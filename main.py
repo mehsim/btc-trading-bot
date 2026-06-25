@@ -543,15 +543,32 @@ def get_news_sentiment():
 # =========================
 def get_orderbook_imbalance():
     try:
+        url = "https://api.bybit.com/v5/market/orderbook"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         response = requests.get(url, params={"category": "spot", "symbol": SYMBOL, "limit": 25}, headers=headers, timeout=10)
-        if response.status_code != 200:
-            print(f"[Orderbook] Error: received HTTP {response.status_code}")
-            return {"imbalance": 0.0, "spread": 0.0}
-        res = response.json()
-        if "result" in res and "b" in res["result"] and "a" in res["result"]:
+        res = None
+        if response.status_code == 200:
+            res = response.json()
+        else:
+            print(f"[Orderbook] Bybit returned HTTP {response.status_code}. Attempting Binance depth fallback...")
+            # Try Binance depth fallback
+            binance_url = "https://api.binance.com/api/v3/depth"
+            resp = requests.get(binance_url, params={"symbol": SYMBOL.upper(), "limit": 25}, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                binance_data = resp.json()
+                res = {
+                    "result": {
+                        "b": binance_data.get("bids", []),
+                        "a": binance_data.get("asks", [])
+                    }
+                }
+            else:
+                print(f"[Orderbook] Binance depth fallback failed: HTTP {resp.status_code}")
+                return {"imbalance": 0.0, "spread": 0.0}
+
+        if res and "result" in res and "b" in res["result"] and "a" in res["result"]:
             bids = res["result"]["b"]  # list of [price, size]
             asks = res["result"]["a"]
             
@@ -922,19 +939,44 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 # LIVE LOOP
 # =========================
 def get_fallback_price():
+    # 1. Try Bybit API
     try:
+        url = "https://api.bybit.com/v5/market/tickers"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": SYMBOL}, headers=headers)
-        if response.status_code != 200:
-            print(f"Error fetching ticker price fallback: HTTP status {response.status_code}")
-            return None
-        res = response.json()
-        return float(res["result"]["list"][0]["lastPrice"])
+        response = requests.get(url, params={"category": "spot", "symbol": SYMBOL}, headers=headers, timeout=5)
+        if response.status_code == 200:
+            res = response.json()
+            return float(res["result"]["list"][0]["lastPrice"])
+        else:
+            print(f"Bybit price ticker returned HTTP {response.status_code}")
     except Exception as e:
-        print(f"Error fetching ticker price fallback: {e}")
-        return None
+        print(f"Error fetching Bybit price fallback: {e}")
+
+    # 2. Try Coinbase API (very permissive, no API key needed)
+    try:
+        response = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=5)
+        if response.status_code == 200:
+            res = response.json()
+            return float(res["data"]["amount"])
+        else:
+            print(f"Coinbase price ticker returned HTTP {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching Coinbase price fallback: {e}")
+
+    # 3. Try Binance API
+    try:
+        response = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
+        if response.status_code == 200:
+            res = response.json()
+            return float(res["price"])
+        else:
+            print(f"Binance price ticker returned HTTP {response.status_code}")
+    except Exception as e:
+        print(f"Error fetching Binance price fallback: {e}")
+
+    return None
 
 def main():
     global live_price, last_ws_update_time
