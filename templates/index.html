@@ -1220,7 +1220,7 @@
                 pagePredictions.forEach(p => {
                     const dateObj = new Date(p.timestamp * 1000);
                     const predTimeStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
-                    const dirClass = p.direction === 'Bullish' ? 'color-bullish' : 'color-bearish';
+                    const dirClass = p.direction === 'Bullish' ? 'color-bullish' : (p.direction === 'Bearish' ? 'color-bearish' : 'color-neutral');
                     
                     let refPriceStr = `$${p.ref_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
                     let expChangeSign = p.predicted_change >= 0 ? '+' : '';
@@ -1330,10 +1330,14 @@
                                 predElem.style.color = "var(--accent-green)";
                                 predElem.style.textShadow = "var(--neon-green-glow)";
                                 barElem.style.backgroundColor = "var(--accent-green)";
-                            } else {
+                            } else if (pred.direction === "Bearish") {
                                 predElem.style.color = "var(--accent-red)";
                                 predElem.style.textShadow = "var(--neon-red-glow)";
                                 barElem.style.backgroundColor = "var(--accent-red)";
+                            } else {
+                                predElem.style.color = "var(--text-secondary)";
+                                predElem.style.textShadow = "none";
+                                barElem.style.backgroundColor = "var(--text-secondary)";
                             }
 
                             const confPct = pred.calibrated_confidence * 100;

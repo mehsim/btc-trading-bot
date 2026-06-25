@@ -146,3 +146,161 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     df.reset_index(drop=True, inplace=True)
 
     return df
+
+def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
+    url = "https://api.bybit.com/v5/market/open-interest"
+    interval_time = "1h"
+    if str(interval) == "5":
+        interval_time = "5min"
+    elif str(interval) == "15":
+        interval_time = "15min"
+    elif str(interval) == "60":
+        interval_time = "1h"
+        
+    oi_data = []
+    cursor = None
+    for page in range(100):
+        params = {
+            "category": "linear",
+            "symbol": symbol,
+            "intervalTime": interval_time,
+            "limit": 200
+        }
+        if cursor:
+            params["cursor"] = cursor
+            
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            if resp.status_code != 200:
+                break
+            res = resp.json()
+            if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
+                batch = res["result"]["list"]
+                oi_data.extend(batch)
+                
+                oldest_ts = int(batch[-1]["timestamp"])
+                if start_ts_ms and oldest_ts < int(start_ts_ms):
+                    break
+                
+                cursor = res["result"].get("nextPageCursor")
+                if not cursor:
+                    break
+            else:
+                break
+            time.sleep(0.05)
+        except Exception as e:
+            print(f"Error fetching OI history: {e}")
+            break
+            
+    if not oi_data:
+        return pd.DataFrame(columns=["timestamp", "open_interest"])
+        
+    df_oi = pd.DataFrame(oi_data)
+    df_oi["timestamp"] = df_oi["timestamp"].astype(float)
+    df_oi["open_interest"] = df_oi["openInterest"].astype(float)
+    df_oi = df_oi[["timestamp", "open_interest"]].sort_values("timestamp").reset_index(drop=True)
+    return df_oi
+
+def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
+    url = "https://api.bybit.com/v5/market/funding/history"
+    funding_data = []
+    current_end = int(end_ts_ms) if end_ts_ms else int(time.time() * 1000)
+    for page in range(50):
+        params = {
+            "category": "linear",
+            "symbol": symbol,
+            "limit": 200,
+            "endTime": current_end
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            if resp.status_code != 200:
+                break
+            res = resp.json()
+            if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
+                batch = res["result"]["list"]
+                funding_data.extend(batch)
+                
+                oldest_ts = int(batch[-1]["fundingRateTimestamp"])
+                if start_ts_ms and oldest_ts < int(start_ts_ms):
+                    break
+                
+                current_end = oldest_ts - 1
+            else:
+                break
+            time.sleep(0.05)
+        except Exception as e:
+            print(f"Error fetching Funding history: {e}")
+            break
+            
+    if not funding_data:
+        return pd.DataFrame(columns=["timestamp", "funding_rate"])
+        
+    df_funding = pd.DataFrame(funding_data)
+    df_funding["timestamp"] = df_funding["fundingRateTimestamp"].astype(float)
+    df_funding["funding_rate"] = df_funding["fundingRate"].astype(float)
+    df_funding = df_funding[["timestamp", "funding_rate"]].sort_values("timestamp").reset_index(drop=True)
+    return df_funding
+
+def get_fear_and_greed_history():
+    url = "https://api.alternative.me/fng/?limit=0&format=json"
+    try:
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            res = resp.json()
+            if "data" in res and len(res["data"]) > 0:
+                fng_data = []
+                for item in res["data"]:
+                    fng_data.append({
+                        "timestamp": float(item["timestamp"]) * 1000,
+                        "fear_greed": float(item["value"])
+                    })
+                df_fng = pd.DataFrame(fng_data)
+                df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
+                return df_fng
+    except Exception as e:
+        print(f"Error fetching Fear & Greed history: {e}")
+    return pd.DataFrame(columns=["timestamp", "fear_greed"])
+
+def merge_derivatives_sentiment_features(df, symbol, interval):
+    if df.empty:
+        df["open_interest"] = 0.0
+        df["funding_rate"] = 0.0
+        df["fear_greed"] = 50.0
+        return df
+
+    min_ts = int(df["timestamp"].min())
+    max_ts = int(df["timestamp"].max())
+    
+    # Fetch
+    df_oi = get_bybit_oi_history(symbol=symbol, interval=interval, start_ts_ms=min_ts, end_ts_ms=max_ts)
+    df_funding = get_bybit_funding_history(symbol=symbol, start_ts_ms=min_ts, end_ts_ms=max_ts)
+    df_fng = get_fear_and_greed_history()
+    
+    # Merge open interest
+    if not df_oi.empty:
+        df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
+        df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
+    else:
+        df["open_interest"] = 0.0
+        
+    # Merge funding rate
+    if not df_funding.empty:
+        df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
+        df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
+    else:
+        df["funding_rate"] = 0.0
+        
+    # Merge fear and greed
+    if not df_fng.empty:
+        df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
+        df = pd.merge_asof(df, df_fng, on="timestamp", direction="backward")
+    else:
+        df["fear_greed"] = 50.0
+        
+    # Clean up NaNs
+    df["open_interest"] = df["open_interest"].ffill().bfill().fillna(0.0)
+    df["funding_rate"] = df["funding_rate"].ffill().bfill().fillna(0.0)
+    df["fear_greed"] = df["fear_greed"].ffill().bfill().fillna(50.0)
+    
+    return df

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import joblib
+import optuna
 
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
@@ -10,7 +11,7 @@ from xgboost import XGBClassifier, XGBRegressor
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, mean_absolute_error
-from data import get_history
+from data import get_history, merge_derivatives_sentiment_features
 
 # =========================
 # CONFIGURATION
@@ -37,6 +38,13 @@ for lag in [1, 2]:
     features.append(f"RSI_lag{lag}")
     features.append(f"MACD_diff_lag{lag}")
     features.append(f"BB_pct_lag{lag}")
+
+# New features from Option 2
+features.extend(["open_interest", "funding_rate", "fear_greed"])
+for lag in [1, 2]:
+    features.append(f"open_interest_lag{lag}")
+    features.append(f"funding_rate_lag{lag}")
+    features.append(f"fear_greed_lag{lag}")
 
 def add_features(df):
     df = df.copy()
@@ -115,9 +123,135 @@ def add_features(df):
     df["RSI_24"] = RSIIndicator(df["close"], window=24).rsi()
     df["ROC_24"] = df["close"].pct_change(24)
     df["volatility_24h"] = df["return_5m"].rolling(24).std()
+    
+    # Derivatives & sentiment lags
+    for lag in [1, 2]:
+        df[f"open_interest_lag{lag}"] = df["open_interest"].shift(lag)
+        df[f"funding_rate_lag{lag}"] = df["funding_rate"].shift(lag)
+        df[f"fear_greed_lag{lag}"] = df["fear_greed"].shift(lag)
         
     df.dropna(inplace=True)
     return df
+
+def add_triple_barrier_labels(df, interval):
+    # Dynamic SL & TP targets based on ATR: TP = 1.5 * ATR, SL = 1.0 * ATR
+    atr = df["ATR_norm"] * df["close"]
+    
+    lookahead = 6
+    closes = df["close"].values
+    highs = df["high"].values
+    lows = df["low"].values
+    atr_vals = atr.values
+    
+    n_samples = len(df)
+    labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral/Expiration
+    
+    for i in range(n_samples):
+        p_t = closes[i]
+        atr_t = atr_vals[i]
+        
+        # Fallback if ATR is 0
+        if atr_t <= 0:
+            atr_t = p_t * 0.001
+            
+        upper_barrier = p_t + 1.5 * atr_t
+        lower_barrier = p_t - 1.0 * atr_t
+        
+        for step in range(1, lookahead + 1):
+            if i + step >= n_samples:
+                break
+            
+            h = highs[i + step]
+            l = lows[i + step]
+            
+            hit_upper = h >= upper_barrier
+            hit_lower = l <= lower_barrier
+            
+            if hit_upper and hit_lower:
+                c = closes[i + step]
+                if c >= upper_barrier:
+                    labels[i] = 2  # Bullish
+                elif c <= lower_barrier:
+                    labels[i] = 0  # Bearish
+                else:
+                    labels[i] = 1
+                break
+            elif hit_upper:
+                labels[i] = 2  # Bullish
+                break
+            elif hit_lower:
+                labels[i] = 0  # Bearish
+                break
+                
+    df["target_trend"] = labels
+    return df
+
+def purged_train_test_split(X, y_trend, y_price, test_size=0.2, lookahead=6):
+    n_samples = len(X)
+    split_idx = int(n_samples * (1 - test_size))
+    
+    train_end = split_idx - lookahead
+    
+    X_train = X.iloc[:train_end]
+    y_train_t = y_trend.iloc[:train_end]
+    y_train_p = y_price.iloc[:train_end]
+    
+    X_test = X.iloc[split_idx:]
+    y_test_t = y_trend.iloc[split_idx:]
+    y_test_p = y_price.iloc[split_idx:]
+    
+    return X_train, X_test, y_train_t, y_test_t, y_train_p, y_test_p
+
+def optimize_classifier(X_train, y_train, X_val, y_val):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 200),
+            'max_depth': trial.suggest_int('max_depth', 3, 5),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'subsample': trial.suggest_float('subsample', 0.7, 0.9),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0.1, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
+            'objective': 'multi:softprob',
+            'num_class': 3,
+            'eval_metric': 'mlogloss',
+            'random_state': 42,
+            'n_jobs': 1
+        }
+        model = XGBClassifier(**params)
+        model.fit(X_train, y_train)
+        preds = model.predict(X_val)
+        acc = accuracy_score(y_val, preds)
+        return acc
+        
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=10)
+    return study.best_params
+
+def optimize_regressor(X_train, y_train, X_val, y_val):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 200),
+            'max_depth': trial.suggest_int('max_depth', 3, 5),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'subsample': trial.suggest_float('subsample', 0.7, 0.9),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0.1, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
+            'random_state': 42,
+            'n_jobs': 1
+        }
+        model = XGBRegressor(**params)
+        model.fit(X_train, y_train)
+        preds = model.predict(X_val)
+        mae = mean_absolute_error(y_val, preds)
+        return mae
+        
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=10)
+    return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
     # =========================
@@ -143,6 +277,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
         df = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
         print(f"Aligned dataset has {len(df)} candles.")
 
+    # Merge Open Interest, Funding Rate, and Fear & Greed index historical data
+    print("Merging Open Interest, Funding Rate, and Fear & Greed historical data...")
+    df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
+
     # =========================
     # FEATURE ENGINEERING
     # =========================
@@ -150,12 +288,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
     df = add_features(df)
     
     # =========================
-    # TARGET (NEXT CANDLE AHEAD)
+    # TARGET (TRIPLE BARRIER + REGRESSION PRICE CHANGE)
     # =========================
     df["future"] = df["close"].shift(-1)
-    df["target_trend"] = (df["future"] > df["close"]).astype(int)
     df["target_price_change"] = (df["future"] - df["close"]) / df["close"]
-    df.dropna(inplace=True)
+    df = add_triple_barrier_labels(df, interval)
+    df.dropna(subset=["target_price_change", "target_trend"], inplace=True)
 
     # ==========================================
     # REGIME SPLITTING & REGIME MODEL TRAINING
@@ -170,45 +308,32 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_trend = df_regime["target_trend"]
         y_price = df_regime["target_price_change"]
 
-        # Models (Tuned to prevent overfitting)
-        model_trend = XGBClassifier(
-            n_estimators=200,
-            max_depth=4,
-            learning_rate=0.02,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            reg_alpha=0.5,
-            reg_lambda=5.0,
-            eval_metric="logloss",
-            random_state=42
+        # Purged time series validation split
+        X_train, X_val, y_train_t, y_val_t, y_train_p, y_val_p = purged_train_test_split(
+            X, y_trend, y_price, test_size=0.2, lookahead=6
         )
 
-        model_price = XGBRegressor(
-            n_estimators=200,
-            max_depth=3,
-            learning_rate=0.02,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            reg_alpha=0.5,
-            reg_lambda=5.0,
-            random_state=42
-        )
+        print(f"  Optimizing hyperparameters for {name} trend classifier...")
+        best_params_t = optimize_classifier(X_train, y_train_t, X_val, y_val_t)
+        print(f"  Best Classifier Params: {best_params_t}")
+        model_trend = XGBClassifier(**best_params_t)
 
-        # Out-of-sample Validation Split (Temporal validation)
-        X_train, X_test, y_train_t, y_test_t = train_test_split(X, y_trend, test_size=0.2, random_state=42, shuffle=False)
-        X_train, X_test, y_train_p, y_test_p = train_test_split(X, y_price, test_size=0.2, random_state=42, shuffle=False)
+        print(f"  Optimizing hyperparameters for {name} price regressor...")
+        best_params_p = optimize_regressor(X_train, y_train_p, X_val, y_val_p)
+        print(f"  Best Regressor Params: {best_params_p}")
+        model_price = XGBRegressor(**best_params_p)
 
         print(f"  Validating {name} models...")
         model_trend.fit(X_train, y_train_t)
-        y_pred_t = model_trend.predict(X_test)
-        acc = accuracy_score(y_test_t, y_pred_t)
+        y_pred_t = model_trend.predict(X_val)
+        acc = accuracy_score(y_val_t, y_pred_t)
 
         model_price.fit(X_train, y_train_p)
-        y_pred_p = model_price.predict(X_test)
-        mae = mean_absolute_error(y_test_p, y_pred_p)
+        y_pred_p = model_price.predict(X_val)
+        mae = mean_absolute_error(y_val_p, y_pred_p)
 
         print(f"  Validation Out-of-Sample Accuracy (Trend): {acc*100:.2f}%")
-        print(f"  Validation Out-of-Sample MAE (Price Change): {mae:.2f}")
+        print(f"  Validation Out-of-Sample MAE (Price Change): {mae:.4f}")
 
         print(f"  Training final {name} models on complete regime dataset...")
         model_trend.fit(X, y_trend)

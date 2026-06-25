@@ -19,7 +19,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import MFIIndicator
-from data import get_history
+from data import get_history, merge_derivatives_sentiment_features
 import xml.etree.ElementTree as ET
 from flask import Flask, jsonify, render_template
 
@@ -235,6 +235,13 @@ for lag in [1, 2]:
     features.append(f"MACD_diff_lag{lag}")
     features.append(f"BB_pct_lag{lag}")
 
+# New features from Option 2
+features.extend(["open_interest", "funding_rate", "fear_greed"])
+for lag in [1, 2]:
+    features.append(f"open_interest_lag{lag}")
+    features.append(f"funding_rate_lag{lag}")
+    features.append(f"fear_greed_lag{lag}")
+
 def add_features(df):
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
     macd = MACD(df["close"])
@@ -310,6 +317,12 @@ def add_features(df):
     df["RSI_24"] = RSIIndicator(df["close"], window=24).rsi()
     df["ROC_24"] = df["close"].pct_change(24)
     df["volatility_24h"] = df["return_5m"].rolling(24).std()
+    
+    # Derivatives & sentiment lags
+    for lag in [1, 2]:
+        df[f"open_interest_lag{lag}"] = df["open_interest"].shift(lag)
+        df[f"funding_rate_lag{lag}"] = df["funding_rate"].shift(lag)
+        df[f"fear_greed_lag{lag}"] = df["fear_greed"].shift(lag)
         
     df.dropna(inplace=True)
     return df
@@ -335,6 +348,7 @@ def build_df(current_price):
                     return None
             
             if len(df) > 0:
+                df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=INTERVAL)
                 df = add_features(df)
                 return df
     except Exception as e:
@@ -638,6 +652,7 @@ def calculate_historical_thresholds(model_trend, interval):
             df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
             df = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
             if len(df) > 0:
+                df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
                 df = add_features(df)
                 
                 X_hist = df[features].values
@@ -661,12 +676,12 @@ def calculate_historical_thresholds(model_trend, interval):
 def calibrate_confidence(raw_conf, p95, max_conf):
     if max_conf <= p95:
         max_conf = p95 + 0.01
-    if p95 <= 0.50:
-        p95 = 0.51
+    if p95 <= 0.33:
+        p95 = 0.34
         
     if raw_conf < p95:
-        # Piecewise linear mapping [0.50, p95] -> [50%, 80%]
-        calibrated = 50.0 + (raw_conf - 0.50) / (p95 - 0.50) * 30.0
+        # Piecewise linear mapping [0.33, p95] -> [50%, 80%]
+        calibrated = 50.0 + (raw_conf - 0.33) / (p95 - 0.33) * 30.0
     else:
         # Piecewise linear mapping [p95, max_conf] -> [80%, 100%]
         calibrated = 80.0 + (raw_conf - p95) / (max_conf - p95) * 20.0
@@ -1033,10 +1048,12 @@ def main():
     bot_state["live_price"] = live_price
 
     # Calculate calibration boundaries at startup for each interval
+    tf_map_startup = {"5": "5m", "15": "15m", "60": "1h"}
     for iv in ["5", "15", "60"]:
         if iv in models_by_interval:
             p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
-            bot_state[f"calibration_{iv}"] = {
+            tf_key = tf_map_startup[iv]
+            bot_state[f"calibration_{tf_key}"] = {
                 "p95": p95,
                 "max_conf": max_conf,
                 "mean": 54.81
@@ -1159,7 +1176,11 @@ def main():
                         
                         df_target = df_completed.copy()
                         df_target["close_btc"] = df_target["close"]
+                        df_target = merge_derivatives_sentiment_features(df_target, symbol=SYMBOL, interval=iv)
                         df = add_features(df_target)
+                        if len(df) == 0:
+                            print(f"[{iv}m] Error: Dataframe became empty after feature engineering.")
+                            continue
                         
                         latest_candle = df.iloc[-1]
                         X_live = latest_candle[features].values.reshape(1, -1)
@@ -1181,14 +1202,24 @@ def main():
                             pred_pct = float(active_model_price.predict(X_live)[0])
                             pred_change = pred_pct * float(latest_candle["close"])
                             predicted_price = float(latest_candle["close"]) + pred_change
-                            prob_bullish = float(active_model_trend.predict_proba(X_live)[0][1])
-
-                            if prob_bullish >= 0.50:
+                            
+                            # 3-class probabilities
+                            probs = active_model_trend.predict_proba(X_live)[0]
+                            prob_bearish = float(probs[0])
+                            prob_neutral = float(probs[1])
+                            prob_bullish = float(probs[2])
+                            
+                            winning_class = int(np.argmax(probs))
+                            
+                            if winning_class == 2:
                                 ml_trend = "Bullish"
                                 ml_confidence = prob_bullish
-                            else:
+                            elif winning_class == 0:
                                 ml_trend = "Bearish"
-                                ml_confidence = 1.0 - prob_bullish
+                                ml_confidence = prob_bearish
+                            else:
+                                ml_trend = "Neutral"
+                                ml_confidence = prob_neutral
 
                             calibration = bot_state[f"calibration_{tf}"]
                             p95 = calibration["p95"]
@@ -1207,7 +1238,7 @@ def main():
                                 "calibrated_confidence": calibrated_confidence
                             }
 
-                            print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.2f}")
+                            print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.2f}")
 
                             # Determine dynamic confidence threshold based on regime and volatility
                             atr_norm_val = latest_candle["ATR_norm"]
@@ -1228,7 +1259,11 @@ def main():
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
 
                             # Determine tracking status
-                            direction_conflict = (ml_trend == "Bullish" and pred_change < 0) or (ml_trend == "Bearish" and pred_change > 0)
+                            direction_conflict = False
+                            if ml_trend == "Bullish" and pred_change < 0:
+                                direction_conflict = True
+                            elif ml_trend == "Bearish" and pred_change > 0:
+                                direction_conflict = True
                             
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"
@@ -1237,6 +1272,9 @@ def main():
                             if active_trade is not None:
                                 status_msg = "Skipped (Trade Active)"
                                 print(f"[{iv}m] New completed candle detected, but trade entry skipped because a trade is already active.")
+                            elif ml_trend == "Neutral":
+                                status_msg = "Skipped (Neutral)"
+                                print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
                             elif direction_conflict:
                                 status_msg = "Skipped (Contradiction)"
                                 print(f"[{iv}m] Prediction skipped: Directional contradiction (Trend: {ml_trend}, Regressor Price Change: {pred_change:+.2f}).")
