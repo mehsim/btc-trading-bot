@@ -13,6 +13,7 @@ USER user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH
 
+ENV PYTHONUNBUFFERED=1
 WORKDIR $HOME/app
 
 # Copy dependency requirements first to leverage Docker build cache
