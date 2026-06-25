@@ -34,17 +34,33 @@ logs_lock = threading.Lock()
 bot_state = {
     "live_price": None,
     "last_update": 0.0,
-    "active_trade": None,
-    "latest_prediction": None,
-    "confluence_results": None,
-    "regime": "Unknown",
-    "adx": 0.0,
+    
+    "active_trade_5m": None,
+    "active_trade_15m": None,
+    "active_trade_1h": None,
+    
+    "latest_prediction_5m": None,
+    "latest_prediction_15m": None,
+    "latest_prediction_1h": None,
+    
+    "confluence_results_5m": None,
+    "confluence_results_15m": None,
+    "confluence_results_1h": None,
+    
+    "regime_5m": "Unknown",
+    "regime_15m": "Unknown",
+    "regime_1h": "Unknown",
+    
+    "adx_5m": 0.0,
+    "adx_15m": 0.0,
+    "adx_1h": 0.0,
+    
     "status": "Initializing",
-    "calibration": {
-        "p95": 0.0,
-        "max_conf": 0.0,
-        "mean": 54.81
-    },
+    
+    "calibration_5m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+    "calibration_15m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+    "calibration_1h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+    
     "trade_history": [],
     "prediction_history": []
 }
@@ -66,7 +82,13 @@ def load_history():
             with open("dashboard_history.json", "r") as f:
                 data = json.load(f)
                 bot_state["trade_history"] = data.get("trade_history", [])
+                for t in bot_state["trade_history"]:
+                    if "interval" not in t:
+                        t["interval"] = "60"
                 bot_state["prediction_history"] = data.get("prediction_history", [])
+                for p in bot_state["prediction_history"]:
+                    if "interval" not in p:
+                        p["interval"] = "60"
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from dashboard_history.json")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
@@ -119,23 +141,30 @@ def run_flask():
 # CONFIGURATION
 # =========================
 SYMBOL = "BTCUSDT"
-INTERVAL = "60"
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
-models_trending = {
-    "trend": XGBClassifier(),
-    "price": XGBRegressor()
-}
-models_trending["trend"].load_model("xgb_trending_trend.json")
-models_trending["price"].load_model("xgb_trending_price.json")
 
-models_ranging = {
-    "trend": XGBClassifier(),
-    "price": XGBRegressor()
-}
-models_ranging["trend"].load_model("xgb_ranging_trend.json")
-models_ranging["price"].load_model("xgb_ranging_price.json")
+models_by_interval = {}
+for iv in ["5", "15", "60"]:
+    models_by_interval[iv] = {
+        "trending": {
+            "trend": XGBClassifier(),
+            "price": XGBRegressor()
+        },
+        "ranging": {
+            "trend": XGBClassifier(),
+            "price": XGBRegressor()
+        }
+    }
+    try:
+        models_by_interval[iv]["trending"]["trend"].load_model(f"xgb_trending_trend_{iv}.json")
+        models_by_interval[iv]["trending"]["price"].load_model(f"xgb_trending_price_{iv}.json")
+        models_by_interval[iv]["ranging"]["trend"].load_model(f"xgb_ranging_trend_{iv}.json")
+        models_by_interval[iv]["ranging"]["price"].load_model(f"xgb_ranging_price_{iv}.json")
+        print(f"Successfully loaded models for interval {iv}m")
+    except Exception as e:
+        print(f"Warning: Could not load models for interval {iv}m: {e}")
 
 # =========================
 # WEB SOCKET FOR LIVE PRICE
@@ -315,7 +344,7 @@ def build_df(current_price):
 def get_local_time_str(t):
     return datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S')
 
-def evaluate_predictions(df_completed):
+def evaluate_predictions(df_completed, interval):
     if not bot_state["prediction_history"]:
         return
 
@@ -325,9 +354,9 @@ def evaluate_predictions(df_completed):
         ts_map[int(row["timestamp"])] = float(row["close"])
 
     for pred in bot_state["prediction_history"]:
-        if not pred["evaluation"]["evaluated"]:
-            # Check 1 hour later (1 hour = 3600 seconds = 3,600,000 milliseconds)
-            target_ts = int(pred["candle_timestamp"]) + 3600000
+        if pred.get("interval") == interval and not pred["evaluation"]["evaluated"]:
+            interval_mins = int(interval)
+            target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000)
             if target_ts in ts_map:
                 exit_price = ts_map[target_ts]
                 ref_price = pred["ref_price"]
@@ -348,7 +377,7 @@ def evaluate_predictions(df_completed):
                 
                 # Print to log
                 success_str = "SUCCESSFUL" if success else "UNSUCCESSFUL"
-                print(f"[Prediction Tracker] Evaluated 1h Prediction from {get_local_time_str(pred['candle_timestamp']/1000)}: Direction: {direction} | Ref Price: {ref_price:.2f} | Exit Price: {exit_price:.2f} | Change: {change:+.2f} ({change_pct:+.3f}%) | Result: {success_str} | Status: {pred['status']}")
+                print(f"[Prediction Tracker] Evaluated {interval}m Prediction from {get_local_time_str(pred['candle_timestamp']/1000)}: Direction: {direction} | Ref Price: {ref_price:.2f} | Exit Price: {exit_price:.2f} | Change: {change:+.2f} ({change_pct:+.3f}%) | Result: {success_str} | Status: {pred['status']}")
 
 # =========================
 # NEWS & SOCIAL SENTIMENT ANALYSIS
@@ -599,11 +628,11 @@ def get_orderbook_imbalance():
 # ==========================================
 # CONFIDENCE CALIBRATION & HISTORICAL STATS
 # ==========================================
-def calculate_historical_thresholds(model_trend):
-    print(f"Fetching historical data to calibrate confidence percentiles (last 5,000 candles for {SYMBOL} + BTCUSDT)...")
+def calculate_historical_thresholds(model_trend, interval):
+    print(f"Fetching historical data to calibrate confidence percentiles (last 5,000 candles for {SYMBOL} + BTCUSDT on {interval}m interval)...")
     try:
-        df_target = get_history(symbol=SYMBOL, interval=INTERVAL, limit=1000, pages=5)
-        df_btc = get_history(symbol="BTCUSDT", interval=INTERVAL, limit=1000, pages=5)
+        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=5)
+        df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=5)
         
         if df_target is not None and len(df_target) > 0 and df_btc is not None and len(df_btc) > 0:
             df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
@@ -619,13 +648,13 @@ def calculate_historical_thresholds(model_trend):
                 max_conf = float(np.max(confidences))
                 mean_conf = float(np.mean(confidences))
                 
-                print("Confidence Calibration Done:")
+                print(f"Confidence Calibration Done for {interval}m:")
                 print(f"  - Historical Mean: {mean_conf*100:.2f}%")
                 print(f"  - 95th Percentile Threshold (Maps to 80%): {p95*100:.2f}%")
                 print(f"  - Maximum Confidence (Maps to 100%): {max_conf*100:.2f}%")
                 return p95, max_conf
     except Exception as e:
-        print(f"Error calculating calibration: {e}. Using defaults.")
+        print(f"Error calculating calibration for {interval}m: {e}. Using defaults.")
     
     return 0.55, 0.75
 
@@ -1003,19 +1032,24 @@ def main():
     print(f"==================================================\n")
     bot_state["live_price"] = live_price
 
-    # Calculate calibration boundaries at startup
-    p95, max_conf = calculate_historical_thresholds(models_trending["trend"])
-    bot_state["calibration"] = {
-        "p95": p95,
-        "max_conf": max_conf,
-        "mean": 54.81
-    }
+    # Calculate calibration boundaries at startup for each interval
+    for iv in ["5", "15", "60"]:
+        if iv in models_by_interval:
+            p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
+            bot_state[f"calibration_{iv}"] = {
+                "p95": p95,
+                "max_conf": max_conf,
+                "mean": 54.81
+            }
 
-    print(f"Starting loop... Checking for new completed hourly candles and exit monitoring...")
+    print(f"Starting loop... Checking for new completed candle signals and exit monitoring...")
     bot_state["status"] = "Running"
 
-    last_processed_candle_timestamp = None
-    active_trade = None
+    last_processed_timestamps = {
+        "last_processed_5_ts": None,
+        "last_processed_15_ts": None,
+        "last_processed_60_ts": None
+    }
 
     while True:
         current_time = time.time()
@@ -1034,264 +1068,280 @@ def main():
             time.sleep(5)
             continue
 
-        # 2. Check Exits if a trade is active
-        if active_trade is not None:
-            stop_loss = active_trade["stop_loss"]
-            take_profit = active_trade["take_profit"]
-            direction = active_trade["direction"]
-            end_time = active_trade["end_time"]
-            entry_price = active_trade["entry_price"]
-            predicted_price = active_trade["predicted_price"]
+        # 2. Check Exits for each timeframe if a trade is active
+        tf_map = {"5": "5m", "15": "15m", "60": "1h"}
+        for iv in ["5", "15", "60"]:
+            tf = tf_map[iv]
+            active_trade_key = f"active_trade_{tf}"
+            active_trade = bot_state[active_trade_key]
+            
+            if active_trade is not None:
+                stop_loss = active_trade["stop_loss"]
+                take_profit = active_trade["take_profit"]
+                direction = active_trade["direction"]
+                end_time = active_trade["end_time"]
+                entry_price = active_trade["entry_price"]
+                predicted_price = active_trade["predicted_price"]
 
-            remaining_seconds = max(0, int(end_time - current_time))
-            mins, secs = divmod(remaining_seconds, 60)
-            countdown_str = f"{mins:02d}m {secs:02d}s"
+                remaining_seconds = max(0, int(end_time - current_time))
+                mins, secs = divmod(remaining_seconds, 60)
+                countdown_str = f"{mins:02d}m {secs:02d}s"
 
-            print(f"Active Trade: {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
+                print(f"[{iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
-            exit_reason = None
-            if direction == "Bullish":
-                if current_price <= stop_loss:
-                    exit_reason = "STOP LOSS HIT [FAIL]"
-                elif current_price >= take_profit:
-                    exit_reason = "TAKE PROFIT HIT [SUCCESS]"
-            else:
-                if current_price >= stop_loss:
-                    exit_reason = "STOP LOSS HIT [FAIL]"
-                elif current_price <= take_profit:
-                    exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                exit_reason = None
+                if direction == "Bullish":
+                    if current_price <= stop_loss:
+                        exit_reason = "STOP LOSS HIT [FAIL]"
+                    elif current_price >= take_profit:
+                        exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                else:
+                    if current_price >= stop_loss:
+                        exit_reason = "STOP LOSS HIT [FAIL]"
+                    elif current_price <= take_profit:
+                        exit_reason = "TAKE PROFIT HIT [SUCCESS]"
 
-            if current_time >= end_time:
-                exit_reason = "1-HOUR TIMER ELAPSED"
+                if current_time >= end_time:
+                    exit_reason = f"{iv}-MINUTE TIMER ELAPSED"
 
-            if exit_reason is not None:
-                actual_price = current_price
-                price_diff = actual_price - predicted_price
-                price_diff_pct = (price_diff / predicted_price) * 100
-                price_accuracy = max(0.0, 100.0 - abs((actual_price - predicted_price) / actual_price * 100))
-                actual_change = actual_price - entry_price
-                actual_trend = "Bullish" if actual_change > 0 else "Bearish"
-                signal_correct = (actual_trend == direction)
-                trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
-                
-                print("\n==================================================")
-                print(f"TRADE EXITED: {exit_reason}")
-                print(f"Start Price: {entry_price:.2f}")
-                print(f"Predicted Price: {predicted_price:.2f}")
-                print(f"Exit Price: {actual_price:.2f}")
-                print(f"Actual Change: {actual_change:+.2f} ({actual_change/entry_price*100:+.4f}%)")
-                print(f"Prediction Error: {price_diff:+.2f} ({price_diff_pct:+.4f}%)")
-                print(f"Price Accuracy: {price_accuracy:.4f}%")
-                print(f"Predicted Signal: {direction}")
-                print(f"Actual Trend: {actual_trend} ({trend_status})")
-                print("==================================================\n")
-                
-                # Update Completed Trade History in global state
-                bot_state["trade_history"].append({
-                    "exit_time": float(time.time()),
-                    "direction": str(direction),
-                    "entry_price": float(entry_price),
-                    "exit_price": float(actual_price),
-                    "change_pct": float((actual_change / entry_price) * 100),
-                    "success": bool(signal_correct),
-                    "reason": str(exit_reason)
-                })
-                save_history()
-                active_trade = None
-                bot_state["active_trade"] = None
-
-        # 3. Check for completed hourly candle closes to search for a new signal
-        try:
-            df_raw = get_history(symbol=SYMBOL, interval=INTERVAL, limit=300)
-            if df_raw is not None and len(df_raw) > 1:
-                df_completed = df_raw.iloc[:-1].copy()
-                latest_completed_ts = int(df_completed.iloc[-1]["timestamp"])
-
-                if last_processed_candle_timestamp is None:
-                    # Force immediate evaluation of the current candle on startup
-                    last_processed_candle_timestamp = 0
-                    print(f"Initialized completed candle timestamp tracking: {get_local_time_str(latest_completed_ts/1000)}")
-
-                if latest_completed_ts != last_processed_candle_timestamp:
-                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed 1-hour candle detected (TS: {latest_completed_ts})")
+                if exit_reason is not None:
+                    actual_price = current_price
+                    price_diff = actual_price - predicted_price
+                    price_diff_pct = (price_diff / predicted_price) * 100
+                    price_accuracy = max(0.0, 100.0 - abs((actual_price - predicted_price) / actual_price * 100))
+                    actual_change = actual_price - entry_price
+                    actual_trend = "Bullish" if actual_change > 0 else "Bearish"
+                    signal_correct = (actual_trend == direction)
+                    trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
                     
-                    # 1. Always evaluate ML prediction
-                    df_target = df_completed.copy()
-                    df_target["close_btc"] = df_target["close"]
-                    df = add_features(df_target)
+                    print("\n==================================================")
+                    print(f"[{iv}m TRADE EXITED]: {exit_reason}")
+                    print(f"Start Price: {entry_price:.2f}")
+                    print(f"Predicted Price: {predicted_price:.2f}")
+                    print(f"Exit Price: {actual_price:.2f}")
+                    print(f"Actual Change: {actual_change:+.2f} ({actual_change/entry_price*100:+.4f}%)")
+                    print(f"Prediction Error: {price_diff:+.2f} ({price_diff_pct:+.4f}%)")
+                    print(f"Price Accuracy: {price_accuracy:.4f}%")
+                    print(f"Predicted Signal: {direction}")
+                    print(f"Actual Trend: {actual_trend} ({trend_status})")
+                    print("==================================================\n")
                     
-                    latest_candle = df.iloc[-1]
-                    X_live = latest_candle[features].values.reshape(1, -1)
-                    
-                    # Dynamic Regime Routing based on ADX
-                    adx_regime = latest_candle["ADX"]
-                    if adx_regime >= 20.0:
-                        active_model_price = models_trending["price"]
-                        active_model_trend = models_trending["trend"]
-                        regime_name = "Trending (ADX >= 20)"
-                    else:
-                        active_model_price = models_ranging["price"]
-                        active_model_trend = models_ranging["trend"]
-                        regime_name = "Ranging (ADX < 20)"
-
-                    pred_pct = float(active_model_price.predict(X_live)[0])
-                    pred_change = pred_pct * float(latest_candle["close"])
-                    predicted_price = float(latest_candle["close"]) + pred_change
-                    prob_bullish = float(active_model_trend.predict_proba(X_live)[0][1])
-
-                    if prob_bullish >= 0.50:
-                        ml_trend = "Bullish"
-                        ml_confidence = prob_bullish
-                    else:
-                        ml_trend = "Bearish"
-                        ml_confidence = 1.0 - prob_bullish
-
-                    calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
-                    expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
-
-                    # Update global state prediction metrics
-                    bot_state["regime"] = regime_name
-                    bot_state["adx"] = adx_regime
-                    bot_state["latest_prediction"] = {
-                        "predicted_change": pred_change,
-                        "predicted_price": predicted_price,
-                        "direction": ml_trend,
-                        "raw_confidence": ml_confidence,
-                        "calibrated_confidence": calibrated_confidence
-                    }
-
-                    print(f"Regime Selected: {regime_name} | ML Output: {ml_trend} | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.2f}")
-
-                    # Determine dynamic confidence threshold based on regime and volatility
-                    atr_norm_val = latest_candle["ATR_norm"]
-                    dynamic_conf_threshold = 0.70
-                    
-                    # 1. Regime Adjustment (ADX)
-                    if adx_regime >= 25.0:
-                        dynamic_conf_threshold = 0.65  # lower threshold to ride strong trend early
-                    elif adx_regime < 15.0:
-                        dynamic_conf_threshold = 0.75  # raise threshold to filter ranging noise
-                        
-                    # 2. Volatility Adjustment (ATR)
-                    if atr_norm_val > 0.008:
-                        dynamic_conf_threshold = max(0.60, dynamic_conf_threshold - 0.05)
-                    elif atr_norm_val < 0.003:
-                        dynamic_conf_threshold = min(0.80, dynamic_conf_threshold + 0.05)
-                        
-                    print(f"Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
-
-                    # Determine tracking status
-                    direction_conflict = (ml_trend == "Bullish" and pred_change < 0) or (ml_trend == "Bearish" and pred_change > 0)
-                    
-                    status_msg = "Pending"
-                    
-                    if active_trade is not None:
-                        status_msg = "Skipped (Trade Active)"
-                        print("New completed candle detected, but trade entry skipped because a trade is already active.")
-                    elif direction_conflict:
-                        status_msg = "Skipped (Contradiction)"
-                        print(f"Prediction skipped: Directional contradiction (Trend: {ml_trend}, Regressor Price Change: {pred_change:+.2f}).")
-                    elif calibrated_confidence < dynamic_conf_threshold:
-                        status_msg = "Skipped (Low Confidence)"
-                        print(f"Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
-                    else:
-                        # Confluence checks
-                        print("Triggering pre-trade confluence analysis...")
-                        news_sentiment, latest_titles = get_news_sentiment()
-                        all_pass, confluence_results = check_pre_trade_confluence(
-                            latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change
-                        )
-
-                        # Update global confluence status
-                        bot_state["confluence_results"] = {
-                            "approved": all_pass,
-                            "checks": confluence_results
-                        }
-
-                        print("\n==================================================")
-                        print("PRE-TRADE CONFLUENCE ANALYSIS REPORT")
-                        print("--------------------------------------------------")
-                        print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {SYMBOL}")
-                        print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
-                        print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.2f} [{expected_pct_change:.3f}%])")
-                        print("--------------------------------------------------")
-                        print("Checks Status:")
-                        for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
-                            status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
-                            print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
-                        
-                        if all_pass:
-                            status_msg = "Traded"
-                            print("--------------------------------------------------")
-                            print("CONFLUENCE RESULT: APPROVED (All checks passed)")
-                            print("==================================================\n")
-                            
-                            atr_norm_val = latest_candle["ATR_norm"]
-                            atr_dollars = atr_norm_val * latest_candle["close"]
-                            
-                            # Regime-Adaptive Take-Profit Multiplier
-                            if latest_candle["ADX"] >= 20.0:
-                                tp_multiplier = 1.50
-                            else:
-                                tp_multiplier = 1.00
-                                
-                            if ml_trend == "Bullish":
-                                stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars
-                                take_profit_price = latest_candle["close"] + tp_multiplier * atr_dollars
-                            else:
-                                stop_loss_price = latest_candle["close"] + 0.75 * atr_dollars
-                                take_profit_price = latest_candle["close"] - tp_multiplier * atr_dollars
-
-                            active_trade = {
-                                "entry_price": float(latest_candle["close"]),
-                                "predicted_price": float(predicted_price),
-                                "stop_loss": float(stop_loss_price),
-                                "take_profit": float(take_profit_price),
-                                "direction": str(ml_trend),
-                                "end_time": float(time.time() + 3600.0)
-                            }
-                            bot_state["active_trade"] = active_trade
-                            
-                            print(f"Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})\n")
-                        else:
-                            status_msg = "Skipped (Confluence Failed)"
-                            failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"]]
-                            print("--------------------------------------------------")
-                            print(f"CONFLUENCE RESULT: REJECTED (Failed: {', '.join(failed_list)})")
-                            print("==================================================\n")
-                    # Prevent duplicate predictions for the same candle timestamp (e.g. on restarts)
-                    exists = any(p.get("candle_timestamp") == int(latest_completed_ts) for p in bot_state["prediction_history"])
-                    if not exists:
-                        # Add prediction to history list in bot_state
-                        bot_state["prediction_history"].append({
-                            "timestamp": float(time.time()),
-                            "candle_timestamp": int(latest_completed_ts),
-                            "direction": str(ml_trend),
-                            "ref_price": float(latest_candle["close"]),
-                            "predicted_change": float(pred_change),
-                            "predicted_price": float(predicted_price),
-                            "status": str(status_msg),
-                            "evaluation": {
-                                "evaluated": False,
-                                "exit_price": None,
-                                "change": None,
-                                "change_pct": None,
-                                "success": None
-                            }
-                        })
-                        
-                        # Limit predictions history length to 200 to prevent memory leak
-                        if len(bot_state["prediction_history"]) > 200:
-                            bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
-                    else:
-                        print(f"[System] Prediction for candle timestamp {get_local_time_str(latest_completed_ts/1000)} already exists in history. Skipping duplicate append.")
-                    # Evaluate previous predictions
-                    evaluate_predictions(df_completed)
+                    # Update Completed Trade History in global state
+                    bot_state["trade_history"].append({
+                        "exit_time": float(time.time()),
+                        "interval": str(iv),
+                        "direction": str(direction),
+                        "entry_price": float(entry_price),
+                        "exit_price": float(actual_price),
+                        "change_pct": float((actual_change / entry_price) * 100),
+                        "success": bool(signal_correct),
+                        "reason": str(exit_reason)
+                    })
                     save_history()
-                    
-                    last_processed_candle_timestamp = latest_completed_ts
-        except Exception as e:
-            print(f"Error checking candle close signals: {e}")
+                    bot_state[active_trade_key] = None
+
+        # 3. Check for completed candle closes to search for a new signal
+        for iv in ["5", "15", "60"]:
+            tf = tf_map[iv]
+            try:
+                df_raw = get_history(symbol=SYMBOL, interval=iv, limit=300)
+                if df_raw is not None and len(df_raw) > 1:
+                    df_completed = df_raw.iloc[:-1].copy()
+                    latest_completed_ts = int(df_completed.iloc[-1]["timestamp"])
+
+                    last_ts_key = f"last_processed_{iv}_ts"
+                    if last_processed_timestamps[last_ts_key] is None:
+                        last_processed_timestamps[last_ts_key] = 0
+                        print(f"Initialized completed candle timestamp tracking for {iv}m: {get_local_time_str(latest_completed_ts/1000)}")
+
+                    if latest_completed_ts != last_processed_timestamps[last_ts_key]:
+                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {iv}-minute candle detected (TS: {latest_completed_ts})")
+                        
+                        df_target = df_completed.copy()
+                        df_target["close_btc"] = df_target["close"]
+                        df = add_features(df_target)
+                        
+                        latest_candle = df.iloc[-1]
+                        X_live = latest_candle[features].values.reshape(1, -1)
+                        
+                        # Dynamic Regime Routing based on ADX
+                        adx_regime = latest_candle["ADX"]
+                        
+                        if iv in models_by_interval:
+                            models_tf = models_by_interval[iv]
+                            if adx_regime >= 20.0:
+                                active_model_price = models_tf["trending"]["price"]
+                                active_model_trend = models_tf["trending"]["trend"]
+                                regime_name = "Trending (ADX >= 20)"
+                            else:
+                                active_model_price = models_tf["ranging"]["price"]
+                                active_model_trend = models_tf["ranging"]["trend"]
+                                regime_name = "Ranging (ADX < 20)"
+
+                            pred_pct = float(active_model_price.predict(X_live)[0])
+                            pred_change = pred_pct * float(latest_candle["close"])
+                            predicted_price = float(latest_candle["close"]) + pred_change
+                            prob_bullish = float(active_model_trend.predict_proba(X_live)[0][1])
+
+                            if prob_bullish >= 0.50:
+                                ml_trend = "Bullish"
+                                ml_confidence = prob_bullish
+                            else:
+                                ml_trend = "Bearish"
+                                ml_confidence = 1.0 - prob_bullish
+
+                            calibration = bot_state[f"calibration_{tf}"]
+                            p95 = calibration["p95"]
+                            max_conf = calibration["max_conf"]
+                            calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
+                            expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
+
+                            # Update global state prediction metrics for this timeframe
+                            bot_state[f"regime_{tf}"] = regime_name
+                            bot_state[f"adx_{tf}"] = adx_regime
+                            bot_state[f"latest_prediction_{tf}"] = {
+                                "predicted_change": pred_change,
+                                "predicted_price": predicted_price,
+                                "direction": ml_trend,
+                                "raw_confidence": ml_confidence,
+                                "calibrated_confidence": calibrated_confidence
+                            }
+
+                            print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.2f}")
+
+                            # Determine dynamic confidence threshold based on regime and volatility
+                            atr_norm_val = latest_candle["ATR_norm"]
+                            dynamic_conf_threshold = 0.70
+                            
+                            # 1. Regime Adjustment (ADX)
+                            if adx_regime >= 25.0:
+                                dynamic_conf_threshold = 0.65
+                            elif adx_regime < 15.0:
+                                dynamic_conf_threshold = 0.75
+                                
+                            # 2. Volatility Adjustment (ATR)
+                            if atr_norm_val > 0.008:
+                                dynamic_conf_threshold = max(0.60, dynamic_conf_threshold - 0.05)
+                            elif atr_norm_val < 0.003:
+                                dynamic_conf_threshold = min(0.80, dynamic_conf_threshold + 0.05)
+                                
+                            print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
+
+                            # Determine tracking status
+                            direction_conflict = (ml_trend == "Bullish" and pred_change < 0) or (ml_trend == "Bearish" and pred_change > 0)
+                            
+                            status_msg = "Pending"
+                            active_trade_key = f"active_trade_{tf}"
+                            active_trade = bot_state[active_trade_key]
+
+                            if active_trade is not None:
+                                status_msg = "Skipped (Trade Active)"
+                                print(f"[{iv}m] New completed candle detected, but trade entry skipped because a trade is already active.")
+                            elif direction_conflict:
+                                status_msg = "Skipped (Contradiction)"
+                                print(f"[{iv}m] Prediction skipped: Directional contradiction (Trend: {ml_trend}, Regressor Price Change: {pred_change:+.2f}).")
+                            elif calibrated_confidence < dynamic_conf_threshold:
+                                status_msg = "Skipped (Low Confidence)"
+                                print(f"[{iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
+                            else:
+                                # Confluence checks
+                                print(f"[{iv}m] Triggering pre-trade confluence analysis...")
+                                news_sentiment, latest_titles = get_news_sentiment()
+                                all_pass, confluence_results = check_pre_trade_confluence(
+                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change
+                                )
+
+                                # Update global confluence status
+                                bot_state[f"confluence_results_{tf}"] = {
+                                    "approved": all_pass,
+                                    "checks": confluence_results
+                                }
+
+                                print(f"\n==================================================")
+                                print(f"[{iv}m] PRE-TRADE CONFLUENCE ANALYSIS REPORT")
+                                print("--------------------------------------------------")
+                                print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {SYMBOL}")
+                                print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
+                                print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.2f} [{expected_pct_change:.3f}%])")
+                                print("--------------------------------------------------")
+                                print("Checks Status:")
+                                for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
+                                    status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
+                                    print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
+                                
+                                if all_pass:
+                                    status_msg = "Traded"
+                                    print("--------------------------------------------------")
+                                    print("CONFLUENCE RESULT: APPROVED (All checks passed)")
+                                    print("==================================================\n")
+                                    
+                                    atr_norm_val = latest_candle["ATR_norm"]
+                                    atr_dollars = atr_norm_val * latest_candle["close"]
+                                    
+                                    # Regime-Adaptive Take-Profit Multiplier
+                                    if latest_candle["ADX"] >= 20.0:
+                                        tp_multiplier = 1.50
+                                    else:
+                                        tp_multiplier = 1.00
+                                        
+                                    if ml_trend == "Bullish":
+                                        stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars
+                                        take_profit_price = latest_candle["close"] + tp_multiplier * atr_dollars
+                                    else:
+                                        stop_loss_price = latest_candle["close"] + 0.75 * atr_dollars
+                                        take_profit_price = latest_candle["close"] - tp_multiplier * atr_dollars
+
+                                    duration_seconds = int(iv) * 60.0
+                                    active_trade = {
+                                        "entry_price": float(latest_candle["close"]),
+                                        "predicted_price": float(predicted_price),
+                                        "stop_loss": float(stop_loss_price),
+                                        "take_profit": float(take_profit_price),
+                                        "direction": str(ml_trend),
+                                        "end_time": float(time.time() + duration_seconds)
+                                    }
+                                    bot_state[active_trade_key] = active_trade
+                                    
+                                    print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})\n")
+                                else:
+                                    status_msg = "Skipped (Confluence Failed)"
+                                    failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"]]
+                                    print("--------------------------------------------------")
+                                    print(f"CONFLUENCE RESULT: REJECTED (Failed: {', '.join(failed_list)})")
+                                    print("==================================================\n")
+                            
+                            # Prevent duplicate predictions for the same candle timestamp
+                            exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv for p in bot_state["prediction_history"])
+                            if not exists:
+                                bot_state["prediction_history"].append({
+                                    "timestamp": float(time.time()),
+                                    "candle_timestamp": int(latest_completed_ts),
+                                    "interval": str(iv),
+                                    "direction": str(ml_trend),
+                                    "ref_price": float(latest_candle["close"]),
+                                    "predicted_change": float(pred_change),
+                                    "predicted_price": float(predicted_price),
+                                    "status": str(status_msg),
+                                    "evaluation": {
+                                        "evaluated": False,
+                                        "exit_price": None,
+                                        "change": None,
+                                        "change_pct": None,
+                                        "success": None
+                                    }
+                                })
+                                
+                                if len(bot_state["prediction_history"]) > 200:
+                                    bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
+                            else:
+                                print(f"[{iv}m] Prediction for candle timestamp {get_local_time_str(latest_completed_ts/1000)} already exists in history. Skipping duplicate append.")
+                            
+                            evaluate_predictions(df_completed, iv)
+                            save_history()
+                            
+                            last_processed_timestamps[last_ts_key] = latest_completed_ts
+            except Exception as e:
+                print(f"Error checking {iv}m candle close signals: {e}")
 
         time.sleep(10)
 

@@ -513,6 +513,51 @@
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
+        /* Pagination Styling */
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .pagination-info {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .pagination-btns {
+            display: flex;
+            gap: 6px;
+        }
+
+        .page-btn {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 12px;
+            transition: var(--transition-smooth);
+        }
+
+        .page-btn:hover:not(:disabled) {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
         /* Stats dashboard under history tables */
         .stats-dashboard {
             display: grid;
@@ -720,32 +765,69 @@
                 </div>
             </div>
 
-            <!-- Market Regime -->
-            <div class="card">
-                <div class="card-title">Market Regime</div>
-                <div class="card-value" id="market-regime">Unknown</div>
-                <div class="card-subtitle">
-                    ADX Strength: <span id="adx-value" style="font-weight: 700;">0.00</span>
+            <!-- 5M Strategy Card -->
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                        <span>5M STRATEGY</span>
+                        <span id="regime-badge-5m" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                    </div>
+                    <div class="card-value" id="model-prediction-5m" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-5m" style="font-size: 11px;">
+                        Calibrated Conf: 0%
+                    </div>
+                    <div class="meter-container" style="margin-top: 8px;">
+                        <div class="meter-bar" id="confidence-meter-bar-5m" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <div id="position-container-5m">
+                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Model Prediction -->
-            <div class="card">
-                <div class="card-title">Model Signal</div>
-                <div class="card-value" id="model-prediction">No Signal</div>
-                <div class="card-subtitle" id="model-details-subtitle">
-                    Calibrated Conf: 0%
+            <!-- 15M Strategy Card -->
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                        <span>15M STRATEGY</span>
+                        <span id="regime-badge-15m" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                    </div>
+                    <div class="card-value" id="model-prediction-15m" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-15m" style="font-size: 11px;">
+                        Calibrated Conf: 0%
+                    </div>
+                    <div class="meter-container" style="margin-top: 8px;">
+                        <div class="meter-bar" id="confidence-meter-bar-15m" style="width: 0%;"></div>
+                    </div>
                 </div>
-                <div class="meter-container">
-                    <div class="meter-bar" id="confidence-meter-bar"></div>
+                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <div id="position-container-15m">
+                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Active Position -->
-            <div class="card">
-                <div class="card-title">Active Trade Position</div>
-                <div id="position-container">
-                    <div class="no-position-text">No active positions. Scanning...</div>
+            <!-- 1H Strategy Card -->
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                        <span>1H STRATEGY</span>
+                        <span id="regime-badge-1h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                    </div>
+                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px;">
+                        Calibrated Conf: 0%
+                    </div>
+                    <div class="meter-container" style="margin-top: 8px;">
+                        <div class="meter-bar" id="confidence-meter-bar-1h" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <div id="position-container-1h">
+                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -756,8 +838,13 @@
             <div class="panel-column">
                 <!-- Confluence Panel -->
                 <div class="card">
-                    <div class="section-header">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                         <div class="section-title">📊 Pre-Trade Confluence Guard</div>
+                        <div class="filter-tabs">
+                            <button class="tab-btn" onclick="setConfluenceTimeframe('5m', this)">5M</button>
+                            <button class="tab-btn" onclick="setConfluenceTimeframe('15m', this)">15M</button>
+                            <button class="tab-btn active" onclick="setConfluenceTimeframe('1h', this)">1H</button>
+                        </div>
                     </div>
                     <div class="section-desc">
                         The bot triggers and validates all 13 confluence rules before executing a signal. Any single failure cancels the trade entry.
@@ -802,6 +889,7 @@
                         <table>
                             <thead>
                                 <tr>
+                                    <th>Timeframe</th>
                                     <th>Exit Time</th>
                                     <th>Direction</th>
                                     <th>Entry Price</th>
@@ -813,7 +901,7 @@
                             </thead>
                             <tbody id="trade-history-rows">
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
+                                    <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -846,12 +934,19 @@
 
         <!-- ML Predictions Tracker Panel -->
         <div class="card">
-            <div class="section-header">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                 <div class="section-title">🔮 ML Predictions Tracker</div>
-                <div class="filter-tabs">
-                    <button class="tab-btn active" id="pred-filter-all" onclick="setPredictionFilter('all', this)">All</button>
-                    <button class="tab-btn" id="pred-filter-traded" onclick="setPredictionFilter('traded', this)" style="color: var(--accent-green);">Traded</button>
-                    <button class="tab-btn" id="pred-filter-skipped" onclick="setPredictionFilter('skipped', this)" style="color: var(--text-secondary);">Skipped</button>
+                <div style="display: flex; gap: 15px;">
+                    <div class="filter-tabs">
+                        <button class="tab-btn" onclick="setPredictionTf('5', this)">5M</button>
+                        <button class="tab-btn" onclick="setPredictionTf('15', this)">15M</button>
+                        <button class="tab-btn active" onclick="setPredictionTf('60', this)">1H</button>
+                    </div>
+                    <div class="filter-tabs">
+                        <button class="tab-btn active" id="pred-filter-all" onclick="setPredictionFilter('all', this)">All</button>
+                        <button class="tab-btn" id="pred-filter-traded" onclick="setPredictionFilter('traded', this)" style="color: var(--accent-green);">Traded</button>
+                        <button class="tab-btn" id="pred-filter-skipped" onclick="setPredictionFilter('skipped', this)" style="color: var(--text-secondary);">Skipped</button>
+                    </div>
                 </div>
             </div>
 
@@ -862,11 +957,11 @@
                     <div class="stat-subcard-val" id="pred-stats-total">0</div>
                 </div>
                 <div class="stat-subcard" style="border-color: rgba(16, 185, 129, 0.12);">
-                    <div class="stat-subcard-title" style="color: var(--accent-green);">Correct 1h</div>
+                    <div class="stat-subcard-title" id="pred-stats-correct-title" style="color: var(--accent-green);">Correct 1H</div>
                     <div class="stat-subcard-val" id="pred-stats-correct" style="color: var(--accent-green);">0</div>
                 </div>
                 <div class="stat-subcard" style="border-color: rgba(244, 63, 94, 0.12);">
-                    <div class="stat-subcard-title" style="color: var(--accent-red);">Incorrect 1h</div>
+                    <div class="stat-subcard-title" id="pred-stats-incorrect-title" style="color: var(--accent-red);">Incorrect 1H</div>
                     <div class="stat-subcard-val" id="pred-stats-incorrect" style="color: var(--accent-red);">0</div>
                 </div>
                 <div class="stat-subcard" style="border-color: rgba(139, 92, 246, 0.12);">
@@ -879,21 +974,31 @@
                 <table>
                     <thead>
                         <tr>
+                            <th>Timeframe</th>
                             <th>Time</th>
                             <th>Direction</th>
                             <th>Ref Price</th>
                             <th>Exp. Change</th>
-                            <th>Price after 1h</th>
+                            <th>Price after TF</th>
                             <th>Outcome</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody id="prediction-history-rows">
                         <tr>
-                            <td colspan="7" style="text-align: center; color: var(--text-secondary); font-style: italic;">No predictions tracked in this session yet.</td>
+                            <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No predictions tracked in this session yet.</td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- Pagination Controls -->
+            <div class="pagination-container" id="prediction-pagination">
+                <div class="pagination-info" id="prediction-pagination-info">Showing 0-0 of 0 predictions</div>
+                <div class="pagination-btns" id="prediction-pagination-btns">
+                    <button class="page-btn" id="prediction-prev-btn" onclick="prevPredictionPage()">Previous</button>
+                    <button class="page-btn" id="prediction-next-btn" onclick="nextPredictionPage()">Next</button>
+                </div>
             </div>
         </div>
     </div>
@@ -921,6 +1026,60 @@
         let activeFilter = 'all'; // 'all', 'success', 'failed'
         let allPredictions = [];
         let activePredictionFilter = 'all'; // 'all', 'traded', 'skipped'
+        let activeConfluenceTimeframe = '1h'; // default to 1H
+        let activePredictionTf = '60'; // default to 1H (interval='60')
+        let predictionCurrentPage = 1;
+        const predictionsPerPage = 10;
+
+        function prevPredictionPage() {
+            if (predictionCurrentPage > 1) {
+                predictionCurrentPage--;
+                renderPredictions();
+            }
+        }
+
+        function nextPredictionPage() {
+            const tfPredictions = allPredictions.filter(p => {
+                const pInterval = p.interval || '60';
+                return pInterval === activePredictionTf;
+            });
+            let filtered = [...tfPredictions];
+            if (activePredictionFilter === 'traded') {
+                filtered = filtered.filter(p => p.status === 'Traded');
+            } else if (activePredictionFilter === 'skipped') {
+                filtered = filtered.filter(p => p.status !== 'Traded');
+            }
+            const totalPages = Math.ceil(filtered.length / predictionsPerPage);
+            if (predictionCurrentPage < totalPages) {
+                predictionCurrentPage++;
+                renderPredictions();
+            }
+        }
+
+        function setConfluenceTimeframe(tf, element) {
+            activeConfluenceTimeframe = tf;
+            const buttons = element.parentElement.querySelectorAll(".tab-btn");
+            buttons.forEach(btn => btn.classList.remove("active"));
+            element.classList.add("active");
+            updateDashboard();
+        }
+
+        function setPredictionTf(tfVal, element) {
+            activePredictionTf = tfVal;
+            predictionCurrentPage = 1; // Reset to page 1
+            const buttons = element.parentElement.querySelectorAll(".tab-btn");
+            buttons.forEach(btn => btn.classList.remove("active"));
+            element.classList.add("active");
+            
+            // Update labels
+            let tfLabel = "1H";
+            if (tfVal === "5") tfLabel = "5M";
+            else if (tfVal === "15") tfLabel = "15M";
+            document.getElementById("pred-stats-correct-title").innerText = `Correct ${tfLabel}`;
+            document.getElementById("pred-stats-incorrect-title").innerText = `Incorrect ${tfLabel}`;
+            
+            renderPredictions();
+        }
 
         function setTradeFilter(filterType, element) {
             activeFilter = filterType;
@@ -932,6 +1091,7 @@
 
         function setPredictionFilter(filterType, element) {
             activePredictionFilter = filterType;
+            predictionCurrentPage = 1; // Reset to page 1
             const buttons = element.parentElement.querySelectorAll(".tab-btn");
             buttons.forEach(btn => btn.classList.remove("active"));
             element.classList.add("active");
@@ -970,9 +1130,11 @@
                     const changeSign = t.change_pct >= 0 ? '+' : '';
                     const successStr = t.success ? "CORRECT ✓" : "INCORRECT ✗";
                     const successClass = t.success ? "color-bullish" : "color-bearish";
+                    const tfLabel = t.interval === '60' ? '1H' : (t.interval ? `${t.interval}M` : '1H');
 
                     htmlRows += `
                         <tr>
+                            <td style="font-weight: 700; color: var(--accent-purple);">${tfLabel}</td>
                             <td>${exitTimeStr}</td>
                             <td class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">${t.direction.toUpperCase()}</td>
                             <td>$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -987,7 +1149,7 @@
             } else {
                 tradesTbody.innerHTML = `
                     <tr>
-                        <td colspan="7" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades match this filter.</td>
+                        <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades match this filter.</td>
                     </tr>
                 `;
             }
@@ -996,30 +1158,66 @@
         function renderPredictions() {
             const predTbody = document.getElementById("prediction-history-rows");
 
-            // Calculate stats for evaluated predictions
-            const evaluatedPredictions = allPredictions.filter(p => p.evaluation && p.evaluation.evaluated);
+            // Filter predictions by the active timeframe interval first
+            const tfPredictions = allPredictions.filter(p => {
+                const pInterval = p.interval || '60';
+                return pInterval === activePredictionTf;
+            });
+
+            // Calculate stats for evaluated predictions of the active timeframe
+            const evaluatedPredictions = tfPredictions.filter(p => p.evaluation && p.evaluation.evaluated);
             const totalEvaluated = evaluatedPredictions.length;
             const correctCount = evaluatedPredictions.filter(p => p.evaluation.success).length;
             const incorrectCount = totalEvaluated - correctCount;
             const winRate = totalEvaluated > 0 ? (correctCount / totalEvaluated * 100) : 0;
 
-            document.getElementById("pred-stats-total").innerText = allPredictions.length;
+            document.getElementById("pred-stats-total").innerText = tfPredictions.length;
             document.getElementById("pred-stats-correct").innerText = correctCount;
             document.getElementById("pred-stats-incorrect").innerText = incorrectCount;
             document.getElementById("pred-stats-winrate").innerText = `${winRate.toFixed(1)}%`;
 
-            // Filter predictions list
-            let filtered = [...allPredictions];
+            // Filter predictions list by status
+            let filtered = [...tfPredictions];
             if (activePredictionFilter === 'traded') {
                 filtered = filtered.filter(p => p.status === 'Traded');
             } else if (activePredictionFilter === 'skipped') {
                 filtered = filtered.filter(p => p.status !== 'Traded');
             }
 
-            if (filtered.length > 0) {
+            const reversedFiltered = [...filtered].reverse();
+            const totalItems = reversedFiltered.length;
+            const totalPages = Math.ceil(totalItems / predictionsPerPage);
+            
+            if (predictionCurrentPage > totalPages && totalPages > 0) {
+                predictionCurrentPage = totalPages;
+            } else if (predictionCurrentPage < 1) {
+                predictionCurrentPage = 1;
+            }
+
+            const startIndex = (predictionCurrentPage - 1) * predictionsPerPage;
+            const endIndex = Math.min(startIndex + predictionsPerPage, totalItems);
+            const pagePredictions = reversedFiltered.slice(startIndex, endIndex);
+
+            // Update pagination UI
+            const infoElem = document.getElementById("prediction-pagination-info");
+            const prevBtn = document.getElementById("prediction-prev-btn");
+            const nextBtn = document.getElementById("prediction-next-btn");
+
+            if (infoElem && prevBtn && nextBtn) {
+                if (totalItems === 0) {
+                    infoElem.innerText = "Showing 0 of 0 predictions";
+                    prevBtn.disabled = true;
+                    nextBtn.disabled = true;
+                } else {
+                    infoElem.innerText = `Showing ${startIndex + 1}-${endIndex} of ${totalItems} predictions (Page ${predictionCurrentPage}/${totalPages})`;
+                    prevBtn.disabled = predictionCurrentPage === 1;
+                    nextBtn.disabled = predictionCurrentPage === totalPages;
+                }
+            }
+
+            if (pagePredictions.length > 0) {
                 let htmlRows = "";
-                // Display newest predictions first
-                [...filtered].reverse().forEach(p => {
+                pagePredictions.forEach(p => {
                     const dateObj = new Date(p.timestamp * 1000);
                     const predTimeStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
                     const dirClass = p.direction === 'Bullish' ? 'color-bullish' : 'color-bearish';
@@ -1053,8 +1251,10 @@
                         statusLabel = `<span class="badge-fail" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px; background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.08); color: var(--text-secondary);">${p.status.toUpperCase()}</span>`;
                     }
 
+                    const tfLabel = p.interval === '60' ? '1H' : (p.interval ? `${p.interval}M` : '1H');
                     htmlRows += `
                         <tr>
+                            <td style="font-weight: 700; color: var(--accent-purple);">${tfLabel}</td>
                             <td>${predTimeStr}</td>
                             <td class="${dirClass}" style="font-weight:700; font-family: 'Outfit', sans-serif;">${p.direction.toUpperCase()}</td>
                             <td>${refPriceStr}</td>
@@ -1069,7 +1269,7 @@
             } else {
                 predTbody.innerHTML = `
                     <tr>
-                        <td colspan="7" style="text-align: center; color: var(--text-secondary); font-style: italic;">No predictions match this filter.</td>
+                        <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No predictions match this filter.</td>
                     </tr>
                 `;
             }
@@ -1102,97 +1302,112 @@
                         lastPrice = currentPrice;
                     }
 
-                    // 3. Update Regime
-                    const regimeVal = data.regime || "Unknown";
-                    const regimeElem = document.getElementById("market-regime");
-                    regimeElem.innerText = regimeVal.replace(/\(ADX.*\)/g, '').trim();
-                    if (regimeVal.includes("Trending")) {
-                        regimeElem.style.color = "var(--accent-orange)";
-                        regimeElem.style.textShadow = "var(--neon-orange-glow)";
-                    } else if (regimeVal.includes("Ranging")) {
-                        regimeElem.style.color = "var(--accent-blue)";
-                        regimeElem.style.textShadow = "var(--neon-blue-glow)";
-                    }
-                    document.getElementById("adx-value").innerText = (data.adx || 0.00).toFixed(2);
-
-                    // 4. Update Prediction Model Signal
-                    const pred = data.latest_prediction;
-                    if (pred) {
-                        const predElem = document.getElementById("model-prediction");
-                        predElem.innerText = pred.direction;
-                        if (pred.direction === "Bullish") {
-                            predElem.style.color = "var(--accent-green)";
-                            predElem.style.textShadow = "var(--neon-green-glow)";
-                            document.getElementById("confidence-meter-bar").style.backgroundColor = "var(--accent-green)";
-                        } else {
-                            predElem.style.color = "var(--accent-red)";
-                            predElem.style.textShadow = "var(--neon-red-glow)";
-                            document.getElementById("confidence-meter-bar").style.backgroundColor = "var(--accent-red)";
-                        }
-
-                        const confPct = pred.calibrated_confidence * 100;
-                        document.getElementById("model-details-subtitle").innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${pred.predicted_change >= 0 ? '+' : ''}${pred.predicted_change.toFixed(2)}`;
-                        document.getElementById("confidence-meter-bar").style.width = `${confPct}%`;
-                    } else {
-                        document.getElementById("model-prediction").innerText = "No Signal";
-                        document.getElementById("model-prediction").style.color = "var(--text-secondary)";
-                        document.getElementById("model-prediction").style.textShadow = "none";
-                        document.getElementById("confidence-meter-bar").style.width = "0%";
-                    }
-
-                    // 5. Active Trade Position
-                    const activeTrade = data.active_trade;
-                    const positionContainer = document.getElementById("position-container");
-                    if (activeTrade) {
-                        const dirClass = activeTrade.direction === "Bullish" ? "color-bullish" : "color-bearish";
-                        const entryPrice = activeTrade.entry_price || 0;
-                        const exitTarget = activeTrade.take_profit || 0;
-                        const stopTarget = activeTrade.stop_loss || 0;
-
-                        let pnlVal = 0;
-                        let pnlPct = 0;
-                        if (currentPrice) {
-                            if (activeTrade.direction === "Bullish") {
-                                pnlVal = currentPrice - entryPrice;
+                    // 3 & 4. Update Timeframe Strategies (5m, 15m, 1h)
+                    const timeframes = ["5m", "15m", "1h"];
+                    timeframes.forEach(tf => {
+                        const regimeVal = data[`regime_${tf}`] || "Unknown";
+                        const adxVal = data[`adx_${tf}`] || 0.00;
+                        const badgeElem = document.getElementById(`regime-badge-${tf}`);
+                        if (badgeElem) {
+                            badgeElem.innerText = regimeVal.replace(/\(ADX.*\)/g, '').trim();
+                            if (regimeVal.includes("Trending")) {
+                                badgeElem.style.color = "var(--accent-orange)";
+                            } else if (regimeVal.includes("Ranging")) {
+                                badgeElem.style.color = "var(--accent-blue)";
                             } else {
-                                pnlVal = entryPrice - currentPrice;
+                                badgeElem.style.color = "var(--text-secondary)";
                             }
-                            pnlPct = (pnlVal / entryPrice) * 100;
                         }
 
-                        const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
-                        const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
+                        const pred = data[`latest_prediction_${tf}`];
+                        const predElem = document.getElementById(`model-prediction-${tf}`);
+                        const barElem = document.getElementById(`confidence-meter-bar-${tf}`);
+                        const subtitleElem = document.getElementById(`model-details-subtitle-${tf}`);
 
-                        positionContainer.innerHTML = `
-                            <div class="active-position-details">
-                                <div class="position-row">
-                                    <span class="position-label">Direction</span>
-                                    <span class="position-val ${dirClass}">${activeTrade.direction.toUpperCase()}</span>
-                                </div>
-                                <div class="position-row">
-                                    <span class="position-label">Entry Price</span>
-                                    <span class="position-val">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div class="position-row">
-                                    <span class="position-label">Take Profit</span>
-                                    <span class="position-val" style="color: var(--accent-green)">$${exitTarget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div class="position-row">
-                                    <span class="position-label">Stop Loss</span>
-                                    <span class="position-val" style="color: var(--accent-red)">$${stopTarget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                </div>
-                                <div class="position-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.08);">
-                                    <span class="position-label">Unrealized P&L</span>
-                                    <span class="position-val ${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        positionContainer.innerHTML = `<div class="no-position-text">No active positions. Scanning...</div>`;
-                    }
+                        if (pred && predElem && barElem && subtitleElem) {
+                            predElem.innerText = pred.direction;
+                            if (pred.direction === "Bullish") {
+                                predElem.style.color = "var(--accent-green)";
+                                predElem.style.textShadow = "var(--neon-green-glow)";
+                                barElem.style.backgroundColor = "var(--accent-green)";
+                            } else {
+                                predElem.style.color = "var(--accent-red)";
+                                predElem.style.textShadow = "var(--neon-red-glow)";
+                                barElem.style.backgroundColor = "var(--accent-red)";
+                            }
 
-                    // 6. Confluence Checks Report
-                    const conf = data.confluence_results;
+                            const confPct = pred.calibrated_confidence * 100;
+                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${pred.predicted_change >= 0 ? '+' : ''}${pred.predicted_change.toFixed(2)}`;
+                            barElem.style.width = `${confPct}%`;
+                        } else if (predElem && barElem && subtitleElem) {
+                            predElem.innerText = "No Signal";
+                            predElem.style.color = "var(--text-secondary)";
+                            predElem.style.textShadow = "none";
+                            barElem.style.width = "0%";
+                            subtitleElem.innerText = `Calibrated Conf: 0%`;
+                        }
+
+                        const activeTrade = data[`active_trade_${tf}`];
+                        const positionContainer = document.getElementById(`position-container-${tf}`);
+                        if (activeTrade && positionContainer) {
+                            const dirClass = activeTrade.direction === "Bullish" ? "color-bullish" : "color-bearish";
+                            const entryPrice = activeTrade.entry_price || 0;
+                            const exitTarget = activeTrade.take_profit || 0;
+                            const stopTarget = activeTrade.stop_loss || 0;
+
+                            let pnlVal = 0;
+                            let pnlPct = 0;
+                            if (currentPrice) {
+                                if (activeTrade.direction === "Bullish") {
+                                    pnlVal = currentPrice - entryPrice;
+                                } else {
+                                    pnlVal = entryPrice - currentPrice;
+                                }
+                                pnlPct = (pnlVal / entryPrice) * 100;
+                            }
+
+                            const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
+                            const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
+
+                            const remainingSeconds = Math.max(0, Math.floor(activeTrade.end_time - (Date.now() / 1000)));
+                            const mins = Math.floor(remainingSeconds / 60);
+                            const secs = remainingSeconds % 60;
+                            const countdownStr = `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
+
+                            positionContainer.innerHTML = `
+                                <div class="active-position-details" style="font-size: 11px; display: flex; flex-direction: column; gap: 4px;">
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="opacity: 0.6;">Position:</span>
+                                        <span class="${dirClass}" style="font-weight: 800;">${activeTrade.direction.toUpperCase()}</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="opacity: 0.6;">Entry Price:</span>
+                                        <span>$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="opacity: 0.6;">TP / SL:</span>
+                                        <span>
+                                            <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(1)}</span> / 
+                                            <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(1)}</span>
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="opacity: 0.6;">Time Left:</span>
+                                        <span style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06);">
+                                        <span style="opacity: 0.8; font-weight: 700;">PnL:</span>
+                                        <span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (positionContainer) {
+                            positionContainer.innerHTML = `<div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>`;
+                        }
+                    });
+
+                    // 6. Confluence Checks Report (filtered by activeConfluenceTimeframe)
+                    const conf = data[`confluence_results_${activeConfluenceTimeframe}`];
                     const confContainer = document.getElementById("confluence-items-container");
                     if (conf && conf.checks) {
                         let htmlStr = "";

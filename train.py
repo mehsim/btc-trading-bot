@@ -119,23 +119,23 @@ def add_features(df):
     df.dropna(inplace=True)
     return df
 
-def train_models():
+def train_models(interval=INTERVAL, pages=PAGES):
     # =========================
     # LOAD DATA
     # =========================
     if SYMBOL == "BTCUSDT":
-        print(f"Fetching {PAGES} pages of {INTERVAL}-minute {SYMBOL} data ({PAGES * 1000} candles)...")
-        df_target = get_history(symbol=SYMBOL, interval=INTERVAL, limit=1000, pages=PAGES)
+        print(f"Fetching {pages} pages of {interval}-minute {SYMBOL} data ({pages * 1000} candles)...")
+        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=pages)
         print(f"Loaded {len(df_target)} {SYMBOL} candles.")
         df = df_target.copy()
         df["close_btc"] = df["close"]
     else:
-        print(f"Fetching {PAGES} pages of {INTERVAL}-minute {SYMBOL} data ({PAGES * 1000} candles)...")
-        df_target = get_history(symbol=SYMBOL, interval=INTERVAL, limit=1000, pages=PAGES)
+        print(f"Fetching {pages} pages of {interval}-minute {SYMBOL} data ({pages * 1000} candles)...")
+        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=pages)
         print(f"Loaded {len(df_target)} {SYMBOL} candles.")
         
-        print(f"Fetching {PAGES} pages of {INTERVAL}-minute BTCUSDT data ({PAGES * 1000} candles) for correlation...")
-        df_btc = get_history(symbol="BTCUSDT", interval=INTERVAL, limit=1000, pages=PAGES)
+        print(f"Fetching {pages} pages of {interval}-minute BTCUSDT data ({pages * 1000} candles) for correlation...")
+        df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=pages)
         print(f"Loaded {len(df_btc)} BTCUSDT candles.")
         
         # Inner merge to align timestamps
@@ -214,9 +214,9 @@ def train_models():
         model_trend.fit(X, y_trend)
         model_price.fit(X, y_price)
 
-        model_trend.save_model(f"xgb_{name}_trend.json")
-        model_price.save_model(f"xgb_{name}_price.json")
-        print(f"  Models trained and saved to xgb_{name}_trend.json and xgb_{name}_price.json successfully.")
+        model_trend.save_model(f"xgb_{name}_trend_{interval}.json")
+        model_price.save_model(f"xgb_{name}_price_{interval}.json")
+        print(f"  Models trained and saved to xgb_{name}_trend_{interval}.json and xgb_{name}_price_{interval}.json successfully.")
 
     # Split dataset based on ADX (Regime Detection)
     df_trending = df[df["ADX"] >= 20.0].copy().reset_index(drop=True)
@@ -226,4 +226,17 @@ def train_models():
     train_regime_model(df_ranging, "ranging")
 
 if __name__ == "__main__":
-    train_models()
+    import argparse
+    parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
+    parser.add_argument("--interval", type=str, default="60", choices=["5", "15", "60", "all"], help="Timeframe interval to train")
+    parser.add_argument("--pages", type=int, default=40, help="Number of data pages to fetch from Bybit")
+    args = parser.parse_args()
+
+    if args.interval == "all":
+        for iv in ["5", "15", "60"]:
+            print(f"\n==============================================")
+            print(f"TRAINING FOR INTERVAL: {iv}")
+            print(f"==============================================")
+            train_models(interval=iv, pages=args.pages)
+    else:
+        train_models(interval=args.interval, pages=args.pages)
