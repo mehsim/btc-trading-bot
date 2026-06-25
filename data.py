@@ -86,6 +86,54 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             print(f"Error fetching Binance fallback klines: {ex}")
 
     if not all_data:
+        print(f"Bybit & Binance failed. Attempting Kraken API fallback for {symbol}...")
+        try:
+            kraken_interval = 60
+            if str(interval) == "15":
+                kraken_interval = 15
+            elif str(interval) == "60":
+                kraken_interval = 60
+            elif str(interval) == "240":
+                kraken_interval = 240
+            elif str(interval).upper() == "D":
+                kraken_interval = 1440
+
+            kraken_url = "https://api.kraken.com/0/public/OHLC"
+            kraken_params = {
+                "pair": "XBTUSD",
+                "interval": kraken_interval
+            }
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            resp = requests.get(kraken_url, params=kraken_params, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                res = resp.json()
+                if "result" in res and len(res["result"]) > 0:
+                    pair_key = [k for k in res["result"].keys() if k != "last"][0]
+                    kraken_data = res["result"][pair_key]
+                    
+                    # Take the last 'limit' candles (Kraken returns 720 by default)
+                    candles_to_take = kraken_data[-limit:] if len(kraken_data) > limit else kraken_data
+                    for item in candles_to_take:
+                        all_data.append([
+                            float(item[0]) * 1000, # timestamp in ms
+                            float(item[1]),        # open
+                            float(item[2]),        # high
+                            float(item[3]),        # low
+                            float(item[4]),        # close
+                            float(item[6]),        # volume
+                            float(item[6]) * float(item[4]) # turnover
+                        ])
+                    print(f"Successfully loaded {len(candles_to_take)} candles from Kraken API fallback.")
+                else:
+                    print(f"Kraken returned empty results or error: {res.get('error')}")
+            else:
+                print(f"Kraken fallback failed with HTTP {resp.status_code}")
+        except Exception as ex:
+            print(f"Error fetching Kraken fallback klines: {ex}")
+
+    if not all_data:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
 
     df = pd.DataFrame(all_data, columns=[
