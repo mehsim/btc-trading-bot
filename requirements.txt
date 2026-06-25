@@ -1,0 +1,9 @@
+pandas
+numpy
+ta
+websocket-client
+xgboost
+scikit-learn
+joblib
+requests
+python-dotenv
