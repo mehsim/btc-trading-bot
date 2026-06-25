@@ -214,14 +214,9 @@ def train_models():
         model_trend.fit(X, y_trend)
         model_price.fit(X, y_price)
 
-        models = {
-            "trend": model_trend,
-            "price": model_price
-        }
-
-        filename = f"models_{name}.pkl"
-        joblib.dump(models, filename)
-        print(f"  Models trained and saved to {filename} successfully.")
+        model_trend.save_model(f"xgb_{name}_trend.json")
+        model_price.save_model(f"xgb_{name}_price.json")
+        print(f"  Models trained and saved to xgb_{name}_trend.json and xgb_{name}_price.json successfully.")
 
     # Split dataset based on ADX (Regime Detection)
     df_trending = df[df["ADX"] >= 20.0].copy().reset_index(drop=True)

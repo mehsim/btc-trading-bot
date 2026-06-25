@@ -52,8 +52,20 @@ print("=" * 60)
 # 1. Load trained models
 print("Loading trained models...")
 try:
-    models_trending = joblib.load("models_trending.pkl")
-    models_ranging = joblib.load("models_ranging.pkl")
+    from xgboost import XGBClassifier, XGBRegressor
+    models_trending = {
+        "trend": XGBClassifier(),
+        "price": XGBRegressor()
+    }
+    models_trending["trend"].load_model("xgb_trending_trend.json")
+    models_trending["price"].load_model("xgb_trending_price.json")
+
+    models_ranging = {
+        "trend": XGBClassifier(),
+        "price": XGBRegressor()
+    }
+    models_ranging["trend"].load_model("xgb_ranging_trend.json")
+    models_ranging["price"].load_model("xgb_ranging_price.json")
     print("Models loaded successfully.")
 except Exception as e:
     print(f"Error loading models: {e}. Please run 'train.py' first.")

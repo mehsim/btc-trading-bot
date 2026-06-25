@@ -23,9 +23,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy the rest of the application files
 COPY --chown=user . $HOME/app
 
-# Train the ML models during the image build process
-RUN python train.py
-
 # Hugging Face Spaces exposes port 7860 by default
 ENV PORT=7860
 EXPOSE 7860

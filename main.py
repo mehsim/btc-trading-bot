@@ -122,10 +122,20 @@ SYMBOL = "BTCUSDT"
 INTERVAL = "60"
 
 # =========================
-# LOAD DUAL MODELS (REGIME ROUTED)
-# =========================
-models_trending = joblib.load("models_trending.pkl")
-models_ranging = joblib.load("models_ranging.pkl")
+from xgboost import XGBClassifier, XGBRegressor
+models_trending = {
+    "trend": XGBClassifier(),
+    "price": XGBRegressor()
+}
+models_trending["trend"].load_model("xgb_trending_trend.json")
+models_trending["price"].load_model("xgb_trending_price.json")
+
+models_ranging = {
+    "trend": XGBClassifier(),
+    "price": XGBRegressor()
+}
+models_ranging["trend"].load_model("xgb_ranging_trend.json")
+models_ranging["price"].load_model("xgb_ranging_price.json")
 
 # =========================
 # WEB SOCKET FOR LIVE PRICE
@@ -533,8 +543,14 @@ def get_news_sentiment():
 # =========================
 def get_orderbook_imbalance():
     try:
-        url = "https://api.bybit.com/v5/market/orderbook"
-        res = requests.get(url, params={"category": "spot", "symbol": SYMBOL, "limit": 25}, timeout=10).json()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, params={"category": "spot", "symbol": SYMBOL, "limit": 25}, headers=headers, timeout=10)
+        if response.status_code != 200:
+            print(f"[Orderbook] Error: received HTTP {response.status_code}")
+            return {"imbalance": 0.0, "spread": 0.0}
+        res = response.json()
         if "result" in res and "b" in res["result"] and "a" in res["result"]:
             bids = res["result"]["b"]  # list of [price, size]
             asks = res["result"]["a"]
@@ -613,8 +629,14 @@ def calibrate_confidence(raw_conf, p95, max_conf):
 
 def get_funding_rate(symbol=SYMBOL):
     try:
-        url = "https://api.bybit.com/v5/market/tickers"
-        res = requests.get(url, params={"category": "linear", "symbol": symbol}, timeout=5).json()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, params={"category": "linear", "symbol": symbol}, headers=headers, timeout=5)
+        if response.status_code != 200:
+            print(f"Error fetching funding rate: HTTP status {response.status_code}")
+            return 0.0
+        res = response.json()
         if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
             rate_str = res["result"]["list"][0].get("fundingRate")
             if rate_str:
@@ -901,8 +923,14 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 # =========================
 def get_fallback_price():
     try:
-        url = "https://api.bybit.com/v5/market/tickers"
-        res = requests.get(url, params={"category": "spot", "symbol": SYMBOL}).json()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, params={"category": "spot", "symbol": SYMBOL}, headers=headers)
+        if response.status_code != 200:
+            print(f"Error fetching ticker price fallback: HTTP status {response.status_code}")
+            return None
+        res = response.json()
         return float(res["result"]["list"][0]["lastPrice"])
     except Exception as e:
         print(f"Error fetching ticker price fallback: {e}")

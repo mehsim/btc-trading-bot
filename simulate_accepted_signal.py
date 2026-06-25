@@ -26,8 +26,20 @@ print("SEARCHING FOR AN APPROVED SIGNAL IN RECENT HISTORY")
 print("=" * 60)
 
 # Load models
-models_trending = joblib.load("models_trending.pkl")
-models_ranging = joblib.load("models_ranging.pkl")
+from xgboost import XGBClassifier, XGBRegressor
+models_trending = {
+    "trend": XGBClassifier(),
+    "price": XGBRegressor()
+}
+models_trending["trend"].load_model("xgb_trending_trend.json")
+models_trending["price"].load_model("xgb_trending_price.json")
+
+models_ranging = {
+    "trend": XGBClassifier(),
+    "price": XGBRegressor()
+}
+models_ranging["trend"].load_model("xgb_ranging_trend.json")
+models_ranging["price"].load_model("xgb_ranging_price.json")
 
 # Fetch calibration limits
 p95, max_conf = calculate_historical_thresholds(models_trending["trend"])
