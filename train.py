@@ -2,12 +2,18 @@ import pandas as pd
 import numpy as np
 import joblib
 import optuna
+from ensemble import (
+    PurgedEmbargoTimeSeriesSplit, EnsembleClassifier, EnsembleRegressor,
+    save_ensemble_classifier, save_ensemble_regressor
+)
 
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import MFIIndicator
 from xgboost import XGBClassifier, XGBRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
+from catboost import CatBoostClassifier, CatBoostRegressor
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, mean_absolute_error
@@ -45,6 +51,17 @@ for lag in [1, 2]:
     features.append(f"open_interest_lag{lag}")
     features.append(f"funding_rate_lag{lag}")
     features.append(f"fear_greed_lag{lag}")
+
+# New microstructure and derivatives momentum features
+features.extend([
+    "open_interest_pct_change", "funding_rate_diff", 
+    "CVD_rolling_1h", "CVD_rolling_4h"
+])
+for lag in [1, 2]:
+    features.append(f"open_interest_pct_change_lag{lag}")
+    features.append(f"funding_rate_diff_lag{lag}")
+    features.append(f"CVD_rolling_1h_lag{lag}")
+    features.append(f"CVD_rolling_4h_lag{lag}")
 
 def add_features(df):
     df = df.copy()
@@ -130,6 +147,22 @@ def add_features(df):
         df[f"funding_rate_lag{lag}"] = df["funding_rate"].shift(lag)
         df[f"fear_greed_lag{lag}"] = df["fear_greed"].shift(lag)
         
+    # Derivatives momentum
+    df["open_interest_pct_change"] = df["open_interest"].pct_change(1).fillna(0.0)
+    df["funding_rate_diff"] = df["funding_rate"].diff(1).fillna(0.0)
+    
+    # Signed volume & Cumulative Volume Delta (CVD) proxies
+    signed_vol = df["volume"] * np.sign(df["close"] - df["open"])
+    df["CVD_rolling_1h"] = signed_vol.rolling(window=4, min_periods=1).sum()
+    df["CVD_rolling_4h"] = signed_vol.rolling(window=16, min_periods=1).sum()
+    
+    # Lag new features
+    for lag in [1, 2]:
+        df[f"open_interest_pct_change_lag{lag}"] = df["open_interest_pct_change"].shift(lag)
+        df[f"funding_rate_diff_lag{lag}"] = df["funding_rate_diff"].shift(lag)
+        df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
+        df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
+        
     df.dropna(inplace=True)
     return df
 
@@ -186,36 +219,15 @@ def add_triple_barrier_labels(df, interval):
     df["target_trend"] = labels
     return df
 
-def purged_train_test_split(X, y_trend, y_price, test_size=0.2, lookahead=6):
-    n_samples = len(X)
-    split_idx = int(n_samples * (1 - test_size))
-    
-    train_end = split_idx - lookahead
-    
-    X_train = X.iloc[:train_end]
-    y_train_t = y_trend.iloc[:train_end]
-    y_train_p = y_price.iloc[:train_end]
-    
-    X_test = X.iloc[split_idx:]
-    y_test_t = y_trend.iloc[split_idx:]
-    y_test_p = y_price.iloc[split_idx:]
-    
-    return X_train, X_test, y_train_t, y_test_t, y_train_p, y_test_p
-
-def optimize_classifier(X_train, y_train, X_val, y_val):
+def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    from sklearn.utils.class_weight import compute_sample_weight
-    sample_weights = compute_sample_weight(class_weight='balanced', y=y_train)
-    
     def objective(trial):
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 200),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
             'max_depth': trial.suggest_int('max_depth', 3, 5),
             'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
-            'reg_alpha': trial.suggest_float('reg_alpha', 0.1, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
             'objective': 'multi:softprob',
             'num_class': 3,
             'eval_metric': 'mlogloss',
@@ -225,35 +237,110 @@ def optimize_classifier(X_train, y_train, X_val, y_val):
         model = XGBClassifier(**params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
-        acc = accuracy_score(y_val, preds)
-        return acc
-        
+        return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=15)
     return study.best_params
 
-def optimize_regressor(X_train, y_train, X_val, y_val):
+def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 200),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
             'max_depth': trial.suggest_int('max_depth', 3, 5),
             'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
-            'reg_alpha': trial.suggest_float('reg_alpha', 0.1, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
+            'objective': 'multiclass',
+            'num_class': 3,
+            'verbose': -1,
+            'random_state': 42,
+            'n_jobs': 1
+        }
+        model = LGBMClassifier(**params)
+        model.fit(X_train, y_train, sample_weight=sample_weights)
+        preds = model.predict(X_val)
+        return accuracy_score(y_val, preds)
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=15)
+    return study.best_params
+
+def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'iterations': trial.suggest_int('iterations', 50, 150),
+            'depth': trial.suggest_int('depth', 3, 5),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'loss_function': 'MultiClass',
+            'verbose': 0,
+            'random_seed': 42
+        }
+        model = CatBoostClassifier(**params)
+        model.fit(X_train, y_train, sample_weight=sample_weights)
+        preds = model.predict(X_val)
+        return accuracy_score(y_val, preds)
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=15)
+    return study.best_params
+
+def optimize_xgb_regressor(X_train, y_train, X_val, y_val):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'max_depth': trial.suggest_int('max_depth', 3, 5),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'subsample': trial.suggest_float('subsample', 0.7, 0.9),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
             'random_state': 42,
             'n_jobs': 1
         }
         model = XGBRegressor(**params)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
-        mae = mean_absolute_error(y_val, preds)
-        return mae
-        
+        return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=15)
+    return study.best_params
+
+def optimize_lgb_regressor(X_train, y_train, X_val, y_val):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'max_depth': trial.suggest_int('max_depth', 3, 5),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'subsample': trial.suggest_float('subsample', 0.7, 0.9),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'verbose': -1,
+            'random_state': 42,
+            'n_jobs': 1
+        }
+        model = LGBMRegressor(**params)
+        model.fit(X_train, y_train)
+        preds = model.predict(X_val)
+        return mean_absolute_error(y_val, preds)
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=15)
+    return study.best_params
+
+def optimize_cat_regressor(X_train, y_train, X_val, y_val):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'iterations': trial.suggest_int('iterations', 50, 150),
+            'depth': trial.suggest_int('depth', 3, 5),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'verbose': 0,
+            'random_seed': 42
+        }
+        model = CatBoostRegressor(**params)
+        model.fit(X_train, y_train)
+        preds = model.predict(X_val)
+        return mean_absolute_error(y_val, preds)
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=15)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
@@ -311,43 +398,125 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_trend = df_regime["target_trend"]
         y_price = df_regime["target_price_change"]
 
-        # Purged time series validation split
-        X_train, X_val, y_train_t, y_val_t, y_train_p, y_val_p = purged_train_test_split(
-            X, y_trend, y_price, test_size=0.2, lookahead=6
-        )
-
-        print(f"  Optimizing hyperparameters for {name} trend classifier...")
-        best_params_t = optimize_classifier(X_train, y_train_t, X_val, y_val_t)
-        print(f"  Best Classifier Params: {best_params_t}")
-        model_trend = XGBClassifier(**best_params_t)
-
-        print(f"  Optimizing hyperparameters for {name} price regressor...")
-        best_params_p = optimize_regressor(X_train, y_train_p, X_val, y_val_p)
-        print(f"  Best Regressor Params: {best_params_p}")
-        model_price = XGBRegressor(**best_params_p)
-
-        print(f"  Validating {name} models...")
+        # Purged and Embargoed Time-Series Cross Validation
+        cv = PurgedEmbargoTimeSeriesSplit(n_splits=5, lookahead=6, embargo_pct=0.01)
+        
+        meta_features_list = []
+        meta_labels_list = []
+        
+        primary_accuracies = []
+        primary_maes = []
+        
+        first_fold = True
+        best_params_xgb_t = None
+        best_params_lgb_t = None
+        best_params_cat_t = None
+        
+        best_params_xgb_p = None
+        best_params_lgb_p = None
+        best_params_cat_p = None
+        
         from sklearn.utils.class_weight import compute_sample_weight
-        sample_weight_val = compute_sample_weight(class_weight='balanced', y=y_train_t)
-        model_trend.fit(X_train, y_train_t, sample_weight=sample_weight_val)
-        y_pred_t = model_trend.predict(X_val)
-        acc = accuracy_score(y_val_t, y_pred_t)
-
-        model_price.fit(X_train, y_train_p)
-        y_pred_p = model_price.predict(X_val)
-        mae = mean_absolute_error(y_val_p, y_pred_p)
-
-        print(f"  Validation Out-of-Sample Accuracy (Trend): {acc*100:.2f}%")
-        print(f"  Validation Out-of-Sample MAE (Price Change): {mae:.4f}")
-
-        print(f"  Training final {name} models on complete regime dataset...")
+        
+        print(f"  Running Purged & Embargoed Cross-Validation...")
+        for fold, (train_idx, val_idx) in enumerate(cv.split(X, y_trend)):
+            X_train, y_train_t, y_train_p = X.iloc[train_idx], y_trend.iloc[train_idx], y_price.iloc[train_idx]
+            X_val, y_val_t, y_val_p = X.iloc[val_idx], y_trend.iloc[val_idx], y_price.iloc[val_idx]
+            
+            sample_weight_train = compute_sample_weight(class_weight='balanced', y=y_train_t)
+            
+            if first_fold:
+                print("  Optimizing hyperparameters on first fold...")
+                best_params_xgb_t = optimize_xgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train)
+                best_params_lgb_t = optimize_lgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train)
+                best_params_cat_t = optimize_cat_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train)
+                
+                best_params_xgb_p = optimize_xgb_regressor(X_train, y_train_p, X_val, y_val_p)
+                best_params_lgb_p = optimize_lgb_regressor(X_train, y_train_p, X_val, y_val_p)
+                best_params_cat_p = optimize_cat_regressor(X_train, y_train_p, X_val, y_val_p)
+                first_fold = False
+            
+            # Instantiate models with best parameters
+            xgb_t = XGBClassifier(**best_params_xgb_t)
+            lgb_t = LGBMClassifier(**best_params_lgb_t)
+            cat_t = CatBoostClassifier(**best_params_cat_t)
+            ensemble_t = EnsembleClassifier(xgb_t, lgb_t, cat_t)
+            
+            xgb_p = XGBRegressor(**best_params_xgb_p)
+            lgb_p = LGBMRegressor(**best_params_lgb_p)
+            cat_p = CatBoostRegressor(**best_params_cat_p)
+            ensemble_p = EnsembleRegressor(xgb_p, lgb_p, cat_p)
+            
+            # Train on this fold
+            ensemble_t.fit(X_train, y_train_t, sample_weight=sample_weight_train)
+            ensemble_p.fit(X_train, y_train_p)
+            
+            # Out of sample validation predictions
+            pred_val_t = ensemble_t.predict(X_val)
+            pred_val_p = ensemble_p.predict(X_val)
+            
+            # Metrics
+            acc = accuracy_score(y_val_t, pred_val_t)
+            mae = mean_absolute_error(y_val_p, pred_val_p)
+            primary_accuracies.append(acc)
+            primary_maes.append(mae)
+            
+            # Generate Meta-labels for this validation fold
+            actual_val_t = y_val_t.values
+            is_non_neutral = (pred_val_t != 1)
+            is_correct = (pred_val_t == actual_val_t)
+            
+            meta_features_list.append(X_val[is_non_neutral])
+            meta_labels_list.append(is_correct[is_non_neutral].astype(int))
+            
+        print(f"  Validation Out-of-Sample Accuracy (Ensemble Trend): {np.mean(primary_accuracies)*100:.2f}%")
+        print(f"  Validation Out-of-Sample MAE (Ensemble Price): {np.mean(primary_maes):.4f}")
+        
+        # Meta-Classifier Dataset
+        meta_X = pd.concat(meta_features_list, ignore_index=True)
+        meta_y = pd.Series(np.concatenate(meta_labels_list))
+        
+        print(f"  Meta-Classifier Training Samples: {len(meta_X)} (Positive rate: {meta_y.mean()*100:.2f}%)")
+        
+        # Train Meta-Classifier (XGBoost Binary Classifier)
+        meta_model = XGBClassifier(
+            n_estimators=100,
+            max_depth=4,
+            learning_rate=0.05,
+            objective='binary:logistic',
+            eval_metric='logloss',
+            random_state=42,
+            n_jobs=1
+        )
+        if len(meta_X) >= 20:
+            meta_model.fit(meta_X, meta_y)
+            print("  Meta-Classifier trained successfully.")
+        else:
+            meta_model.fit(X, np.ones(len(X)))
+            print("  Warning: Insufficient samples for Meta-Classifier. Dummy classifier trained.")
+            
+        # Fit final primary models on complete regime dataset
+        print(f"  Training final ensemble models on complete {name} dataset...")
+        final_xgb_t = XGBClassifier(**best_params_xgb_t)
+        final_lgb_t = LGBMClassifier(**best_params_lgb_t)
+        final_cat_t = CatBoostClassifier(**best_params_cat_t)
+        final_ensemble_t = EnsembleClassifier(final_xgb_t, final_lgb_t, final_cat_t)
+        
+        final_xgb_p = XGBRegressor(**best_params_xgb_p)
+        final_lgb_p = LGBMRegressor(**best_params_lgb_p)
+        final_cat_p = CatBoostRegressor(**best_params_cat_p)
+        final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
+        
         sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
-        model_trend.fit(X, y_trend, sample_weight=sample_weight_full)
-        model_price.fit(X, y_price)
-
-        model_trend.save_model(f"xgb_{name}_trend_{interval}.json")
-        model_price.save_model(f"xgb_{name}_price_{interval}.json")
-        print(f"  Models trained and saved to xgb_{name}_trend_{interval}.json and xgb_{name}_price_{interval}.json successfully.")
+        final_ensemble_t.fit(X, y_trend, sample_weight=sample_weight_full)
+        final_ensemble_p.fit(X, y_price)
+        
+        # Save models to disk using native text/JSON saving methods
+        save_ensemble_classifier(final_ensemble_t, f"ensemble_{name}_trend_{interval}")
+        save_ensemble_regressor(final_ensemble_p, f"ensemble_{name}_price_{interval}")
+        meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+        
+        print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
     # Split dataset based on ADX (Regime Detection)
     df_trending = df[df["ADX"] >= 20.0].copy().reset_index(drop=True)

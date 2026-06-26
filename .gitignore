@@ -19,3 +19,5 @@ simulation_log.txt
 
 # Trained ML binary models (compiled dynamically in Docker)
 *.pkl
+catboost_info/
+

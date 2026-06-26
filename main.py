@@ -236,6 +236,8 @@ SYMBOL = "BTCUSDT"
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
+import joblib
+from ensemble import load_ensemble_classifier, load_ensemble_regressor
 
 models_by_interval = {}
 model_files_mtime = {}
@@ -243,49 +245,71 @@ model_files_mtime = {}
 for iv in ["5", "15", "60"]:
     models_by_interval[iv] = {
         "trending": {
-            "trend": XGBClassifier(),
-            "price": XGBRegressor()
+            "trend": None,
+            "price": None,
+            "meta": None
         },
         "ranging": {
-            "trend": XGBClassifier(),
-            "price": XGBRegressor()
+            "trend": None,
+            "price": None,
+            "meta": None
         }
     }
 
 def load_model_weights(iv):
-    filenames = {
-        "trending_trend": f"xgb_trending_trend_{iv}.json",
-        "trending_price": f"xgb_trending_price_{iv}.json",
-        "ranging_trend": f"xgb_ranging_trend_{iv}.json",
-        "ranging_price": f"xgb_ranging_price_{iv}.json"
+    prefixes = {
+        "trending_trend": f"ensemble_trending_trend_{iv}",
+        "trending_price": f"ensemble_trending_price_{iv}",
+        "ranging_trend": f"ensemble_ranging_trend_{iv}",
+        "ranging_price": f"ensemble_ranging_price_{iv}",
+        "trending_meta": f"meta_trending_trend_{iv}.json",
+        "ranging_meta": f"meta_ranging_trend_{iv}.json"
     }
     
     # Update modification times
-    for key, filename in filenames.items():
+    for key, filename in prefixes.items():
         if os.path.exists(filename):
             model_files_mtime[f"{iv}_{key}"] = os.path.getmtime(filename)
+        elif os.path.exists(f"{filename}_xgb.json"):
+            model_files_mtime[f"{iv}_{key}"] = os.path.getmtime(f"{filename}_xgb.json")
             
     # Load
     try:
-        models_by_interval[iv]["trending"]["trend"].load_model(filenames["trending_trend"])
-        models_by_interval[iv]["trending"]["price"].load_model(filenames["trending_price"])
-        models_by_interval[iv]["ranging"]["trend"].load_model(filenames["ranging_trend"])
-        models_by_interval[iv]["ranging"]["price"].load_model(filenames["ranging_price"])
-        print(f"Successfully loaded models for interval {iv}m")
+        n_features = len(features)
+        
+        if os.path.exists(f"{prefixes['trending_trend']}_xgb.json"):
+            models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features)
+        if os.path.exists(f"{prefixes['trending_price']}_xgb.json"):
+            models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features)
+        if os.path.exists(prefixes["trending_meta"]):
+            meta_clf = XGBClassifier()
+            meta_clf.load_model(prefixes["trending_meta"])
+            models_by_interval[iv]["trending"]["meta"] = meta_clf
+            
+        if os.path.exists(f"{prefixes['ranging_trend']}_xgb.json"):
+            models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features)
+        if os.path.exists(f"{prefixes['ranging_price']}_xgb.json"):
+            models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features)
+        if os.path.exists(prefixes["ranging_meta"]):
+            meta_clf = XGBClassifier()
+            meta_clf.load_model(prefixes["ranging_meta"])
+            models_by_interval[iv]["ranging"]["meta"] = meta_clf
+            
+        print(f"Successfully loaded ensemble and meta models for interval {iv}m")
     except Exception as e:
-        print(f"Warning: Could not load models for interval {iv}m: {e}")
+        print(f"Warning: Could not load ensemble models for interval {iv}m: {e}")
 
-# Initial load
-for iv in ["5", "15", "60"]:
-    load_model_weights(iv)
+
 
 def check_and_hot_reload_models():
     for iv in ["5", "15", "60"]:
         filenames = {
-            "trending_trend": f"xgb_trending_trend_{iv}.json",
-            "trending_price": f"xgb_trending_price_{iv}.json",
-            "ranging_trend": f"xgb_ranging_trend_{iv}.json",
-            "ranging_price": f"xgb_ranging_price_{iv}.json"
+            "trending_trend": f"ensemble_trending_trend_{iv}_xgb.json",
+            "trending_price": f"ensemble_trending_price_{iv}_xgb.json",
+            "trending_meta": f"meta_trending_trend_{iv}.json",
+            "ranging_trend": f"ensemble_ranging_trend_{iv}_xgb.json",
+            "ranging_price": f"ensemble_ranging_price_{iv}_xgb.json",
+            "ranging_meta": f"meta_ranging_trend_{iv}.json"
         }
         
         changed = False
@@ -389,6 +413,21 @@ for lag in [1, 2]:
     features.append(f"funding_rate_lag{lag}")
     features.append(f"fear_greed_lag{lag}")
 
+# New microstructure and derivatives momentum features
+features.extend([
+    "open_interest_pct_change", "funding_rate_diff", 
+    "CVD_rolling_1h", "CVD_rolling_4h"
+])
+for lag in [1, 2]:
+    features.append(f"open_interest_pct_change_lag{lag}")
+    features.append(f"funding_rate_diff_lag{lag}")
+    features.append(f"CVD_rolling_1h_lag{lag}")
+    features.append(f"CVD_rolling_4h_lag{lag}")
+
+# Initial load
+for iv in ["5", "15", "60"]:
+    load_model_weights(iv)
+
 def add_features(df):
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
     macd = MACD(df["close"])
@@ -470,6 +509,22 @@ def add_features(df):
         df[f"open_interest_lag{lag}"] = df["open_interest"].shift(lag)
         df[f"funding_rate_lag{lag}"] = df["funding_rate"].shift(lag)
         df[f"fear_greed_lag{lag}"] = df["fear_greed"].shift(lag)
+        
+    # Derivatives momentum
+    df["open_interest_pct_change"] = df["open_interest"].pct_change(1).fillna(0.0)
+    df["funding_rate_diff"] = df["funding_rate"].diff(1).fillna(0.0)
+    
+    # Signed volume & Cumulative Volume Delta (CVD) proxies
+    signed_vol = df["volume"] * np.sign(df["close"] - df["open"])
+    df["CVD_rolling_1h"] = signed_vol.rolling(window=4, min_periods=1).sum()
+    df["CVD_rolling_4h"] = signed_vol.rolling(window=16, min_periods=1).sum()
+    
+    # Lag new features
+    for lag in [1, 2]:
+        df[f"open_interest_pct_change_lag{lag}"] = df["open_interest_pct_change"].shift(lag)
+        df[f"funding_rate_diff_lag{lag}"] = df["funding_rate_diff"].shift(lag)
+        df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
+        df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
         
     df.dropna(inplace=True)
     return df
@@ -1446,6 +1501,16 @@ def main():
                                 
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
 
+                            # Check Meta-Classifier if we have a trade signal (Bullish/Bearish)
+                            meta_passed = True
+                            if ml_trend in ["Bullish", "Bearish"]:
+                                active_meta_model = models_tf["trending"]["meta"] if adx_regime >= 20.0 else models_tf["ranging"]["meta"]
+                                if active_meta_model is not None:
+                                    meta_pred = int(active_meta_model.predict(X_live)[0])
+                                    if meta_pred == 0:
+                                        meta_passed = False
+                                        print(f"[{iv}m] Prediction skipped: Meta-Classifier rejected this signal (expected failure/low probability).")
+
                             # Determine tracking status
                             direction_conflict = False
                             
@@ -1459,6 +1524,8 @@ def main():
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
+                            elif not meta_passed:
+                                status_msg = "Skipped (Meta-Filter Failed)"
                             elif direction_conflict:
                                 status_msg = "Skipped (Contradiction)"
                                 print(f"[{iv}m] Prediction skipped: Directional contradiction (Trend: {ml_trend}, Regressor Price Change: {pred_change:+.2f}).")
