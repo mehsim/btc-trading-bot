@@ -63,12 +63,14 @@ bot_state = {
     "calibration_15m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     "calibration_1h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     
+    "simulated_balance": 10000.0,
     "trade_history": [],
     "prediction_history": []
 }
 
 def save_history():
     data = {
+        "simulated_balance": bot_state["simulated_balance"],
         "trade_history": bot_state["trade_history"],
         "prediction_history": bot_state["prediction_history"]
     }
@@ -83,6 +85,7 @@ def load_history():
         try:
             with open("dashboard_history.json", "r") as f:
                 data = json.load(f)
+                bot_state["simulated_balance"] = data.get("simulated_balance", 10000.0)
                 bot_state["trade_history"] = data.get("trade_history", [])
                 for t in bot_state["trade_history"]:
                     if "interval" not in t:
@@ -395,7 +398,8 @@ features = [
     "high_low_ratio", "open_close_ratio", "RSI_diff", "MACD_diff_diff", "ROC_5", "ROC_10",
     "ADX", "ADX_pos", "ADX_neg", "close_to_VWAP",
     "btc_return_5m", "btc_return_5m_lag1", "btc_return_5m_lag2", "btc_return_5m_lag3",
-    "RSI_24", "ROC_24", "volatility_24h"
+    "RSI_24", "ROC_24", "volatility_24h",
+    "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")
@@ -526,6 +530,13 @@ def add_features(df):
         df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
         df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
         
+    # Cyclical time features
+    datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    df["hour_sin"] = np.sin(2 * np.pi * datetime_series.dt.hour / 24.0)
+    df["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
+    df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+    df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+
     df.dropna(inplace=True)
     return df
 
@@ -723,6 +734,23 @@ def get_news_sentiment():
             print(f"[News/Sentiment] Fetched {len(rss_titles[:10])} articles from Cointelegraph RSS.")
     except Exception as e:
         print(f"[News/Sentiment] Error fetching Cointelegraph RSS: {e}")
+
+    # 1b. Fetch from CoinDesk RSS
+    url_coindesk = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    try:
+        res = requests.get(url_coindesk, headers=headers, timeout=10)
+        if res.status_code == 200:
+            xml_content = res.content.decode("utf-8")
+            root = ET.fromstring(xml_content)
+            coindesk_titles = []
+            for item in root.findall(".//item"):
+                title_elem = item.find("title")
+                if title_elem is not None and title_elem.text:
+                    coindesk_titles.append(title_elem.text.strip())
+            titles.extend(coindesk_titles[:10])
+            print(f"[News/Sentiment] Fetched {len(coindesk_titles[:10])} articles from CoinDesk RSS.")
+    except Exception as e:
+        print(f"[News/Sentiment] Error fetching CoinDesk RSS: {e}")
 
     # 2. Fetch from Reddit RSS (free social sentiment fallback)
     reddit_posts = get_reddit_posts()
@@ -1388,6 +1416,51 @@ def main():
                 entry_price = active_trade["entry_price"]
                 predicted_price = active_trade["predicted_price"]
 
+                # Trailing stop and break-even variables
+                atr_dollars = active_trade.get("atr_dollars", 50.0)
+                highest_price = active_trade.get("highest_price", entry_price)
+                lowest_price = active_trade.get("lowest_price", entry_price)
+                break_even_triggered = active_trade.get("break_even_triggered", False)
+                position_size_usd = active_trade.get("position_size_usd", 100.0)
+
+                # Update trailing stop peak prices
+                if direction == "Bullish":
+                    if current_price > highest_price:
+                        highest_price = current_price
+                        active_trade["highest_price"] = highest_price
+                        # Trailing Stop: SL trails highest price by 1.25 * ATR
+                        potential_sl = highest_price - 1.25 * atr_dollars
+                        if potential_sl > stop_loss:
+                            stop_loss = potential_sl
+                            active_trade["stop_loss"] = stop_loss
+                            print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f})")
+                    
+                    # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
+                    if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
+                        break_even_triggered = True
+                        active_trade["break_even_triggered"] = True
+                        stop_loss = max(stop_loss, entry_price)
+                        active_trade["stop_loss"] = stop_loss
+                        print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                else:
+                    if current_price < lowest_price:
+                        lowest_price = current_price
+                        active_trade["lowest_price"] = lowest_price
+                        # Trailing Stop: SL trails lowest price by 1.25 * ATR
+                        potential_sl = lowest_price + 1.25 * atr_dollars
+                        if potential_sl < stop_loss:
+                            stop_loss = potential_sl
+                            active_trade["stop_loss"] = stop_loss
+                            print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f})")
+                            
+                    # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
+                    if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
+                        break_even_triggered = True
+                        active_trade["break_even_triggered"] = True
+                        stop_loss = min(stop_loss, entry_price)
+                        active_trade["stop_loss"] = stop_loss
+                        print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)
                 countdown_str = f"{mins:02d}m {secs:02d}s"
@@ -1415,20 +1488,29 @@ def main():
                     price_diff_pct = (price_diff / predicted_price) * 100
                     price_accuracy = max(0.0, 100.0 - abs((actual_price - predicted_price) / actual_price * 100))
                     actual_change = actual_price - entry_price
+                    actual_change_pct = (actual_change / entry_price) * 100
+                    
+                    # Calculate PnL (long vs short) and simulated fees
+                    raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
+                    net_return_pct = raw_return_pct - 0.2  # 0.2% roundtrip Spot fee
+                    realized_pnl = position_size_usd * (net_return_pct / 100.0)
+                    
+                    # Update simulated balance
+                    old_bal = bot_state.get("simulated_balance", 10000.0)
+                    new_bal = old_bal + realized_pnl
+                    bot_state["simulated_balance"] = new_bal
+                    
                     actual_trend = "Bullish" if actual_change > 0 else "Bearish"
                     signal_correct = (actual_trend == direction)
                     trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
                     
                     print("\n==================================================")
                     print(f"[{iv}m TRADE EXITED]: {exit_reason}")
-                    print(f"Start Price: {entry_price:.2f}")
-                    print(f"Predicted Price: {predicted_price:.2f}")
-                    print(f"Exit Price: {actual_price:.2f}")
-                    print(f"Actual Change: {actual_change:+.2f} ({actual_change/entry_price*100:+.4f}%)")
-                    print(f"Prediction Error: {price_diff:+.2f} ({price_diff_pct:+.4f}%)")
-                    print(f"Price Accuracy: {price_accuracy:.4f}%")
-                    print(f"Predicted Signal: {direction}")
-                    print(f"Actual Trend: {actual_trend} ({trend_status})")
+                    print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
+                    print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
+                    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees)")
+                    print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
+                    print(f"Predicted Signal: {direction} ({trend_status})")
                     print("==================================================\n")
                     
                     # Update Completed Trade History in global state
@@ -1438,9 +1520,12 @@ def main():
                         "direction": str(direction),
                         "entry_price": float(entry_price),
                         "exit_price": float(actual_price),
-                        "change_pct": float((actual_change / entry_price) * 100),
+                        "change_pct": float(net_return_pct),
                         "success": bool(signal_correct),
-                        "reason": str(exit_reason)
+                        "reason": str(exit_reason),
+                        "position_size_usd": float(position_size_usd),
+                        "pnl_usd": float(realized_pnl),
+                        "balance": float(new_bal)
                     })
                     save_history()
                     bot_state[active_trade_key] = None
@@ -1618,13 +1703,21 @@ def main():
                                         tp_multiplier = 1.50
                                     else:
                                         tp_multiplier = 1.00
-                                        
+                                    
                                     if ml_trend == "Bullish":
                                         stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars
                                         take_profit_price = latest_candle["close"] + tp_multiplier * atr_dollars
                                     else:
                                         stop_loss_price = latest_candle["close"] + 0.75 * atr_dollars
                                         take_profit_price = latest_candle["close"] - tp_multiplier * atr_dollars
+
+                                    # Kelly Criterion position sizing calculation
+                                    kelly_b = tp_multiplier / 0.75
+                                    kelly_p = float(calibrated_confidence)
+                                    f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
+                                    kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
+                                    current_bal = bot_state.get("simulated_balance", 10000.0)
+                                    position_size_usd = current_bal * kelly_fraction
 
                                     duration_seconds = int(iv) * 60.0
                                     active_trade = {
@@ -1633,11 +1726,18 @@ def main():
                                         "stop_loss": float(stop_loss_price),
                                         "take_profit": float(take_profit_price),
                                         "direction": str(ml_trend),
-                                        "end_time": float(time.time() + duration_seconds)
+                                        "end_time": float(time.time() + duration_seconds),
+                                        "atr_dollars": float(atr_dollars),
+                                        "highest_price": float(latest_candle["close"]),
+                                        "lowest_price": float(latest_candle["close"]),
+                                        "break_even_triggered": False,
+                                        "position_size_usd": float(position_size_usd),
+                                        "kelly_fraction": float(kelly_fraction)
                                     }
                                     bot_state[active_trade_key] = active_trade
                                     
-                                    print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})\n")
+                                    print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
+                                    print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Kelly allocation: {kelly_fraction*100:.2f}% | Size: ${position_size_usd:.2f}\n")
                                 else:
                                     status_msg = "Skipped (Confluence Failed)"
                                     failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"]]

@@ -34,7 +34,8 @@ features = [
     "high_low_ratio", "open_close_ratio", "RSI_diff", "MACD_diff_diff", "ROC_5", "ROC_10",
     "ADX", "ADX_pos", "ADX_neg", "close_to_VWAP",
     "btc_return_5m", "btc_return_5m_lag1", "btc_return_5m_lag2", "btc_return_5m_lag3",
-    "RSI_24", "ROC_24", "volatility_24h"
+    "RSI_24", "ROC_24", "volatility_24h",
+    "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")
@@ -163,6 +164,13 @@ def add_features(df):
         df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
         df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
         
+    # Cyclical time features
+    datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    df["hour_sin"] = np.sin(2 * np.pi * datetime_series.dt.hour / 24.0)
+    df["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
+    df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+    df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+
     df.dropna(inplace=True)
     return df
 
@@ -219,13 +227,19 @@ def add_triple_barrier_labels(df, interval):
     df["target_trend"] = labels
     return df
 
-def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights):
+def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
+        if regime == "trending":
+            max_depth_min, max_depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+        else:
+            max_depth_min, max_depth_max = 3, 4
+            lr_min, lr_max = 0.04, 0.12
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 50, 150),
-            'max_depth': trial.suggest_int('max_depth', 3, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
+            'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
             'objective': 'multi:softprob',
@@ -242,13 +256,19 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights):
     study.optimize(objective, n_trials=15)
     return study.best_params
 
-def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights):
+def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
+        if regime == "trending":
+            max_depth_min, max_depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+        else:
+            max_depth_min, max_depth_max = 3, 4
+            lr_min, lr_max = 0.04, 0.12
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 50, 150),
-            'max_depth': trial.suggest_int('max_depth', 3, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
+            'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
             'objective': 'multiclass',
@@ -265,13 +285,19 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights):
     study.optimize(objective, n_trials=15)
     return study.best_params
 
-def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights):
+def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
+        if regime == "trending":
+            depth_min, depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+        else:
+            depth_min, depth_max = 3, 4
+            lr_min, lr_max = 0.04, 0.12
         params = {
             'iterations': trial.suggest_int('iterations', 50, 150),
-            'depth': trial.suggest_int('depth', 3, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'depth': trial.suggest_int('depth', depth_min, depth_max),
+            'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'loss_function': 'MultiClass',
             'verbose': 0,
             'random_seed': 42
@@ -284,13 +310,19 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights):
     study.optimize(objective, n_trials=15)
     return study.best_params
 
-def optimize_xgb_regressor(X_train, y_train, X_val, y_val):
+def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
+        if regime == "trending":
+            max_depth_min, max_depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+        else:
+            max_depth_min, max_depth_max = 3, 4
+            lr_min, lr_max = 0.04, 0.12
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 50, 150),
-            'max_depth': trial.suggest_int('max_depth', 3, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
+            'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
             'random_state': 42,
@@ -304,13 +336,19 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val):
     study.optimize(objective, n_trials=15)
     return study.best_params
 
-def optimize_lgb_regressor(X_train, y_train, X_val, y_val):
+def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
+        if regime == "trending":
+            max_depth_min, max_depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+        else:
+            max_depth_min, max_depth_max = 3, 4
+            lr_min, lr_max = 0.04, 0.12
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 50, 150),
-            'max_depth': trial.suggest_int('max_depth', 3, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
+            'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
             'verbose': -1,
@@ -325,13 +363,19 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val):
     study.optimize(objective, n_trials=15)
     return study.best_params
 
-def optimize_cat_regressor(X_train, y_train, X_val, y_val):
+def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
+        if regime == "trending":
+            depth_min, depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+        else:
+            depth_min, depth_max = 3, 4
+            lr_min, lr_max = 0.04, 0.12
         params = {
             'iterations': trial.suggest_int('iterations', 50, 150),
-            'depth': trial.suggest_int('depth', 3, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.08, log=True),
+            'depth': trial.suggest_int('depth', depth_min, depth_max),
+            'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'verbose': 0,
             'random_seed': 42
         }
@@ -427,13 +471,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             
             if first_fold:
                 print("  Optimizing hyperparameters on first fold...")
-                best_params_xgb_t = optimize_xgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train)
-                best_params_lgb_t = optimize_lgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train)
-                best_params_cat_t = optimize_cat_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train)
+                best_params_xgb_t = optimize_xgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name)
+                best_params_lgb_t = optimize_lgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name)
+                best_params_cat_t = optimize_cat_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name)
                 
-                best_params_xgb_p = optimize_xgb_regressor(X_train, y_train_p, X_val, y_val_p)
-                best_params_lgb_p = optimize_lgb_regressor(X_train, y_train_p, X_val, y_val_p)
-                best_params_cat_p = optimize_cat_regressor(X_train, y_train_p, X_val, y_val_p)
+                best_params_xgb_p = optimize_xgb_regressor(X_train, y_train_p, X_val, y_val_p, regime=name)
+                best_params_lgb_p = optimize_lgb_regressor(X_train, y_train_p, X_val, y_val_p, regime=name)
+                best_params_cat_p = optimize_cat_regressor(X_train, y_train_p, X_val, y_val_p, regime=name)
                 first_fold = False
             
             # Instantiate models with best parameters
