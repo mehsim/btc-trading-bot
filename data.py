@@ -48,7 +48,9 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         print(f"Bybit klines returned no data. Attempting Binance API fallback for {symbol}...")
         try:
             binance_interval = "1h"
-            if str(interval) == "15":
+            if str(interval) == "5":
+                binance_interval = "5m"
+            elif str(interval) == "15":
                 binance_interval = "15m"
             elif str(interval) == "60":
                 binance_interval = "1h"
@@ -89,7 +91,9 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         print(f"Bybit & Binance failed. Attempting Kraken API fallback for {symbol}...")
         try:
             kraken_interval = 60
-            if str(interval) == "15":
+            if str(interval) == "5":
+                kraken_interval = 5
+            elif str(interval) == "15":
                 kraken_interval = 15
             elif str(interval) == "60":
                 kraken_interval = 60
