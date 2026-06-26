@@ -219,6 +219,37 @@
             transform: translateY(-1px);
         }
 
+        .optimize-btn {
+            background: rgba(139, 92, 246, 0.08);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+            border-radius: 30px;
+            color: var(--accent-purple);
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 20px;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            margin-right: 12px;
+        }
+
+        .optimize-btn:hover {
+            background: var(--accent-purple);
+            color: #ffffff;
+            border-color: var(--accent-purple);
+            box-shadow: var(--glow-purple);
+            transform: translateY(-1px);
+        }
+
+        .optimize-btn:disabled {
+            background: rgba(107, 114, 128, 0.08);
+            border-color: rgba(107, 114, 128, 0.15);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
         /* KPI Dashboard Grid */
         .dashboard-grid {
             display: grid;
@@ -746,6 +777,7 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button id="optimize-btn" class="optimize-btn" onclick="optimizeModels()">Optimize Models</button>
                 <div class="status-pill">
                     <div class="status-dot"></div>
                     <span id="bot-status">INITIALIZING</span>
@@ -1283,6 +1315,20 @@
                     const statusText = data.status || "RUNNING";
                     document.getElementById("bot-status").innerText = statusText.toUpperCase();
 
+                    // Update Retraining Status / Optimize Models Button
+                    const optBtn = document.getElementById("optimize-btn");
+                    if (optBtn) {
+                        if (data.retraining_status === "Optimizing...") {
+                            optBtn.disabled = true;
+                            optBtn.innerText = "Optimizing Models...";
+                            optBtn.style.opacity = "0.7";
+                        } else {
+                            optBtn.disabled = false;
+                            optBtn.innerText = "Optimize Models";
+                            optBtn.style.opacity = "1";
+                        }
+                    }
+
                     // 2. Update Live Price
                     const currentPrice = data.live_price;
                     if (currentPrice) {
@@ -1528,6 +1574,30 @@
                     })
                     .catch(err => {
                         console.log("Connection closed during shutdown.");
+                    });
+            }
+        }
+
+        function optimizeModels() {
+            if (confirm("Are you sure you want to trigger model optimization? This will fetch historical data and optimize hyperparameters using Optuna (takes 2-3 minutes) in the background.")) {
+                const optBtn = document.getElementById("optimize-btn");
+                if (optBtn) {
+                    optBtn.disabled = true;
+                    optBtn.innerText = "Starting optimization...";
+                }
+                fetch('/api/retrain', { method: 'POST' })
+                    .then(response => {
+                        if (response.ok) {
+                            return response.json();
+                        } else {
+                            throw new Error("Already optimizing or failed to start.");
+                        }
+                    })
+                    .then(data => {
+                        alert("Hyperparameter optimization started in the background thread. Dashboard status will update to 'Optimizing...'.");
+                    })
+                    .catch(err => {
+                        alert(err.message || "Could not trigger model optimization.");
                     });
             }
         }

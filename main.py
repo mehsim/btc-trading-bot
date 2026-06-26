@@ -30,6 +30,7 @@ app = Flask(__name__, template_folder="templates")
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 bot_logs = []
 logs_lock = threading.Lock()
+retraining_lock = threading.Lock()
 
 bot_state = {
     "live_price": None,
@@ -56,6 +57,7 @@ bot_state = {
     "adx_1h": 0.0,
     
     "status": "Initializing",
+    "retraining_status": "Idle",
     
     "calibration_5m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     "calibration_15m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
@@ -124,9 +126,99 @@ def terminate_bot():
     os.kill(os.getpid(), signal.SIGINT)
     return jsonify({"status": "terminating"})
 
+@app.route("/api/retrain", methods=["POST"])
+def trigger_retrain():
+    started = retrain_models_thread(is_manual=True)
+    if started:
+        return jsonify({"status": "started", "message": "Model optimization started in background."})
+    else:
+        return jsonify({"status": "ignored", "message": "Optimization already in progress."}), 409
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+def retrain_models_thread(is_manual=False):
+    """
+    Worker function to retrain all models (5m, 15m, 60m) inside a background thread.
+    Uses retraining_lock to prevent concurrent retraining.
+    """
+    if not retraining_lock.acquire(blocking=False):
+        print("[Retraining] Retraining is already in progress. Skipping request.")
+        return False
+    
+    def run_training():
+        global bot_state
+        try:
+            bot_state["retraining_status"] = "Optimizing..."
+            print(f"[Retraining] Starting {'manual ' if is_manual else 'scheduled '}rolling retraining of models for 5m, 15m, and 60m intervals...")
+            
+            # Import train_models dynamically to avoid circular import issues
+            from train import train_models
+            
+            # Retrain for all intervals
+            for iv in ["5", "15", "60"]:
+                print(f"[Retraining] Retraining models for interval {iv}m...")
+                train_models(interval=iv, pages=40)
+                
+            print("[Retraining] Rolling retraining completed successfully. Model files updated on disk.")
+        except Exception as e:
+            print(f"[Retraining] Error during retraining process: {e}")
+        finally:
+            bot_state["retraining_status"] = "Idle"
+            retraining_lock.release()
+
+    threading.Thread(target=run_training, daemon=True).start()
+    return True
+
+def run_rolling_retrain_scheduler():
+    """
+    Background scheduler that runs indefinitely.
+    Every 1 hour, it checks if the models on disk are older than 7 days (604,800 seconds).
+    If they are, or if any model file is missing, it triggers rolling retraining.
+    """
+    print("[Scheduler] Automated weekly rolling retraining scheduler started.")
+    # Give the bot some time to initialize before running the first check
+    time.sleep(30)
+    
+    retrain_interval_seconds = 7 * 24 * 60 * 60  # 7 days
+    
+    while True:
+        try:
+            now = time.time()
+            needs_retrain = False
+            
+            # Check if any model file is missing or older than 7 days
+            for iv in ["5", "15", "60"]:
+                filenames = [
+                    f"xgb_trending_trend_{iv}.json",
+                    f"xgb_trending_price_{iv}.json",
+                    f"xgb_ranging_trend_{iv}.json",
+                    f"xgb_ranging_price_{iv}.json"
+                ]
+                for filename in filenames:
+                    if not os.path.exists(filename):
+                        print(f"[Scheduler] Model file {filename} is missing. Triggering retraining.")
+                        needs_retrain = True
+                        break
+                    else:
+                        mtime = os.path.getmtime(filename)
+                        age = now - mtime
+                        if age > retrain_interval_seconds:
+                            print(f"[Scheduler] Model file {filename} is {age/(24*3600):.1f} days old (exceeds 7 days). Triggering retraining.")
+                            needs_retrain = True
+                            break
+                if needs_retrain:
+                    break
+            
+            if needs_retrain:
+                retrain_models_thread(is_manual=False)
+                
+        except Exception as e:
+            print(f"[Scheduler] Error in rolling retraining scheduler: {e}")
+            
+        # Sleep for 1 hour before checking again
+        time.sleep(3600)
 
 def run_flask():
     import logging
@@ -146,6 +238,8 @@ SYMBOL = "BTCUSDT"
 from xgboost import XGBClassifier, XGBRegressor
 
 models_by_interval = {}
+model_files_mtime = {}
+
 for iv in ["5", "15", "60"]:
     models_by_interval[iv] = {
         "trending": {
@@ -157,14 +251,67 @@ for iv in ["5", "15", "60"]:
             "price": XGBRegressor()
         }
     }
+
+def load_model_weights(iv):
+    filenames = {
+        "trending_trend": f"xgb_trending_trend_{iv}.json",
+        "trending_price": f"xgb_trending_price_{iv}.json",
+        "ranging_trend": f"xgb_ranging_trend_{iv}.json",
+        "ranging_price": f"xgb_ranging_price_{iv}.json"
+    }
+    
+    # Update modification times
+    for key, filename in filenames.items():
+        if os.path.exists(filename):
+            model_files_mtime[f"{iv}_{key}"] = os.path.getmtime(filename)
+            
+    # Load
     try:
-        models_by_interval[iv]["trending"]["trend"].load_model(f"xgb_trending_trend_{iv}.json")
-        models_by_interval[iv]["trending"]["price"].load_model(f"xgb_trending_price_{iv}.json")
-        models_by_interval[iv]["ranging"]["trend"].load_model(f"xgb_ranging_trend_{iv}.json")
-        models_by_interval[iv]["ranging"]["price"].load_model(f"xgb_ranging_price_{iv}.json")
+        models_by_interval[iv]["trending"]["trend"].load_model(filenames["trending_trend"])
+        models_by_interval[iv]["trending"]["price"].load_model(filenames["trending_price"])
+        models_by_interval[iv]["ranging"]["trend"].load_model(filenames["ranging_trend"])
+        models_by_interval[iv]["ranging"]["price"].load_model(filenames["ranging_price"])
         print(f"Successfully loaded models for interval {iv}m")
     except Exception as e:
         print(f"Warning: Could not load models for interval {iv}m: {e}")
+
+# Initial load
+for iv in ["5", "15", "60"]:
+    load_model_weights(iv)
+
+def check_and_hot_reload_models():
+    for iv in ["5", "15", "60"]:
+        filenames = {
+            "trending_trend": f"xgb_trending_trend_{iv}.json",
+            "trending_price": f"xgb_trending_price_{iv}.json",
+            "ranging_trend": f"xgb_ranging_trend_{iv}.json",
+            "ranging_price": f"xgb_ranging_price_{iv}.json"
+        }
+        
+        changed = False
+        for key, filename in filenames.items():
+            if os.path.exists(filename):
+                current_mtime = os.path.getmtime(filename)
+                mtime_key = f"{iv}_{key}"
+                if mtime_key not in model_files_mtime or current_mtime > model_files_mtime[mtime_key]:
+                    changed = True
+                    break
+                    
+        if changed:
+            print(f"[Hot-Reload] Model update detected for {iv}m on disk. Reloading in memory...")
+            load_model_weights(iv)
+            try:
+                p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
+                tf_map_startup = {"5": "5m", "15": "15m", "60": "1h"}
+                tf_key = tf_map_startup[iv]
+                bot_state[f"calibration_{tf_key}"] = {
+                    "p95": p95,
+                    "max_conf": max_conf,
+                    "mean": 54.81
+                }
+                print(f"[Hot-Reload] Recalculated calibration thresholds for {iv}m (p95: {p95:.2f}, max_conf: {max_conf:.2f})")
+            except Exception as e:
+                print(f"[Hot-Reload] Warning: Could not recalculate thresholds for {iv}m: {e}")
 
 # =========================
 # WEB SOCKET FOR LIVE PRICE
@@ -1190,6 +1337,7 @@ def main():
                     bot_state[active_trade_key] = None
 
         # 3. Check for completed candle closes to search for a new signal
+        check_and_hot_reload_models()
         for iv in ["5", "15", "60"]:
             tf = tf_map[iv]
             try:
@@ -1417,4 +1565,6 @@ if __name__ == "__main__":
     threading.Thread(target=start_ws, daemon=True).start()
     # Start local web dashboard server in a background thread
     threading.Thread(target=run_flask, daemon=True).start()
+    # Start automated rolling retraining scheduler in a background thread
+    threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
     main()
