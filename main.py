@@ -915,9 +915,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         df_4h = None
 
     if df_4h is None or len(df_4h) < 21:
-        if str(interval) == "5":
-            results["4h_Trend"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for 5m)"}
-            results["4h_RSI"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for 5m)"}
+        if str(interval) in ["5", "15"]:
+            results["4h_Trend"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for short TF)"}
+            results["4h_RSI"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for short TF)"}
         else:
             results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data"}
             results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data"}
@@ -938,9 +938,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         else:
             trend_pass = (trend_4h == "Bearish")
             
-        if str(interval) == "5":
+        if str(interval) in ["5", "15"]:
             trend_pass = True
-            trend_detail = f"4h Trend is {trend_4h} (Bypassed for 5m)"
+            trend_detail = f"4h Trend is {trend_4h} (Bypassed for short TF)"
         else:
             trend_detail = f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})"
             
@@ -959,9 +959,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             rsi_4h_pass = (rsi_4h > 30.0)
             detail_msg = f"4h RSI is {rsi_4h:.2f} (> 30, Safe)" if rsi_4h_pass else f"4h RSI is {rsi_4h:.2f} (<= 30, Oversold)"
             
-        if str(interval) == "5":
+        if str(interval) in ["5", "15"]:
             rsi_4h_pass = True
-            detail_msg = f"4h RSI is {rsi_4h:.2f} (Bypassed for 5m)"
+            detail_msg = f"4h RSI is {rsi_4h:.2f} (Bypassed for short TF)"
             
         results["4h_RSI"] = {
             "pass": rsi_4h_pass,
@@ -1107,7 +1107,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     spread_pass = (spread <= 0.001)  # Spread must be <= 0.1% to prevent entry on low liquidity / spikes
     
     # 10b. Weighted Imbalance
-    if ml_trend == "Bullish":
+    if str(interval) in ["5", "15"]:
+        ob_pass = True
+        imbalance_detail = f"Weighted Imbalance: {ob_imbalance:+.2f} (Bypassed for short TF)"
+    elif ml_trend == "Bullish":
         ob_pass = (ob_imbalance >= -0.20)
         imbalance_detail = f"Weighted Imbalance: {ob_imbalance:+.2f} (>= -0.20, Safe)" if ob_pass else f"Weighted Imbalance: {ob_imbalance:+.2f} (< -0.20, Heavy Sell)"
     else:
@@ -1126,10 +1129,15 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # 11. News Sentiment Check
     is_opposed = (ml_trend == "Bullish" and news_sentiment == "Bearish") or (ml_trend == "Bearish" and news_sentiment == "Bullish")
-    news_pass = not is_opposed
+    if str(interval) in ["5", "15"]:
+        news_pass = True
+        detail_msg = f"Model: {ml_trend} vs News: {news_sentiment} (Bypassed for short TF)"
+    else:
+        news_pass = not is_opposed
+        detail_msg = f"Model: {ml_trend} vs News: {news_sentiment}"
     results["News_Sentiment"] = {
         "pass": news_pass,
-        "detail": f"Model: {ml_trend} vs News: {news_sentiment}"
+        "detail": detail_msg
     }
     if not news_pass:
         all_pass = False
@@ -1422,19 +1430,19 @@ def main():
 
                             # Determine dynamic confidence threshold based on regime and volatility
                             atr_norm_val = latest_candle["ATR_norm"]
-                            dynamic_conf_threshold = 0.70
+                            dynamic_conf_threshold = 0.60
                             
                             # 1. Regime Adjustment (ADX)
                             if adx_regime >= 25.0:
-                                dynamic_conf_threshold = 0.65
+                                dynamic_conf_threshold = 0.55
                             elif adx_regime < 15.0:
-                                dynamic_conf_threshold = 0.75
+                                dynamic_conf_threshold = 0.65
                                 
                             # 2. Volatility Adjustment (ATR)
                             if atr_norm_val > 0.008:
-                                dynamic_conf_threshold = max(0.60, dynamic_conf_threshold - 0.05)
+                                dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.05)
                             elif atr_norm_val < 0.003:
-                                dynamic_conf_threshold = min(0.80, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold = min(0.70, dynamic_conf_threshold + 0.05)
                                 
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
 
