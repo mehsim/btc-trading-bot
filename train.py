@@ -204,6 +204,9 @@ def purged_train_test_split(X, y_trend, y_price, test_size=0.2, lookahead=6):
 
 def optimize_classifier(X_train, y_train, X_val, y_val):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    from sklearn.utils.class_weight import compute_sample_weight
+    sample_weights = compute_sample_weight(class_weight='balanced', y=y_train)
+    
     def objective(trial):
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 50, 200),
@@ -220,7 +223,7 @@ def optimize_classifier(X_train, y_train, X_val, y_val):
             'n_jobs': 1
         }
         model = XGBClassifier(**params)
-        model.fit(X_train, y_train)
+        model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         acc = accuracy_score(y_val, preds)
         return acc
@@ -324,7 +327,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
         model_price = XGBRegressor(**best_params_p)
 
         print(f"  Validating {name} models...")
-        model_trend.fit(X_train, y_train_t)
+        from sklearn.utils.class_weight import compute_sample_weight
+        sample_weight_val = compute_sample_weight(class_weight='balanced', y=y_train_t)
+        model_trend.fit(X_train, y_train_t, sample_weight=sample_weight_val)
         y_pred_t = model_trend.predict(X_val)
         acc = accuracy_score(y_val_t, y_pred_t)
 
@@ -336,7 +341,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"  Validation Out-of-Sample MAE (Price Change): {mae:.4f}")
 
         print(f"  Training final {name} models on complete regime dataset...")
-        model_trend.fit(X, y_trend)
+        sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
+        model_trend.fit(X, y_trend, sample_weight=sample_weight_full)
         model_price.fit(X, y_price)
 
         model_trend.save_model(f"xgb_{name}_trend_{interval}.json")

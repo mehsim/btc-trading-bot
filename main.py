@@ -709,9 +709,10 @@ def get_funding_rate(symbol=SYMBOL):
 # ==========================================
 # PRE-TRADE CONFLUENCE ANALYSIS
 # ==========================================
-def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change):
+def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval):
     """
     Runs 12 pre-trade confluence checks before a signal is authorized.
+    Timeframe-specific guards are applied to avoid unnecessary skips on short intervals.
     Returns: (bool_all_pass, dict_results_details)
     """
     results = {}
@@ -726,8 +727,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         df_1d = None
 
     if df_1d is None or len(df_1d) < 21:
-        results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data"}
-        all_pass = False
+        if str(interval) in ["5", "15"]:
+            results["1d_Trend"] = {"pass": True, "detail": "Could not fetch 1d data (Bypassed for short TF)"}
+        else:
+            results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data"}
+            all_pass = False
     else:
         # Calculate 1d EMA 9 and EMA 21 using completed candles
         df_1d_completed = df_1d.iloc[:-1].copy()
@@ -741,9 +745,16 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         else:
             trend_1d_pass = (trend_1d == "Bearish")
             
+        # Bypassed for short timeframes (5m, 15m)
+        if str(interval) in ["5", "15"]:
+            trend_1d_pass = True
+            detail_msg = f"1d Trend is {trend_1d} (Bypassed for short TF)"
+        else:
+            detail_msg = f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f})"
+            
         results["1d_Trend"] = {
             "pass": trend_1d_pass,
-            "detail": f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f})"
+            "detail": detail_msg
         }
         if not trend_1d_pass:
             all_pass = False
@@ -757,9 +768,13 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         df_4h = None
 
     if df_4h is None or len(df_4h) < 21:
-        results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data"}
-        results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data"}
-        all_pass = False
+        if str(interval) == "5":
+            results["4h_Trend"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for 5m)"}
+            results["4h_RSI"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for 5m)"}
+        else:
+            results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data"}
+            results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data"}
+            all_pass = False
     else:
         # Calculate 4h EMA 9, EMA 21, and RSI using completed candles
         df_4h_completed = df_4h.iloc[:-1].copy()
@@ -776,9 +791,15 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         else:
             trend_pass = (trend_4h == "Bearish")
             
+        if str(interval) == "5":
+            trend_pass = True
+            trend_detail = f"4h Trend is {trend_4h} (Bypassed for 5m)"
+        else:
+            trend_detail = f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})"
+            
         results["4h_Trend"] = {
             "pass": trend_pass,
-            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})"
+            "detail": trend_detail
         }
         if not trend_pass:
             all_pass = False
@@ -790,6 +811,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         else:
             rsi_4h_pass = (rsi_4h > 30.0)
             detail_msg = f"4h RSI is {rsi_4h:.2f} (> 30, Safe)" if rsi_4h_pass else f"4h RSI is {rsi_4h:.2f} (<= 30, Oversold)"
+            
+        if str(interval) == "5":
+            rsi_4h_pass = True
+            detail_msg = f"4h RSI is {rsi_4h:.2f} (Bypassed for 5m)"
             
         results["4h_RSI"] = {
             "pass": rsi_4h_pass,
@@ -912,10 +937,16 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # 9. Fee Coverage Check (using volatility-based ATR norm to avoid model point-estimate shrinkage)
     atr_norm_val = df_1h["ATR_norm"].iloc[-1]
-    fee_pass = (atr_norm_val >= 0.0025)
+    if str(interval) in ["5", "15"]:
+        fee_pass = (atr_norm_val >= 0.0010)
+        req_str = ">= 0.10%"
+    else:
+        fee_pass = (atr_norm_val >= 0.0015)
+        req_str = ">= 0.15%"
+        
     results["Fee_Coverage"] = {
         "pass": fee_pass,
-        "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req >= 0.25% to cover roundtrip Spot fees)"
+        "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req {req_str} to cover roundtrip Spot fees)"
     }
     if not fee_pass:
         all_pass = False
@@ -969,6 +1000,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         "pass": funding_pass,
         "detail": detail_msg
     }
+
     # Convert all results pass values and all_pass to standard python bool/str
     std_results = {}
     for key, val in results.items():
@@ -1260,10 +1292,6 @@ def main():
 
                             # Determine tracking status
                             direction_conflict = False
-                            if ml_trend == "Bullish" and pred_change < 0:
-                                direction_conflict = True
-                            elif ml_trend == "Bearish" and pred_change > 0:
-                                direction_conflict = True
                             
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"
@@ -1286,7 +1314,7 @@ def main():
                                 print(f"[{iv}m] Triggering pre-trade confluence analysis...")
                                 news_sentiment, latest_titles = get_news_sentiment()
                                 all_pass, confluence_results = check_pre_trade_confluence(
-                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change
+                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
                                 )
 
                                 # Update global confluence status
