@@ -159,7 +159,7 @@ def retrain_models_thread(is_manual=False):
             # Retrain for all intervals
             for iv in ["5", "15", "60"]:
                 print(f"[Retraining] Retraining models for interval {iv}m...")
-                train_models(interval=iv, pages=40)
+                train_models(interval=iv, pages=20)
                 
             print("[Retraining] Rolling retraining completed successfully. Model files updated on disk.")
         except Exception as e:
@@ -1211,6 +1211,52 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         "detail": detail_msg
     }
 
+    # 13. Expected Price Change Threshold Check
+    min_pct_map = {"5": 0.10, "15": 0.15, "60": 0.25}
+    req_pct = min_pct_map.get(str(interval), 0.15)
+    change_pass = (expected_pct_change >= req_pct)
+    results["Expected_Change"] = {
+        "pass": change_pass,
+        "detail": f"Expected price change is {expected_pct_change:.3f}% (Req >= {req_pct:.2f}% to trade)"
+    }
+    if not change_pass:
+        all_pass = False
+
+    # 14. Timeframe Trend Alignment Check
+    trend_align_pass = True
+    align_detail = "Aligned with dominant trend"
+    if str(interval) in ["5", "15"]:
+        try:
+            # Fetch 1h candles to check 1h trend
+            df_1h_align = get_history(symbol=SYMBOL, interval="60", limit=100)
+            if df_1h_align is not None and len(df_1h_align) >= 21:
+                df_1h_align_completed = df_1h_align.iloc[:-1].copy()
+                ema9_1h = EMAIndicator(df_1h_align_completed["close"], window=9).ema_indicator().iloc[-1]
+                ema21_1h = EMAIndicator(df_1h_align_completed["close"], window=21).ema_indicator().iloc[-1]
+                trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
+                
+                if ml_trend == "Bullish" and trend_1h != "Bullish":
+                    trend_align_pass = False
+                    align_detail = f"Blocked (5m/15m Bullish signal contradicts 1h Bearish trend)"
+                elif ml_trend == "Bearish" and trend_1h != "Bearish":
+                    trend_align_pass = False
+                    align_detail = f"Blocked (5m/15m Bearish signal contradicts 1h Bullish trend)"
+                else:
+                    align_detail = f"Aligned with 1h {trend_1h} trend"
+            else:
+                align_detail = "Could not fetch 1h trend data (Bypassed)"
+        except Exception as e:
+            align_detail = f"Skipped trend alignment check (Error: {e})"
+    else:
+        align_detail = f"1h interval is already the dominant trend"
+
+    results["Timeframe_Alignment"] = {
+        "pass": trend_align_pass,
+        "detail": align_detail
+    }
+    if not trend_align_pass:
+        all_pass = False
+
     # Convert all results pass values and all_pass to standard python bool/str
     std_results = {}
     for key, val in results.items():
@@ -1485,19 +1531,19 @@ def main():
 
                             # Determine dynamic confidence threshold based on regime and volatility
                             atr_norm_val = latest_candle["ATR_norm"]
-                            dynamic_conf_threshold = 0.60
+                            dynamic_conf_threshold = 0.65
                             
                             # 1. Regime Adjustment (ADX)
                             if adx_regime >= 25.0:
-                                dynamic_conf_threshold = 0.55
+                                dynamic_conf_threshold = 0.60
                             elif adx_regime < 15.0:
-                                dynamic_conf_threshold = 0.65
+                                dynamic_conf_threshold = 0.70
                                 
                             # 2. Volatility Adjustment (ATR)
                             if atr_norm_val > 0.008:
-                                dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.05)
+                                dynamic_conf_threshold = max(0.55, dynamic_conf_threshold - 0.05)
                             elif atr_norm_val < 0.003:
-                                dynamic_conf_threshold = min(0.70, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold = min(0.75, dynamic_conf_threshold + 0.05)
                                 
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
 
@@ -1512,7 +1558,7 @@ def main():
                                         print(f"[{iv}m] Prediction skipped: Meta-Classifier rejected this signal (expected failure/low probability).")
 
                             # Determine tracking status
-                            direction_conflict = False
+                            direction_conflict = (ml_trend == "Bullish" and pred_change < 0) or (ml_trend == "Bearish" and pred_change > 0)
                             
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"

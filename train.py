@@ -24,7 +24,7 @@ from data import get_history, merge_derivatives_sentiment_features
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-PAGES = 40  # 40 pages of 1-hour candles provides ~40,000 candles (limit on Bybit spot history)
+PAGES = 20  # 20 pages of candles provides ~20,000 candles (balanced dataset size)
 
 # Feature list matches train.py and main.py
 features = [
@@ -529,7 +529,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
     parser.add_argument("--interval", type=str, default="60", choices=["5", "15", "60", "all"], help="Timeframe interval to train")
-    parser.add_argument("--pages", type=int, default=40, help="Number of data pages to fetch from Bybit")
+    parser.add_argument("--pages", type=int, default=20, help="Number of data pages to fetch from Bybit")
     args = parser.parse_args()
 
     if args.interval == "all":
