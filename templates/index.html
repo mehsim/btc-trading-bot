@@ -1273,6 +1273,22 @@
                         
                         outcomeClass = p.evaluation.success ? "color-bullish" : "color-bearish";
                         outcomeLabel = p.evaluation.success ? " [CORRECT]" : " [INCORRECT]";
+                    } else {
+                        // Show Pending ETA for unevaluated predictions
+                        const lookahead = 6;
+                        const intervalMins = parseInt(p.interval || '60');
+                        const etaMs = p.candle_timestamp + (lookahead * intervalMins * 60 * 1000);
+                        const etaDate = new Date(etaMs);
+                        const now = Date.now();
+                        if (now < etaMs) {
+                            const minsLeft = Math.ceil((etaMs - now) / 60000);
+                            const etaTimeStr = etaDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            exitPriceStr = `<span style="color: var(--accent-orange); font-size: 11px;">⏳ Pending</span>`;
+                            diffStr = `<span style="color: var(--text-muted); font-size: 11px;">ETA ${etaTimeStr} (${minsLeft}m)</span>`;
+                        } else {
+                            exitPriceStr = `<span style="color: var(--text-muted); font-size: 11px;">⏳ Evaluating...</span>`;
+                            diffStr = `<span style="color: var(--text-muted); font-size: 11px;">Awaiting candle data</span>`;
+                        }
                     }
 
                     // Format Status to look nice
