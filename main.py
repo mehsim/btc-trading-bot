@@ -583,7 +583,8 @@ def evaluate_predictions(df_completed, interval):
     for pred in bot_state["prediction_history"]:
         if pred.get("interval") == interval and not pred["evaluation"]["evaluated"]:
             interval_mins = int(interval)
-            target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000)
+            lookahead = 6
+            target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000 * lookahead)
             if target_ts in ts_map:
                 exit_price = ts_map[target_ts]
                 ref_price = pred["ref_price"]
@@ -1480,7 +1481,8 @@ def main():
                         exit_reason = "TAKE PROFIT HIT [SUCCESS]"
 
                 if current_time >= end_time:
-                    exit_reason = f"{iv}-MINUTE TIMER ELAPSED"
+                    lookahead = 6
+                    exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
 
                 if exit_reason is not None:
                     actual_price = current_price
@@ -1719,7 +1721,8 @@ def main():
                                     current_bal = bot_state.get("simulated_balance", 10000.0)
                                     position_size_usd = current_bal * kelly_fraction
 
-                                    duration_seconds = int(iv) * 60.0
+                                    lookahead = 6
+                                    duration_seconds = int(iv) * 60.0 * lookahead
                                     active_trade = {
                                         "entry_price": float(latest_candle["close"]),
                                         "predicted_price": float(predicted_price),

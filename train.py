@@ -424,7 +424,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
     # =========================
     # TARGET (TRIPLE BARRIER + REGRESSION PRICE CHANGE)
     # =========================
-    df["future"] = df["close"].shift(-1)
+    lookahead = 6
+    df["future"] = df["close"].shift(-lookahead)
     df["target_price_change"] = (df["future"] - df["close"]) / df["close"]
     df = add_triple_barrier_labels(df, interval)
     df.dropna(subset=["target_price_change", "target_trend"], inplace=True)
@@ -523,12 +524,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"  Meta-Classifier Training Samples: {len(meta_X)} (Positive rate: {meta_y.mean()*100:.2f}%)")
         
         # Train Meta-Classifier (XGBoost Binary Classifier)
+        n_pos = sum(meta_y)
+        n_neg = len(meta_y) - n_pos
+        scale_pos_weight = (n_neg / n_pos) if n_pos > 0 else 1.0
+        
         meta_model = XGBClassifier(
             n_estimators=100,
             max_depth=4,
             learning_rate=0.05,
             objective='binary:logistic',
             eval_metric='logloss',
+            scale_pos_weight=scale_pos_weight,
             random_state=42,
             n_jobs=1
         )
