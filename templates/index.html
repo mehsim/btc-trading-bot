@@ -786,6 +786,15 @@
             </div>
         </header>
 
+        <!-- Circuit Breaker Alert Banner -->
+        <div id="circuit-breaker-banner" style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">🛑</span>
+            <div>
+                <strong style="color: var(--accent-red); font-size: 13px;">Circuit Breaker Active</strong>
+                <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">Daily drawdown exceeded 5% — trading paused until midnight UTC.</span>
+            </div>
+        </div>
+
         <!-- KPI Dashboard -->
         <div class="dashboard-grid">
             <!-- Current Price -->
@@ -914,6 +923,22 @@
                         <div class="stat-subcard" style="border-color: rgba(139, 92, 246, 0.12);">
                             <div class="stat-subcard-title" style="color: var(--accent-purple);">Win Rate</div>
                             <div class="stat-subcard-val" id="stats-winrate" style="color: var(--accent-purple);">0.0%</div>
+                        </div>
+                    </div>
+
+                    <!-- Per-TF Win Rate Row -->
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">5M Win Rate</div>
+                            <div id="tf-winrate-5" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                        </div>
+                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">15M Win Rate</div>
+                            <div id="tf-winrate-15" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                        </div>
+                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">1H Win Rate</div>
+                            <div id="tf-winrate-60" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
                         </div>
                     </div>
 
@@ -1330,6 +1355,23 @@
                     // 1. Status
                     const statusText = data.status || "RUNNING";
                     document.getElementById("bot-status").innerText = statusText.toUpperCase();
+
+                    // Circuit Breaker Banner
+                    const cbBanner = document.getElementById("circuit-breaker-banner");
+                    if (cbBanner) {
+                        cbBanner.style.display = data.circuit_breaker_active ? "flex" : "none";
+                    }
+
+                    // Per-TF Win Rates
+                    const winByTf = data.win_rate_by_tf || {};
+                    [["5", "tf-winrate-5"], ["15", "tf-winrate-15"], ["60", "tf-winrate-60"]].forEach(([k, id]) => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            const val = winByTf[k];
+                            el.innerText = val !== null && val !== undefined ? `${val}%` : "—";
+                            el.style.color = val >= 55 ? "var(--accent-green)" : val >= 45 ? "var(--accent-orange)" : val !== null && val !== undefined ? "var(--accent-red)" : "var(--accent-purple)";
+                        }
+                    });
 
                     // Update Retraining Status / Optimize Models Button
                     const optBtn = document.getElementById("optimize-btn");
