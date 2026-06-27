@@ -583,7 +583,7 @@ def evaluate_predictions(df_completed, interval):
     for pred in bot_state["prediction_history"]:
         if pred.get("interval") == interval and not pred["evaluation"]["evaluated"]:
             interval_mins = int(interval)
-            lookahead = 6
+            lookahead = 10
             target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000 * lookahead)
             if target_ts in ts_map:
                 exit_price = ts_map[target_ts]
@@ -942,119 +942,89 @@ def get_funding_rate(symbol=SYMBOL):
 # ==========================================
 def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval):
     """
-    Runs 12 pre-trade confluence checks before a signal is authorized.
-    Timeframe-specific guards are applied to avoid unnecessary skips on short intervals.
-    Returns: (bool_all_pass, dict_results_details)
+    Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
+    Critical checks are hard gates (instant reject if failed).
+    Other checks contribute weighted points to a total score.
+    Trade is approved if score >= 75% of max possible points AND no hard gate fails.
+    Returns: (bool_approved, dict_results_details)
     """
     results = {}
-    all_pass = True
+    hard_gate_failed = False
+    total_score = 0
+    max_score = 0
 
-    # 1. 1-Day Structural Trend Check (Macro Bias)
+    # ======= CHECK 1: 1-Day Structural Trend (Weight: 1, Bypassed for 5m/15m) =======
     try:
-        # Fetch Daily historical candles
         df_1d = get_history(symbol=SYMBOL, interval="D", limit=100)
     except Exception as e:
         print(f"Error fetching 1d candle history for confluence: {e}")
         df_1d = None
 
-    if df_1d is None or len(df_1d) < 21:
-        if str(interval) in ["5", "15"]:
-            results["1d_Trend"] = {"pass": True, "detail": "Could not fetch 1d data (Bypassed for short TF)"}
-        else:
-            results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data"}
-            all_pass = False
+    weight_1d = 1
+    if str(interval) in ["5", "15"]:
+        results["1d_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
+    elif df_1d is None or len(df_1d) < 21:
+        results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data", "weight": weight_1d}
+        max_score += weight_1d
     else:
-        # Calculate 1d EMA 9 and EMA 21 using completed candles
         df_1d_completed = df_1d.iloc[:-1].copy()
         ema9_1d = EMAIndicator(df_1d_completed["close"], window=9).ema_indicator().iloc[-1]
         ema21_1d = EMAIndicator(df_1d_completed["close"], window=21).ema_indicator().iloc[-1]
-        
-        # Trend check
         trend_1d = "Bullish" if ema9_1d > ema21_1d else "Bearish"
-        if ml_trend == "Bullish":
-            trend_1d_pass = (trend_1d == "Bullish")
-        else:
-            trend_1d_pass = (trend_1d == "Bearish")
-            
-        # Bypassed for short timeframes (5m, 15m)
-        if str(interval) in ["5", "15"]:
-            trend_1d_pass = True
-            detail_msg = f"1d Trend is {trend_1d} (Bypassed for short TF)"
-        else:
-            detail_msg = f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f})"
-            
+        trend_1d_pass = (ml_trend == "Bullish" and trend_1d == "Bullish") or (ml_trend == "Bearish" and trend_1d == "Bearish")
         results["1d_Trend"] = {
             "pass": trend_1d_pass,
-            "detail": detail_msg
+            "detail": f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f})",
+            "weight": weight_1d
         }
-        if not trend_1d_pass:
-            all_pass = False
+        max_score += weight_1d
+        if trend_1d_pass:
+            total_score += weight_1d
 
-    # 2. 4-Hour Tactical Trend Check & 4-Hour RSI Check
+    # ======= CHECK 2: 4-Hour Tactical Trend & RSI (Weight: 1 each, Bypassed for 5m/15m) =======
     try:
-        # Fetch 4h historical candles (interval "240")
         df_4h = get_history(symbol=SYMBOL, interval="240", limit=100)
     except Exception as e:
         print(f"Error fetching 4h candle history for confluence: {e}")
         df_4h = None
 
-    if df_4h is None or len(df_4h) < 21:
-        if str(interval) in ["5", "15"]:
-            results["4h_Trend"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for short TF)"}
-            results["4h_RSI"] = {"pass": True, "detail": "Could not fetch 4h data (Bypassed for short TF)"}
-        else:
-            results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data"}
-            results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data"}
-            all_pass = False
+    weight_4h = 1
+    if str(interval) in ["5", "15"]:
+        results["4h_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
+        results["4h_RSI"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
+    elif df_4h is None or len(df_4h) < 21:
+        results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data", "weight": weight_4h}
+        results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data", "weight": weight_4h}
+        max_score += weight_4h * 2
     else:
-        # Calculate 4h EMA 9, EMA 21, and RSI using completed candles
         df_4h_completed = df_4h.iloc[:-1].copy()
         ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator().iloc[-1]
         ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator().iloc[-1]
-        
-        # Calculate 4h RSI
         rsi_4h = RSIIndicator(df_4h_completed["close"], window=14).rsi().iloc[-1]
-        
-        # Trend check
+
         trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
-        if ml_trend == "Bullish":
-            trend_pass = (trend_4h == "Bullish")
-        else:
-            trend_pass = (trend_4h == "Bearish")
-            
-        if str(interval) in ["5", "15"]:
-            trend_pass = True
-            trend_detail = f"4h Trend is {trend_4h} (Bypassed for short TF)"
-        else:
-            trend_detail = f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})"
-            
+        trend_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")
         results["4h_Trend"] = {
             "pass": trend_pass,
-            "detail": trend_detail
+            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})",
+            "weight": weight_4h
         }
-        if not trend_pass:
-            all_pass = False
-            
-        # RSI check
+        max_score += weight_4h
+        if trend_pass:
+            total_score += weight_4h
+
         if ml_trend == "Bullish":
             rsi_4h_pass = (rsi_4h < 70.0)
             detail_msg = f"4h RSI is {rsi_4h:.2f} (< 70, Safe)" if rsi_4h_pass else f"4h RSI is {rsi_4h:.2f} (>= 70, Overbought)"
         else:
             rsi_4h_pass = (rsi_4h > 30.0)
             detail_msg = f"4h RSI is {rsi_4h:.2f} (> 30, Safe)" if rsi_4h_pass else f"4h RSI is {rsi_4h:.2f} (<= 30, Oversold)"
-            
-        if str(interval) in ["5", "15"]:
-            rsi_4h_pass = True
-            detail_msg = f"4h RSI is {rsi_4h:.2f} (Bypassed for short TF)"
-            
-        results["4h_RSI"] = {
-            "pass": rsi_4h_pass,
-            "detail": detail_msg
-        }
-        if not rsi_4h_pass:
-            all_pass = False
+        results["4h_RSI"] = {"pass": rsi_4h_pass, "detail": detail_msg, "weight": weight_4h}
+        max_score += weight_4h
+        if rsi_4h_pass:
+            total_score += weight_4h
 
-    # 3. 1h RSI Check
+    # ======= CHECK 3: 1h RSI — HARD GATE (extreme overbought/oversold) =======
     rsi_1h = df_1h["RSI"].iloc[-1]
     if ml_trend == "Bullish":
         rsi_1h_pass = (rsi_1h < 70.0)
@@ -1062,35 +1032,31 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     else:
         rsi_1h_pass = (rsi_1h > 30.0)
         detail_msg = f"1h RSI is {rsi_1h:.2f} (> 30, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (<= 30, Oversold)"
-    
-    results["1h_RSI"] = {
-        "pass": rsi_1h_pass,
-        "detail": detail_msg
-    }
+    results["1h_RSI"] = {"pass": rsi_1h_pass, "detail": detail_msg + " [HARD GATE]", "weight": "HARD"}
     if not rsi_1h_pass:
-        all_pass = False
+        hard_gate_failed = True
 
-    # 4. Volume Check (Completed 1h volume >= 80% of 20-period average volume of completed candles)
+    # ======= CHECK 4: Volume Participation (Weight: 2) =======
+    weight_vol = 2
     try:
         vol_series = df_1h["volume"]
         avg_vol_20 = vol_series.iloc[:-1].rolling(20).mean().iloc[-1]
         latest_vol = vol_series.iloc[-2]
-        
         volume_pass = (latest_vol >= 0.8 * avg_vol_20)
         results["Volume_Participation"] = {
             "pass": volume_pass,
-            "detail": f"Vol: {latest_vol:.1f} vs Avg20: {avg_vol_20:.1f} ({latest_vol/avg_vol_20*100:.1f}%, Req >= 80%)"
+            "detail": f"Vol: {latest_vol:.1f} vs Avg20: {avg_vol_20:.1f} ({latest_vol/avg_vol_20*100:.1f}%, Req >= 80%)",
+            "weight": weight_vol
         }
     except Exception as e:
         volume_pass = True
-        results["Volume_Participation"] = {
-            "pass": True,
-            "detail": f"Skipped volume check (Error: {e})"
-        }
-    if not volume_pass:
-        all_pass = False
+        results["Volume_Participation"] = {"pass": True, "detail": f"Skipped volume check (Error: {e})", "weight": weight_vol}
+    max_score += weight_vol
+    if volume_pass:
+        total_score += weight_vol
 
-    # 5. Bollinger Band Edge Guard Check (BB_pct)
+    # ======= CHECK 5: Bollinger Band Edge Guard (Weight: 2) =======
+    weight_bb = 2
     bb_pct_val = df_1h["BB_pct"].iloc[-1]
     if ml_trend == "Bullish":
         bb_pass = (bb_pct_val < 0.95)
@@ -1098,23 +1064,19 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     else:
         bb_pass = (bb_pct_val > 0.05)
         detail_msg = f"BB Pct is {bb_pct_val:.3f} (> 0.05, Room to run)" if bb_pass else f"BB Pct is {bb_pct_val:.3f} (<= 0.05, Overextended short)"
-        
-    results["BB_Edge_Guard"] = {
-        "pass": bb_pass,
-        "detail": detail_msg
-    }
-    if not bb_pass:
-        all_pass = False
+    results["BB_Edge_Guard"] = {"pass": bb_pass, "detail": detail_msg, "weight": weight_bb}
+    max_score += weight_bb
+    if bb_pass:
+        total_score += weight_bb
 
-    # 6. Counter-Momentum Candle Guard (Check if last 3 completed 1h candles oppose the direction)
+    # ======= CHECK 6: Counter-Momentum Guard (Weight: 2) =======
+    weight_cm = 2
     try:
         c1 = df_1h.iloc[-2]
         c2 = df_1h.iloc[-3]
         c3 = df_1h.iloc[-4]
-        
         is_red = [c1["close"] < c1["open"], c2["close"] < c2["open"], c3["close"] < c3["open"]]
         is_green = [c1["close"] > c1["open"], c2["close"] > c2["open"], c3["close"] > c3["open"]]
-        
         if ml_trend == "Bullish":
             candle_pass = not all(is_red)
             detail_msg = "Safe (No consecutive 3 red candles)" if candle_pass else "Blocked (Knife Falling: 3 consecutive red candles)"
@@ -1124,22 +1086,19 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     except Exception as e:
         candle_pass = True
         detail_msg = f"Skipped (Not enough candles: {e})"
-        
-    results["Counter_Momentum"] = {
-        "pass": candle_pass,
-        "detail": detail_msg
-    }
-    if not candle_pass:
-        all_pass = False
+    results["Counter_Momentum"] = {"pass": candle_pass, "detail": detail_msg, "weight": weight_cm}
+    max_score += weight_cm
+    if candle_pass:
+        total_score += weight_cm
 
-    # 7. Volatility (ATR) Safety Guard
+    # ======= CHECK 7: Volatility (ATR) Safety Guard (Weight: 2) =======
+    weight_atr = 2
     try:
         atr_series = df_1h["ATR_norm"]
         recent_atr = atr_series.iloc[-100:]
         p10 = float(np.percentile(recent_atr, 10))
         p90 = float(np.percentile(recent_atr, 90))
         current_atr = atr_series.iloc[-1]
-        
         atr_pass = (p10 <= current_atr <= p90)
         if atr_pass:
             detail_msg = f"ATR Norm: {current_atr:.6f} (P10: {p10:.6f}, P90: {p90:.6f}, Safe)"
@@ -1150,23 +1109,20 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     except Exception as e:
         atr_pass = True
         detail_msg = f"Skipped volatility guard (Error: {e})"
-        
-    results["Volatility_Guard"] = {
-        "pass": atr_pass,
-        "detail": detail_msg
-    }
-    if not atr_pass:
-        all_pass = False
+    results["Volatility_Guard"] = {"pass": atr_pass, "detail": detail_msg, "weight": weight_atr}
+    max_score += weight_atr
+    if atr_pass:
+        total_score += weight_atr
 
-    # 8. ADX Trend Regime Check (Informational - routes dynamically to trending or ranging models)
+    # ======= CHECK 8: ADX Regime (Informational only — Weight: 0, always passes) =======
     adx_val = df_1h["ADX"].iloc[-1]
-    adx_pass = True
     results["ADX_Regime"] = {
-        "pass": adx_pass,
-        "detail": f"ADX is {adx_val:.2f} ({'Trending Regime' if adx_val >= 20.0 else 'Ranging Regime'})"
+        "pass": True,
+        "detail": f"ADX is {adx_val:.2f} ({'Trending Regime' if adx_val >= 20.0 else 'Ranging Regime'}) [INFO]",
+        "weight": 0
     }
 
-    # 9. Fee Coverage Check (using volatility-based ATR norm to avoid model point-estimate shrinkage)
+    # ======= CHECK 9: Fee Coverage — HARD GATE =======
     atr_norm_val = df_1h["ATR_norm"].iloc[-1]
     if str(interval) in ["5", "15"]:
         fee_pass = (atr_norm_val >= 0.0010)
@@ -1174,23 +1130,20 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     else:
         fee_pass = (atr_norm_val >= 0.0015)
         req_str = ">= 0.15%"
-        
     results["Fee_Coverage"] = {
         "pass": fee_pass,
-        "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req {req_str} to cover roundtrip Spot fees)"
+        "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req {req_str} to cover roundtrip Spot fees) [HARD GATE]",
+        "weight": "HARD"
     }
     if not fee_pass:
-        all_pass = False
+        hard_gate_failed = True
 
-    # 10. Order Book Imbalance Check
+    # ======= CHECK 10: Order Book Imbalance & Spread (Weight: 1) =======
+    weight_ob = 1
     ob_metrics = get_orderbook_imbalance()
     ob_imbalance = ob_metrics["imbalance"]
     spread = ob_metrics["spread"]
-    
-    # 10a. Spread Guard
-    spread_pass = (spread <= 0.001)  # Spread must be <= 0.1% to prevent entry on low liquidity / spikes
-    
-    # 10b. Weighted Imbalance
+    spread_pass = (spread <= 0.001)
     if str(interval) in ["5", "15"]:
         ob_pass = True
         imbalance_detail = f"Weighted Imbalance: {ob_imbalance:+.2f} (Bypassed for short TF)"
@@ -1200,70 +1153,58 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     else:
         ob_pass = (ob_imbalance <= 0.20)
         imbalance_detail = f"Weighted Imbalance: {ob_imbalance:+.2f} (<= +0.20, Safe)" if ob_pass else f"Weighted Imbalance: {ob_imbalance:+.2f} (> +0.20, Heavy Buy)"
-        
     combined_ob_pass = ob_pass and spread_pass
     spread_detail = f"Spread: {spread*100:.3f}% (Req <= 0.10%, Safe)" if spread_pass else f"Spread: {spread*100:.3f}% (> 0.10%, High Spread)"
-    
     results["Orderbook_Imbalance"] = {
         "pass": combined_ob_pass,
-        "detail": f"{imbalance_detail} | {spread_detail}"
+        "detail": f"{imbalance_detail} | {spread_detail}",
+        "weight": weight_ob
     }
-    if not combined_ob_pass:
-        all_pass = False
+    max_score += weight_ob
+    if combined_ob_pass:
+        total_score += weight_ob
 
-    # 11. News Sentiment Check
+    # ======= CHECK 11: News Sentiment (Weight: 1, Bypassed for 5m/15m) =======
+    weight_news = 1
     is_opposed = (ml_trend == "Bullish" and news_sentiment == "Bearish") or (ml_trend == "Bearish" and news_sentiment == "Bullish")
     if str(interval) in ["5", "15"]:
         news_pass = True
         detail_msg = f"Model: {ml_trend} vs News: {news_sentiment} (Bypassed for short TF)"
+        results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": 0}
     else:
         news_pass = not is_opposed
         detail_msg = f"Model: {ml_trend} vs News: {news_sentiment}"
-    results["News_Sentiment"] = {
-        "pass": news_pass,
-        "detail": detail_msg
-    }
-    if not news_pass:
-        all_pass = False
+        results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": weight_news}
+        max_score += weight_news
+        if news_pass:
+            total_score += weight_news
 
-    # 12. Funding Rate Guard Check (using linear perp funding rate)
-    funding_rate = get_funding_rate(SYMBOL)
-    if ml_trend == "Bullish":
-        funding_pass = (funding_rate < 0.0005)
-        detail_msg = f"Funding rate is {funding_rate*100:+.4f}% (< +0.05%, Safe)" if funding_pass else f"Funding rate is {funding_rate*100:+.4f}% (>= +0.05%, Congested Longs)"
-    else:
-        funding_pass = (funding_rate > -0.0005)
-        detail_msg = f"Funding rate is {funding_rate*100:+.4f}% (> -0.05%, Safe)" if funding_pass else f"Funding rate is {funding_rate*100:+.4f}% (<= -0.05%, Congested Shorts)"
-        
-    results["Funding_Rate_Guard"] = {
-        "pass": funding_pass,
-        "detail": detail_msg
-    }
-
-    # 13. Expected Price Change Threshold Check
+    # ======= CHECK 12: Expected Price Change Threshold (Weight: 2) =======
+    weight_exp = 2
     min_pct_map = {"5": 0.10, "15": 0.15, "60": 0.25}
     req_pct = min_pct_map.get(str(interval), 0.15)
     change_pass = (expected_pct_change >= req_pct)
     results["Expected_Change"] = {
         "pass": change_pass,
-        "detail": f"Expected price change is {expected_pct_change:.3f}% (Req >= {req_pct:.2f}% to trade)"
+        "detail": f"Expected price change is {expected_pct_change:.3f}% (Req >= {req_pct:.2f}% to trade)",
+        "weight": weight_exp
     }
-    if not change_pass:
-        all_pass = False
+    max_score += weight_exp
+    if change_pass:
+        total_score += weight_exp
 
-    # 14. Timeframe Trend Alignment Check
+    # ======= CHECK 13: Timeframe Trend Alignment (Weight: 2) =======
+    weight_align = 2
     trend_align_pass = True
     align_detail = "Aligned with dominant trend"
     if str(interval) in ["5", "15"]:
         try:
-            # Fetch 1h candles to check 1h trend
             df_1h_align = get_history(symbol=SYMBOL, interval="60", limit=100)
             if df_1h_align is not None and len(df_1h_align) >= 21:
                 df_1h_align_completed = df_1h_align.iloc[:-1].copy()
                 ema9_1h = EMAIndicator(df_1h_align_completed["close"], window=9).ema_indicator().iloc[-1]
                 ema21_1h = EMAIndicator(df_1h_align_completed["close"], window=21).ema_indicator().iloc[-1]
                 trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
-                
                 if ml_trend == "Bullish" and trend_1h != "Bullish":
                     trend_align_pass = False
                     align_detail = f"Blocked (5m/15m Bullish signal contradicts 1h Bearish trend)"
@@ -1278,15 +1219,24 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             align_detail = f"Skipped trend alignment check (Error: {e})"
     else:
         align_detail = f"1h interval is already the dominant trend"
+    results["Timeframe_Alignment"] = {"pass": trend_align_pass, "detail": align_detail, "weight": weight_align}
+    max_score += weight_align
+    if trend_align_pass:
+        total_score += weight_align
 
-    results["Timeframe_Alignment"] = {
-        "pass": trend_align_pass,
-        "detail": align_detail
+    # ======= FINAL SCORING =======
+    score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
+    score_threshold = 75.0
+    approved = (not hard_gate_failed) and (score_pct >= score_threshold)
+
+    # Add score summary to results
+    results["_Score_Summary"] = {
+        "pass": approved,
+        "detail": f"Score: {total_score}/{max_score} ({score_pct:.0f}%) | Threshold: {score_threshold:.0f}% | Hard Gates: {'FAILED' if hard_gate_failed else 'PASSED'}",
+        "weight": "SUMMARY"
     }
-    if not trend_align_pass:
-        all_pass = False
 
-    # Convert all results pass values and all_pass to standard python bool/str
+    # Convert all results pass values to standard python bool/str
     std_results = {}
     for key, val in results.items():
         std_results[str(key)] = {
@@ -1294,7 +1244,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             "detail": str(val["detail"])
         }
 
-    return bool(all_pass), std_results
+    return bool(approved), std_results
 
 # =========================
 # LIVE LOOP
@@ -1481,7 +1431,7 @@ def main():
                         exit_reason = "TAKE PROFIT HIT [SUCCESS]"
 
                 if current_time >= end_time:
-                    lookahead = 6
+                    lookahead = 10
                     exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
 
                 if exit_reason is not None:
@@ -1618,34 +1568,42 @@ def main():
 
                             # Determine dynamic confidence threshold based on regime and volatility
                             atr_norm_val = latest_candle["ATR_norm"]
-                            dynamic_conf_threshold = 0.65
+                            dynamic_conf_threshold = 0.55
                             
                             # 1. Regime Adjustment (ADX)
                             if adx_regime >= 25.0:
-                                dynamic_conf_threshold = 0.60
+                                dynamic_conf_threshold = 0.50
                             elif adx_regime < 15.0:
-                                dynamic_conf_threshold = 0.70
+                                dynamic_conf_threshold = 0.60
                                 
                             # 2. Volatility Adjustment (ATR)
                             if atr_norm_val > 0.008:
-                                dynamic_conf_threshold = max(0.55, dynamic_conf_threshold - 0.05)
+                                dynamic_conf_threshold = max(0.45, dynamic_conf_threshold - 0.05)
                             elif atr_norm_val < 0.003:
-                                dynamic_conf_threshold = min(0.75, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold = min(0.65, dynamic_conf_threshold + 0.05)
                                 
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
 
-                            # Check Meta-Classifier if we have a trade signal (Bullish/Bearish)
-                            meta_passed = True
+                            # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
+                            meta_adjustment = 0.0
                             if ml_trend in ["Bullish", "Bearish"]:
                                 active_meta_model = models_tf["trending"]["meta"] if adx_regime >= 20.0 else models_tf["ranging"]["meta"]
                                 if active_meta_model is not None:
                                     meta_pred = int(active_meta_model.predict(X_live)[0])
-                                    if meta_pred == 0:
-                                        meta_passed = False
-                                        print(f"[{iv}m] Prediction skipped: Meta-Classifier rejected this signal (expected failure/low probability).")
+                                    if meta_pred == 1:
+                                        meta_adjustment = +0.05  # Meta predicts success: boost confidence
+                                        print(f"[{iv}m] Meta-Classifier: PASS (confidence boosted +5%)")
+                                    else:
+                                        meta_adjustment = -0.10  # Meta predicts failure: reduce confidence
+                                        print(f"[{iv}m] Meta-Classifier: FAIL (confidence reduced -10%)")
+                                    calibrated_confidence = max(0.0, min(1.0, calibrated_confidence + meta_adjustment))
+                                    print(f"[{iv}m] Adjusted Calibrated Confidence: {calibrated_confidence*100:.2f}%")
 
                             # Determine tracking status
-                            direction_conflict = (ml_trend == "Bullish" and pred_change < 0) or (ml_trend == "Bearish" and pred_change > 0)
+                            # Softened contradiction: only block if regressor predicts > 0.05% in OPPOSITE direction
+                            pred_pct = (abs(pred_change) / latest_candle["close"]) * 100
+                            strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > 0.05) or \
+                                              (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
                             
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"
@@ -1657,11 +1615,9 @@ def main():
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
-                            elif not meta_passed:
-                                status_msg = "Skipped (Meta-Filter Failed)"
-                            elif direction_conflict:
+                            elif strong_conflict:
                                 status_msg = "Skipped (Contradiction)"
-                                print(f"[{iv}m] Prediction skipped: Directional contradiction (Trend: {ml_trend}, Regressor Price Change: {pred_change:+.2f}).")
+                                print(f"[{iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.2f} [{pred_pct:.3f}%]).")
                             elif calibrated_confidence < dynamic_conf_threshold:
                                 status_msg = "Skipped (Low Confidence)"
                                 print(f"[{iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
@@ -1694,7 +1650,7 @@ def main():
                                 if all_pass:
                                     status_msg = "Traded"
                                     print("--------------------------------------------------")
-                                    print("CONFLUENCE RESULT: APPROVED (All checks passed)")
+                                    print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
                                     print("==================================================\n")
                                     
                                     atr_norm_val = latest_candle["ATR_norm"]
@@ -1721,7 +1677,7 @@ def main():
                                     current_bal = bot_state.get("simulated_balance", 10000.0)
                                     position_size_usd = current_bal * kelly_fraction
 
-                                    lookahead = 6
+                                    lookahead = 10
                                     duration_seconds = int(iv) * 60.0 * lookahead
                                     active_trade = {
                                         "entry_price": float(latest_candle["close"]),
@@ -1743,9 +1699,10 @@ def main():
                                     print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Kelly allocation: {kelly_fraction*100:.2f}% | Size: ${position_size_usd:.2f}\n")
                                 else:
                                     status_msg = "Skipped (Confluence Failed)"
-                                    failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"]]
+                                    failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
                                     print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: REJECTED (Failed: {', '.join(failed_list)})")
+                                    print(f"CONFLUENCE RESULT: REJECTED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score too low')})")
+                                    print(f"Failed checks: {', '.join(failed_list)}")
                                     print("==================================================\n")
                             
                             # Prevent duplicate predictions for the same candle timestamp

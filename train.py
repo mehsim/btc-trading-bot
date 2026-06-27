@@ -175,10 +175,10 @@ def add_features(df):
     return df
 
 def add_triple_barrier_labels(df, interval):
-    # Dynamic SL & TP targets based on ATR: TP = 1.5 * ATR, SL = 1.0 * ATR
+    # Dynamic SL & TP targets based on ATR: TP = 1.2 * ATR, SL = 0.8 * ATR
     atr = df["ATR_norm"] * df["close"]
     
-    lookahead = 6
+    lookahead = 10
     closes = df["close"].values
     highs = df["high"].values
     lows = df["low"].values
@@ -195,8 +195,8 @@ def add_triple_barrier_labels(df, interval):
         if atr_t <= 0:
             atr_t = p_t * 0.001
             
-        upper_barrier = p_t + 1.5 * atr_t
-        lower_barrier = p_t - 1.0 * atr_t
+        upper_barrier = p_t + 1.2 * atr_t
+        lower_barrier = p_t - 0.8 * atr_t
         
         for step in range(1, lookahead + 1):
             if i + step >= n_samples:
@@ -424,7 +424,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     # =========================
     # TARGET (TRIPLE BARRIER + REGRESSION PRICE CHANGE)
     # =========================
-    lookahead = 6
+    lookahead = 10
     df["future"] = df["close"].shift(-lookahead)
     df["target_price_change"] = (df["future"] - df["close"]) / df["close"]
     df = add_triple_barrier_labels(df, interval)
