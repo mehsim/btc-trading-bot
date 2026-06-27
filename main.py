@@ -64,11 +64,26 @@ bot_state = {
     "calibration_1h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     
     "simulated_balance": 10000.0,
+    "daily_drawdown_start_balance": 10000.0,
+    "daily_drawdown_reset_day": -1,
+    "circuit_breaker_active": False,
     "trade_history": [],
-    "prediction_history": []
+    "prediction_history": [],
+    "win_rate_by_tf": {"5": None, "15": None, "60": None}
 }
 
 def save_history():
+    # Cap prediction history at 500 entries
+    if len(bot_state["prediction_history"]) > 500:
+        bot_state["prediction_history"] = bot_state["prediction_history"][-500:]
+    # Recompute win rate by TF from trade history
+    for tf_key in ["5", "15", "60"]:
+        tf_trades = [t for t in bot_state["trade_history"] if str(t.get("interval")) == tf_key]
+        if tf_trades:
+            wins = sum(1 for t in tf_trades if t.get("success"))
+            bot_state["win_rate_by_tf"][tf_key] = round(wins / len(tf_trades) * 100, 1)
+        else:
+            bot_state["win_rate_by_tf"][tf_key] = None
     data = {
         "simulated_balance": bot_state["simulated_balance"],
         "trade_history": bot_state["trade_history"],
@@ -399,7 +414,8 @@ features = [
     "ADX", "ADX_pos", "ADX_neg", "close_to_VWAP",
     "btc_return_5m", "btc_return_5m_lag1", "btc_return_5m_lag2", "btc_return_5m_lag3",
     "RSI_24", "ROC_24", "volatility_24h",
-    "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos"
+    "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos",
+    "RSI_z", "ADX_z"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")
@@ -477,6 +493,12 @@ def add_features(df):
     df["ADX"] = adx_ind.adx()
     df["ADX_pos"] = adx_ind.adx_pos()
     df["ADX_neg"] = adx_ind.adx_neg()
+
+    # Rolling z-score normalization for RSI and ADX (200-candle window)
+    for col in ["RSI", "ADX"]:
+        rolling_mean = df[col].rolling(200, min_periods=20).mean()
+        rolling_std = df[col].rolling(200, min_periods=20).std().replace(0, 1)
+        df[f"{col}_z"] = (df[col] - rolling_mean) / rolling_std
 
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     rolling_pv = (typical_price * df["volume"]).rolling(window=168, min_periods=1).sum()
@@ -1483,8 +1505,55 @@ def main():
                     bot_state[active_trade_key] = None
 
         # 3. Check for completed candle closes to search for a new signal
+
+        # --- Daily Drawdown Circuit Breaker ---
+        today = datetime.now().day
+        if bot_state["daily_drawdown_reset_day"] != today:
+            bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 10000.0)
+            bot_state["daily_drawdown_reset_day"] = today
+            bot_state["circuit_breaker_active"] = False
+            print(f"[Circuit Breaker] Daily reset. Start balance: ${bot_state['daily_drawdown_start_balance']:.2f}")
+        else:
+            start_bal = bot_state["daily_drawdown_start_balance"]
+            curr_bal = bot_state.get("simulated_balance", start_bal)
+            daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
+            if daily_dd_pct >= 5.0 and not bot_state["circuit_breaker_active"]:
+                bot_state["circuit_breaker_active"] = True
+                print(f"[Circuit Breaker] ACTIVATED — daily drawdown {daily_dd_pct:.2f}% >= 5%. Trading paused for today.")
+            elif daily_dd_pct < 5.0:
+                bot_state["circuit_breaker_active"] = False
+
+        # --- High-Impact News Window Guard ---
+        def is_high_impact_news_window():
+            """Returns True if within 15 minutes of a known high-impact event (CPI, FOMC, NFP)."""
+            try:
+                now_utc = datetime.utcnow()
+                # Use investing.com economic calendar RSS or finnhub — use finnhub free tier
+                resp = requests.get(
+                    "https://finnhub.io/api/v1/calendar/economic",
+                    params={"token": "free"},
+                    timeout=5
+                )
+                if resp.status_code == 200:
+                    events = resp.json().get("economicCalendar", [])
+                    high_impact = ["CPI", "FOMC", "NFP", "Non-Farm", "Federal Reserve", "Interest Rate"]
+                    for ev in events:
+                        if any(kw.lower() in ev.get("event", "").lower() for kw in high_impact):
+                            ev_time_str = ev.get("time", "")
+                            try:
+                                ev_time = datetime.strptime(ev_time_str, "%Y-%m-%d %H:%M:%S")
+                                diff = abs((now_utc - ev_time).total_seconds())
+                                if diff <= 900:  # 15 minute window
+                                    return True, ev.get("event", "Unknown")
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            return False, None
+
         check_and_hot_reload_models()
         for iv in ["5", "15", "60"]:
+
             tf = tf_map[iv]
             try:
                 df_raw = get_history(symbol=SYMBOL, interval=iv, limit=300)
@@ -1612,6 +1681,9 @@ def main():
                             if active_trade is not None:
                                 status_msg = "Skipped (Trade Active)"
                                 print(f"[{iv}m] New completed candle detected, but trade entry skipped because a trade is already active.")
+                            elif bot_state.get("circuit_breaker_active", False):
+                                status_msg = "Skipped (Circuit Breaker)"
+                                print(f"[{iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
@@ -1622,88 +1694,94 @@ def main():
                                 status_msg = "Skipped (Low Confidence)"
                                 print(f"[{iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
                             else:
-                                # Confluence checks
-                                print(f"[{iv}m] Triggering pre-trade confluence analysis...")
-                                news_sentiment, latest_titles = get_news_sentiment()
-                                all_pass, confluence_results = check_pre_trade_confluence(
-                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
-                                )
-
-                                # Update global confluence status
-                                bot_state[f"confluence_results_{tf}"] = {
-                                    "approved": all_pass,
-                                    "checks": confluence_results
-                                }
-
-                                print(f"\n==================================================")
-                                print(f"[{iv}m] PRE-TRADE CONFLUENCE ANALYSIS REPORT")
-                                print("--------------------------------------------------")
-                                print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {SYMBOL}")
-                                print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
-                                print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.2f} [{expected_pct_change:.3f}%])")
-                                print("--------------------------------------------------")
-                                print("Checks Status:")
-                                for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
-                                    status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
-                                    print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
-                                
-                                if all_pass:
-                                    status_msg = "Traded"
-                                    print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
-                                    print("==================================================\n")
-                                    
-                                    atr_norm_val = latest_candle["ATR_norm"]
-                                    atr_dollars = atr_norm_val * latest_candle["close"]
-                                    
-                                    # Regime-Adaptive Take-Profit Multiplier
-                                    if latest_candle["ADX"] >= 20.0:
-                                        tp_multiplier = 1.50
-                                    else:
-                                        tp_multiplier = 1.00
-                                    
-                                    if ml_trend == "Bullish":
-                                        stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars
-                                        take_profit_price = latest_candle["close"] + tp_multiplier * atr_dollars
-                                    else:
-                                        stop_loss_price = latest_candle["close"] + 0.75 * atr_dollars
-                                        take_profit_price = latest_candle["close"] - tp_multiplier * atr_dollars
-
-                                    # Kelly Criterion position sizing calculation
-                                    kelly_b = tp_multiplier / 0.75
-                                    kelly_p = float(calibrated_confidence)
-                                    f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
-                                    kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
-                                    current_bal = bot_state.get("simulated_balance", 10000.0)
-                                    position_size_usd = current_bal * kelly_fraction
-
-                                    lookahead = 10
-                                    duration_seconds = int(iv) * 60.0 * lookahead
-                                    active_trade = {
-                                        "entry_price": float(latest_candle["close"]),
-                                        "predicted_price": float(predicted_price),
-                                        "stop_loss": float(stop_loss_price),
-                                        "take_profit": float(take_profit_price),
-                                        "direction": str(ml_trend),
-                                        "end_time": float(time.time() + duration_seconds),
-                                        "atr_dollars": float(atr_dollars),
-                                        "highest_price": float(latest_candle["close"]),
-                                        "lowest_price": float(latest_candle["close"]),
-                                        "break_even_triggered": False,
-                                        "position_size_usd": float(position_size_usd),
-                                        "kelly_fraction": float(kelly_fraction)
-                                    }
-                                    bot_state[active_trade_key] = active_trade
-                                    
-                                    print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
-                                    print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Kelly allocation: {kelly_fraction*100:.2f}% | Size: ${position_size_usd:.2f}\n")
+                                # Check news window guard before running full confluence
+                                in_news_window, news_event = is_high_impact_news_window()
+                                if in_news_window:
+                                    status_msg = "Skipped (News Window)"
+                                    print(f"[{iv}m] Prediction skipped: High-impact event window ({news_event}). Trading paused.")
                                 else:
-                                    status_msg = "Skipped (Confluence Failed)"
-                                    failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
+                                    # Confluence checks
+                                    print(f"[{iv}m] Triggering pre-trade confluence analysis...")
+                                    news_sentiment, latest_titles = get_news_sentiment()
+                                    all_pass, confluence_results = check_pre_trade_confluence(
+                                        latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
+                                    )
+
+                                    # Update global confluence status
+                                    bot_state[f"confluence_results_{tf}"] = {
+                                        "approved": all_pass,
+                                        "checks": confluence_results
+                                    }
+
+                                    print(f"\n==================================================")
+                                    print(f"[{iv}m] PRE-TRADE CONFLUENCE ANALYSIS REPORT")
                                     print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: REJECTED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score too low')})")
-                                    print(f"Failed checks: {', '.join(failed_list)}")
-                                    print("==================================================\n")
+                                    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {SYMBOL}")
+                                    print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
+                                    print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.2f} [{expected_pct_change:.3f}%])")
+                                    print("--------------------------------------------------")
+                                    print("Checks Status:")
+                                    for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
+                                        status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
+                                        print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
+                                    
+                                    if all_pass:
+                                        status_msg = "Traded"
+                                        print("--------------------------------------------------")
+                                        print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
+                                        print("==================================================\n")
+                                        
+                                        atr_norm_val = latest_candle["ATR_norm"]
+                                        atr_dollars = atr_norm_val * latest_candle["close"]
+                                        
+                                        # Regime-Adaptive Take-Profit Multiplier
+                                        if latest_candle["ADX"] >= 20.0:
+                                            tp_multiplier = 1.50
+                                        else:
+                                            tp_multiplier = 1.00
+                                        
+                                        if ml_trend == "Bullish":
+                                            stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars
+                                            take_profit_price = latest_candle["close"] + tp_multiplier * atr_dollars
+                                        else:
+                                            stop_loss_price = latest_candle["close"] + 0.75 * atr_dollars
+                                            take_profit_price = latest_candle["close"] - tp_multiplier * atr_dollars
+
+                                        # Kelly Criterion position sizing calculation
+                                        kelly_b = tp_multiplier / 0.75
+                                        kelly_p = float(calibrated_confidence)
+                                        f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
+                                        kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
+                                        current_bal = bot_state.get("simulated_balance", 10000.0)
+                                        position_size_usd = current_bal * kelly_fraction
+
+                                        lookahead = 10
+                                        duration_seconds = int(iv) * 60.0 * lookahead
+                                        active_trade = {
+                                            "entry_price": float(latest_candle["close"]),
+                                            "predicted_price": float(predicted_price),
+                                            "stop_loss": float(stop_loss_price),
+                                            "take_profit": float(take_profit_price),
+                                            "direction": str(ml_trend),
+                                            "end_time": float(time.time() + duration_seconds),
+                                            "atr_dollars": float(atr_dollars),
+                                            "highest_price": float(latest_candle["close"]),
+                                            "lowest_price": float(latest_candle["close"]),
+                                            "break_even_triggered": False,
+                                            "position_size_usd": float(position_size_usd),
+                                            "kelly_fraction": float(kelly_fraction)
+                                        }
+                                        bot_state[active_trade_key] = active_trade
+                                        
+                                        print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
+                                        print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Kelly allocation: {kelly_fraction*100:.2f}% | Size: ${position_size_usd:.2f}\n")
+                                    else:
+                                        status_msg = "Skipped (Confluence Failed)"
+                                        failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
+                                        print("--------------------------------------------------")
+                                        print(f"CONFLUENCE RESULT: REJECTED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score too low')})")
+                                        print(f"Failed checks: {', '.join(failed_list)}")
+                                        print("==================================================\n")
                             
                             # Prevent duplicate predictions for the same candle timestamp
                             exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv for p in bot_state["prediction_history"])

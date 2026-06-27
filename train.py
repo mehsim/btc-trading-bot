@@ -35,7 +35,8 @@ features = [
     "ADX", "ADX_pos", "ADX_neg", "close_to_VWAP",
     "btc_return_5m", "btc_return_5m_lag1", "btc_return_5m_lag2", "btc_return_5m_lag3",
     "RSI_24", "ROC_24", "volatility_24h",
-    "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos"
+    "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos",
+    "RSI_z", "ADX_z"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")
@@ -111,6 +112,12 @@ def add_features(df):
     df["ADX"] = adx_ind.adx()
     df["ADX_pos"] = adx_ind.adx_pos()
     df["ADX_neg"] = adx_ind.adx_neg()
+
+    # Rolling z-score normalization for RSI and ADX (200-candle window)
+    for col in ["RSI", "ADX"]:
+        rolling_mean = df[col].rolling(200, min_periods=20).mean()
+        rolling_std = df[col].rolling(200, min_periods=20).std().replace(0, 1)
+        df[f"{col}_z"] = (df[col] - rolling_mean) / rolling_std
 
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     rolling_pv = (typical_price * df["volume"]).rolling(window=168, min_periods=1).sum()
