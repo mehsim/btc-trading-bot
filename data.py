@@ -22,7 +22,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-            response = requests.get(url, params=params, headers=headers)
+            response = requests.get(url, params=params, headers=headers, timeout=10)
             if response.status_code != 200:
                 print(f"Error fetching page {page + 1}: Received status code {response.status_code}")
                 print(f"Response content: {response.text[:300]}")

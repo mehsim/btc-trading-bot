@@ -37,12 +37,15 @@ retraining_lock = threading.Lock()
 
 bot_state = {
     "live_price": None,
+    "live_price_BTCUSDT": None,
+    "live_price_ETHUSDT": None,
+    "live_price_SOLUSDT": None,
     "last_update": 0.0,
     
-    "active_trade_1h": None,
-    "active_trade_2h": None,
-    "active_trade_4h": None,
-    "active_trade_6h": None,
+    "active_trade_1h": [],
+    "active_trade_2h": [],
+    "active_trade_4h": [],
+    "active_trade_6h": [],
     
     "latest_prediction_1h": None,
     "latest_prediction_2h": None,
@@ -80,6 +83,10 @@ bot_state = {
     "prediction_history": [],
     "win_rate_by_tf": {"60": None, "120": None, "240": None, "360": None}
 }
+
+cached_news_sentiment = "Neutral"
+cached_news_titles = []
+news_sentiment_lock = threading.Lock()
 
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
 
@@ -233,6 +240,7 @@ def trigger_retrain():
 def force_close_trade():
     data = request.json or {}
     interval = str(data.get("interval", ""))
+    symbol = str(data.get("symbol", "")).upper()
     
     tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
     tf = tf_map_local.get(interval)
@@ -240,22 +248,36 @@ def force_close_trade():
         return jsonify({"status": "error", "message": "Invalid interval specified."}), 400
         
     active_trade_key = f"active_trade_{tf}"
-    active_trade = bot_state[active_trade_key]
-    
-    if not active_trade:
-        return jsonify({"status": "error", "message": f"No active trade found for interval {tf}."}), 400
-        
+    active_trades_list = bot_state.get(active_trade_key, [])
+    if not isinstance(active_trades_list, list):
+        active_trades_list = [] if active_trades_list is None else [active_trades_list]
+        bot_state[active_trade_key] = active_trades_list
+
+    # Find the trade for the specified symbol
+    trade_to_close = None
+    for t in active_trades_list:
+        if t.get("symbol", "").upper() == symbol:
+            trade_to_close = t
+            break
+            
+    if not trade_to_close:
+        # Fallback if no symbol specified, close the first one
+        if len(active_trades_list) > 0:
+            trade_to_close = active_trades_list[0]
+            symbol = trade_to_close.get("symbol", "BTCUSDT")
+        else:
+            return jsonify({"status": "error", "message": f"No active trade found for {tf}."}), 400
+            
     # Exiting trade manually
-    symbol = active_trade.get("symbol", "BTCUSDT")
-    entry_price = active_trade["entry_price"]
-    direction = active_trade["direction"]
-    position_size_usd = active_trade.get("position_size_usd", 100.0)
+    entry_price = trade_to_close["entry_price"]
+    direction = trade_to_close["direction"]
+    position_size_usd = trade_to_close.get("position_size_usd", 100.0)
     
     live_symbol_price = get_fallback_price(symbol)
     actual_exit_price = live_symbol_price if live_symbol_price is not None else (live_price or entry_price)
     
     # Apply slippage on exit
-    atr_norm_val = active_trade.get("atr_dollars", 50.0) / entry_price
+    atr_norm_val = trade_to_close.get("atr_dollars", 50.0) / entry_price
     slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
     if direction == "Bullish":
         actual_price = actual_exit_price * (1.0 - slippage_pct / 100.0)
@@ -266,8 +288,8 @@ def force_close_trade():
     actual_change_pct = (actual_change / entry_price) * 100
     
     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
-    leverage = active_trade.get("leverage", 1.0)
-    net_return_pct = (raw_return_pct * leverage) - 0.2  # 0.2% Futures roundtrip fee
+    leverage = trade_to_close.get("leverage", 1.0)
+    net_return_pct = (raw_return_pct * leverage) - 0.2
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
     
     old_bal = bot_state.get("simulated_balance", 10000.0)
@@ -289,7 +311,6 @@ def force_close_trade():
     print(f"Predicted Signal: {direction} ({trend_status})")
     print("==================================================\n")
     
-    # Save to completed trades history
     bot_state["trade_history"].append({
         "symbol": symbol,
         "exit_time": float(time.time()),
@@ -306,9 +327,8 @@ def force_close_trade():
         "leverage": float(leverage)
     })
     
-    # Mark the corresponding prediction as evaluated
     for p in bot_state["prediction_history"]:
-        if p.get("interval") == interval and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
+        if p.get("interval") == interval and p.get("symbol") == symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
             p["evaluation"] = {
                 "evaluated": True,
                 "exit_price": float(actual_price),
@@ -319,9 +339,12 @@ def force_close_trade():
             break
             
     save_history()
-    bot_state[active_trade_key] = None
     
-    return jsonify({"status": "success", "message": f"Successfully force-closed {tf.upper()} active trade at ${actual_price:.2f}"})
+    # Remove from active trades
+    active_trades_list = [t for t in active_trades_list if not (t.get("symbol", "").upper() == symbol)]
+    bot_state[active_trade_key] = active_trades_list
+    
+    return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
 
 @app.route("/")
 def index():
@@ -540,20 +563,24 @@ def on_message(ws, message):
     try:
         data = json.loads(message)
         if "data" in data and isinstance(data["data"], dict):
-            price = data["data"].get("lastPrice")
-            if price:
-                live_price = float(price)
-                last_ws_update_time = time.time()
-                bot_state["live_price"] = live_price
-                bot_state["last_update"] = last_ws_update_time
+            price_str = data["data"].get("lastPrice")
+            sym = data["data"].get("symbol")
+            if price_str and sym:
+                val = float(price_str)
+                bot_state[f"live_price_{sym}"] = val
+                if sym == "BTCUSDT":
+                    live_price = val
+                    bot_state["live_price"] = val
+                    last_ws_update_time = time.time()
+                    bot_state["last_update"] = last_ws_update_time
     except Exception:
         pass
 
 def on_open(ws):
-    print(f"Connected to Bybit WebSocket for {SYMBOL}")
+    print("Connected to Bybit WebSocket for multi-asset prices")
     ws.send(json.dumps({
         "op": "subscribe",
-        "args": [f"tickers.{SYMBOL}"]
+        "args": [f"tickers.{s}" for s in SUPPORTED_SYMBOLS]
     }))
 
 def on_close(ws, close_status_code, close_msg):
@@ -1019,6 +1046,30 @@ def get_news_sentiment():
     except Exception as e:
         print(f"[News/Sentiment] Error executing FinBERT pipeline: {e}")
     return "Neutral", []
+
+def run_news_sentiment_updater():
+    global cached_news_sentiment, cached_news_titles
+    print("[News/Sentiment] Background updater thread started.")
+    try:
+        sentiment, titles = get_news_sentiment()
+        with news_sentiment_lock:
+            cached_news_sentiment = sentiment
+            cached_news_titles = titles
+        print(f"[News/Sentiment] Startup background update success: {sentiment} (based on {len(titles)} inputs).")
+    except Exception as e:
+        print(f"[News/Sentiment] Startup background update error: {e}")
+        
+    while True:
+        time.sleep(15 * 60)
+        try:
+            print("[News/Sentiment] Triggering periodic background news sentiment update...")
+            sentiment, titles = get_news_sentiment()
+            with news_sentiment_lock:
+                cached_news_sentiment = sentiment
+                cached_news_titles = titles
+            print(f"[News/Sentiment] Background update success: {sentiment} (based on {len(titles)} inputs).")
+        except Exception as e:
+            print(f"[News/Sentiment] Error in background news sentiment update: {e}")
 
 # =========================
 # ORDER BOOK PRESSURE
@@ -1579,12 +1630,17 @@ def main():
         for iv in ["60", "120", "240", "360"]:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
-            active_trade = bot_state[active_trade_key]
+            active_trades_list = bot_state.get(active_trade_key, [])
+            if not isinstance(active_trades_list, list):
+                active_trades_list = [] if active_trades_list is None else [active_trades_list]
+                bot_state[active_trade_key] = active_trades_list
             
-            if active_trade is not None:
+            updated_trades = []
+            for active_trade in active_trades_list:
                 active_symbol = active_trade.get("symbol", "BTCUSDT")
                 symbol_price = get_fallback_price(active_symbol)
                 if symbol_price is None:
+                    updated_trades.append(active_trade)
                     continue
                 current_price = symbol_price
                 
@@ -1644,7 +1700,7 @@ def main():
                 mins, secs = divmod(remaining_seconds, 60)
                 countdown_str = f"{mins:02d}m {secs:02d}s"
 
-                print(f"[{iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
+                print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 exit_reason = None
                 if direction == "Bullish":
@@ -1717,8 +1773,21 @@ def main():
                         "balance": float(new_bal),
                         "leverage": float(leverage)
                     })
+                    
+                    for p in bot_state["prediction_history"]:
+                        if p.get("interval") == str(iv) and p.get("symbol") == active_symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
+                            p["evaluation"] = {
+                                "evaluated": True,
+                                "exit_price": float(actual_price),
+                                "change": float(actual_change if direction == "Bullish" else -actual_change),
+                                "change_pct": float(raw_return_pct),
+                                "success": bool(signal_correct)
+                            }
+                            break
                     save_history()
-                    bot_state[active_trade_key] = None
+                else:
+                    updated_trades.append(active_trade)
+            bot_state[active_trade_key] = updated_trades
 
         # 3. Check for completed candle closes to search for a new signal
 
@@ -1777,13 +1846,13 @@ def main():
         for iv in ["60", "120", "240", "360"]:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
-            active_trade = bot_state[active_trade_key]
+            active_trades_list = bot_state.get(active_trade_key, [])
+            if not isinstance(active_trades_list, list):
+                active_trades_list = [] if active_trades_list is None else [active_trades_list]
+                bot_state[active_trade_key] = active_trades_list
             
-            if active_trade is not None:
-                symbol = active_trade.get("symbol", "BTCUSDT")
-            else:
-                symbol_idx = int(time.time() / 10) % len(SUPPORTED_SYMBOLS)
-                symbol = SUPPORTED_SYMBOLS[symbol_idx]
+            symbol_idx = int(time.time() / 10) % len(SUPPORTED_SYMBOLS)
+            symbol = SUPPORTED_SYMBOLS[symbol_idx]
                 
             try:
                 df_raw = get_history(symbol=symbol, interval=iv, limit=300)
@@ -1918,23 +1987,25 @@ def main():
                             
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"
-                            active_trade = bot_state[active_trade_key]
+                            active_trades_list = bot_state.get(active_trade_key, [])
+                            
+                            has_active_symbol_trade = any(t.get("symbol") == symbol for t in active_trades_list)
 
-                            if active_trade is not None:
+                            if has_active_symbol_trade:
                                 status_msg = "Skipped (Trade Active)"
-                                print(f"[{iv}m] New completed candle detected, but trade entry skipped because a trade is already active.")
+                                print(f"[{symbol} {iv}m] New completed candle detected, but trade entry skipped because a trade is already active for this symbol.")
                             elif bot_state.get("circuit_breaker_active", False):
                                 status_msg = "Skipped (Circuit Breaker)"
-                                print(f"[{iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
+                                print(f"[{symbol} {iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
-                                print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
+                                print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
                             elif strong_conflict:
                                 status_msg = "Skipped (Contradiction)"
-                                print(f"[{iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
+                                print(f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
                             elif calibrated_confidence < dynamic_conf_threshold:
                                 status_msg = "Skipped (Low Confidence)"
-                                print(f"[{iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
+                                print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
                             else:
                                 # Check news window guard before running full confluence
                                 in_news_window, news_event = is_high_impact_news_window()
@@ -1942,9 +2013,9 @@ def main():
                                     status_msg = "Skipped (News Window)"
                                     print(f"[{iv}m] Prediction skipped: High-impact event window ({news_event}). Trading paused.")
                                 else:
-                                    # Confluence checks
-                                    print(f"[{iv}m] Triggering pre-trade confluence analysis...")
-                                    news_sentiment, latest_titles = get_news_sentiment()
+                                    with news_sentiment_lock:
+                                        news_sentiment = cached_news_sentiment
+                                        latest_titles = cached_news_titles
                                     all_pass, confluence_results = check_pre_trade_confluence(
                                         latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
                                     )
@@ -2032,7 +2103,8 @@ def main():
                                             "kelly_fraction": float(kelly_fraction),
                                             "leverage": float(leverage_val)
                                         }
-                                        bot_state[active_trade_key] = active_trade
+                                        active_trades_list.append(active_trade)
+                                        bot_state[active_trade_key] = active_trades_list
                                         
                                         print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
                                         print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x\n")
@@ -2084,6 +2156,8 @@ def main():
 
 if __name__ == "__main__":
     import threading
+    # Start background news sentiment updater thread
+    threading.Thread(target=run_news_sentiment_updater, daemon=True).start()
     # Start Bybit WebSocket feed in a background thread
     threading.Thread(target=start_ws, daemon=True).start()
     # Start local web dashboard server in a background thread

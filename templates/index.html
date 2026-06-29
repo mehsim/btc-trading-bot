@@ -816,11 +816,24 @@
         <!-- KPI Dashboard -->
         <div class="dashboard-grid">
             <!-- Current Price -->
-            <div class="card">
-                <div class="card-title">Live Spot Price</div>
-                <div class="card-value" id="live-price">$0.00</div>
-                <div class="card-subtitle">
-                    <span id="price-trend-icon" style="font-size: 8px;">●</span> Bybit Spot BTCUSDT Tickers
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div class="card-title" style="margin-bottom: 2px;">Live Spot Prices</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; padding: 2px 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">BTC:</span>
+                        <span id="live-price-btc" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">ETH:</span>
+                        <span id="live-price-eth" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">SOL:</span>
+                        <span id="live-price-sol" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
+                </div>
+                <div class="card-subtitle" style="font-size: 9px; opacity: 0.8; display: flex; align-items: center; gap: 4px;">
+                    <span id="price-trend-icon" style="font-size: 8px;">●</span> Bybit Live Spot Feed
                 </div>
             </div>
 
@@ -1189,6 +1202,8 @@
         let predictionCurrentPage = 1;
         const predictionsPerPage = 10;
         let activeTradesState = {};
+        let lastPrices = {BTC: null, ETH: null, SOL: null};
+        let globalDataCache = null;
 
         function prevPredictionPage() {
             if (predictionCurrentPage > 1) {
@@ -1258,19 +1273,24 @@
             renderPredictions();
         }
 
-        function forceCloseTrade(interval) {
+        function forceCloseTrade(interval, symbol) {
             const tfMap = { '60': '1H', '120': '2H', '240': '4H', '360': '6H' };
             const tfLabel = tfMap[interval] || interval;
-            if (confirm(`Are you sure you want to manually close the active ${tfLabel} trade at the current live price?`)) {
+            const symLabel = symbol ? symbol.replace("USDT", "") : "active";
+            if (confirm(`Are you sure you want to manually close the ${tfLabel} ${symLabel} position?`)) {
                 fetch('/api/close_trade', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ interval: String(interval) })
+                    body: JSON.stringify({ 
+                        interval: String(interval),
+                        symbol: symbol || ""
+                    })
                 })
                     .then(response => response.json())
                     .then(res => {
                         if (res.status === 'success') {
                             alert(res.message);
+                            closeActiveTradesModal();
                             updateDashboard();
                         } else {
                             alert(res.message || "Failed to close trade.");
@@ -1460,11 +1480,14 @@
                     // Format Status to look nice
                     let statusLabel = p.status;
                     if (p.status === "Traded") {
-                        const isActive = activeTradesState[p.interval] !== null && activeTradesState[p.interval] !== undefined;
+                        let isActive = false;
+                        if (Array.isArray(activeTradesState[p.interval])) {
+                            isActive = activeTradesState[p.interval].some(t => t.symbol === p.symbol);
+                        }
                         if (isActive) {
                             statusLabel = `<div style="display: flex; align-items: center; gap: 8px;">
                                 <span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>
-                                <button onclick="event.stopPropagation(); forceCloseTrade('${p.interval}')" style="padding: 3px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
+                                <button onclick="event.stopPropagation(); forceCloseTrade('${p.interval}', '${p.symbol}')" style="padding: 3px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
                             </div>`;
                         } else {
                             statusLabel = `<span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>`;
@@ -1537,18 +1560,37 @@
                     }
 
                     // 2. Update Live Price
+                    globalDataCache = data;
                     const currentPrice = data.live_price;
-                    if (currentPrice) {
-                        const priceElem = document.getElementById("live-price");
-                        priceElem.innerText = `$${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    const symbols = ["BTC", "ETH", "SOL"];
+                    
+                    symbols.forEach(sym => {
+                        const val = data[`live_price_${sym}USDT`];
+                        const elem = document.getElementById(`live-price-${sym.toLowerCase()}`);
+                        if (val && elem) {
+                            elem.innerText = `$${val.toLocaleString(undefined, { 
+                                minimumFractionDigits: 2, 
+                                maximumFractionDigits: 2 
+                            })}`;
+                            
+                            const prevVal = lastPrices[sym];
+                            if (prevVal !== null) {
+                                if (val > prevVal) {
+                                    elem.style.color = "var(--accent-green)";
+                                } else if (val < prevVal) {
+                                    elem.style.color = "var(--accent-red)";
+                                }
+                            }
+                            lastPrices[sym] = val;
+                        }
+                    });
 
+                    if (currentPrice) {
                         const trendIcon = document.getElementById("price-trend-icon");
                         if (lastPrice !== null) {
                             if (currentPrice > lastPrice) {
-                                priceElem.style.color = "var(--accent-green)";
                                 trendIcon.style.color = "var(--accent-green)";
                             } else if (currentPrice < lastPrice) {
-                                priceElem.style.color = "var(--accent-red)";
                                 trendIcon.style.color = "var(--accent-red)";
                             }
                         }
@@ -1556,11 +1598,15 @@
                     }
 
                     activeTradesState = {
-                        "60": data.active_trade_1h,
-                        "120": data.active_trade_2h,
-                        "240": data.active_trade_4h,
-                        "360": data.active_trade_6h
+                        "60": data.active_trade_1h || [],
+                        "120": data.active_trade_2h || [],
+                        "240": data.active_trade_4h || [],
+                        "360": data.active_trade_6h || []
                     };
+
+                    if (document.getElementById("active-trades-modal") && document.getElementById("active-trades-modal").style.display === "flex") {
+                        renderActiveTradesModalContent();
+                    }
 
                     // 3 & 4. Update Timeframe Strategies (1h, 2h, 4h, 6h)
                     const timeframes = ["1h", "2h", "4h", "6h"];
@@ -1611,71 +1657,29 @@
                             subtitleElem.innerText = `Calibrated Conf: 0%`;
                         }
 
-                        const activeTrade = data[`active_trade_${tf}`];
+                        const activeTradesList = data[`active_trade_${tf}`] || [];
                         const positionContainer = document.getElementById(`position-container-${tf}`);
                         const levBadge = document.getElementById(`leverage-badge-${tf}`);
+                        
                         if (levBadge) {
-                            levBadge.innerText = activeTrade && activeTrade.leverage ? ` (${activeTrade.leverage.toFixed(1)}x)` : '';
+                            levBadge.innerText = '';
                         }
-                        if (activeTrade && positionContainer) {
-                            const dirClass = activeTrade.direction === "Bullish" ? "color-bullish" : "color-bearish";
-                            const entryPrice = activeTrade.entry_price || 0;
-                            const exitTarget = activeTrade.take_profit || 0;
-                            const stopTarget = activeTrade.stop_loss || 0;
-
-                            let pnlVal = 0;
-                            let pnlPct = 0;
-                            if (currentPrice) {
-                                if (activeTrade.direction === "Bullish") {
-                                    pnlVal = currentPrice - entryPrice;
-                                } else {
-                                    pnlVal = entryPrice - currentPrice;
-                                }
-                                pnlPct = (pnlVal / entryPrice) * 100;
-                            }
-
-                            const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
-                            const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
-
-                            const remainingSeconds = Math.max(0, Math.floor(activeTrade.end_time - (Date.now() / 1000)));
-                            const mins = Math.floor(remainingSeconds / 60);
-                            const secs = remainingSeconds % 60;
-                            const countdownStr = `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
-
-                            positionContainer.innerHTML = `
-                                <div class="active-position-details" style="font-size: 11px; display: flex; flex-direction: column; gap: 4px;">
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span style="opacity: 0.6;">Asset / Position:</span>
-                                        <span class="${dirClass}" style="font-weight: 800;">${(activeTrade.symbol || "BTCUSDT").replace("USDT", "")} ${activeTrade.direction.toUpperCase()}</span>
-                                    </div>
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span style="opacity: 0.6;">Entry Price:</span>
-                                        <span>$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                    </div>
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span style="opacity: 0.6;">TP / SL:</span>
-                                        <span>
-                                            <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(1)}</span> / 
-                                            <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(1)}</span>
+                        
+                        if (positionContainer) {
+                            if (activeTradesList.length > 0) {
+                                const count = activeTradesList.length;
+                                const countText = count === 1 ? "1 Active Position" : `${count} Active Positions`;
+                                positionContainer.innerHTML = `
+                                    <div onclick="openActiveTradesModal('${tf}')" style="cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; background: rgba(139,92,246,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(139,92,246,0.1)'" onmouseout="this.style.background='rgba(139,92,246,0.05)'">
+                                        <span style="color: var(--accent-purple); font-weight: 800; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                                            💼 ${countText}
                                         </span>
+                                        <span style="font-size: 10px; color: var(--text-muted); font-weight: 600;">(Click to view details / close)</span>
                                     </div>
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span style="opacity: 0.6;">Time Left:</span>
-                                        <span style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</span>
-                                    </div>
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span style="opacity: 0.6;">Leverage:</span>
-                                        <span style="color: var(--accent-orange); font-weight: 700;">${activeTrade.leverage ? activeTrade.leverage.toFixed(1) + 'x' : '1.0x'}</span>
-                                    </div>
-                                    <div style="display: flex; justify-content: space-between; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06);">
-                                        <span style="opacity: 0.8; font-weight: 700;">PnL:</span>
-                                        <span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
-                                    </div>
-                                    <button onclick="const tfIntervalMap = {'1h': '60', '2h': '120', '4h': '240', '6h': '360'}; forceCloseTrade(tfIntervalMap['${tf}'])" style="margin-top: 8px; width: 100%; padding: 6px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Manual Close Position</button>
-                                </div>
-                            `;
-                        } else if (positionContainer) {
-                            positionContainer.innerHTML = `<div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>`;
+                                `;
+                            } else {
+                                positionContainer.innerHTML = `<div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>`;
+                            }
                         }
                     });
 
@@ -1995,6 +1999,97 @@
                 `;
             }
         }
+
+        const tfIntervalMap = {"1h": "60", "2h": "120", "4h": "240", "6h": "360"};
+        let activeTradesModalTf = "";
+
+        function openActiveTradesModal(tf) {
+            activeTradesModalTf = tf;
+            document.getElementById("active-trades-modal-title").innerText = `💼 Active Parallel Trades (${tf.toUpperCase()})`;
+            renderActiveTradesModalContent();
+            document.getElementById("active-trades-modal").style.display = "flex";
+        }
+
+        function closeActiveTradesModal() {
+            document.getElementById("active-trades-modal").style.display = "none";
+        }
+
+        function renderActiveTradesModalContent() {
+            const container = document.getElementById("active-trades-modal-content");
+            if (!container) return;
+
+            const interval = tfIntervalMap[activeTradesModalTf];
+            const trades = activeTradesState[interval] || [];
+
+            if (trades.length === 0) {
+                container.innerHTML = `<div style="text-align: center; opacity: 0.6; font-size: 13px; padding: 20px 0;">No active positions for this timeframe.</div>`;
+                return;
+            }
+
+            let html = "";
+            trades.forEach((trade, idx) => {
+                const dirClass = trade.direction === "Bullish" ? "color-bullish" : "color-bearish";
+                const entryPrice = trade.entry_price || 0;
+                const exitTarget = trade.take_profit || 0;
+                const stopTarget = trade.stop_loss || 0;
+                const symbol = trade.symbol || "BTCUSDT";
+
+                const livePriceKey = `live_price_${symbol}`;
+                const currentPriceVal = globalDataCache && globalDataCache[livePriceKey] ? globalDataCache[livePriceKey] : (symbol === "BTCUSDT" ? lastPrice : null);
+
+                let pnlVal = 0;
+                let pnlPct = 0;
+                if (currentPriceVal) {
+                    if (trade.direction === "Bullish") {
+                        pnlVal = currentPriceVal - entryPrice;
+                    } else {
+                        pnlVal = entryPrice - currentPriceVal;
+                    }
+                    pnlPct = (pnlVal / entryPrice) * 100;
+                }
+
+                const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
+                const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
+
+                const remainingSeconds = Math.max(0, Math.floor(trade.end_time - (Date.now() / 1000)));
+                const mins = Math.floor(remainingSeconds / 60);
+                const secs = remainingSeconds % 60;
+                const countdownStr = `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
+
+                html += `
+                    <div style="border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.01);">
+                        <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 13px; margin-bottom: 8px; border-bottom: 1px dashed rgba(255,255,255,0.06); padding-bottom: 6px;">
+                            <span class="${dirClass}">${symbol.replace("USDT", "")} ${trade.direction.toUpperCase()}</span>
+                            <span style="color: var(--accent-orange);">${trade.leverage ? trade.leverage.toFixed(1) + 'x' : '1.0x'}</span>
+                        </div>
+                        <div style="font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary);">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Entry Price:</span>
+                                <span style="color: var(--text-primary); font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>TP / SL:</span>
+                                <span>
+                                    <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(1)}</span> / 
+                                    <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(1)}</span>
+                                </span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Time Left:</span>
+                                <span style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.04);">
+                                <span style="font-weight: 700;">PnL:</span>
+                                <span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
+                            </div>
+                        </div>
+                        <button onclick="forceCloseTrade('${interval}', '${symbol}')" style="margin-top: 10px; width: 100%; padding: 6px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Manual Close Position</button>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = `<div style="display: flex; flex-direction: column; gap: 12px;">${html}</div>`;
+        }
     </script>
 
     <!-- Trade Details Modal Overlay -->
@@ -2054,6 +2149,30 @@
             <div
                 style="padding:12px 20px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02); display:flex; justify-content:flex-end;">
                 <button onclick="closeDailyPnlModal()"
+                    style="padding:8px 16px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-weight:700; font-size:12px; transition:transform 0.1s;"
+                    onmouseover="this.style.transform='scale(1.02)'"
+                    onmouseout="this.style.transform='scale(1)'">Close</button>
+            </div>
+        </div>
+    <!-- Active Parallel Trades Modal Overlay -->
+    <div id="active-trades-modal"
+        style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.85); backdrop-filter:blur(5px); justify-content:center; align-items:center;">
+        <div
+            style="background:var(--card-bg); border:1px solid rgba(139,92,246,0.3); border-radius:15px; width:95%; max-width:500px; box-shadow:0 0 25px rgba(139,92,246,0.25); display:flex; flex-direction:column; overflow:hidden; font-family:'Outfit', sans-serif; color:var(--text-primary);">
+            <div
+                style="padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02);">
+                <span id="active-trades-modal-title" style="font-size:16px; font-weight:800; color:var(--accent-purple);">💼 Active Parallel Trades</span>
+                <button onclick="closeActiveTradesModal()"
+                    style="background:none; border:none; color:var(--text-secondary); font-size:20px; cursor:pointer; font-weight:700; outline:none; transition:color 0.2s;"
+                    onmouseover="this.style.color='var(--accent-red)'"
+                    onmouseout="this.style.color='var(--text-secondary)'">&times;</button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:16px; max-height:400px; overflow-y:auto;" id="active-trades-modal-content">
+                <!-- Loaded dynamically -->
+            </div>
+            <div
+                style="padding:12px 20px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02); display:flex; justify-content:flex-end;">
+                <button onclick="closeActiveTradesModal()"
                     style="padding:8px 16px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-weight:700; font-size:12px; transition:transform 0.1s;"
                     onmouseover="this.style.transform='scale(1.02)'"
                     onmouseout="this.style.transform='scale(1)'">Close</button>
