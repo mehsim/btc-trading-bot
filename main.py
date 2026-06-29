@@ -21,7 +21,7 @@ from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import MFIIndicator
 from data import get_history, merge_derivatives_sentiment_features
 import xml.etree.ElementTree as ET
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 # ==========================================
 # WEB DASHBOARD CONFIGURATION & STATE
