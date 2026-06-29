@@ -1370,6 +1370,20 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if trend_align_pass:
         total_score += weight_align
 
+    # ======= CHECK 14: Open Interest Delta Confirmation (Weight: 2) =======
+    weight_oi = 2
+    try:
+        oi_delta = df_1h["open_interest_pct_change"].iloc[-1] * 100.0  # as percentage
+        oi_pass = (oi_delta >= -2.0)
+        detail_msg = f"OI Delta: {oi_delta:+.2f}% (Req >= -2.00% to confirm momentum, Safe)" if oi_pass else f"OI Delta: {oi_delta:+.2f}% (< -2.00%, Position unwinding / exhaustion)"
+    except Exception as e:
+        oi_pass = True
+        detail_msg = f"Skipped (Error: {e})"
+    results["Open_Interest_Delta"] = {"pass": oi_pass, "detail": detail_msg, "weight": weight_oi}
+    max_score += weight_oi
+    if oi_pass:
+        total_score += weight_oi
+
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
     score_threshold = 75.0
@@ -1727,12 +1741,15 @@ def main():
                                 active_model_trend = models_tf["ranging"]["trend"]
                                 regime_name = "Ranging (ADX < 20)"
 
-                            pred_pct = float(active_model_price.predict(X_live)[0])
+                            # Refined regime switching voting weights (Trending: CatBoost dominant; Ranging: LightGBM dominant)
+                            ensemble_weights = [0.3, 0.2, 0.5] if adx_regime >= 20.0 else [0.3, 0.5, 0.2]
+                            
+                            pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
                             pred_change = pred_pct * float(latest_candle["close"])
                             predicted_price = float(latest_candle["close"]) + pred_change
                             
                             # 3-class probabilities
-                            probs = active_model_trend.predict_proba(X_live)[0]
+                            probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
                             prob_bearish = float(probs[0])
                             prob_neutral = float(probs[1])
                             prob_bullish = float(probs[2])
@@ -1870,11 +1887,16 @@ def main():
                                         atr_norm_val = latest_candle["ATR_norm"]
                                         atr_dollars = atr_norm_val * latest_candle["close"]
                                         
-                                        # Regime-Adaptive Take-Profit Multiplier
-                                        if latest_candle["ADX"] >= 20.0:
-                                            tp_multiplier = 1.50
-                                        else:
-                                            tp_multiplier = 1.00
+                                        # Volatility (ATR)-Adaptive Take-Profit Multiplier
+                                        # High Volatility (ATR_norm >= 0.008) -> Smaller targets to lock profits
+                                        # Low Volatility (ATR_norm <= 0.003) -> Larger targets to capture extensions
+                                        base_tp = 2.0 if latest_candle["ADX"] >= 20.0 else 1.2
+                                        vol_factor = 1.0
+                                        if atr_norm_val > 0:
+                                            vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
+                                            vol_factor = max(0.75, min(1.5, vol_factor))
+                                        tp_multiplier = round(base_tp * vol_factor, 2)
+                                        print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                         
                                         if ml_trend == "Bullish":
                                             stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars

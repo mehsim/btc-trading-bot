@@ -59,15 +59,20 @@ class EnsembleClassifier:
         self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
         return self
 
-    def predict_proba(self, X):
+    def predict_proba(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
         xgb_prob = self.xgb_model.predict_proba(X_arr)
         lgb_prob = self.lgb_model.predict_proba(X_arr)
         cat_prob = self.cat_model.predict_proba(X_arr)
-        return (xgb_prob + lgb_prob + cat_prob) / 3.0
+        if weights is None:
+            return (xgb_prob + lgb_prob + cat_prob) / 3.0
+        else:
+            w = np.array(weights, dtype=float)
+            w = w / np.sum(w)
+            return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
 
-    def predict(self, X):
-        probs = self.predict_proba(X)
+    def predict(self, X, weights=None):
+        probs = self.predict_proba(X, weights=weights)
         return np.argmax(probs, axis=1)
 
 class EnsembleRegressor:
@@ -86,12 +91,17 @@ class EnsembleRegressor:
         self.cat_model.fit(X_arr, y)
         return self
 
-    def predict(self, X):
+    def predict(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
         xgb_pred = self.xgb_model.predict(X_arr)
         lgb_pred = self.lgb_model.predict(X_arr)
         cat_pred = self.cat_model.predict(X_arr)
-        return (xgb_pred + lgb_pred + cat_pred) / 3.0
+        if weights is None:
+            return (xgb_pred + lgb_pred + cat_pred) / 3.0
+        else:
+            w = np.array(weights, dtype=float)
+            w = w / np.sum(w)
+            return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
 
 # ==========================================
 # NATIVE SAVING/LOADING (TEXT/JSON ONLY)
