@@ -1318,7 +1318,7 @@
                     
                     let refPriceStr = `$${p.ref_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
                     let expChangeSign = p.predicted_change >= 0 ? '+' : '';
-                    let expChangeStr = `${expChangeSign}${p.predicted_change.toFixed(2)}`;
+                    let expChangeStr = `${expChangeSign}${p.predicted_change.toFixed(3)}`;
 
                     let exitPriceStr = "-";
                     let diffStr = "-";
@@ -1482,7 +1482,7 @@
                             }
 
                             const confPct = pred.calibrated_confidence * 100;
-                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${pred.predicted_change >= 0 ? '+' : ''}${pred.predicted_change.toFixed(2)}`;
+                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${pred.predicted_change >= 0 ? '+' : ''}${pred.predicted_change.toFixed(3)}`;
                             barElem.style.width = `${confPct}%`;
                         } else if (predElem && barElem && subtitleElem) {
                             predElem.innerText = "No Signal";

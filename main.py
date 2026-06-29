@@ -78,6 +78,8 @@ bot_state = {
     "win_rate_by_tf": {"60": None, "120": None, "240": None, "360": None}
 }
 
+HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
+
 def save_history():
     # Cap prediction history at 500 entries
     if len(bot_state["prediction_history"]) > 500:
@@ -96,15 +98,15 @@ def save_history():
         "prediction_history": bot_state["prediction_history"]
     }
     try:
-        with open("dashboard_history.json", "w") as f:
+        with open(HISTORY_FILE, "w") as f:
             json.dump(data, f)
     except Exception as e:
         print(f"Error saving history to disk: {e}")
 
 def load_history():
-    if os.path.exists("dashboard_history.json"):
+    if os.path.exists(HISTORY_FILE):
         try:
-            with open("dashboard_history.json", "r") as f:
+            with open(HISTORY_FILE, "r") as f:
                 data = json.load(f)
                 bot_state["simulated_balance"] = data.get("simulated_balance", 10000.0)
                 bot_state["trade_history"] = [t for t in data.get("trade_history", []) if str(t.get("interval", "60")) not in ["5", "15"]]
@@ -115,7 +117,7 @@ def load_history():
                 for p in bot_state["prediction_history"]:
                     if "interval" not in p:
                         p["interval"] = "60"
-                print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from dashboard_history.json")
+                print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
 
@@ -1640,7 +1642,7 @@ def main():
                                 "calibrated_confidence": calibrated_confidence
                             }
 
-                            print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.2f}")
+                            print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
                             # Determine dynamic confidence threshold based on regime and volatility
                             atr_norm_val = latest_candle["ATR_norm"]
@@ -1696,7 +1698,7 @@ def main():
                                 print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
                             elif strong_conflict:
                                 status_msg = "Skipped (Contradiction)"
-                                print(f"[{iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.2f} [{pred_pct:.3f}%]).")
+                                print(f"[{iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
                             elif calibrated_confidence < dynamic_conf_threshold:
                                 status_msg = "Skipped (Low Confidence)"
                                 print(f"[{iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
@@ -1725,7 +1727,7 @@ def main():
                                     print("--------------------------------------------------")
                                     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {SYMBOL}")
                                     print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
-                                    print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.2f} [{expected_pct_change:.3f}%])")
+                                    print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.3f} [{expected_pct_change:.3f}%])")
                                     print("--------------------------------------------------")
                                     print("Checks Status:")
                                     for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
