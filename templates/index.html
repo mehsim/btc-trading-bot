@@ -828,7 +828,7 @@
             <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
-                        <span>1H STRATEGY</span>
+                        <span>1H STRATEGY<span id="leverage-badge-1h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-1h"
                             style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
@@ -852,7 +852,7 @@
             <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
-                        <span>2H STRATEGY</span>
+                        <span>2H STRATEGY<span id="leverage-badge-2h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-2h"
                             style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
@@ -876,7 +876,7 @@
             <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
-                        <span>4H STRATEGY</span>
+                        <span>4H STRATEGY<span id="leverage-badge-4h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-4h"
                             style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
@@ -900,7 +900,7 @@
             <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
-                        <span>6H STRATEGY</span>
+                        <span>6H STRATEGY<span id="leverage-badge-6h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-6h"
                             style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
@@ -1599,6 +1599,10 @@
 
                         const activeTrade = data[`active_trade_${tf}`];
                         const positionContainer = document.getElementById(`position-container-${tf}`);
+                        const levBadge = document.getElementById(`leverage-badge-${tf}`);
+                        if (levBadge) {
+                            levBadge.innerText = activeTrade && activeTrade.leverage ? ` (${activeTrade.leverage.toFixed(1)}x)` : '';
+                        }
                         if (activeTrade && positionContainer) {
                             const dirClass = activeTrade.direction === "Bullish" ? "color-bullish" : "color-bearish";
                             const entryPrice = activeTrade.entry_price || 0;
