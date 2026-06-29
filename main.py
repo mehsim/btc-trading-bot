@@ -1714,7 +1714,7 @@ def main():
                 print(f"[Circuit Breaker] ACTIVATED — daily drawdown {daily_dd_pct:.2f}% >= 5%. Trading paused for today.")
             elif daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
                 bot_state["daily_goal_reached"] = True
-                print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Trading paused for today to secure profits.")
+                print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
             elif daily_dd_pct < 5.0 and daily_profit < 1000.0:
                 bot_state["circuit_breaker_active"] = False
                 bot_state["daily_goal_reached"] = False
@@ -1883,9 +1883,6 @@ def main():
                             elif bot_state.get("circuit_breaker_active", False):
                                 status_msg = "Skipped (Circuit Breaker)"
                                 print(f"[{iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
-                            elif bot_state.get("daily_goal_reached", False):
-                                status_msg = "Skipped (Daily Goal Reached)"
-                                print(f"[{iv}m] Prediction skipped: Daily profit goal of $1000 reached. Trading paused for today.")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
