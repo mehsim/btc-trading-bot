@@ -1191,9 +1191,13 @@
         function renderTrades() {
             const tradesTbody = document.getElementById("trade-history-rows");
 
+            // Filter to show only 1h, 2h, 4h, and 6h trades
+            const validIntervals = ['60', '120', '240', '360'];
+            const activeTradesOnly = allTrades.filter(t => validIntervals.includes(String(t.interval || '60')));
+
             // Calculate stats
-            const total = allTrades.length;
-            const successCount = allTrades.filter(t => t.success).length;
+            const total = activeTradesOnly.length;
+            const successCount = activeTradesOnly.filter(t => t.success).length;
             const failedCount = total - successCount;
             const winRate = total > 0 ? (successCount / total * 100) : 0;
 
@@ -1203,7 +1207,7 @@
             document.getElementById("stats-winrate").innerText = `${winRate.toFixed(1)}%`;
 
             // Filter trades list
-            let filtered = [...allTrades];
+            let filtered = [...activeTradesOnly];
             if (activeFilter === 'success') {
                 filtered = filtered.filter(t => t.success);
             } else if (activeFilter === 'failed') {

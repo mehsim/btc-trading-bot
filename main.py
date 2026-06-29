@@ -107,11 +107,11 @@ def load_history():
             with open("dashboard_history.json", "r") as f:
                 data = json.load(f)
                 bot_state["simulated_balance"] = data.get("simulated_balance", 10000.0)
-                bot_state["trade_history"] = data.get("trade_history", [])
+                bot_state["trade_history"] = [t for t in data.get("trade_history", []) if str(t.get("interval", "60")) not in ["5", "15"]]
                 for t in bot_state["trade_history"]:
                     if "interval" not in t:
                         t["interval"] = "60"
-                bot_state["prediction_history"] = data.get("prediction_history", [])
+                bot_state["prediction_history"] = [p for p in data.get("prediction_history", []) if str(p.get("interval", "60")) not in ["5", "15"]]
                 for p in bot_state["prediction_history"]:
                     if "interval" not in p:
                         p["interval"] = "60"
