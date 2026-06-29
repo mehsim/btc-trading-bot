@@ -765,7 +765,18 @@ def evaluate_predictions(df_completed, interval):
         ts_map[int(row["timestamp"])] = float(row["close"])
 
     for pred in bot_state["prediction_history"]:
-        if pred.get("interval") == interval and not pred["evaluation"]["evaluated"]:
+        eval_dict = pred.get("evaluation")
+        if eval_dict is None:
+            eval_dict = {
+                "evaluated": False,
+                "exit_price": None,
+                "change": None,
+                "change_pct": None,
+                "success": None
+            }
+            pred["evaluation"] = eval_dict
+            
+        if pred.get("interval") == interval and not eval_dict.get("evaluated"):
             interval_mins = int(interval)
             lookahead = 10
             target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000 * lookahead)
