@@ -7,7 +7,9 @@
     <title>BTC Trading Bot Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <style>
         :root {
             /* Harmonious Dark Palette */
@@ -15,7 +17,7 @@
             --card-bg: rgba(17, 24, 39, 0.55);
             --card-border: rgba(255, 255, 255, 0.05);
             --card-hover-border: rgba(255, 255, 255, 0.12);
-            
+
             --text-primary: #f9fafb;
             --text-secondary: #9ca3af;
             --text-muted: #6b7280;
@@ -33,7 +35,7 @@
             --glow-blue: 0 0 20px rgba(59, 130, 246, 0.25);
             --glow-orange: 0 0 20px rgba(249, 115, 22, 0.25);
             --glow-purple: 0 0 20px rgba(139, 92, 246, 0.25);
-            
+
             --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
@@ -188,10 +190,12 @@
                 transform: scale(0.95);
                 opacity: 0.5;
             }
+
             50% {
                 transform: scale(1.2);
                 opacity: 1;
             }
+
             100% {
                 transform: scale(0.95);
                 opacity: 0.5;
@@ -710,9 +714,17 @@
             border-radius: 50%;
         }
 
-        .btn-red { background-color: #ff5f56; }
-        .btn-yellow { background-color: #ffbd2e; }
-        .btn-green { background-color: #27c93f; }
+        .btn-red {
+            background-color: #ff5f56;
+        }
+
+        .btn-yellow {
+            background-color: #ffbd2e;
+        }
+
+        .btn-green {
+            background-color: #27c93f;
+        }
 
         .terminal-title {
             font-family: 'Fira Code', monospace;
@@ -774,10 +786,10 @@
         <!-- Header -->
         <header>
             <div class="logo-section">
-                <div class="logo-icon">𝝰</div>
+                <div class="logo-icon">U</div>
                 <div class="logo-text">
-                    <h1>Antigravity Trading</h1>
-                    <span>Algorithmic Confluence Bot</span>
+                    <h1>UBOTE</h1>
+                    <span>Accuracy Master</span>
                 </div>
             </div>
             <div class="header-actions">
@@ -791,11 +803,13 @@
         </header>
 
         <!-- Circuit Breaker Alert Banner -->
-        <div id="circuit-breaker-banner" style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px;">
+        <div id="circuit-breaker-banner"
+            style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 18px;">🛑</span>
             <div>
                 <strong style="color: var(--accent-red); font-size: 13px;">Circuit Breaker Active</strong>
-                <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">Daily drawdown exceeded 5% — trading paused until midnight UTC.</span>
+                <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">Daily drawdown exceeded
+                    5% — trading paused until midnight UTC.</span>
             </div>
         </div>
 
@@ -815,9 +829,11 @@
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>1H STRATEGY</span>
-                        <span id="regime-badge-1h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-1h"
+                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 5px;">No Signal
+                    </div>
                     <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px;">
                         Calibrated Conf: 0%
                     </div>
@@ -837,9 +853,11 @@
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>2H STRATEGY</span>
-                        <span id="regime-badge-2h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-2h"
+                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-2h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-value" id="model-prediction-2h" style="font-size: 20px; margin-top: 5px;">No Signal
+                    </div>
                     <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 11px;">
                         Calibrated Conf: 0%
                     </div>
@@ -859,9 +877,11 @@
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>4H STRATEGY</span>
-                        <span id="regime-badge-4h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-4h"
+                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-4h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-value" id="model-prediction-4h" style="font-size: 20px; margin-top: 5px;">No Signal
+                    </div>
                     <div class="card-subtitle" id="model-details-subtitle-4h" style="font-size: 11px;">
                         Calibrated Conf: 0%
                     </div>
@@ -881,9 +901,11 @@
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>6H STRATEGY</span>
-                        <span id="regime-badge-6h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-6h"
+                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-6h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-value" id="model-prediction-6h" style="font-size: 20px; margin-top: 5px;">No Signal
+                    </div>
                     <div class="card-subtitle" id="model-details-subtitle-6h" style="font-size: 11px;">
                         Calibrated Conf: 0%
                     </div>
@@ -905,7 +927,8 @@
             <div class="panel-column">
                 <!-- Confluence Panel -->
                 <div class="card">
-                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div class="section-header"
+                        style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                         <div class="section-title">📊 Pre-Trade Confluence Guard</div>
                         <div class="filter-tabs">
                             <button class="tab-btn active" onclick="setConfluenceTimeframe('1h', this)">1H</button>
@@ -915,7 +938,8 @@
                         </div>
                     </div>
                     <div class="section-desc">
-                        The bot triggers and validates all 13 confluence rules before executing a signal. Any single failure cancels the trade entry.
+                        The bot triggers and validates all 13 confluence rules before executing a signal. Any single
+                        failure cancels the trade entry.
                     </div>
                     <div class="confluence-grid" id="confluence-items-container">
                         <!-- Confluence Items loaded dynamically -->
@@ -936,11 +960,15 @@
                                 <div class="terminal-btn btn-green"></div>
                             </div>
                             <div class="terminal-title">bot-engine-stdout.log</div>
-                            <div id="log-time" style="font-family: 'Fira Code', monospace; font-size: 10px; color: var(--text-secondary);">00:00:00</div>
+                            <div id="log-time"
+                                style="font-family: 'Fira Code', monospace; font-size: 10px; color: var(--text-secondary);">
+                                00:00:00</div>
                         </div>
                         <div class="terminal-window" id="terminal-console-logs">
-                            <div class="terminal-line"><span class="terminal-timestamp">[System]</span> Initializing local dashboard link...</div>
-                            <div class="terminal-line"><span class="terminal-timestamp">[System]</span> Local dashboard connected. Fetching live state...</div>
+                            <div class="terminal-line"><span class="terminal-timestamp">[System]</span> Initializing
+                                local dashboard link...</div>
+                            <div class="terminal-line"><span class="terminal-timestamp">[System]</span> Local dashboard
+                                connected. Fetching live state...</div>
                         </div>
                     </div>
                 </div>
@@ -953,8 +981,10 @@
                 <div class="section-title">📜 Completed Trades History</div>
                 <div class="filter-tabs">
                     <button class="tab-btn active" onclick="setTradeFilter('all', this)">All Signals</button>
-                    <button class="tab-btn" onclick="setTradeFilter('success', this)" style="color: var(--accent-green);">Successful</button>
-                    <button class="tab-btn" onclick="setTradeFilter('failed', this)" style="color: var(--accent-red);">Unsuccessful</button>
+                    <button class="tab-btn" onclick="setTradeFilter('success', this)"
+                        style="color: var(--accent-green);">Successful</button>
+                    <button class="tab-btn" onclick="setTradeFilter('failed', this)"
+                        style="color: var(--accent-red);">Unsuccessful</button>
                 </div>
             </div>
 
@@ -980,21 +1010,29 @@
 
             <!-- Per-TF Win Rate Row -->
             <div style="display: flex; gap: 10px; margin-top: 10px;">
-                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                <div
+                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
                     <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">1H Win Rate</div>
-                    <div id="tf-winrate-60" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                    <div id="tf-winrate-60" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
+                    </div>
                 </div>
-                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                <div
+                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
                     <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">2H Win Rate</div>
-                    <div id="tf-winrate-120" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                    <div id="tf-winrate-120" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
+                    </div>
                 </div>
-                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                <div
+                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
                     <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">4H Win Rate</div>
-                    <div id="tf-winrate-240" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                    <div id="tf-winrate-240" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
+                    </div>
                 </div>
-                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                <div
+                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
                     <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">6H Win Rate</div>
-                    <div id="tf-winrate-360" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                    <div id="tf-winrate-360" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
+                    </div>
                 </div>
             </div>
 
@@ -1008,6 +1046,7 @@
                             <th>Entry Price</th>
                             <th>Exit Price</th>
                             <th>Invested (USD)</th>
+                            <th>Leverage</th>
                             <th>Profit/Loss</th>
                             <th>PnL (USD)</th>
                             <th>Outcome</th>
@@ -1016,7 +1055,9 @@
                     </thead>
                     <tbody id="trade-history-rows">
                         <tr>
-                            <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
+                            <td colspan="12"
+                                style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades
+                                completed in this session yet.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1025,7 +1066,8 @@
 
         <!-- ML Predictions Tracker Panel -->
         <div class="card">
-            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div class="section-header"
+                style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                 <div class="section-title">🔮 ML Predictions Tracker</div>
                 <div style="display: flex; gap: 15px;">
                     <div class="filter-tabs">
@@ -1035,9 +1077,12 @@
                         <button class="tab-btn" onclick="setPredictionTf('360', this)">6H</button>
                     </div>
                     <div class="filter-tabs">
-                        <button class="tab-btn active" id="pred-filter-all" onclick="setPredictionFilter('all', this)">All</button>
-                        <button class="tab-btn" id="pred-filter-traded" onclick="setPredictionFilter('traded', this)" style="color: var(--accent-green);">Traded</button>
-                        <button class="tab-btn" id="pred-filter-skipped" onclick="setPredictionFilter('skipped', this)" style="color: var(--text-secondary);">Skipped</button>
+                        <button class="tab-btn active" id="pred-filter-all"
+                            onclick="setPredictionFilter('all', this)">All</button>
+                        <button class="tab-btn" id="pred-filter-traded" onclick="setPredictionFilter('traded', this)"
+                            style="color: var(--accent-green);">Traded</button>
+                        <button class="tab-btn" id="pred-filter-skipped" onclick="setPredictionFilter('skipped', this)"
+                            style="color: var(--text-secondary);">Skipped</button>
                     </div>
                 </div>
             </div>
@@ -1049,16 +1094,19 @@
                     <div class="stat-subcard-val" id="pred-stats-total">0</div>
                 </div>
                 <div class="stat-subcard" style="border-color: rgba(16, 185, 129, 0.12);">
-                    <div class="stat-subcard-title" id="pred-stats-correct-title" style="color: var(--accent-green);">Correct 1H</div>
+                    <div class="stat-subcard-title" id="pred-stats-correct-title" style="color: var(--accent-green);">
+                        Correct 1H</div>
                     <div class="stat-subcard-val" id="pred-stats-correct" style="color: var(--accent-green);">0</div>
                 </div>
                 <div class="stat-subcard" style="border-color: rgba(244, 63, 94, 0.12);">
-                    <div class="stat-subcard-title" id="pred-stats-incorrect-title" style="color: var(--accent-red);">Incorrect 1H</div>
+                    <div class="stat-subcard-title" id="pred-stats-incorrect-title" style="color: var(--accent-red);">
+                        Incorrect 1H</div>
                     <div class="stat-subcard-val" id="pred-stats-incorrect" style="color: var(--accent-red);">0</div>
                 </div>
                 <div class="stat-subcard" style="border-color: rgba(139, 92, 246, 0.12);">
                     <div class="stat-subcard-title" style="color: var(--accent-purple);">Raw Accuracy</div>
-                    <div class="stat-subcard-val" id="pred-stats-winrate" style="color: var(--accent-purple);">0.0%</div>
+                    <div class="stat-subcard-val" id="pred-stats-winrate" style="color: var(--accent-purple);">0.0%
+                    </div>
                 </div>
             </div>
 
@@ -1078,7 +1126,9 @@
                     </thead>
                     <tbody id="prediction-history-rows">
                         <tr>
-                            <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No predictions tracked in this session yet.</td>
+                            <td colspan="8"
+                                style="text-align: center; color: var(--text-secondary); font-style: italic;">No
+                                predictions tracked in this session yet.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1163,7 +1213,7 @@
             const buttons = element.parentElement.querySelectorAll(".tab-btn");
             buttons.forEach(btn => btn.classList.remove("active"));
             element.classList.add("active");
-            
+
             // Update labels
             let tfLabel = "1H";
             if (tfVal === "120") tfLabel = "2H";
@@ -1171,7 +1221,7 @@
             else if (tfVal === "360") tfLabel = "6H";
             document.getElementById("pred-stats-correct-title").innerText = `Correct ${tfLabel}`;
             document.getElementById("pred-stats-incorrect-title").innerText = `Incorrect ${tfLabel}`;
-            
+
             renderPredictions();
         }
 
@@ -1193,7 +1243,7 @@
         }
 
         function forceCloseTrade(interval) {
-            const tfMap = {'60': '1H', '120': '2H', '240': '4H', '360': '6H'};
+            const tfMap = { '60': '1H', '120': '2H', '240': '4H', '360': '6H' };
             const tfLabel = tfMap[interval] || interval;
             if (confirm(`Are you sure you want to manually close the active ${tfLabel} trade at the current live price?`)) {
                 fetch('/api/close_trade', {
@@ -1201,19 +1251,19 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ interval: String(interval) })
                 })
-                .then(response => response.json())
-                .then(res => {
-                    if (res.status === 'success') {
-                        alert(res.message);
-                        updateDashboard();
-                    } else {
-                        alert(res.message || "Failed to close trade.");
-                    }
-                })
-                .catch(err => {
-                    console.error("Error closing trade:", err);
-                    alert("Error sending manual close request.");
-                });
+                    .then(response => response.json())
+                    .then(res => {
+                        if (res.status === 'success') {
+                            alert(res.message);
+                            updateDashboard();
+                        } else {
+                            alert(res.message || "Failed to close trade.");
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error closing trade:", err);
+                        alert("Error sending manual close request.");
+                    });
             }
         }
 
@@ -1256,6 +1306,7 @@
                     const tfLabel = t.interval === '60' ? '1H' : t.interval === '120' ? '2H' : t.interval === '240' ? '4H' : t.interval === '360' ? '6H' : (t.interval ? `${t.interval}M` : '1H');
 
                     const investedVal = t.position_size_usd ? t.position_size_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00';
+                    const leverageStr = t.leverage ? t.leverage.toFixed(1) + 'x' : '1.0x';
                     const rawPnL = t.pnl_usd !== undefined ? t.pnl_usd : (t.change_pct / 100 * (t.position_size_usd || 100));
                     const pnlSign = rawPnL >= 0 ? '+' : '';
                     const formattedRealizedPnL = `${pnlSign}${rawPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1268,6 +1319,7 @@
                             <td>$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td>$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td style="color: var(--accent-orange); font-weight: 600;">$${investedVal}</td>
+                            <td style="color: var(--accent-purple); font-weight: 600;">${leverageStr}</td>
                             <td class="${pnlClass}" style="font-weight: 800;">${changeSign}${t.change_pct.toFixed(3)}%</td>
                             <td class="${pnlClass}" style="font-weight: 800;">$${formattedRealizedPnL}</td>
                             <td class="${successClass}" style="font-weight: 700;">${successStr}</td>
@@ -1279,7 +1331,7 @@
             } else {
                 tradesTbody.innerHTML = `
                     <tr>
-                        <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades match this filter.</td>
+                        <td colspan="12" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades match this filter.</td>
                     </tr>
                 `;
             }
@@ -1317,7 +1369,7 @@
             const reversedFiltered = [...filtered].reverse();
             const totalItems = reversedFiltered.length;
             const totalPages = Math.ceil(totalItems / predictionsPerPage);
-            
+
             if (predictionCurrentPage > totalPages && totalPages > 0) {
                 predictionCurrentPage = totalPages;
             } else if (predictionCurrentPage < 1) {
@@ -1351,7 +1403,7 @@
                     const dateObj = new Date(p.timestamp * 1000);
                     const predTimeStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
                     const dirClass = p.direction === 'Bullish' ? 'color-bullish' : (p.direction === 'Bearish' ? 'color-bearish' : 'color-neutral');
-                    
+
                     let refPriceStr = `$${p.ref_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
                     let expChangeSign = p.predicted_change >= 0 ? '+' : '';
                     let expChangeStr = `${expChangeSign}${p.predicted_change.toFixed(3)}`;
@@ -1368,7 +1420,7 @@
                         const changePct = p.evaluation.change_pct.toFixed(3);
                         const diffColorClass = p.evaluation.success ? "color-bullish" : "color-bearish";
                         diffStr = `<span class="${diffColorClass}" style="font-weight: 800;">${changeSign}${changeVal} (${changeSign}${changePct}%)</span>`;
-                        
+
                         outcomeClass = p.evaluation.success ? "color-bullish" : "color-bearish";
                         outcomeLabel = p.evaluation.success ? " [CORRECT]" : " [INCORRECT]";
                     } else {
@@ -1591,6 +1643,10 @@
                                         <span style="opacity: 0.6;">Time Left:</span>
                                         <span style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</span>
                                     </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="opacity: 0.6;">Leverage:</span>
+                                        <span style="color: var(--accent-orange); font-weight: 700;">${activeTrade.leverage ? activeTrade.leverage.toFixed(1) + 'x' : '1.0x'}</span>
+                                    </div>
                                     <div style="display: flex; justify-content: space-between; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.06);">
                                         <span style="opacity: 0.8; font-weight: 700;">PnL:</span>
                                         <span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
@@ -1786,6 +1842,10 @@
                     <span style="font-weight:700; color:var(--accent-orange);">$${t.position_size_usd ? t.position_size_usd.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '100.00'}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">Leverage</span>
+                    <span style="font-weight:700; color:var(--accent-purple);">${t.leverage ? t.leverage.toFixed(1) + 'x' : '1.0x'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Net Return Pct</span>
                     <span class="${pnlClass}" style="font-weight:800;">${changeSign}${t.change_pct.toFixed(3)}%</span>
                 </div>
@@ -1816,17 +1876,29 @@
     </script>
 
     <!-- Trade Details Modal Overlay -->
-    <div id="trade-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.85); backdrop-filter:blur(5px); justify-content:center; align-items:center;">
-        <div style="background:var(--card-bg); border:1px solid rgba(139,92,246,0.3); border-radius:15px; width:90%; max-width:500px; box-shadow:0 0 25px rgba(139,92,246,0.25); display:flex; flex-direction:column; overflow:hidden; font-family:'Outfit', sans-serif; color:var(--text-primary);">
-            <div style="padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02);">
-                <span style="font-size:16px; font-weight:800; color:var(--accent-purple);">📜 Trade Execution Details</span>
-                <button onclick="closeTradeModal()" style="background:none; border:none; color:var(--text-secondary); font-size:20px; cursor:pointer; font-weight:700; outline:none; transition:color 0.2s;" onmouseover="this.style.color='var(--accent-red)'" onmouseout="this.style.color='var(--text-secondary)'">&times;</button>
+    <div id="trade-modal"
+        style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.85); backdrop-filter:blur(5px); justify-content:center; align-items:center;">
+        <div
+            style="background:var(--card-bg); border:1px solid rgba(139,92,246,0.3); border-radius:15px; width:90%; max-width:500px; box-shadow:0 0 25px rgba(139,92,246,0.25); display:flex; flex-direction:column; overflow:hidden; font-family:'Outfit', sans-serif; color:var(--text-primary);">
+            <div
+                style="padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02);">
+                <span style="font-size:16px; font-weight:800; color:var(--accent-purple);">📜 Trade Execution
+                    Details</span>
+                <button onclick="closeTradeModal()"
+                    style="background:none; border:none; color:var(--text-secondary); font-size:20px; cursor:pointer; font-weight:700; outline:none; transition:color 0.2s;"
+                    onmouseover="this.style.color='var(--accent-red)'"
+                    onmouseout="this.style.color='var(--text-secondary)'">&times;</button>
             </div>
-            <div style="padding:20px; display:flex; flex-direction:column; gap:12px; max-height:450px; overflow-y:auto;" id="trade-modal-content">
+            <div style="padding:20px; display:flex; flex-direction:column; gap:12px; max-height:450px; overflow-y:auto;"
+                id="trade-modal-content">
                 <!-- Loaded dynamically -->
             </div>
-            <div style="padding:12px 20px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02); display:flex; justify-content:flex-end;">
-                <button onclick="closeTradeModal()" style="padding:8px 16px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-weight:700; font-size:12px; transition:transform 0.1s;" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">Close</button>
+            <div
+                style="padding:12px 20px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02); display:flex; justify-content:flex-end;">
+                <button onclick="closeTradeModal()"
+                    style="padding:8px 16px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-weight:700; font-size:12px; transition:transform 0.1s;"
+                    onmouseover="this.style.transform='scale(1.02)'"
+                    onmouseout="this.style.transform='scale(1)'">Close</button>
             </div>
         </div>
     </div>

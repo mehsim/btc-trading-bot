@@ -13,7 +13,10 @@ import numpy as np
 import joblib
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+
+def get_pkt_time():
+    return datetime.utcnow() + timedelta(hours=5)
 
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
@@ -155,7 +158,7 @@ def print(*args, **kwargs):
     _print(*args, **kwargs)
     if "file" not in kwargs or kwargs["file"] is None:
         msg = " ".join(map(str, args))
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        timestamp = get_pkt_time().strftime("%H:%M:%S")
         lines = msg.split('\n')
         with logs_lock:
             for line in lines:
@@ -214,7 +217,8 @@ def force_close_trade():
     actual_change_pct = (actual_change / entry_price) * 100
     
     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
-    net_return_pct = raw_return_pct - 0.2  # 0.2% Spot roundtrip fee
+    leverage = active_trade.get("leverage", 1.0)
+    net_return_pct = (raw_return_pct * leverage) - 0.2  # 0.2% Futures roundtrip fee
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
     
     old_bal = bot_state.get("simulated_balance", 10000.0)
@@ -231,7 +235,7 @@ def force_close_trade():
     print(f"[{tf.upper()} MANUAL EXIT]: {exit_reason}")
     print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
     print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
-    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees)")
+    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees with {leverage}x leverage)")
     print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
     print(f"Predicted Signal: {direction} ({trend_status})")
     print("==================================================\n")
@@ -248,7 +252,8 @@ def force_close_trade():
         "reason": exit_reason,
         "position_size_usd": float(position_size_usd),
         "pnl_usd": float(realized_pnl),
-        "balance": float(new_bal)
+        "balance": float(new_bal),
+        "leverage": float(leverage)
     })
     
     # Mark the corresponding prediction as evaluated
@@ -284,6 +289,8 @@ def retrain_models_thread(is_manual=False):
     def run_training():
         global bot_state
         try:
+            # Sync latest predictions and trade history from Hugging Face Space first
+            load_history()
             bot_state["retraining_status"] = "Optimizing..."
             print(f"[Retraining] Starting {'manual ' if is_manual else 'scheduled '}rolling retraining of models for 1h, 2h, 4h, and 6h intervals...")
             
@@ -707,7 +714,8 @@ def build_df(current_price):
     return None
 
 def get_local_time_str(t):
-    return datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S')
+    # Pakistan timezone is UTC + 5 hours (18000 seconds)
+    return datetime.utcfromtimestamp(t + 18000).strftime('%Y-%m-%d %H:%M:%S')
 
 def evaluate_predictions(df_completed, interval):
     if not bot_state["prediction_history"]:
@@ -1481,7 +1489,7 @@ def main():
         if live_price is None or (current_time - last_ws_update_time > 15.0):
             fallback_price = get_fallback_price()
             if fallback_price is not None:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] WebSocket price is stale or disconnected. Fallback price: {fallback_price:.2f}")
+                print(f"[{get_pkt_time().strftime('%H:%M:%S')}] WebSocket price is stale or disconnected. Fallback price: {fallback_price:.2f}")
                 live_price = fallback_price
                 last_ws_update_time = current_time
             
@@ -1581,9 +1589,10 @@ def main():
                     actual_change = actual_price - entry_price
                     actual_change_pct = (actual_change / entry_price) * 100
                     
-                    # Calculate PnL (long vs short) and simulated fees
+                    # Calculate PnL (long vs short) and simulated fees with leverage
                     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
-                    net_return_pct = raw_return_pct - 0.2  # 0.2% roundtrip Spot fee
+                    leverage = active_trade.get("leverage", 1.0)
+                    net_return_pct = (raw_return_pct * leverage) - 0.2  # 0.2% roundtrip fee
                     realized_pnl = position_size_usd * (net_return_pct / 100.0)
                     
                     # Update simulated balance
@@ -1616,29 +1625,36 @@ def main():
                         "reason": str(exit_reason),
                         "position_size_usd": float(position_size_usd),
                         "pnl_usd": float(realized_pnl),
-                        "balance": float(new_bal)
+                        "balance": float(new_bal),
+                        "leverage": float(leverage)
                     })
                     save_history()
                     bot_state[active_trade_key] = None
 
         # 3. Check for completed candle closes to search for a new signal
 
-        # --- Daily Drawdown Circuit Breaker ---
-        today = datetime.now().day
+        # --- Daily Drawdown Circuit Breaker & Profit Goal ---
+        today = get_pkt_time().day
         if bot_state["daily_drawdown_reset_day"] != today:
             bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 10000.0)
             bot_state["daily_drawdown_reset_day"] = today
             bot_state["circuit_breaker_active"] = False
-            print(f"[Circuit Breaker] Daily reset. Start balance: ${bot_state['daily_drawdown_start_balance']:.2f}")
+            bot_state["daily_goal_reached"] = False
+            print(f"[Circuit Breaker] Daily reset (PKT). Start balance: ${bot_state['daily_drawdown_start_balance']:.2f}")
         else:
             start_bal = bot_state["daily_drawdown_start_balance"]
             curr_bal = bot_state.get("simulated_balance", start_bal)
             daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
+            daily_profit = curr_bal - start_bal
             if daily_dd_pct >= 5.0 and not bot_state["circuit_breaker_active"]:
                 bot_state["circuit_breaker_active"] = True
                 print(f"[Circuit Breaker] ACTIVATED — daily drawdown {daily_dd_pct:.2f}% >= 5%. Trading paused for today.")
-            elif daily_dd_pct < 5.0:
+            elif daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
+                bot_state["daily_goal_reached"] = True
+                print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Trading paused for today to secure profits.")
+            elif daily_dd_pct < 5.0 and daily_profit < 1000.0:
                 bot_state["circuit_breaker_active"] = False
+                bot_state["daily_goal_reached"] = False
 
         # --- High-Impact News Window Guard ---
         def is_high_impact_news_window():
@@ -1801,6 +1817,9 @@ def main():
                             elif bot_state.get("circuit_breaker_active", False):
                                 status_msg = "Skipped (Circuit Breaker)"
                                 print(f"[{iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
+                            elif bot_state.get("daily_goal_reached", False):
+                                status_msg = "Skipped (Daily Goal Reached)"
+                                print(f"[{iv}m] Prediction skipped: Daily profit goal of $1000 reached. Trading paused for today.")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{iv}m] Prediction skipped: Model output is Neutral/Hold.")
@@ -1872,6 +1891,13 @@ def main():
                                         current_bal = bot_state.get("simulated_balance", 10000.0)
                                         position_size_usd = current_bal * kelly_fraction
 
+                                        # Calculate leverage (1x to 125x) based on confidence
+                                        leverage_val = 1.0 + (calibrated_confidence - 0.50) / 0.50 * 124.0
+                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital
+                                        stop_loss_pct = (0.75 * atr_dollars / latest_candle["close"]) * 100
+                                        max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 125.0
+                                        leverage_val = round(max(1.0, min(125.0, min(leverage_val, max_safe_lev))), 1)
+
                                         lookahead = 10
                                         duration_seconds = int(iv) * 60.0 * lookahead
                                         active_trade = {
@@ -1886,12 +1912,13 @@ def main():
                                             "lowest_price": float(latest_candle["close"]),
                                             "break_even_triggered": False,
                                             "position_size_usd": float(position_size_usd),
-                                            "kelly_fraction": float(kelly_fraction)
+                                            "kelly_fraction": float(kelly_fraction),
+                                            "leverage": float(leverage_val)
                                         }
                                         bot_state[active_trade_key] = active_trade
                                         
                                         print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
-                                        print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Kelly allocation: {kelly_fraction*100:.2f}% | Size: ${position_size_usd:.2f}\n")
+                                        print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x\n")
                                     else:
                                         status_msg = "Skipped (Confluence Failed)"
                                         failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
