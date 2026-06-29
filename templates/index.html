@@ -922,81 +922,6 @@
                     </div>
                 </div>
 
-                <!-- Completed Trades Panel -->
-                <div class="card">
-                    <div class="section-header">
-                        <div class="section-title">📜 Completed Trades History</div>
-                        <div class="filter-tabs">
-                            <button class="tab-btn active" onclick="setTradeFilter('all', this)">All Signals</button>
-                            <button class="tab-btn" onclick="setTradeFilter('success', this)" style="color: var(--accent-green);">Successful</button>
-                            <button class="tab-btn" onclick="setTradeFilter('failed', this)" style="color: var(--accent-red);">Unsuccessful</button>
-                        </div>
-                    </div>
-
-                    <!-- Stats Row -->
-                    <div class="stats-dashboard">
-                        <div class="stat-subcard">
-                            <div class="stat-subcard-title">Total Trades</div>
-                            <div class="stat-subcard-val" id="stats-total">0</div>
-                        </div>
-                        <div class="stat-subcard" style="border-color: rgba(16, 185, 129, 0.12);">
-                            <div class="stat-subcard-title" style="color: var(--accent-green);">Successful</div>
-                            <div class="stat-subcard-val" id="stats-success" style="color: var(--accent-green);">0</div>
-                        </div>
-                        <div class="stat-subcard" style="border-color: rgba(244, 63, 94, 0.12);">
-                            <div class="stat-subcard-title" style="color: var(--accent-red);">Unsuccessful</div>
-                            <div class="stat-subcard-val" id="stats-failed" style="color: var(--accent-red);">0</div>
-                        </div>
-                        <div class="stat-subcard" style="border-color: rgba(139, 92, 246, 0.12);">
-                            <div class="stat-subcard-title" style="color: var(--accent-purple);">Win Rate</div>
-                            <div class="stat-subcard-val" id="stats-winrate" style="color: var(--accent-purple);">0.0%</div>
-                        </div>
-                    </div>
-
-                    <!-- Per-TF Win Rate Row -->
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
-                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">1H Win Rate</div>
-                            <div id="tf-winrate-60" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
-                        </div>
-                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
-                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">2H Win Rate</div>
-                            <div id="tf-winrate-120" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
-                        </div>
-                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
-                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">4H Win Rate</div>
-                            <div id="tf-winrate-240" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
-                        </div>
-                        <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
-                            <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">6H Win Rate</div>
-                            <div id="tf-winrate-360" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
-                        </div>
-                    </div>
-
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Timeframe</th>
-                                    <th>Exit Time</th>
-                                    <th>Direction</th>
-                                    <th>Entry Price</th>
-                                    <th>Exit Price</th>
-                                    <th>Invested (USD)</th>
-                                    <th>Profit/Loss</th>
-                                    <th>PnL (USD)</th>
-                                    <th>Outcome</th>
-                                    <th>Reason</th>
-                                </tr>
-                            </thead>
-                            <tbody id="trade-history-rows">
-                                <tr>
-                                    <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
             </div>
 
             <!-- RIGHT COLUMN: Console Logs & Predictions Tracker -->
@@ -1019,6 +944,82 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Completed Trades Panel -->
+        <div class="card">
+            <div class="section-header">
+                <div class="section-title">📜 Completed Trades History</div>
+                <div class="filter-tabs">
+                    <button class="tab-btn active" onclick="setTradeFilter('all', this)">All Signals</button>
+                    <button class="tab-btn" onclick="setTradeFilter('success', this)" style="color: var(--accent-green);">Successful</button>
+                    <button class="tab-btn" onclick="setTradeFilter('failed', this)" style="color: var(--accent-red);">Unsuccessful</button>
+                </div>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="stats-dashboard">
+                <div class="stat-subcard">
+                    <div class="stat-subcard-title">Total Trades</div>
+                    <div class="stat-subcard-val" id="stats-total">0</div>
+                </div>
+                <div class="stat-subcard" style="border-color: rgba(16, 185, 129, 0.12);">
+                    <div class="stat-subcard-title" style="color: var(--accent-green);">Successful</div>
+                    <div class="stat-subcard-val" id="stats-success" style="color: var(--accent-green);">0</div>
+                </div>
+                <div class="stat-subcard" style="border-color: rgba(244, 63, 94, 0.12);">
+                    <div class="stat-subcard-title" style="color: var(--accent-red);">Unsuccessful</div>
+                    <div class="stat-subcard-val" id="stats-failed" style="color: var(--accent-red);">0</div>
+                </div>
+                <div class="stat-subcard" style="border-color: rgba(139, 92, 246, 0.12);">
+                    <div class="stat-subcard-title" style="color: var(--accent-purple);">Win Rate</div>
+                    <div class="stat-subcard-val" id="stats-winrate" style="color: var(--accent-purple);">0.0%</div>
+                </div>
+            </div>
+
+            <!-- Per-TF Win Rate Row -->
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">1H Win Rate</div>
+                    <div id="tf-winrate-60" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                </div>
+                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">2H Win Rate</div>
+                    <div id="tf-winrate-120" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                </div>
+                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">4H Win Rate</div>
+                    <div id="tf-winrate-240" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                </div>
+                <div style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">6H Win Rate</div>
+                    <div id="tf-winrate-360" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—</div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timeframe</th>
+                            <th>Exit Time</th>
+                            <th>Direction</th>
+                            <th>Entry Price</th>
+                            <th>Exit Price</th>
+                            <th>Invested (USD)</th>
+                            <th>Profit/Loss</th>
+                            <th>PnL (USD)</th>
+                            <th>Outcome</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trade-history-rows">
+                        <tr>
+                            <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -1121,6 +1122,7 @@
         let activePredictionTf = '60'; // default to 1H (interval='60')
         let predictionCurrentPage = 1;
         const predictionsPerPage = 10;
+        let activeTradesState = {};
 
         function prevPredictionPage() {
             if (predictionCurrentPage > 1) {
@@ -1188,6 +1190,31 @@
             buttons.forEach(btn => btn.classList.remove("active"));
             element.classList.add("active");
             renderPredictions();
+        }
+
+        function forceCloseTrade(interval) {
+            const tfMap = {'60': '1H', '120': '2H', '240': '4H', '360': '6H'};
+            const tfLabel = tfMap[interval] || interval;
+            if (confirm(`Are you sure you want to manually close the active ${tfLabel} trade at the current live price?`)) {
+                fetch('/api/close_trade', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interval: String(interval) })
+                })
+                .then(response => response.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        alert(res.message);
+                        updateDashboard();
+                    } else {
+                        alert(res.message || "Failed to close trade.");
+                    }
+                })
+                .catch(err => {
+                    console.error("Error closing trade:", err);
+                    alert("Error sending manual close request.");
+                });
+            }
         }
 
         function renderTrades() {
@@ -1365,7 +1392,15 @@
                     // Format Status to look nice
                     let statusLabel = p.status;
                     if (p.status === "Traded") {
-                        statusLabel = `<span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>`;
+                        const isActive = activeTradesState[p.interval] !== null && activeTradesState[p.interval] !== undefined;
+                        if (isActive) {
+                            statusLabel = `<div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>
+                                <button onclick="event.stopPropagation(); forceCloseTrade('${p.interval}')" style="padding: 3px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
+                            </div>`;
+                        } else {
+                            statusLabel = `<span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>`;
+                        }
                     } else {
                         statusLabel = `<span class="badge-fail" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px; background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.08); color: var(--text-secondary);">${p.status.toUpperCase()}</span>`;
                     }
@@ -1410,7 +1445,7 @@
 
                     // Per-TF Win Rates
                     const winByTf = data.win_rate_by_tf || {};
-                    [["5", "tf-winrate-5"], ["15", "tf-winrate-15"], ["60", "tf-winrate-60"]].forEach(([k, id]) => {
+                    [["60", "tf-winrate-60"], ["120", "tf-winrate-120"], ["240", "tf-winrate-240"], ["360", "tf-winrate-360"]].forEach(([k, id]) => {
                         const el = document.getElementById(id);
                         if (el) {
                             const val = winByTf[k];
@@ -1451,6 +1486,13 @@
                         }
                         lastPrice = currentPrice;
                     }
+
+                    activeTradesState = {
+                        "60": data.active_trade_1h,
+                        "120": data.active_trade_2h,
+                        "240": data.active_trade_4h,
+                        "360": data.active_trade_6h
+                    };
 
                     // 3 & 4. Update Timeframe Strategies (1h, 2h, 4h, 6h)
                     const timeframes = ["1h", "2h", "4h", "6h"];
@@ -1553,6 +1595,7 @@
                                         <span style="opacity: 0.8; font-weight: 700;">PnL:</span>
                                         <span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
                                     </div>
+                                    <button onclick="const tfIntervalMap = {'1h': '60', '2h': '120', '4h': '240', '6h': '360'}; forceCloseTrade(tfIntervalMap['${tf}'])" style="margin-top: 8px; width: 100%; padding: 6px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Manual Close Position</button>
                                 </div>
                             `;
                         } else if (positionContainer) {

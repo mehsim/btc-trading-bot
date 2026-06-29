@@ -188,6 +188,86 @@ def trigger_retrain():
     else:
         return jsonify({"status": "ignored", "message": "Optimization already in progress."}), 409
 
+@app.route("/api/close_trade", methods=["POST"])
+def force_close_trade():
+    data = request.json or {}
+    interval = str(data.get("interval", ""))
+    
+    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+    tf = tf_map_local.get(interval)
+    if not tf:
+        return jsonify({"status": "error", "message": "Invalid interval specified."}), 400
+        
+    active_trade_key = f"active_trade_{tf}"
+    active_trade = bot_state[active_trade_key]
+    
+    if not active_trade:
+        return jsonify({"status": "error", "message": f"No active trade found for interval {tf}."}), 400
+        
+    # Exiting trade manually
+    entry_price = active_trade["entry_price"]
+    direction = active_trade["direction"]
+    position_size_usd = active_trade.get("position_size_usd", 100.0)
+    actual_price = live_price or entry_price
+    
+    actual_change = actual_price - entry_price
+    actual_change_pct = (actual_change / entry_price) * 100
+    
+    raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
+    net_return_pct = raw_return_pct - 0.2  # 0.2% Spot roundtrip fee
+    realized_pnl = position_size_usd * (net_return_pct / 100.0)
+    
+    old_bal = bot_state.get("simulated_balance", 10000.0)
+    new_bal = old_bal + realized_pnl
+    bot_state["simulated_balance"] = new_bal
+    
+    actual_trend = "Bullish" if actual_change > 0 else "Bearish"
+    signal_correct = (actual_trend == direction)
+    trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
+    
+    exit_reason = "Manual Exit (Force Closed)"
+    
+    print("\n==================================================")
+    print(f"[{tf.upper()} MANUAL EXIT]: {exit_reason}")
+    print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
+    print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
+    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees)")
+    print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
+    print(f"Predicted Signal: {direction} ({trend_status})")
+    print("==================================================\n")
+    
+    # Save to completed trades history
+    bot_state["trade_history"].append({
+        "exit_time": float(time.time()),
+        "interval": interval,
+        "direction": direction,
+        "entry_price": float(entry_price),
+        "exit_price": float(actual_price),
+        "change_pct": float(net_return_pct),
+        "success": bool(signal_correct),
+        "reason": exit_reason,
+        "position_size_usd": float(position_size_usd),
+        "pnl_usd": float(realized_pnl),
+        "balance": float(new_bal)
+    })
+    
+    # Mark the corresponding prediction as evaluated
+    for p in bot_state["prediction_history"]:
+        if p.get("interval") == interval and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
+            p["evaluation"] = {
+                "evaluated": True,
+                "exit_price": float(actual_price),
+                "change": float(actual_change if direction == "Bullish" else -actual_change),
+                "change_pct": float(raw_return_pct),
+                "success": bool(signal_correct)
+            }
+            break
+            
+    save_history()
+    bot_state[active_trade_key] = None
+    
+    return jsonify({"status": "success", "message": f"Successfully force-closed {tf.upper()} active trade at ${actual_price:.2f}"})
+
 @app.route("/")
 def index():
     return render_template("index.html")
