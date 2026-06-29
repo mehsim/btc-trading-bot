@@ -982,14 +982,16 @@
                                     <th>Direction</th>
                                     <th>Entry Price</th>
                                     <th>Exit Price</th>
+                                    <th>Invested (USD)</th>
                                     <th>Profit/Loss</th>
+                                    <th>PnL (USD)</th>
                                     <th>Outcome</th>
                                     <th>Reason</th>
                                 </tr>
                             </thead>
                             <tbody id="trade-history-rows">
                                 <tr>
-                                    <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
+                                    <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades completed in this session yet.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1226,6 +1228,11 @@
                     const successClass = t.success ? "color-bullish" : "color-bearish";
                     const tfLabel = t.interval === '60' ? '1H' : t.interval === '120' ? '2H' : t.interval === '240' ? '4H' : t.interval === '360' ? '6H' : (t.interval ? `${t.interval}M` : '1H');
 
+                    const investedVal = t.position_size_usd ? t.position_size_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00';
+                    const rawPnL = t.pnl_usd !== undefined ? t.pnl_usd : (t.change_pct / 100 * (t.position_size_usd || 100));
+                    const pnlSign = rawPnL >= 0 ? '+' : '';
+                    const formattedRealizedPnL = `${pnlSign}${rawPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
                     htmlRows += `
                         <tr onclick="showTradeDetails(${allTrades.indexOf(t)})" style="cursor: pointer;" title="Click to view details" class="hover-row">
                             <td style="font-weight: 700; color: var(--accent-purple);">${tfLabel}</td>
@@ -1233,7 +1240,9 @@
                             <td class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">${t.direction.toUpperCase()}</td>
                             <td>$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td>$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td style="color: var(--accent-orange); font-weight: 600;">$${investedVal}</td>
                             <td class="${pnlClass}" style="font-weight: 800;">${changeSign}${t.change_pct.toFixed(3)}%</td>
+                            <td class="${pnlClass}" style="font-weight: 800;">$${formattedRealizedPnL}</td>
                             <td class="${successClass}" style="font-weight: 700;">${successStr}</td>
                             <td style="color: var(--text-secondary); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t.reason}</td>
                         </tr>
@@ -1243,7 +1252,7 @@
             } else {
                 tradesTbody.innerHTML = `
                     <tr>
-                        <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades match this filter.</td>
+                        <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades match this filter.</td>
                     </tr>
                 `;
             }
