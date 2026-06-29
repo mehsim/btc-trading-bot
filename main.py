@@ -2018,6 +2018,8 @@ def main():
                             
                             last_processed_timestamps[last_ts_key] = latest_completed_ts
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"Error checking {iv}m candle close signals: {e}")
 
         time.sleep(10)
