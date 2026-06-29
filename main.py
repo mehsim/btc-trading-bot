@@ -104,6 +104,34 @@ def save_history():
         print(f"Error saving history to disk: {e}")
 
 def load_history():
+    # 1. Sync from Hugging Face Space if running locally (not in Space environment)
+    if not os.environ.get("SPACE_ID"):
+        try:
+            print("Syncing: Attempting to pull latest history from Hugging Face Space...")
+            resp = requests.get("https://mehsimleo-btc-trading-bot.hf.space/api/status", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                hf_trades = data.get("trade_history", [])
+                hf_predictions = data.get("prediction_history", [])
+                hf_balance = data.get("simulated_balance", 10000.0)
+                
+                # Filter out old 5m and 15m intervals
+                hf_trades = [t for t in hf_trades if str(t.get("interval", "60")) not in ["5", "15"]]
+                hf_predictions = [p for p in hf_predictions if str(p.get("interval", "60")) not in ["5", "15"]]
+                
+                if len(hf_trades) > 0 or len(hf_predictions) > 0:
+                    bot_state["simulated_balance"] = hf_balance
+                    bot_state["trade_history"] = hf_trades
+                    bot_state["prediction_history"] = hf_predictions
+                    print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
+                    
+                    # Save local copy
+                    save_history()
+                    return
+        except Exception as e:
+            print(f"HF Space Sync: Could not fetch from Hugging Face Space: {e}")
+
+    # 2. Local/Persistent history fallback load
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r") as f:
