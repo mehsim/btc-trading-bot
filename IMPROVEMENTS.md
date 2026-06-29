@@ -47,11 +47,28 @@ This document summarizes the architecture upgrades, feature updates, layout opti
 ---
 
 ## 5. Deployment & State Persistence
-- **Hugging Face Live Sync**:
-  - Implemented automatic sync logic inside `load_history()` in `main.py`. On local startup, it queries the live Hugging Face Space API (`/api/status`) to pull predictions, trades, and balances to synchronize local states.
-- **Environment Safety**:
-  - The sync engine skips self-requests on the Hugging Face container itself (via the `SPACE_ID` check) to prevent loops and timeouts.
-- **Persistent Storage**:
-  - Configured `HISTORY_FILE` to automatically use the `/data/dashboard_history.json` persistent mount if present, ensuring data is not lost during Space rebuilds/restarts.
-- **Git Ignore Fixes**:
-  - Removed `dashboard_history.json` from git tracking and ignored it to prevent local empty history files from overwriting live history files during new commits/pushes.
+- **Hugging Face Live Sync & Dataset Backup**:
+  - Implemented automatic sync logic inside `load_history()` in `main.py`. On local startup, it queries the live Hugging Face Space API (`/api/status`) to pull predictions, trades, and balances.
+  - Implemented a programmatic cloud backup/restore to a private Hugging Face Dataset (`{space_id}-history`) utilizing the Space's `HF_TOKEN` secret to prevent data loss across container rebuilds/restarts.
+- **Git Tracking**:
+  - Re-tracked `dashboard_history.json` in Git with starting history so the bot does not start completely blank in environments without secrets configured.
+
+---
+
+## 6. Advanced Trading Logic & Prediction Accuracy Upgrades (Evening Session)
+- **Pakistan Standard Time (PKT) Logs**:
+  - Forced PKT (UTC+5) across all print wrapper console logs, websocket fallback messages, candle close detections, pre-trade report logs, and the daily drawdown/profit resets.
+- **Dynamic Sizing & Safety Leverage (1x to 125x)**:
+  - Enabled dynamic leverage scaled linearly from `1.0x` (at 50% ML confidence) to `125.0x` (at 100% ML confidence).
+  - Implemented a safety liquidation guard that automatically caps leverage such that the distance to the Stop Loss (`0.75 * ATR`) never exceeds `90.0%` of the maintenance margin.
+  - Integrated leverage values into active position cards, completed trades table rows, and the details popup modal.
+- **Daily Profit Goal ($1000)**:
+  - Implemented a daily profit goal circuit breaker. If the day's realized PnL reaches **$1,000**, the bot pauses trading for the remainder of the day (evaluated on PKT day boundary).
+- **Refined Regime Switching & Ensemble Weights**:
+  - Replaced simple average voting with weighted averaging based on ADX regimes:
+    - **Trending Regime (ADX >= 20)**: Weight is shifted towards **CatBoost** (XGB: 30%, LGB: 20%, Cat: 50%).
+    - **Ranging Regime (ADX < 20)**: Weight is shifted towards **LightGBM** (XGB: 30%, LGB: 50%, Cat: 20%).
+- **Open Interest (OI) Delta Confirmation**:
+  - Added a new pre-trade confluence check (**Check 15**) that monitors the percentage change of Open Interest. If OI drops by more than `2.0%` over the last candle, the check fails (preventing entries during trend exhaustion).
+- **Dynamic ATR Sizing (Take Profit Multipliers)**:
+  - Implemented volatility-adaptive TP multipliers. Low volatility scales the multiplier up to `3.0x` to capture breakout extensions; high volatility scales it down to `0.9x - 1.5x` to lock in profits early.
