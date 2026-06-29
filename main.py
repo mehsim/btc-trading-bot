@@ -246,11 +246,22 @@ def force_close_trade():
         return jsonify({"status": "error", "message": f"No active trade found for interval {tf}."}), 400
         
     # Exiting trade manually
+    symbol = active_trade.get("symbol", "BTCUSDT")
     entry_price = active_trade["entry_price"]
     direction = active_trade["direction"]
     position_size_usd = active_trade.get("position_size_usd", 100.0)
-    actual_price = live_price or entry_price
     
+    live_symbol_price = get_fallback_price(symbol)
+    actual_exit_price = live_symbol_price if live_symbol_price is not None else (live_price or entry_price)
+    
+    # Apply slippage on exit
+    atr_norm_val = active_trade.get("atr_dollars", 50.0) / entry_price
+    slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
+    if direction == "Bullish":
+        actual_price = actual_exit_price * (1.0 - slippage_pct / 100.0)
+    else:
+        actual_price = actual_exit_price * (1.0 + slippage_pct / 100.0)
+        
     actual_change = actual_price - entry_price
     actual_change_pct = (actual_change / entry_price) * 100
     
@@ -270,7 +281,7 @@ def force_close_trade():
     exit_reason = "Manual Exit (Force Closed)"
     
     print("\n==================================================")
-    print(f"[{tf.upper()} MANUAL EXIT]: {exit_reason}")
+    print(f"[{symbol} {tf.upper()} MANUAL EXIT]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
     print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
     print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
     print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees with {leverage}x leverage)")
@@ -280,6 +291,7 @@ def force_close_trade():
     
     # Save to completed trades history
     bot_state["trade_history"].append({
+        "symbol": symbol,
         "exit_time": float(time.time()),
         "interval": interval,
         "direction": direction,
@@ -412,6 +424,7 @@ def run_flask():
 # CONFIGURATION
 # =========================
 SYMBOL = "BTCUSDT"
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
@@ -755,7 +768,7 @@ def get_local_time_str(t):
     # Pakistan timezone is UTC + 5 hours (18000 seconds)
     return datetime.utcfromtimestamp(t + 18000).strftime('%Y-%m-%d %H:%M:%S')
 
-def evaluate_predictions(df_completed, interval):
+def evaluate_predictions(df_completed, interval, symbol):
     if not bot_state["prediction_history"]:
         return
 
@@ -776,7 +789,7 @@ def evaluate_predictions(df_completed, interval):
             }
             pred["evaluation"] = eval_dict
             
-        if pred.get("interval") == interval and not eval_dict.get("evaluated"):
+        if pred.get("interval") == interval and pred.get("symbol", "BTCUSDT") == symbol and not eval_dict.get("evaluated"):
             interval_mins = int(interval)
             lookahead = 10
             target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000 * lookahead)
@@ -1458,43 +1471,42 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 # =========================
 # LIVE LOOP
 # =========================
-def get_fallback_price():
+def get_fallback_price(symbol=SYMBOL):
     # 1. Try Bybit API
     try:
         url = "https://api.bybit.com/v5/market/tickers"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": SYMBOL}, headers=headers, timeout=5)
+        response = requests.get(url, params={"category": "spot", "symbol": symbol}, headers=headers, timeout=5)
         if response.status_code == 200:
             res = response.json()
             return float(res["result"]["list"][0]["lastPrice"])
         else:
-            print(f"Bybit price ticker returned HTTP {response.status_code}")
+            print(f"Bybit price ticker for {symbol} returned HTTP {response.status_code}")
     except Exception as e:
-        print(f"Error fetching Bybit price fallback: {e}")
+        print(f"Error fetching Bybit price fallback for {symbol}: {e}")
 
-    # 2. Try Coinbase API (very permissive, no API key needed)
-    try:
-        response = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=5)
-        if response.status_code == 200:
-            res = response.json()
-            return float(res["data"]["amount"])
-        else:
-            print(f"Coinbase price ticker returned HTTP {response.status_code}")
-    except Exception as e:
-        print(f"Error fetching Coinbase price fallback: {e}")
+    # 2. Try Coinbase API (only for BTCUSDT)
+    if symbol == "BTCUSDT":
+        try:
+            response = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=5)
+            if response.status_code == 200:
+                res = response.json()
+                return float(res["data"]["amount"])
+        except Exception:
+            pass
 
     # 3. Try Binance API
     try:
-        response = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
+        response = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=5)
         if response.status_code == 200:
             res = response.json()
             return float(res["price"])
         else:
-            print(f"Binance price ticker returned HTTP {response.status_code}")
+            print(f"Binance price ticker for {symbol} returned HTTP {response.status_code}")
     except Exception as e:
-        print(f"Error fetching Binance price fallback: {e}")
+        print(f"Error fetching Binance price fallback for {symbol}: {e}")
 
     return None
 
@@ -1570,6 +1582,12 @@ def main():
             active_trade = bot_state[active_trade_key]
             
             if active_trade is not None:
+                active_symbol = active_trade.get("symbol", "BTCUSDT")
+                symbol_price = get_fallback_price(active_symbol)
+                if symbol_price is None:
+                    continue
+                current_price = symbol_price
+                
                 stop_loss = active_trade["stop_loss"]
                 take_profit = active_trade["take_profit"]
                 direction = active_trade["direction"]
@@ -1645,7 +1663,14 @@ def main():
                     exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
 
                 if exit_reason is not None:
-                    actual_price = current_price
+                    # Apply slippage on exit
+                    atr_norm_val = active_trade.get("atr_dollars", 50.0) / entry_price
+                    slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
+                    if direction == "Bullish":
+                        actual_price = current_price * (1.0 - slippage_pct / 100.0)
+                    else:
+                        actual_price = current_price * (1.0 + slippage_pct / 100.0)
+
                     price_diff = actual_price - predicted_price
                     price_diff_pct = (price_diff / predicted_price) * 100
                     price_accuracy = max(0.0, 100.0 - abs((actual_price - predicted_price) / actual_price * 100))
@@ -1668,7 +1693,7 @@ def main():
                     trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
                     
                     print("\n==================================================")
-                    print(f"[{iv}m TRADE EXITED]: {exit_reason}")
+                    print(f"[{active_symbol} {iv}m TRADE EXITED]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
                     print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
                     print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
                     print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees)")
@@ -1678,6 +1703,7 @@ def main():
                     
                     # Update Completed Trade History in global state
                     bot_state["trade_history"].append({
+                        "symbol": active_symbol,
                         "exit_time": float(time.time()),
                         "interval": str(iv),
                         "direction": str(direction),
@@ -1749,28 +1775,45 @@ def main():
 
         check_and_hot_reload_models()
         for iv in ["60", "120", "240", "360"]:
-
             tf = tf_map[iv]
+            active_trade_key = f"active_trade_{tf}"
+            active_trade = bot_state[active_trade_key]
+            
+            if active_trade is not None:
+                symbol = active_trade.get("symbol", "BTCUSDT")
+            else:
+                symbol_idx = int(time.time() / 10) % len(SUPPORTED_SYMBOLS)
+                symbol = SUPPORTED_SYMBOLS[symbol_idx]
+                
             try:
-                df_raw = get_history(symbol=SYMBOL, interval=iv, limit=300)
+                df_raw = get_history(symbol=symbol, interval=iv, limit=300)
                 if df_raw is not None and len(df_raw) > 1:
                     df_completed = df_raw.iloc[:-1].copy()
                     latest_completed_ts = int(df_completed.iloc[-1]["timestamp"])
 
-                    last_ts_key = f"last_processed_{iv}_ts"
-                    if last_processed_timestamps[last_ts_key] is None:
+                    last_ts_key = f"last_processed_{symbol}_{iv}_ts"
+                    if last_processed_timestamps.get(last_ts_key) is None:
                         last_processed_timestamps[last_ts_key] = 0
-                        print(f"Initialized completed candle timestamp tracking for {iv}m: {get_local_time_str(latest_completed_ts/1000)}")
+                        print(f"Initialized completed candle timestamp tracking for {symbol} on {iv}m: {get_local_time_str(latest_completed_ts/1000)}")
 
                     if latest_completed_ts != last_processed_timestamps[last_ts_key]:
-                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {iv}-minute candle detected (TS: {latest_completed_ts})")
+                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {symbol} {iv}-minute candle detected (TS: {latest_completed_ts})")
                         
                         df_target = df_completed.copy()
-                        df_target["close_btc"] = df_target["close"]
-                        df_target = merge_derivatives_sentiment_features(df_target, symbol=SYMBOL, interval=iv)
+                        if symbol == "BTCUSDT":
+                            df_target["close_btc"] = df_target["close"]
+                        else:
+                            df_btc = get_history(symbol="BTCUSDT", interval=iv, limit=300)
+                            if df_btc is not None and len(df_btc) > 0:
+                                df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
+                                df_target = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
+                            else:
+                                df_target["close_btc"] = df_target["close"]
+                                
+                        df_target = merge_derivatives_sentiment_features(df_target, symbol=symbol, interval=iv)
                         df = add_features(df_target)
                         if len(df) == 0:
-                            print(f"[{iv}m] Error: Dataframe became empty after feature engineering.")
+                            print(f"[{symbol} {iv}m] Error: Dataframe became empty after feature engineering.")
                             continue
                         
                         latest_candle = df.iloc[-1]
@@ -1944,12 +1987,17 @@ def main():
                                         tp_multiplier = round(base_tp * vol_factor, 2)
                                         print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                         
+                                        # Apply slippage on entry
+                                        slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)  # Dynamic slippage
+                                        raw_entry_price = float(latest_candle["close"])
                                         if ml_trend == "Bullish":
-                                            stop_loss_price = latest_candle["close"] - 0.75 * atr_dollars
-                                            take_profit_price = latest_candle["close"] + tp_multiplier * atr_dollars
+                                            entry_price = raw_entry_price * (1.0 + slippage_pct / 100.0)
+                                            stop_loss_price = entry_price - 0.75 * atr_dollars
+                                            take_profit_price = entry_price + tp_multiplier * atr_dollars
                                         else:
-                                            stop_loss_price = latest_candle["close"] + 0.75 * atr_dollars
-                                            take_profit_price = latest_candle["close"] - tp_multiplier * atr_dollars
+                                            entry_price = raw_entry_price * (1.0 - slippage_pct / 100.0)
+                                            stop_loss_price = entry_price + 0.75 * atr_dollars
+                                            take_profit_price = entry_price - tp_multiplier * atr_dollars
 
                                         # Kelly Criterion position sizing calculation
                                         kelly_b = tp_multiplier / 0.75
@@ -1962,22 +2010,23 @@ def main():
                                         # Calculate leverage (1x to 125x) based on confidence
                                         leverage_val = 1.0 + (calibrated_confidence - 0.50) / 0.50 * 124.0
                                         # Risk check: cap leverage so stop loss doesn't exceed 90% of capital
-                                        stop_loss_pct = (0.75 * atr_dollars / latest_candle["close"]) * 100
+                                        stop_loss_pct = (0.75 * atr_dollars / entry_price) * 100
                                         max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 125.0
                                         leverage_val = round(max(1.0, min(125.0, min(leverage_val, max_safe_lev))), 1)
 
                                         lookahead = 10
                                         duration_seconds = int(iv) * 60.0 * lookahead
                                         active_trade = {
-                                            "entry_price": float(latest_candle["close"]),
+                                            "symbol": symbol,
+                                            "entry_price": float(entry_price),
                                             "predicted_price": float(predicted_price),
                                             "stop_loss": float(stop_loss_price),
                                             "take_profit": float(take_profit_price),
                                             "direction": str(ml_trend),
                                             "end_time": float(time.time() + duration_seconds),
                                             "atr_dollars": float(atr_dollars),
-                                            "highest_price": float(latest_candle["close"]),
-                                            "lowest_price": float(latest_candle["close"]),
+                                            "highest_price": float(entry_price),
+                                            "lowest_price": float(entry_price),
                                             "break_even_triggered": False,
                                             "position_size_usd": float(position_size_usd),
                                             "kelly_fraction": float(kelly_fraction),
@@ -1985,7 +2034,7 @@ def main():
                                         }
                                         bot_state[active_trade_key] = active_trade
                                         
-                                        print(f"[{iv}m] Trade Opened: {ml_trend} at price {latest_candle['close']:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
+                                        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
                                         print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x\n")
                                     else:
                                         status_msg = "Skipped (Confluence Failed)"
@@ -1996,9 +2045,10 @@ def main():
                                         print("==================================================\n")
                             
                             # Prevent duplicate predictions for the same candle timestamp
-                            exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv for p in bot_state["prediction_history"])
+                            exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv and p.get("symbol") == symbol for p in bot_state["prediction_history"])
                             if not exists:
                                 bot_state["prediction_history"].append({
+                                    "symbol": symbol,
                                     "timestamp": float(time.time()),
                                     "candle_timestamp": int(latest_completed_ts),
                                     "interval": str(iv),
@@ -2019,9 +2069,9 @@ def main():
                                 if len(bot_state["prediction_history"]) > 200:
                                     bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
                             else:
-                                print(f"[{iv}m] Prediction for candle timestamp {get_local_time_str(latest_completed_ts/1000)} already exists in history. Skipping duplicate append.")
+                                print(f"[{symbol} {iv}m] Prediction for candle timestamp {get_local_time_str(latest_completed_ts/1000)} already exists in history. Skipping duplicate append.")
                             
-                            evaluate_predictions(df_completed, iv)
+                            evaluate_predictions(df_completed, iv, symbol)
                             save_history()
                             
                             last_processed_timestamps[last_ts_key] = latest_completed_ts
