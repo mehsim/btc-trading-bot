@@ -103,14 +103,54 @@ def save_history():
     try:
         with open(HISTORY_FILE, "w") as f:
             json.dump(data, f)
+            
+        # If running on Hugging Face and write token is available, backup to HF Dataset
+        token = os.environ.get("HF_TOKEN") or os.environ.get("token")
+        space_id = os.environ.get("SPACE_ID")
+        if token and space_id:
+            try:
+                from huggingface_hub import HfApi
+                api = HfApi()
+                dataset_id = f"{space_id}-history"
+                api.create_repo(repo_id=dataset_id, repo_type="dataset", exist_ok=True, token=token)
+                api.upload_file(
+                    path_or_fileobj=HISTORY_FILE,
+                    path_in_repo="dashboard_history.json",
+                    repo_id=dataset_id,
+                    repo_type="dataset",
+                    token=token
+                )
+            except Exception as hf_err:
+                print(f"HF Space Sync: Failed to backup history to Dataset: {hf_err}")
     except Exception as e:
         print(f"Error saving history to disk: {e}")
 
 def load_history():
-    # 1. Sync from Hugging Face Space if running locally (not in Space environment)
-    if not os.environ.get("SPACE_ID"):
+    token = os.environ.get("HF_TOKEN") or os.environ.get("token")
+    space_id = os.environ.get("SPACE_ID")
+    
+    # 1. If running on HF and token is available, restore history from HF Dataset
+    if space_id and token:
         try:
-            print("Syncing: Attempting to pull latest history from Hugging Face Space...")
+            from huggingface_hub import hf_hub_download
+            dataset_id = f"{space_id}-history"
+            print(f"[Sync] Attempting to download history from Dataset {dataset_id}...")
+            downloaded_path = hf_hub_download(
+                repo_id=dataset_id,
+                filename="dashboard_history.json",
+                repo_type="dataset",
+                token=token
+            )
+            import shutil
+            shutil.copy(downloaded_path, HISTORY_FILE)
+            print("[Sync] Successfully restored history from Hugging Face Dataset.")
+        except Exception as hf_err:
+            print(f"[Sync] Could not restore history from HF Dataset (normal if first run): {hf_err}")
+
+    # 2. Sync from Hugging Face Space if running locally (not in Space environment itself)
+    elif not space_id:
+        try:
+            print("Syncing: Attempting to pull latest history from Hugging Face Space API...")
             resp = requests.get("https://mehsimleo-btc-trading-bot.hf.space/api/status", timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
@@ -127,8 +167,6 @@ def load_history():
                     bot_state["trade_history"] = hf_trades
                     bot_state["prediction_history"] = hf_predictions
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
-                    
-                    # Save local copy
                     save_history()
                     return
         except Exception as e:

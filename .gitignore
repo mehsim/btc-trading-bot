@@ -14,7 +14,6 @@ __pycache__/
 Thumbs.db
 
 # Bot session/history logs (so we start fresh on the cloud)
-dashboard_history.json
 simulation_log.txt
 
 # Trained ML binary models (compiled dynamically in Docker)
