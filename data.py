@@ -54,8 +54,12 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                 binance_interval = "15m"
             elif str(interval) == "60":
                 binance_interval = "1h"
+            elif str(interval) == "120":
+                binance_interval = "2h"
             elif str(interval) == "240":
                 binance_interval = "4h"
+            elif str(interval) == "360":
+                binance_interval = "6h"
             elif str(interval).upper() == "D":
                 binance_interval = "1d"
 
@@ -97,8 +101,12 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                 kraken_interval = 15
             elif str(interval) == "60":
                 kraken_interval = 60
+            elif str(interval) == "120":
+                kraken_interval = 60  # Kraken does not support 120
             elif str(interval) == "240":
                 kraken_interval = 240
+            elif str(interval) == "360":
+                kraken_interval = 240  # Kraken does not support 360
             elif str(interval).upper() == "D":
                 kraken_interval = 1440
 
@@ -158,8 +166,10 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         interval_time = "5min"
     elif str(interval) == "15":
         interval_time = "15min"
-    elif str(interval) == "60":
+    elif str(interval) in ["60", "120"]:
         interval_time = "1h"
+    elif str(interval) in ["240", "360"]:
+        interval_time = "4h"
         
     oi_data = []
     cursor = None

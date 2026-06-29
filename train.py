@@ -585,12 +585,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
-    parser.add_argument("--interval", type=str, default="60", choices=["5", "15", "60", "all"], help="Timeframe interval to train")
+    parser.add_argument("--interval", type=str, default="60", choices=["60", "120", "240", "360", "all"], help="Timeframe interval to train")
     parser.add_argument("--pages", type=int, default=20, help="Number of data pages to fetch from Bybit")
     args = parser.parse_args()
 
     if args.interval == "all":
-        for iv in ["5", "15", "60"]:
+        for iv in ["60", "120", "240", "360"]:
             print(f"\n==============================================")
             print(f"TRAINING FOR INTERVAL: {iv}")
             print(f"==============================================")

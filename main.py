@@ -36,32 +36,38 @@ bot_state = {
     "live_price": None,
     "last_update": 0.0,
     
-    "active_trade_5m": None,
-    "active_trade_15m": None,
     "active_trade_1h": None,
+    "active_trade_2h": None,
+    "active_trade_4h": None,
+    "active_trade_6h": None,
     
-    "latest_prediction_5m": None,
-    "latest_prediction_15m": None,
     "latest_prediction_1h": None,
+    "latest_prediction_2h": None,
+    "latest_prediction_4h": None,
+    "latest_prediction_6h": None,
     
-    "confluence_results_5m": None,
-    "confluence_results_15m": None,
     "confluence_results_1h": None,
+    "confluence_results_2h": None,
+    "confluence_results_4h": None,
+    "confluence_results_6h": None,
     
-    "regime_5m": "Unknown",
-    "regime_15m": "Unknown",
     "regime_1h": "Unknown",
+    "regime_2h": "Unknown",
+    "regime_4h": "Unknown",
+    "regime_6h": "Unknown",
     
-    "adx_5m": 0.0,
-    "adx_15m": 0.0,
     "adx_1h": 0.0,
+    "adx_2h": 0.0,
+    "adx_4h": 0.0,
+    "adx_6h": 0.0,
     
     "status": "Initializing",
     "retraining_status": "Idle",
     
-    "calibration_5m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
-    "calibration_15m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     "calibration_1h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+    "calibration_2h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+    "calibration_4h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+    "calibration_6h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     
     "simulated_balance": 10000.0,
     "daily_drawdown_start_balance": 10000.0,
@@ -69,7 +75,7 @@ bot_state = {
     "circuit_breaker_active": False,
     "trade_history": [],
     "prediction_history": [],
-    "win_rate_by_tf": {"5": None, "15": None, "60": None}
+    "win_rate_by_tf": {"60": None, "120": None, "240": None, "360": None}
 }
 
 def save_history():
@@ -77,7 +83,7 @@ def save_history():
     if len(bot_state["prediction_history"]) > 500:
         bot_state["prediction_history"] = bot_state["prediction_history"][-500:]
     # Recompute win rate by TF from trade history
-    for tf_key in ["5", "15", "60"]:
+    for tf_key in ["60", "120", "240", "360"]:
         tf_trades = [t for t in bot_state["trade_history"] if str(t.get("interval")) == tf_key]
         if tf_trades:
             wins = sum(1 for t in tf_trades if t.get("success"))
@@ -169,13 +175,13 @@ def retrain_models_thread(is_manual=False):
         global bot_state
         try:
             bot_state["retraining_status"] = "Optimizing..."
-            print(f"[Retraining] Starting {'manual ' if is_manual else 'scheduled '}rolling retraining of models for 5m, 15m, and 60m intervals...")
+            print(f"[Retraining] Starting {'manual ' if is_manual else 'scheduled '}rolling retraining of models for 1h, 2h, 4h, and 6h intervals...")
             
             # Import train_models dynamically to avoid circular import issues
             from train import train_models
             
             # Retrain for all intervals
-            for iv in ["5", "15", "60"]:
+            for iv in ["60", "120", "240", "360"]:
                 print(f"[Retraining] Retraining models for interval {iv}m...")
                 train_models(interval=iv, pages=20)
                 
@@ -207,7 +213,7 @@ def run_rolling_retrain_scheduler():
             needs_retrain = False
             
             # Check if any model file is missing or older than 7 days
-            for iv in ["5", "15", "60"]:
+            for iv in ["60", "120", "240", "360"]:
                 filenames = [
                     f"xgb_trending_trend_{iv}.json",
                     f"xgb_trending_price_{iv}.json",
@@ -260,7 +266,7 @@ from ensemble import load_ensemble_classifier, load_ensemble_regressor
 models_by_interval = {}
 model_files_mtime = {}
 
-for iv in ["5", "15", "60"]:
+for iv in ["60", "120", "240", "360"]:
     models_by_interval[iv] = {
         "trending": {
             "trend": None,
@@ -313,14 +319,14 @@ def load_model_weights(iv):
             meta_clf.load_model(prefixes["ranging_meta"])
             models_by_interval[iv]["ranging"]["meta"] = meta_clf
             
-        print(f"Successfully loaded ensemble and meta models for interval {iv}m")
+        print(f"Successfully loaded ensemble and meta models for interval {iv}")
     except Exception as e:
-        print(f"Warning: Could not load ensemble models for interval {iv}m: {e}")
+        print(f"Warning: Could not load ensemble models for interval {iv}: {e}")
 
 
 
 def check_and_hot_reload_models():
-    for iv in ["5", "15", "60"]:
+    for iv in ["60", "120", "240", "360"]:
         filenames = {
             "trending_trend": f"ensemble_trending_trend_{iv}_xgb.json",
             "trending_price": f"ensemble_trending_price_{iv}_xgb.json",
@@ -340,18 +346,18 @@ def check_and_hot_reload_models():
                     break
                     
         if changed:
-            print(f"[Hot-Reload] Model update detected for {iv}m on disk. Reloading in memory...")
+            print(f"[Hot-Reload] Model update detected for {iv} on disk. Reloading in memory...")
             load_model_weights(iv)
             try:
                 p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
-                tf_map_startup = {"5": "5m", "15": "15m", "60": "1h"}
+                tf_map_startup = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
                 tf_key = tf_map_startup[iv]
                 bot_state[f"calibration_{tf_key}"] = {
                     "p95": p95,
                     "max_conf": max_conf,
                     "mean": 54.81
                 }
-                print(f"[Hot-Reload] Recalculated calibration thresholds for {iv}m (p95: {p95:.2f}, max_conf: {max_conf:.2f})")
+                print(f"[Hot-Reload] Recalculated calibration thresholds for {iv} (p95: {p95:.2f}, max_conf: {max_conf:.2f})")
             except Exception as e:
                 print(f"[Hot-Reload] Warning: Could not recalculate thresholds for {iv}m: {e}")
 
@@ -445,7 +451,7 @@ for lag in [1, 2]:
     features.append(f"CVD_rolling_4h_lag{lag}")
 
 # Initial load
-for iv in ["5", "15", "60"]:
+for iv in ["60", "120", "240", "360"]:
     load_model_weights(iv)
 
 def add_features(df):
@@ -1337,8 +1343,8 @@ def main():
     bot_state["live_price"] = live_price
 
     # Calculate calibration boundaries at startup for each interval
-    tf_map_startup = {"5": "5m", "15": "15m", "60": "1h"}
-    for iv in ["5", "15", "60"]:
+    tf_map_startup = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+    for iv in ["60", "120", "240", "360"]:
         if iv in models_by_interval:
             p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
             tf_key = tf_map_startup[iv]
@@ -1352,9 +1358,10 @@ def main():
     bot_state["status"] = "Running"
 
     last_processed_timestamps = {
-        "last_processed_5_ts": None,
-        "last_processed_15_ts": None,
-        "last_processed_60_ts": None
+        "last_processed_60_ts": None,
+        "last_processed_120_ts": None,
+        "last_processed_240_ts": None,
+        "last_processed_360_ts": None
     }
 
     while True:
@@ -1375,8 +1382,8 @@ def main():
             continue
 
         # 2. Check Exits for each timeframe if a trade is active
-        tf_map = {"5": "5m", "15": "15m", "60": "1h"}
-        for iv in ["5", "15", "60"]:
+        tf_map = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+        for iv in ["60", "120", "240", "360"]:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
             active_trade = bot_state[active_trade_key]
@@ -1552,7 +1559,7 @@ def main():
             return False, None
 
         check_and_hot_reload_models()
-        for iv in ["5", "15", "60"]:
+        for iv in ["60", "120", "240", "360"]:
 
             tf = tf_map[iv]
             try:
