@@ -1406,9 +1406,9 @@
                     const predTimeStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
                     const dirClass = p.direction === 'Bullish' ? 'color-bullish' : (p.direction === 'Bearish' ? 'color-bearish' : 'color-neutral');
 
-                    let refPriceStr = `$${p.ref_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-                    let expChangeSign = p.predicted_change >= 0 ? '+' : '';
-                    let expChangeStr = `${expChangeSign}${p.predicted_change.toFixed(3)}`;
+                    let refPriceStr = p.ref_price !== undefined && p.ref_price !== null ? `$${p.ref_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-';
+                    let expChangeSign = (p.predicted_change || 0) >= 0 ? '+' : '';
+                    let expChangeStr = p.predicted_change !== undefined && p.predicted_change !== null ? `${expChangeSign}${p.predicted_change.toFixed(3)}` : '-';
 
                     let exitPriceStr = "-";
                     let diffStr = "-";
