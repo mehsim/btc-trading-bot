@@ -1002,6 +1002,38 @@
             </div>
         </div>
 
+        <!-- Active Open Trades Panel -->
+        <div class="card">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div class="section-title">💼 Active Open Trades</div>
+                <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
+            </div>
+
+            <div class="table-container" style="margin-top: 15px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timeframe</th>
+                            <th>Symbol</th>
+                            <th>Direction</th>
+                            <th>Leverage</th>
+                            <th>Entry Price</th>
+                            <th>Current Price</th>
+                            <th>TP / SL</th>
+                            <th>Time Left</th>
+                            <th>PnL</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="active-open-trades-rows">
+                        <tr>
+                            <td colspan="10" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Completed Trades Panel -->
         <div class="card">
             <div class="section-header">
@@ -1085,38 +1117,6 @@
                             <td colspan="12"
                                 style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades
                                 completed in this session yet.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Active Open Trades Panel -->
-        <div class="card">
-            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div class="section-title">💼 Active Open Trades</div>
-                <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
-            </div>
-
-            <div class="table-container" style="margin-top: 15px;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Timeframe</th>
-                            <th>Symbol</th>
-                            <th>Direction</th>
-                            <th>Leverage</th>
-                            <th>Entry Price</th>
-                            <th>Current Price</th>
-                            <th>TP / SL</th>
-                            <th>Time Left</th>
-                            <th>PnL</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="active-open-trades-rows">
-                        <tr>
-                            <td colspan="10" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                         </tr>
                     </tbody>
                 </table>
