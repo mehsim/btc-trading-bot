@@ -838,7 +838,7 @@
             </div>
 
             <!-- 1H Strategy Card -->
-            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('1h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>1H STRATEGY<span id="leverage-badge-1h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
@@ -862,7 +862,7 @@
             </div>
 
             <!-- 2H Strategy Card -->
-            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('2h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>2H STRATEGY<span id="leverage-badge-2h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
@@ -886,7 +886,7 @@
             </div>
 
             <!-- 4H Strategy Card -->
-            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('4h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>4H STRATEGY<span id="leverage-badge-4h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
@@ -910,7 +910,7 @@
             </div>
 
             <!-- 6H Strategy Card -->
-            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('6h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>6H STRATEGY<span id="leverage-badge-6h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
@@ -1670,11 +1670,11 @@
                                 const count = activeTradesList.length;
                                 const countText = count === 1 ? "1 Active Position" : `${count} Active Positions`;
                                 positionContainer.innerHTML = `
-                                    <div onclick="openActiveTradesModal('${tf}')" style="cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; background: rgba(139,92,246,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(139,92,246,0.1)'" onmouseout="this.style.background='rgba(139,92,246,0.05)'">
+                                    <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; background: rgba(139,92,246,0.05); transition: background 0.2s;">
                                         <span style="color: var(--accent-purple); font-weight: 800; font-size: 12px; display: flex; align-items: center; gap: 6px;">
                                             💼 ${countText}
                                         </span>
-                                        <span style="font-size: 10px; color: var(--text-muted); font-weight: 600;">(Click to view details / close)</span>
+                                        <span style="font-size: 10px; color: var(--text-muted); font-weight: 600;">(Click card to view details / close)</span>
                                     </div>
                                 `;
                             } else {
