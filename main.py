@@ -253,13 +253,20 @@ def force_close_trade():
         active_trades_list = [] if active_trades_list is None else [active_trades_list]
         bot_state[active_trade_key] = active_trades_list
 
-    # Find the trade for the specified symbol
+    # Find the trade for the specified symbol or trade_id
+    trade_id = data.get("trade_id")
     trade_to_close = None
-    for t in active_trades_list:
-        if t.get("symbol", "").upper() == symbol:
-            trade_to_close = t
-            break
-            
+    if trade_id:
+        for t in active_trades_list:
+            if t.get("trade_id") == trade_id:
+                trade_to_close = t
+                break
+    if not trade_to_close:
+        for t in active_trades_list:
+            if t.get("symbol", "").upper() == symbol:
+                trade_to_close = t
+                break
+                
     if not trade_to_close:
         # Fallback if no symbol specified, close the first one
         if len(active_trades_list) > 0:
@@ -341,7 +348,10 @@ def force_close_trade():
     save_history()
     
     # Remove from active trades
-    active_trades_list = [t for t in active_trades_list if not (t.get("symbol", "").upper() == symbol)]
+    if trade_id:
+        active_trades_list = [t for t in active_trades_list if t.get("trade_id") != trade_id]
+    else:
+        active_trades_list = [t for t in active_trades_list if not (t.get("symbol", "").upper() == symbol)]
     bot_state[active_trade_key] = active_trades_list
     
     return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
@@ -1989,12 +1999,9 @@ def main():
                             active_trade_key = f"active_trade_{tf}"
                             active_trades_list = bot_state.get(active_trade_key, [])
                             
-                            has_active_symbol_trade = any(t.get("symbol") == symbol for t in active_trades_list)
-
-                            if has_active_symbol_trade:
-                                status_msg = "Skipped (Trade Active)"
-                                print(f"[{symbol} {iv}m] New completed candle detected, but trade entry skipped because a trade is already active for this symbol.")
-                            elif bot_state.get("circuit_breaker_active", False):
+                            # Parallel trades of same symbol are allowed
+                            has_active_symbol_trade = False
+                            if bot_state.get("circuit_breaker_active", False):
                                 status_msg = "Skipped (Circuit Breaker)"
                                 print(f"[{symbol} {iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
                             elif ml_trend == "Neutral":
@@ -2087,7 +2094,10 @@ def main():
 
                                         lookahead = 10
                                         duration_seconds = int(iv) * 60.0 * lookahead
+                                        import uuid
+                                        trade_uuid = str(uuid.uuid4())[:8]
                                         active_trade = {
+                                            "trade_id": f"{symbol}_{trade_uuid}",
                                             "symbol": symbol,
                                             "entry_price": float(entry_price),
                                             "predicted_price": float(predicted_price),

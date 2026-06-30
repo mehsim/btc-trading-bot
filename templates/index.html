@@ -1168,7 +1168,7 @@
             renderTrades();
         }
 
-        function forceCloseTrade(interval, symbol) {
+        function forceCloseTrade(interval, symbol, tradeId) {
             const tfMap = { '60': '1H', '120': '2H', '240': '4H', '360': '6H' };
             const tfLabel = tfMap[interval] || interval;
             const symLabel = symbol ? symbol.replace("USDT", "") : "active";
@@ -1178,7 +1178,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         interval: String(interval),
-                        symbol: symbol || ""
+                        symbol: symbol || "",
+                        trade_id: tradeId || ""
                     })
                 })
                     .then(response => response.json())
@@ -1347,7 +1348,7 @@
                         <td style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</td>
                         <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
                         <td>
-                            <button onclick="forceCloseTrade('${trade.intervalVal}', '${symbol}')" style="padding: 4px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 4px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
+                            <button onclick="forceCloseTrade('${trade.intervalVal}', '${symbol}', '${trade.trade_id || ''}')" style="padding: 4px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 4px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
                         </td>
                     </tr>
                 `;
@@ -1918,7 +1919,7 @@
                                 <span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span>
                             </div>
                         </div>
-                        <button onclick="forceCloseTrade('${interval}', '${symbol}')" style="margin-top: 10px; width: 100%; padding: 6px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Manual Close Position</button>
+                        <button onclick="forceCloseTrade('${interval}', '${symbol}', '${trade.trade_id || ''}')" style="margin-top: 10px; width: 100%; padding: 6px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Manual Close Position</button>
                     </div>
                 `;
             });
