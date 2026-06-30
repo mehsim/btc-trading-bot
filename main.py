@@ -483,6 +483,7 @@ def run_flask():
 # CONFIGURATION
 # =========================
 SYMBOL = "BTCUSDT"
+INTERVAL = "60"
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT"]
 
 # =========================
@@ -1319,7 +1320,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         if rsi_4h_pass:
             total_score += weight_4h
 
-    # ======= CHECK 3: 1h RSI — HARD GATE (extreme overbought/oversold) =======
+    # ======= CHECK 3: 1h RSI (Weight: 2) =======
+    weight_rsi = 2
     rsi_1h = df_1h["RSI"].iloc[-1]
     if ml_trend == "Bullish":
         rsi_1h_pass = (rsi_1h < 70.0)
@@ -1327,9 +1329,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     else:
         rsi_1h_pass = (rsi_1h > 30.0)
         detail_msg = f"1h RSI is {rsi_1h:.2f} (> 30, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (<= 30, Oversold)"
-    results["1h_RSI"] = {"pass": rsi_1h_pass, "detail": detail_msg + " [HARD GATE]", "weight": "HARD"}
-    if not rsi_1h_pass:
-        hard_gate_failed = True
+    results["1h_RSI"] = {"pass": rsi_1h_pass, "detail": detail_msg, "weight": weight_rsi}
+    max_score += weight_rsi
+    if rsi_1h_pass:
+        total_score += weight_rsi
 
     # ======= CHECK 4: Volume Participation (Weight: 2) =======
     weight_vol = 2
@@ -1417,7 +1420,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         "weight": 0
     }
 
-    # ======= CHECK 9: Fee Coverage — HARD GATE =======
+    # ======= CHECK 9: Fee Coverage (Weight: 2) =======
+    weight_fee = 2
     atr_norm_val = df_1h["ATR_norm"].iloc[-1]
     if str(interval) in ["5", "15"]:
         fee_pass = (atr_norm_val >= 0.0010)
@@ -1427,11 +1431,12 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         req_str = ">= 0.15%"
     results["Fee_Coverage"] = {
         "pass": fee_pass,
-        "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req {req_str} to cover roundtrip Spot fees) [HARD GATE]",
-        "weight": "HARD"
+        "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req {req_str} to cover roundtrip Spot fees)",
+        "weight": weight_fee
     }
-    if not fee_pass:
-        hard_gate_failed = True
+    max_score += weight_fee
+    if fee_pass:
+        total_score += weight_fee
 
     # ======= CHECK 10: Order Book Imbalance & Spread (Weight: 1) =======
     weight_ob = 1
@@ -2125,12 +2130,19 @@ def main():
                                         current_bal = bot_state.get("simulated_balance", 10000.0)
                                         position_size_usd = current_bal * kelly_fraction
 
-                                        # Option 1: Reduce maximum leverage to 100
-                                        leverage_val = 1.0 + (calibrated_confidence - 0.50) / 0.50 * 99.0
-                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital
+                                        # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
+                                        c = float(calibrated_confidence)
+                                        if c >= 0.85:
+                                            leverage_val = 35.0 + (c - 0.85) / 0.15 * 15.0
+                                        else:
+                                            leverage_val = 10.0 + (c - 0.70) / 0.15 * 25.0
+                                            if leverage_val < 1.0:
+                                                leverage_val = 1.0
+
+                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit at 50.0x
                                         stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
                                         max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
-                                        leverage_val = round(max(1.0, min(100.0, min(leverage_val, max_safe_lev))), 1)
+                                        leverage_val = round(max(1.0, min(50.0, min(leverage_val, max_safe_lev))), 1)
 
                                         lookahead = 10
                                         duration_seconds = int(iv) * 60.0 * lookahead

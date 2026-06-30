@@ -26,23 +26,15 @@ print("SEARCHING FOR AN APPROVED SIGNAL IN RECENT HISTORY")
 print("=" * 60)
 
 # Load models
-from xgboost import XGBClassifier, XGBRegressor
-models_trending = {
-    "trend": XGBClassifier(),
-    "price": XGBRegressor()
-}
-models_trending["trend"].load_model("xgb_trending_trend.json")
-models_trending["price"].load_model("xgb_trending_price.json")
+# Load models
+from main import models_by_interval, load_model_weights
+load_model_weights("60")
 
-models_ranging = {
-    "trend": XGBClassifier(),
-    "price": XGBRegressor()
-}
-models_ranging["trend"].load_model("xgb_ranging_trend.json")
-models_ranging["price"].load_model("xgb_ranging_price.json")
+models_trending = models_by_interval["60"]["trending"]
+models_ranging = models_by_interval["60"]["ranging"]
 
 # Fetch calibration limits
-p95, max_conf = calculate_historical_thresholds(models_trending["trend"])
+p95, max_conf = calculate_historical_thresholds(models_trending["trend"], "60")
 
 # Fetch daily and 4h data for trend checks
 print("Fetching macro histories for trend verification...")
@@ -59,6 +51,8 @@ rsi_4h = RSIIndicator(df_4h["close"], window=14).rsi()
 # Fetch target 1h history (last 400 candles)
 df_1h = get_history(symbol=SYMBOL, interval=INTERVAL, limit=400)
 df_1h["close_btc"] = df_1h["close"]
+from data import merge_derivatives_sentiment_features
+df_1h = merge_derivatives_sentiment_features(df_1h, symbol=SYMBOL, interval=INTERVAL)
 df_1h = add_features(df_1h)
 
 found_signal = False
