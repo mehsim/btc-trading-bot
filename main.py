@@ -410,14 +410,14 @@ def retrain_models_thread(is_manual=False):
 def run_rolling_retrain_scheduler():
     """
     Background scheduler that runs indefinitely.
-    Every 1 hour, it checks if the models on disk are older than 7 days (604,800 seconds).
+    Every 1 hour, it checks if the models on disk are older than 3 days (259,200 seconds).
     If they are, or if any model file is missing, it triggers rolling retraining.
     """
-    print("[Scheduler] Automated weekly rolling retraining scheduler started.")
+    print("[Scheduler] Automated 72-hour rolling retraining scheduler started.")
     # Give the bot some time to initialize before running the first check
     time.sleep(30)
     
-    retrain_interval_seconds = 7 * 24 * 60 * 60  # 7 days
+    retrain_interval_seconds = 3 * 24 * 60 * 60  # 3 days
     
     while True:
         try:
@@ -441,7 +441,7 @@ def run_rolling_retrain_scheduler():
                         mtime = os.path.getmtime(filename)
                         age = now - mtime
                         if age > retrain_interval_seconds:
-                            print(f"[Scheduler] Model file {filename} is {age/(24*3600):.1f} days old (exceeds 7 days). Triggering retraining.")
+                            print(f"[Scheduler] Model file {filename} is {age/(24*3600):.1f} days old (exceeds 3 days). Triggering retraining.")
                             needs_retrain = True
                             break
                 if needs_retrain:
@@ -1521,7 +1521,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
-    score_threshold = 75.0
+    score_threshold = 80.0
     approved = (not hard_gate_failed) and (score_pct >= score_threshold)
 
     # Add score summary to results
@@ -1843,10 +1843,10 @@ def main():
             """Returns True if within 15 minutes of a known high-impact event (CPI, FOMC, NFP)."""
             try:
                 now_utc = datetime.utcnow()
-                # Use investing.com economic calendar RSS or finnhub — use finnhub free tier
+                finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
                 resp = requests.get(
                     "https://finnhub.io/api/v1/calendar/economic",
-                    params={"token": "free"},
+                    params={"token": finnhub_token},
                     timeout=5
                 )
                 if resp.status_code == 200:
