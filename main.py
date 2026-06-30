@@ -108,7 +108,11 @@ def save_history():
     data = {
         "simulated_balance": bot_state["simulated_balance"],
         "trade_history": bot_state["trade_history"],
-        "prediction_history": bot_state["prediction_history"]
+        "prediction_history": bot_state["prediction_history"],
+        "active_trade_1h": bot_state.get("active_trade_1h", []),
+        "active_trade_2h": bot_state.get("active_trade_2h", []),
+        "active_trade_4h": bot_state.get("active_trade_4h", []),
+        "active_trade_6h": bot_state.get("active_trade_6h", [])
     }
     try:
         with open(HISTORY_FILE, "w") as f:
@@ -176,6 +180,10 @@ def load_history():
                     bot_state["simulated_balance"] = hf_balance
                     bot_state["trade_history"] = hf_trades
                     bot_state["prediction_history"] = hf_predictions
+                    bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
+                    bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
+                    bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
+                    bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
                     save_history()
                     return
@@ -196,6 +204,12 @@ def load_history():
                 for p in bot_state["prediction_history"]:
                     if "interval" not in p:
                         p["interval"] = "60"
+                
+                # Load active trades
+                bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
+                bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
+                bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
+                bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
@@ -1649,6 +1663,7 @@ def main():
 
         # 2. Check Exits for each timeframe if a trade is active
         tf_map = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+        active_trades_updated = False
         for iv in ["60", "120", "240", "360"]:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
@@ -1692,6 +1707,7 @@ def main():
                         if potential_sl > stop_loss:
                             stop_loss = potential_sl
                             active_trade["stop_loss"] = stop_loss
+                            active_trades_updated = True
                             print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f})")
                     
                     # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
@@ -1700,6 +1716,7 @@ def main():
                         active_trade["break_even_triggered"] = True
                         stop_loss = max(stop_loss, entry_price)
                         active_trade["stop_loss"] = stop_loss
+                        active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
                 else:
                     if current_price < lowest_price:
@@ -1710,6 +1727,7 @@ def main():
                         if potential_sl < stop_loss:
                             stop_loss = potential_sl
                             active_trade["stop_loss"] = stop_loss
+                            active_trades_updated = True
                             print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f})")
                             
                     # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
@@ -1718,6 +1736,7 @@ def main():
                         active_trade["break_even_triggered"] = True
                         stop_loss = min(stop_loss, entry_price)
                         active_trade["stop_loss"] = stop_loss
+                        active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
 
                 remaining_seconds = max(0, int(end_time - current_time))
@@ -1812,6 +1831,9 @@ def main():
                 else:
                     updated_trades.append(active_trade)
             bot_state[active_trade_key] = updated_trades
+        
+        if active_trades_updated:
+            save_history()
 
         # 3. Check for completed candle closes to search for a new signal
 
