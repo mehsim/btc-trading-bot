@@ -40,6 +40,9 @@ bot_state = {
     "live_price_BTCUSDT": None,
     "live_price_ETHUSDT": None,
     "live_price_SOLUSDT": None,
+    "live_price_BNBUSDT": None,
+    "live_price_ADAUSDT": None,
+    "live_price_XRPUSDT": None,
     "last_update": 0.0,
     
     "active_trade_1h": [],
@@ -466,7 +469,7 @@ def run_flask():
 # CONFIGURATION
 # =========================
 SYMBOL = "BTCUSDT"
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT"]
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
