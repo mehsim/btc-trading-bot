@@ -2082,29 +2082,33 @@ def main():
                                         # Apply slippage on entry
                                         slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)  # Dynamic slippage
                                         raw_entry_price = float(latest_candle["close"])
+                                        # Option 2: Widen SL to 1.2 * ATR and scale TP proportionally
+                                        sl_multiplier = 1.2
+                                        tp_multiplier_adjusted = tp_multiplier * (sl_multiplier / 0.75)
+
                                         if ml_trend == "Bullish":
                                             entry_price = raw_entry_price * (1.0 + slippage_pct / 100.0)
-                                            stop_loss_price = entry_price - 0.75 * atr_dollars
-                                            take_profit_price = entry_price + tp_multiplier * atr_dollars
+                                            stop_loss_price = entry_price - sl_multiplier * atr_dollars
+                                            take_profit_price = entry_price + tp_multiplier_adjusted * atr_dollars
                                         else:
                                             entry_price = raw_entry_price * (1.0 - slippage_pct / 100.0)
-                                            stop_loss_price = entry_price + 0.75 * atr_dollars
-                                            take_profit_price = entry_price - tp_multiplier * atr_dollars
+                                            stop_loss_price = entry_price + sl_multiplier * atr_dollars
+                                            take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
 
                                         # Kelly Criterion position sizing calculation
-                                        kelly_b = tp_multiplier / 0.75
+                                        kelly_b = tp_multiplier_adjusted / sl_multiplier
                                         kelly_p = float(calibrated_confidence)
                                         f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
                                         kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
                                         current_bal = bot_state.get("simulated_balance", 10000.0)
                                         position_size_usd = current_bal * kelly_fraction
 
-                                        # Calculate leverage (1x to 125x) based on confidence
-                                        leverage_val = 1.0 + (calibrated_confidence - 0.50) / 0.50 * 124.0
+                                        # Option 1: Reduce maximum leverage to 100
+                                        leverage_val = 1.0 + (calibrated_confidence - 0.50) / 0.50 * 99.0
                                         # Risk check: cap leverage so stop loss doesn't exceed 90% of capital
-                                        stop_loss_pct = (0.75 * atr_dollars / entry_price) * 100
-                                        max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 125.0
-                                        leverage_val = round(max(1.0, min(125.0, min(leverage_val, max_safe_lev))), 1)
+                                        stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
+                                        max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
+                                        leverage_val = round(max(1.0, min(100.0, min(leverage_val, max_safe_lev))), 1)
 
                                         lookahead = 10
                                         duration_seconds = int(iv) * 60.0 * lookahead
