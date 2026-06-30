@@ -1018,9 +1018,12 @@
 
         <!-- Active Open Trades Panel -->
         <div class="card">
-            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 10px;">
                 <div class="section-title">💼 Active Open Trades</div>
-                <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div id="active-open-trades-total-pnl" style="font-size: 13px; font-weight: 800; padding: 4px 12px; border-radius: 20px; display: none; font-family: 'Outfit', sans-serif;">Total PnL: $0.00</div>
+                    <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
+                </div>
             </div>
 
             <div class="table-container" style="margin-top: 15px;">
@@ -1135,6 +1138,13 @@
                     </tbody>
                 </table>
             </div>
+            
+            <!-- Pagination Controls -->
+            <div id="trade-history-pagination" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display: none;">
+                <button id="prev-page-btn" onclick="changeTradeHistoryPage(-1)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-primary); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: background 0.2s; font-size: 12px; font-weight: 700;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">← Previous</button>
+                <span id="page-num-indicator" style="font-size: 13px; font-weight: 700; color: var(--text-secondary);">Page <span id="current-page-num" style="color: var(--accent-purple);">1</span> of <span id="total-page-num">1</span></span>
+                <button id="next-page-btn" onclick="changeTradeHistoryPage(1)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-primary); padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: background 0.2s; font-size: 12px; font-weight: 700;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">Next →</button>
+            </div>
         </div>
     </div>
 
@@ -1176,6 +1186,7 @@
 
         function setTradeFilter(filterType, element) {
             activeFilter = filterType;
+            tradeHistoryPage = 1; // Reset to page 1 on filter change
             const buttons = element.parentElement.querySelectorAll(".tab-btn");
             buttons.forEach(btn => btn.classList.remove("active"));
             element.classList.add("active");
@@ -1213,6 +1224,14 @@
             }
         }
 
+        let tradeHistoryPage = 1;
+        const tradeHistoryPageSize = 10;
+
+        function changeTradeHistoryPage(direction) {
+            tradeHistoryPage += direction;
+            renderTrades();
+        }
+
         function renderTrades() {
             const tradesTbody = document.getElementById("trade-history-rows");
 
@@ -1239,10 +1258,52 @@
                 filtered = filtered.filter(t => !t.success);
             }
 
-            if (filtered.length > 0) {
+            const totalFiltered = filtered.length;
+            const totalPages = Math.ceil(totalFiltered / tradeHistoryPageSize) || 1;
+            
+            // Adjust current page if it is out of bounds
+            if (tradeHistoryPage > totalPages) {
+                tradeHistoryPage = totalPages;
+            }
+            if (tradeHistoryPage < 1) {
+                tradeHistoryPage = 1;
+            }
+
+            // Update UI indicators
+            const currentPageNumElem = document.getElementById("current-page-num");
+            const totalPageNumElem = document.getElementById("total-page-num");
+            const prevBtn = document.getElementById("prev-page-btn");
+            const nextBtn = document.getElementById("next-page-btn");
+            const paginationContainer = document.getElementById("trade-history-pagination");
+
+            if (currentPageNumElem) currentPageNumElem.innerText = tradeHistoryPage;
+            if (totalPageNumElem) totalPageNumElem.innerText = totalPages;
+            
+            if (prevBtn) {
+                prevBtn.disabled = (tradeHistoryPage === 1);
+                prevBtn.style.opacity = prevBtn.disabled ? "0.4" : "1";
+                prevBtn.style.pointerEvents = prevBtn.disabled ? "none" : "auto";
+            }
+            if (nextBtn) {
+                nextBtn.disabled = (tradeHistoryPage === totalPages);
+                nextBtn.style.opacity = nextBtn.disabled ? "0.4" : "1";
+                nextBtn.style.pointerEvents = nextBtn.disabled ? "none" : "auto";
+            }
+
+            if (paginationContainer) {
+                paginationContainer.style.display = totalFiltered > 0 ? "flex" : "none";
+            }
+
+            const startIndex = (tradeHistoryPage - 1) * tradeHistoryPageSize;
+            const endIndex = startIndex + tradeHistoryPageSize;
+            
+            // Display newest trades first
+            const sortedFiltered = [...filtered].reverse();
+            const pageTrades = sortedFiltered.slice(startIndex, endIndex);
+
+            if (pageTrades.length > 0) {
                 let htmlRows = "";
-                // Display newest trades first
-                [...filtered].reverse().forEach(t => {
+                pageTrades.forEach(t => {
                     const dateObj = new Date(t.exit_time * 1000);
                     const exitTimeStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
                     const pnlClass = t.exit_price >= t.entry_price ? (t.direction === "Bullish" ? "color-bullish" : "color-bearish") : (t.direction === "Bullish" ? "color-bearish" : "color-bullish");
@@ -1286,6 +1347,7 @@
         function renderActiveOpenTrades() {
             const tbody = document.getElementById("active-open-trades-rows");
             const countBadge = document.getElementById("active-open-trades-count");
+            const totalPnLElem = document.getElementById("active-open-trades-total-pnl");
             if (!tbody) return;
 
             // Gather all active trades from activeTradesState
@@ -1314,10 +1376,16 @@
                         <td colspan="10" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                     </tr>
                 `;
+                if (totalPnLElem) {
+                    totalPnLElem.style.display = "none";
+                }
                 return;
             }
 
             let htmlRows = "";
+            let totalPnLVal = 0;
+            let totalPosSize = 0;
+
             allActive.forEach(trade => {
                 const symbol = trade.symbol || "BTCUSDT";
                 const dirClass = trade.direction === "Bullish" ? "color-bullish" : "color-bearish";
@@ -1343,6 +1411,10 @@
                     
                     pnlPct = rawPct * lev;
                     pnlVal = posSize * (pnlPct / 100);
+
+                    // Accumulate totals
+                    totalPnLVal += pnlVal;
+                    totalPosSize += posSize;
                 }
 
                 const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
@@ -1375,6 +1447,22 @@
             });
 
             tbody.innerHTML = htmlRows;
+
+            // Render Total PnL badge
+            if (totalPnLElem) {
+                if (allActive.length > 0) {
+                    const totalPnLPct = totalPosSize > 0 ? (totalPnLVal / totalPosSize * 100) : 0;
+                    const pnlBg = totalPnLVal >= 0 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)";
+                    const pnlColor = totalPnLVal >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+                    
+                    totalPnLElem.style.display = "block";
+                    totalPnLElem.style.color = pnlColor;
+                    totalPnLElem.style.background = pnlBg;
+                    totalPnLElem.innerText = `Total PnL: ${totalPnLVal >= 0 ? '+' : ''}$${totalPnLVal.toFixed(2)} (${totalPnLVal >= 0 ? '+' : ''}${totalPnLPct.toFixed(3)}%)`;
+                } else {
+                    totalPnLElem.style.display = "none";
+                }
+            }
         }
 
         function updateDashboard() {
