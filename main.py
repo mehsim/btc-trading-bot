@@ -281,7 +281,9 @@ def force_close_trade():
     position_size_usd = trade_to_close.get("position_size_usd", 100.0)
     
     live_symbol_price = get_fallback_price(symbol)
-    actual_exit_price = live_symbol_price if live_symbol_price is not None else (live_price or entry_price)
+    if live_symbol_price is None:
+        live_symbol_price = bot_state.get(f"live_price_{symbol}")
+    actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
     
     # Apply slippage on exit
     atr_norm_val = trade_to_close.get("atr_dollars", 50.0) / entry_price
@@ -1649,6 +1651,8 @@ def main():
             for active_trade in active_trades_list:
                 active_symbol = active_trade.get("symbol", "BTCUSDT")
                 symbol_price = get_fallback_price(active_symbol)
+                if symbol_price is None:
+                    symbol_price = bot_state.get(f"live_price_{active_symbol}")
                 if symbol_price is None:
                     updated_trades.append(active_trade)
                     continue
