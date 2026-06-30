@@ -110,9 +110,20 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             elif str(interval).upper() == "D":
                 kraken_interval = 1440
 
+            kraken_pair = "XBTUSDT"
+            symbol_upper = symbol.upper()
+            if symbol_upper == "BTCUSDT":
+                kraken_pair = "XBTUSDT"
+            elif symbol_upper == "ETHUSDT":
+                kraken_pair = "ETHUSDT"
+            elif symbol_upper == "SOLUSDT":
+                kraken_pair = "SOLUSDT"
+            else:
+                kraken_pair = symbol_upper
+
             kraken_url = "https://api.kraken.com/0/public/OHLC"
             kraken_params = {
-                "pair": "XBTUSD",
+                "pair": kraken_pair,
                 "interval": kraken_interval
             }
             headers = {
