@@ -1331,16 +1331,22 @@
                 let pnlVal = 0;
                 let pnlPct = 0;
                 if (currentPriceVal) {
+                    let diff = 0;
                     if (trade.direction === "Bullish") {
-                        pnlVal = currentPriceVal - entryPrice;
+                        diff = currentPriceVal - entryPrice;
                     } else {
-                        pnlVal = entryPrice - currentPriceVal;
+                        diff = entryPrice - currentPriceVal;
                     }
-                    pnlPct = (pnlVal / entryPrice) * 100;
+                    const rawPct = (diff / entryPrice) * 100;
+                    const lev = trade.leverage || 1.0;
+                    const posSize = trade.position_size_usd || 100.0;
+                    
+                    pnlPct = rawPct * lev;
+                    pnlVal = posSize * (pnlPct / 100);
                 }
 
                 const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
-                const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
+                const formattedPnL = `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
 
                 const remainingSeconds = Math.max(0, Math.floor(trade.end_time - (Date.now() / 1000)));
                 const mins = Math.floor(remainingSeconds / 60);
@@ -1890,16 +1896,22 @@
                 let pnlVal = 0;
                 let pnlPct = 0;
                 if (currentPriceVal) {
+                    let diff = 0;
                     if (trade.direction === "Bullish") {
-                        pnlVal = currentPriceVal - entryPrice;
+                        diff = currentPriceVal - entryPrice;
                     } else {
-                        pnlVal = entryPrice - currentPriceVal;
+                        diff = entryPrice - currentPriceVal;
                     }
-                    pnlPct = (pnlVal / entryPrice) * 100;
+                    const rawPct = (diff / entryPrice) * 100;
+                    const lev = trade.leverage || 1.0;
+                    const posSize = trade.position_size_usd || 100.0;
+                    
+                    pnlPct = rawPct * lev;
+                    pnlVal = posSize * (pnlPct / 100);
                 }
 
                 const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
-                const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
+                const formattedPnL = `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
 
                 const remainingSeconds = Math.max(0, Math.floor(trade.end_time - (Date.now() / 1000)));
                 const mins = Math.floor(remainingSeconds / 60);
