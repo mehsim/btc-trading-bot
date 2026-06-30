@@ -1091,83 +1091,35 @@
             </div>
         </div>
 
-        <!-- ML Predictions Tracker Panel -->
+        <!-- Active Open Trades Panel -->
         <div class="card">
-            <div class="section-header"
-                style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div class="section-title">🔮 ML Predictions Tracker</div>
-                <div style="display: flex; gap: 15px;">
-                    <div class="filter-tabs">
-                        <button class="tab-btn active" onclick="setPredictionTf('60', this)">1H</button>
-                        <button class="tab-btn" onclick="setPredictionTf('120', this)">2H</button>
-                        <button class="tab-btn" onclick="setPredictionTf('240', this)">4H</button>
-                        <button class="tab-btn" onclick="setPredictionTf('360', this)">6H</button>
-                    </div>
-                    <div class="filter-tabs">
-                        <button class="tab-btn active" id="pred-filter-all"
-                            onclick="setPredictionFilter('all', this)">All</button>
-                        <button class="tab-btn" id="pred-filter-traded" onclick="setPredictionFilter('traded', this)"
-                            style="color: var(--accent-green);">Traded</button>
-                        <button class="tab-btn" id="pred-filter-skipped" onclick="setPredictionFilter('skipped', this)"
-                            style="color: var(--text-secondary);">Skipped</button>
-                    </div>
-                </div>
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div class="section-title">💼 Active Open Trades</div>
+                <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
             </div>
 
-            <!-- Predictions Stats Row -->
-            <div class="stats-dashboard">
-                <div class="stat-subcard">
-                    <div class="stat-subcard-title">Total Signals</div>
-                    <div class="stat-subcard-val" id="pred-stats-total">0</div>
-                </div>
-                <div class="stat-subcard" style="border-color: rgba(16, 185, 129, 0.12);">
-                    <div class="stat-subcard-title" id="pred-stats-correct-title" style="color: var(--accent-green);">
-                        Correct 1H</div>
-                    <div class="stat-subcard-val" id="pred-stats-correct" style="color: var(--accent-green);">0</div>
-                </div>
-                <div class="stat-subcard" style="border-color: rgba(244, 63, 94, 0.12);">
-                    <div class="stat-subcard-title" id="pred-stats-incorrect-title" style="color: var(--accent-red);">
-                        Incorrect 1H</div>
-                    <div class="stat-subcard-val" id="pred-stats-incorrect" style="color: var(--accent-red);">0</div>
-                </div>
-                <div class="stat-subcard" style="border-color: rgba(139, 92, 246, 0.12);">
-                    <div class="stat-subcard-title" style="color: var(--accent-purple);">Raw Accuracy</div>
-                    <div class="stat-subcard-val" id="pred-stats-winrate" style="color: var(--accent-purple);">0.0%
-                    </div>
-                </div>
-            </div>
-
-            <div class="table-container">
+            <div class="table-container" style="margin-top: 15px;">
                 <table>
                     <thead>
                         <tr>
                             <th>Timeframe</th>
-                            <th>Time</th>
+                            <th>Symbol</th>
                             <th>Direction</th>
-                            <th>Ref Price</th>
-                            <th>Exp. Change</th>
-                            <th>Price after TF</th>
-                            <th>Outcome</th>
-                            <th>Status</th>
+                            <th>Leverage</th>
+                            <th>Entry Price</th>
+                            <th>Current Price</th>
+                            <th>TP / SL</th>
+                            <th>Time Left</th>
+                            <th>PnL</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
-                    <tbody id="prediction-history-rows">
+                    <tbody id="active-open-trades-rows">
                         <tr>
-                            <td colspan="8"
-                                style="text-align: center; color: var(--text-secondary); font-style: italic;">No
-                                predictions tracked in this session yet.</td>
+                            <td colspan="10" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                         </tr>
                     </tbody>
                 </table>
-            </div>
-
-            <!-- Pagination Controls -->
-            <div class="pagination-container" id="prediction-pagination">
-                <div class="pagination-info" id="prediction-pagination-info">Showing 0-0 of 0 predictions</div>
-                <div class="pagination-btns" id="prediction-pagination-btns">
-                    <button class="page-btn" id="prediction-prev-btn" onclick="prevPredictionPage()">Previous</button>
-                    <button class="page-btn" id="prediction-next-btn" onclick="nextPredictionPage()">Next</button>
-                </div>
             </div>
         </div>
     </div>
@@ -1195,40 +1147,10 @@
         let loggedLinesCount = 0;
         let allTrades = [];
         let activeFilter = 'all'; // 'all', 'success', 'failed'
-        let allPredictions = [];
-        let activePredictionFilter = 'all'; // 'all', 'traded', 'skipped'
         let activeConfluenceTimeframe = '1h'; // default to 1H
-        let activePredictionTf = '60'; // default to 1H (interval='60')
-        let predictionCurrentPage = 1;
-        const predictionsPerPage = 10;
         let activeTradesState = {};
         let lastPrices = {BTC: null, ETH: null, SOL: null};
         let globalDataCache = null;
-
-        function prevPredictionPage() {
-            if (predictionCurrentPage > 1) {
-                predictionCurrentPage--;
-                renderPredictions();
-            }
-        }
-
-        function nextPredictionPage() {
-            const tfPredictions = allPredictions.filter(p => {
-                const pInterval = p.interval || '60';
-                return pInterval === activePredictionTf;
-            });
-            let filtered = [...tfPredictions];
-            if (activePredictionFilter === 'traded') {
-                filtered = filtered.filter(p => p.status === 'Traded');
-            } else if (activePredictionFilter === 'skipped') {
-                filtered = filtered.filter(p => p.status !== 'Traded');
-            }
-            const totalPages = Math.ceil(filtered.length / predictionsPerPage);
-            if (predictionCurrentPage < totalPages) {
-                predictionCurrentPage++;
-                renderPredictions();
-            }
-        }
 
         function setConfluenceTimeframe(tf, element) {
             activeConfluenceTimeframe = tf;
@@ -1238,39 +1160,12 @@
             updateDashboard();
         }
 
-        function setPredictionTf(tfVal, element) {
-            activePredictionTf = tfVal;
-            predictionCurrentPage = 1; // Reset to page 1
-            const buttons = element.parentElement.querySelectorAll(".tab-btn");
-            buttons.forEach(btn => btn.classList.remove("active"));
-            element.classList.add("active");
-
-            // Update labels
-            let tfLabel = "1H";
-            if (tfVal === "120") tfLabel = "2H";
-            else if (tfVal === "240") tfLabel = "4H";
-            else if (tfVal === "360") tfLabel = "6H";
-            document.getElementById("pred-stats-correct-title").innerText = `Correct ${tfLabel}`;
-            document.getElementById("pred-stats-incorrect-title").innerText = `Incorrect ${tfLabel}`;
-
-            renderPredictions();
-        }
-
         function setTradeFilter(filterType, element) {
             activeFilter = filterType;
             const buttons = element.parentElement.querySelectorAll(".tab-btn");
             buttons.forEach(btn => btn.classList.remove("active"));
             element.classList.add("active");
             renderTrades();
-        }
-
-        function setPredictionFilter(filterType, element) {
-            activePredictionFilter = filterType;
-            predictionCurrentPage = 1; // Reset to page 1
-            const buttons = element.parentElement.querySelectorAll(".tab-btn");
-            buttons.forEach(btn => btn.classList.remove("active"));
-            element.classList.add("active");
-            renderPredictions();
         }
 
         function forceCloseTrade(interval, symbol) {
@@ -1373,151 +1268,92 @@
             }
         }
 
-        function renderPredictions() {
-            const predTbody = document.getElementById("prediction-history-rows");
+        function renderActiveOpenTrades() {
+            const tbody = document.getElementById("active-open-trades-rows");
+            const countBadge = document.getElementById("active-open-trades-count");
+            if (!tbody) return;
 
-            // Filter predictions by the active timeframe interval first
-            const tfPredictions = allPredictions.filter(p => {
-                const pInterval = p.interval || '60';
-                return pInterval === activePredictionTf;
+            // Gather all active trades from activeTradesState
+            let allActive = [];
+            const intervals = ["60", "120", "240", "360"];
+            const intervalLabelMap = {"60": "1H", "120": "2H", "240": "4H", "360": "6H"};
+
+            intervals.forEach(iv => {
+                const trades = activeTradesState[iv] || [];
+                trades.forEach(t => {
+                    allActive.push({
+                        ...t,
+                        intervalStr: intervalLabelMap[iv],
+                        intervalVal: iv
+                    });
+                });
             });
 
-            // Calculate stats for evaluated predictions of the active timeframe
-            const evaluatedPredictions = tfPredictions.filter(p => p.evaluation && p.evaluation.evaluated);
-            const totalEvaluated = evaluatedPredictions.length;
-            const correctCount = evaluatedPredictions.filter(p => p.evaluation.success).length;
-            const incorrectCount = totalEvaluated - correctCount;
-            const winRate = totalEvaluated > 0 ? (correctCount / totalEvaluated * 100) : 0;
+            // Update badge count
+            const count = allActive.length;
+            countBadge.innerText = count === 1 ? "1 Active Position" : `${count} Active Positions`;
 
-            document.getElementById("pred-stats-total").innerText = tfPredictions.length;
-            document.getElementById("pred-stats-correct").innerText = correctCount;
-            document.getElementById("pred-stats-incorrect").innerText = incorrectCount;
-            document.getElementById("pred-stats-winrate").innerText = `${winRate.toFixed(1)}%`;
-
-            // Filter predictions list by status
-            let filtered = [...tfPredictions];
-            if (activePredictionFilter === 'traded') {
-                filtered = filtered.filter(p => p.status === 'Traded');
-            } else if (activePredictionFilter === 'skipped') {
-                filtered = filtered.filter(p => p.status !== 'Traded');
-            }
-
-            const reversedFiltered = [...filtered].reverse();
-            const totalItems = reversedFiltered.length;
-            const totalPages = Math.ceil(totalItems / predictionsPerPage);
-
-            if (predictionCurrentPage > totalPages && totalPages > 0) {
-                predictionCurrentPage = totalPages;
-            } else if (predictionCurrentPage < 1) {
-                predictionCurrentPage = 1;
-            }
-
-            const startIndex = (predictionCurrentPage - 1) * predictionsPerPage;
-            const endIndex = Math.min(startIndex + predictionsPerPage, totalItems);
-            const pagePredictions = reversedFiltered.slice(startIndex, endIndex);
-
-            // Update pagination UI
-            const infoElem = document.getElementById("prediction-pagination-info");
-            const prevBtn = document.getElementById("prediction-prev-btn");
-            const nextBtn = document.getElementById("prediction-next-btn");
-
-            if (infoElem && prevBtn && nextBtn) {
-                if (totalItems === 0) {
-                    infoElem.innerText = "Showing 0 of 0 predictions";
-                    prevBtn.disabled = true;
-                    nextBtn.disabled = true;
-                } else {
-                    infoElem.innerText = `Showing ${startIndex + 1}-${endIndex} of ${totalItems} predictions (Page ${predictionCurrentPage}/${totalPages})`;
-                    prevBtn.disabled = predictionCurrentPage === 1;
-                    nextBtn.disabled = predictionCurrentPage === totalPages;
-                }
-            }
-
-            if (pagePredictions.length > 0) {
-                let htmlRows = "";
-                pagePredictions.forEach(p => {
-                    const dateObj = new Date(p.timestamp * 1000);
-                    const predTimeStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString();
-                    const dirClass = p.direction === 'Bullish' ? 'color-bullish' : (p.direction === 'Bearish' ? 'color-bearish' : 'color-neutral');
-
-                    let refPriceStr = p.ref_price !== undefined && p.ref_price !== null ? `$${p.ref_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-';
-                    let expChangeSign = (p.predicted_change || 0) >= 0 ? '+' : '';
-                    let expChangeStr = p.predicted_change !== undefined && p.predicted_change !== null ? `${expChangeSign}${p.predicted_change.toFixed(3)}` : '-';
-
-                    let exitPriceStr = "-";
-                    let diffStr = "-";
-                    let outcomeClass = "";
-                    let outcomeLabel = "";
-
-                    if (p.evaluation && p.evaluation.evaluated) {
-                        exitPriceStr = `$${p.evaluation.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-                        const changeSign = p.evaluation.change >= 0 ? '+' : '';
-                        const changeVal = p.evaluation.change.toFixed(2);
-                        const changePct = p.evaluation.change_pct.toFixed(3);
-                        const diffColorClass = p.evaluation.success ? "color-bullish" : "color-bearish";
-                        diffStr = `<span class="${diffColorClass}" style="font-weight: 800;">${changeSign}${changeVal} (${changeSign}${changePct}%)</span>`;
-
-                        outcomeClass = p.evaluation.success ? "color-bullish" : "color-bearish";
-                        outcomeLabel = p.evaluation.success ? " [CORRECT]" : " [INCORRECT]";
-                    } else {
-                        // Show Pending ETA for unevaluated predictions
-                        const lookahead = 10;
-                        const intervalMins = parseInt(p.interval || '60');
-                        const etaMs = p.candle_timestamp + (lookahead * intervalMins * 60 * 1000);
-                        const etaDate = new Date(etaMs);
-                        const now = Date.now();
-                        if (now < etaMs) {
-                            const minsLeft = Math.ceil((etaMs - now) / 60000);
-                            const etaTimeStr = etaDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            exitPriceStr = `<span style="color: var(--accent-orange); font-size: 11px;">⏳ Pending</span>`;
-                            diffStr = `<span style="color: var(--text-muted); font-size: 11px;">ETA ${etaTimeStr} (${minsLeft}m)</span>`;
-                        } else {
-                            exitPriceStr = `<span style="color: var(--text-muted); font-size: 11px;">⏳ Evaluating...</span>`;
-                            diffStr = `<span style="color: var(--text-muted); font-size: 11px;">Awaiting candle data</span>`;
-                        }
-                    }
-
-                    // Format Status to look nice
-                    let statusLabel = p.status;
-                    if (p.status === "Traded") {
-                        let isActive = false;
-                        if (Array.isArray(activeTradesState[p.interval])) {
-                            isActive = activeTradesState[p.interval].some(t => t.symbol === p.symbol);
-                        }
-                        if (isActive) {
-                            statusLabel = `<div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>
-                                <button onclick="event.stopPropagation(); forceCloseTrade('${p.interval}', '${p.symbol}')" style="padding: 3px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
-                            </div>`;
-                        } else {
-                            statusLabel = `<span class="badge-pass" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px;">TRADED</span>`;
-                        }
-                    } else {
-                        statusLabel = `<span class="badge-fail" style="padding: 3px 8px; font-size:10px; font-weight:700; border-radius:6px; background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.08); color: var(--text-secondary);">${p.status.toUpperCase()}</span>`;
-                    }
-
-                    const tfLabel = p.interval === '60' ? '1H' : p.interval === '120' ? '2H' : p.interval === '240' ? '4H' : p.interval === '360' ? '6H' : (p.interval ? `${p.interval}M` : '1H');
-                    htmlRows += `
-                        <tr>
-                            <td style="font-weight: 700; color: var(--accent-purple);">${tfLabel}</td>
-                            <td>${predTimeStr}</td>
-                            <td class="${dirClass}" style="font-weight:700; font-family: 'Outfit', sans-serif;">${p.direction.toUpperCase()}</td>
-                            <td>${refPriceStr}</td>
-                            <td class="${dirClass}" style="font-weight:600;">${expChangeStr}</td>
-                            <td>${exitPriceStr}</td>
-                            <td>${diffStr}</td>
-                            <td>${statusLabel}</td>
-                        </tr>
-                    `;
-                });
-                predTbody.innerHTML = htmlRows;
-            } else {
-                predTbody.innerHTML = `
+            if (allActive.length === 0) {
+                tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic;">No predictions match this filter.</td>
+                        <td colspan="10" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                     </tr>
                 `;
+                return;
             }
+
+            let htmlRows = "";
+            allActive.forEach(trade => {
+                const symbol = trade.symbol || "BTCUSDT";
+                const dirClass = trade.direction === "Bullish" ? "color-bullish" : "color-bearish";
+                const entryPrice = trade.entry_price || 0;
+                const exitTarget = trade.take_profit || 0;
+                const stopTarget = trade.stop_loss || 0;
+
+                const livePriceKey = `live_price_${symbol}`;
+                const currentPriceVal = globalDataCache && globalDataCache[livePriceKey] ? globalDataCache[livePriceKey] : (symbol === "BTCUSDT" ? lastPrice : null);
+
+                let pnlVal = 0;
+                let pnlPct = 0;
+                if (currentPriceVal) {
+                    if (trade.direction === "Bullish") {
+                        pnlVal = currentPriceVal - entryPrice;
+                    } else {
+                        pnlVal = entryPrice - currentPriceVal;
+                    }
+                    pnlPct = (pnlVal / entryPrice) * 100;
+                }
+
+                const pnlClass = pnlVal >= 0 ? "color-bullish" : "color-bearish";
+                const formattedPnL = `${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(2)} (${pnlVal >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
+
+                const remainingSeconds = Math.max(0, Math.floor(trade.end_time - (Date.now() / 1000)));
+                const mins = Math.floor(remainingSeconds / 60);
+                const secs = remainingSeconds % 60;
+                const countdownStr = `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
+
+                htmlRows += `
+                    <tr>
+                        <td style="font-weight: 800; color: var(--accent-purple);">${trade.intervalStr}</td>
+                        <td style="font-weight: 700; color: var(--text-primary);">${symbol.replace("USDT", "")}</td>
+                        <td><span class="badge ${trade.direction === "Bullish" ? "badge-success" : "badge-danger"}">${trade.direction.toUpperCase()}</span></td>
+                        <td style="color: var(--accent-orange); font-weight: 700;">${trade.leverage ? trade.leverage.toFixed(1) + 'x' : '1.0x'}</td>
+                        <td style="font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td style="font-weight: 600; color: var(--text-primary);">${currentPriceVal ? '$' + currentPriceVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
+                        <td>
+                            <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(2)}</span> / 
+                            <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(2)}</span>
+                        </td>
+                        <td style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</td>
+                        <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
+                        <td>
+                            <button onclick="forceCloseTrade('${trade.intervalVal}', '${symbol}')" style="padding: 4px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 4px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = htmlRows;
         }
 
         function updateDashboard() {
@@ -1737,9 +1573,8 @@
                     renderTrades();
                     updateDailyPnlCard();
 
-                    // 7b. ML Predictions Tracker Table
-                    allPredictions = data.prediction_history || [];
-                    renderPredictions();
+                    // 7b. Active Open Trades Table
+                    renderActiveOpenTrades();
 
                     // 8. Update Terminal Console logs
                     const logs = data.logs || [];
