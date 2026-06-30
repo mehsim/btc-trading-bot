@@ -804,13 +804,15 @@
 
         <!-- Circuit Breaker Alert Banner -->
         <div id="circuit-breaker-banner"
-            style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 18px;">🛑</span>
-            <div>
-                <strong style="color: var(--accent-red); font-size: 13px;">Circuit Breaker Active</strong>
-                <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">Daily drawdown exceeded
-                    5% — trading paused until midnight UTC.</span>
+            style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; align-items: center; gap: 10px; justify-content: space-between; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 18px;">🛑</span>
+                <div>
+                    <strong style="color: var(--accent-red); font-size: 13px;">Circuit Breaker Active</strong>
+                    <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">Daily drawdown exceeded 5% — trading paused until midnight UTC.</span>
+                </div>
             </div>
+            <button onclick="resetCircuitBreaker()" style="padding: 6px 12px; font-size: 11px; background: rgba(244,63,94,0.2); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.4); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.35)'" onmouseout="this.style.background='rgba(244,63,94,0.2)'">Reset Breaker</button>
         </div>
 
         <!-- KPI Dashboard -->
@@ -1925,6 +1927,23 @@
             });
 
             container.innerHTML = `<div style="display: flex; flex-direction: column; gap: 12px;">${html}</div>`;
+        }
+
+        function resetCircuitBreaker() {
+            if (confirm("Are you sure you want to reset the daily drawdown circuit breaker and resume trading immediately?")) {
+                fetch('/api/reset_circuit_breaker', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+                .then(response => response.json())
+                .then(res => {
+                    alert(res.message);
+                    updateDashboard();
+                })
+                .catch(err => {
+                    console.error("Error resetting circuit breaker:", err);
+                });
+            }
         }
     </script>
 

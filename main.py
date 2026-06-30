@@ -358,6 +358,13 @@ def force_close_trade():
     
     return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
 
+@app.route("/api/reset_circuit_breaker", methods=["POST"])
+def reset_circuit_breaker():
+    bot_state["circuit_breaker_active"] = False
+    bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 10000.0)
+    save_history()
+    return jsonify({"status": "success", "message": "Daily drawdown circuit breaker successfully reset. Trading resumed!"})
+
 @app.route("/")
 def index():
     return render_template("index.html")
