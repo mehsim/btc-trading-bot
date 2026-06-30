@@ -65,7 +65,11 @@ for i in range(len(df_1h) - 1, 100, -1):
     candle_dt = datetime.fromtimestamp(timestamp / 1000)
     
     # Generate ML prediction
-    X_live = candle[features].values.reshape(1, -1)
+    selected_features_list = models_by_interval["60"].get("selected_features")
+    if selected_features_list is not None:
+        X_live = candle[selected_features_list].values.reshape(1, -1)
+    else:
+        X_live = candle[features].values.reshape(1, -1)
     
     # Dynamic Regime Routing based on ADX
     adx_regime = candle["ADX"]

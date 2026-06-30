@@ -505,7 +505,8 @@ for iv in ["60", "120", "240", "360"]:
             "trend": None,
             "price": None,
             "meta": None
-        }
+        },
+        "selected_features": None
     }
 
 def load_model_weights(iv):
@@ -527,7 +528,17 @@ def load_model_weights(iv):
             
     # Load
     try:
-        n_features = len(features)
+        # Load selected features if they exist
+        selected_features_filename = f"selected_features_{iv}.json"
+        if os.path.exists(selected_features_filename):
+            with open(selected_features_filename, "r") as f:
+                selected_features_list = json.load(f)
+            models_by_interval[iv]["selected_features"] = selected_features_list
+            n_features = len(selected_features_list)
+            print(f"Loaded {n_features} selected features for interval {iv}")
+        else:
+            models_by_interval[iv]["selected_features"] = None
+            n_features = len(features)
         
         if os.path.exists(f"{prefixes['trending_trend']}_xgb.json"):
             models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features)
@@ -1182,7 +1193,11 @@ def calculate_historical_thresholds(model_trend, interval):
                 df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
                 df = add_features(df)
                 
-                X_hist = df[features].values
+                selected_features_list = models_by_interval[interval].get("selected_features")
+                if selected_features_list is not None:
+                    X_hist = df[selected_features_list].values
+                else:
+                    X_hist = df[features].values
                 probs = model_trend.predict_proba(X_hist)
                 confidences = np.max(probs, axis=1)
                 
@@ -1540,7 +1555,19 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
-    score_threshold = 80.0
+    
+    # Regime-Aware Dynamic Confluence Threshold based on ADX
+    try:
+        adx_val = df_1h["ADX"].iloc[-1]
+        if adx_val > 25.0:
+            score_threshold = 70.0
+        elif adx_val < 18.0:
+            score_threshold = 90.0
+        else:
+            score_threshold = 80.0
+    except Exception as e:
+        score_threshold = 80.0
+        
     approved = (not hard_gate_failed) and (score_pct >= score_threshold)
 
     # Add score summary to results
@@ -1558,7 +1585,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             "detail": str(val["detail"])
         }
 
-    return bool(approved), std_results
+    return bool(approved), std_results, float(score_pct)
 
 # =========================
 # LIVE LOOP
@@ -1937,7 +1964,12 @@ def main():
                             continue
                         
                         latest_candle = df.iloc[-1]
-                        X_live = latest_candle[features].values.reshape(1, -1)
+                        
+                        # Slicing features based on selected_features if loaded
+                        if iv in models_by_interval and models_by_interval[iv].get("selected_features") is not None:
+                            X_live = latest_candle[models_by_interval[iv]["selected_features"]].values.reshape(1, -1)
+                        else:
+                            X_live = latest_candle[features].values.reshape(1, -1)
                         
                         # Dynamic Regime Routing based on ADX
                         adx_regime = latest_candle["ADX"]
@@ -2064,7 +2096,7 @@ def main():
                                     with news_sentiment_lock:
                                         news_sentiment = cached_news_sentiment
                                         latest_titles = cached_news_titles
-                                    all_pass, confluence_results = check_pre_trade_confluence(
+                                    all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
                                         latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
                                     )
 
@@ -2129,6 +2161,16 @@ def main():
                                         kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
                                         current_bal = bot_state.get("simulated_balance", 10000.0)
                                         position_size_usd = current_bal * kelly_fraction
+
+                                        # Dynamic Portfolio-Level Kelly Position Sizing Multiplier (based on confluence score)
+                                        sizing_multiplier = 0.25
+                                        if confluence_score_pct >= 95.0:
+                                            sizing_multiplier = 1.0
+                                        elif confluence_score_pct >= 70.0:
+                                            sizing_multiplier = 0.25 + (confluence_score_pct - 70.0) / 25.0 * 0.75
+                                        
+                                        position_size_usd = position_size_usd * sizing_multiplier
+                                        print(f"[{iv}m Confluence Sizing] Confluence Score: {confluence_score_pct:.1f}% -> Position Sizing Multiplier: {sizing_multiplier:.2f}x (Adjusted Size: ${position_size_usd:.2f})")
 
                                         # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
                                         c = float(calibrated_confidence)

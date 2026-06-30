@@ -438,6 +438,32 @@ def train_models(interval=INTERVAL, pages=PAGES):
     df.dropna(subset=["target_price_change", "target_trend"], inplace=True)
 
     # ==========================================
+    # AUTOML FEATURE SELECTION (NOISE REDUCTION)
+    # ==========================================
+    import json
+    from xgboost import XGBClassifier
+    print("Running preliminary feature selection via XGBoost...")
+    X_prelim = df[features]
+    y_prelim = df["target_trend"]
+    prelim_model = XGBClassifier(n_estimators=80, max_depth=5, random_state=42, n_jobs=-1)
+    prelim_model.fit(X_prelim, y_prelim)
+    importances = prelim_model.feature_importances_
+    indices = np.argsort(importances)[::-1]
+    
+    # Keep top 35 features
+    top_n = min(35, len(features))
+    selected_features = [features[idx] for idx in indices[:top_n]]
+    print(f"Feature selection complete: Selected top {top_n} features out of {len(features)}:")
+    for rank, f_name in enumerate(selected_features, 1):
+        print(f"  {rank}. {f_name} (importance: {importances[features.index(f_name)]:.4f})")
+        
+    # Save selected features list to file
+    features_filename = f"selected_features_{interval}.json"
+    with open(features_filename, "w") as f:
+        json.dump(selected_features, f)
+    print(f"Saved selected features list to {features_filename}")
+
+    # ==========================================
     # REGIME SPLITTING & REGIME MODEL TRAINING
     # ==========================================
     def train_regime_model(df_regime, name):
@@ -446,7 +472,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"Skipping {name} due to insufficient data.")
             return
 
-        X = df_regime[features]
+        X = df_regime[selected_features]
         y_trend = df_regime["target_trend"]
         y_price = df_regime["target_price_change"]
 
