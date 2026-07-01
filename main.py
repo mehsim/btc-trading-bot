@@ -233,11 +233,117 @@ def print(*args, **kwargs):
             if len(bot_logs) > 200:
                 bot_logs[:] = bot_logs[-200:]
 
+_last_balance_fetch = 0.0
+_cached_balance = None
+_balance_lock = threading.Lock()
+
+def get_real_bybit_balance():
+    import os
+    import hmac
+    import hashlib
+    import time
+    import requests
+    
+    api_key = os.getenv("BYBIT_API_KEY", "")
+    api_secret = os.getenv("BYBIT_API_SECRET", "")
+    
+    if not api_key or not api_secret:
+        return "API_KEYS_MISSING"
+        
+    timestamp = str(int(time.time() * 1000))
+    recv_window = "5000"
+    
+    account_type = "UNIFIED"
+    query_string = f"accountType={account_type}"
+    val_str = timestamp + api_key + recv_window + query_string
+    sign = hmac.new(
+        api_secret.encode("utf-8"),
+        val_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    
+    headers = {
+        "X-BAPI-API-KEY": api_key,
+        "X-BAPI-SIGN": sign,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json"
+    }
+    
+    url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
+    
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("retCode") == 0:
+                list_data = data.get("result", {}).get("list", [])
+                if list_data:
+                    total_equity = list_data[0].get("totalEquity", "0")
+                    return float(total_equity)
+            elif data.get("retCode") in [10003, 10005]:
+                return get_real_bybit_balance_fallback(api_key, api_secret, "CONTRACT")
+        return "FETCH_ERROR"
+    except Exception as e:
+        print(f"[Bybit Balance] Error fetching balance: {e}")
+        return "FETCH_ERROR"
+
+def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
+    import hmac
+    import hashlib
+    import time
+    import requests
+    timestamp = str(int(time.time() * 1000))
+    recv_window = "5000"
+    query_string = f"accountType={account_type}"
+    val_str = timestamp + api_key + recv_window + query_string
+    sign = hmac.new(
+        api_secret.encode("utf-8"),
+        val_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    
+    headers = {
+        "X-BAPI-API-KEY": api_key,
+        "X-BAPI-SIGN": sign,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json"
+    }
+    url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("retCode") == 0:
+                list_data = data.get("result", {}).get("list", [])
+                if list_data:
+                    total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
+                    return float(total_equity)
+        return "FETCH_ERROR"
+    except Exception:
+        return "FETCH_ERROR"
+
+def get_real_bybit_balance_cached():
+    global _last_balance_fetch, _cached_balance
+    with _balance_lock:
+        now = time.time()
+        # Fetch every 15 seconds max to prevent rate-limiting
+        if now - _last_balance_fetch > 15.0 or _cached_balance is None:
+            val = get_real_bybit_balance()
+            _cached_balance = val
+            _last_balance_fetch = now
+        return _cached_balance
+
 @app.route("/api/status")
 def get_status():
     state_copy = bot_state.copy()
     with logs_lock:
         state_copy["logs"] = list(bot_logs)
+    
+    # Inject cached real Bybit balance
+    state_copy["real_bybit_balance"] = get_real_bybit_balance_cached()
+    
     return jsonify(state_copy)
 
 @app.route("/api/terminate", methods=["POST"])

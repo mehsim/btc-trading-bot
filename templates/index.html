@@ -1000,17 +1000,34 @@
                     </div>
                 </div>
                 
-                <!-- Today's PnL (PKT) Card -->
-                <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 22px; min-height: 140px; flex-grow: 1;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
-                    <div>
-                        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
-                            <span>Today's Profit / Loss (PKT)</span>
-                            <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">HISTORY ➔</span>
+                <!-- Today's PnL and Bybit Balance Cards Container -->
+                <div style="display: flex; gap: 15px; width: 100%; flex-wrap: wrap;">
+                    <!-- Today's PnL (PKT) Card -->
+                    <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 22px; min-height: 140px; flex: 1; min-width: 230px; margin-bottom: 0;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
+                        <div>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                                <span>Today's Profit / Loss (PKT)</span>
+                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">HISTORY ➔</span>
+                            </div>
+                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
                         </div>
-                        <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
+                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 15px; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                            Daily Goal: $1,000 (Min)
+                        </div>
                     </div>
-                    <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 15px; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
-                        Daily Goal: $1,000 (Min)
+                    
+                    <!-- Real Bybit Balance Card -->
+                    <div class="card" id="bybit-balance-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 140px; flex: 1; min-width: 230px; margin-bottom: 0;">
+                        <div>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                                <span>Real Bybit Balance</span>
+                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">LIVE</span>
+                            </div>
+                            <div class="card-value" id="bybit-balance-value" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
+                        </div>
+                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 15px; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; color: var(--text-secondary);">
+                            Syncing with Bybit APIs...
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1501,6 +1518,38 @@
                     // 1. Status
                     const statusText = data.status || "RUNNING";
                     document.getElementById("bot-status").innerText = statusText.toUpperCase();
+
+                    // Real Bybit Balance Card Update
+                    const realBalVal = document.getElementById("bybit-balance-value");
+                    const realBalSub = document.getElementById("bybit-balance-subtitle");
+                    if (realBalVal && realBalSub) {
+                        const bal = data.real_bybit_balance;
+                        if (bal === "API_KEYS_MISSING") {
+                            realBalVal.innerText = "Setup Keys";
+                            realBalVal.style.fontSize = "26px";
+                            realBalVal.style.color = "var(--text-muted)";
+                            realBalSub.innerHTML = `<span style="color: var(--accent-orange); font-weight: 600;">Configure BYBIT_API_KEY and BYBIT_API_SECRET in your .env file</span>`;
+                        } else if (bal === "FETCH_ERROR") {
+                            realBalVal.innerText = "Error";
+                            realBalVal.style.fontSize = "36px";
+                            realBalVal.style.color = "var(--accent-red)";
+                            realBalSub.innerHTML = `<span style="color: var(--accent-red); font-weight: 600;">Failed to fetch balance. Check API keys/permissions.</span>`;
+                        } else if (typeof bal === "number" || !isNaN(parseFloat(bal))) {
+                            const valFloat = parseFloat(bal);
+                            realBalVal.innerText = `$${valFloat.toLocaleString(undefined, { 
+                                minimumFractionDigits: 2, 
+                                maximumFractionDigits: 2 
+                            })}`;
+                            realBalVal.style.fontSize = "36px";
+                            realBalVal.style.color = "var(--accent-green)";
+                            realBalSub.innerHTML = `<span style="color: var(--accent-green); font-weight: 600;">✓ Balance synced successfully</span>`;
+                        } else {
+                            realBalVal.innerText = "--";
+                            realBalVal.style.fontSize = "36px";
+                            realBalVal.style.color = "var(--text-secondary)";
+                            realBalSub.innerText = "Syncing with Bybit APIs...";
+                        }
+                    }
 
                     // Circuit Breaker Banner
                     const cbBanner = document.getElementById("circuit-breaker-banner");
