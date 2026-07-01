@@ -20,3 +20,5 @@ simulation_log.txt
 *.pkl
 catboost_info/
 
+# Secrets
+.env
