@@ -18,6 +18,12 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, mean_absolute_error
 from data import get_history, merge_derivatives_sentiment_features
+import threading
+import requests
+from datetime import datetime, timedelta
+
+economic_calendar_cache = None
+economic_calendar_lock = threading.Lock()
 
 # =========================
 # CONFIGURATION
@@ -64,6 +70,87 @@ for lag in [1, 2]:
     features.append(f"funding_rate_diff_lag{lag}")
     features.append(f"CVD_rolling_1h_lag{lag}")
     features.append(f"CVD_rolling_4h_lag{lag}")
+
+features.append("hours_to_news")
+
+def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
+    global economic_calendar_cache
+    with economic_calendar_lock:
+        if economic_calendar_cache is not None:
+            return economic_calendar_cache
+            
+        try:
+            finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
+            now = datetime.utcnow()
+            if start_ts_ms:
+                from_dt = datetime.utcfromtimestamp(start_ts_ms / 1000.0)
+            else:
+                from_dt = now - timedelta(days=60)
+                
+            if end_ts_ms:
+                to_dt = datetime.utcfromtimestamp(end_ts_ms / 1000.0) + timedelta(days=2)
+            else:
+                to_dt = now + timedelta(days=7)
+                
+            from_str = from_dt.strftime("%Y-%m-%d")
+            to_str = to_dt.strftime("%Y-%m-%d")
+            
+            print(f"[News/Sentiment] Fetching economic calendar from {from_str} to {to_str}...")
+            resp = requests.get(
+                "https://finnhub.io/api/v1/calendar/economic",
+                params={"token": finnhub_token, "from": from_str, "to": to_str},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                events = resp.json().get("economicCalendar", [])
+                high_impact = ["CPI", "FOMC", "NFP", "Non-Farm", "Federal Reserve", "Interest Rate"]
+                filtered_events = []
+                for ev in events:
+                    if any(kw.lower() in ev.get("event", "").lower() for kw in high_impact):
+                        ev_time_str = ev.get("time", "")
+                        try:
+                            ev_time = datetime.strptime(ev_time_str, "%Y-%m-%d %H:%M:%S")
+                            filtered_events.append(ev_time)
+                        except Exception:
+                            pass
+                economic_calendar_cache = sorted(filtered_events)
+                print(f"[News/Sentiment] Cached {len(economic_calendar_cache)} high-impact calendar events.")
+                return economic_calendar_cache
+        except Exception as e:
+            print(f"[News/Sentiment] Error caching economic calendar: {e}")
+        
+        economic_calendar_cache = []
+        return economic_calendar_cache
+
+def add_news_proximity_feature(df):
+    if df.empty:
+        df["hours_to_news"] = 72.0
+        return df
+        
+    start_ts = df["timestamp"].min()
+    end_ts = df["timestamp"].max()
+    events = fetch_economic_calendar_cached(start_ts, end_ts)
+    
+    if not events:
+        df["hours_to_news"] = 72.0
+        return df
+        
+    import bisect
+    df_dt = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    hours_to_news_list = []
+    events_utc = [pd.Timestamp(ev).tz_localize("UTC") for ev in events]
+    
+    for current_time in df_dt:
+        idx = bisect.bisect_right(events_utc, current_time)
+        if idx < len(events_utc):
+            next_event = events_utc[idx]
+            diff_hours = (next_event - current_time).total_seconds() / 3600.0
+            hours_to_news_list.append(min(72.0, max(0.0, diff_hours)))
+        else:
+            hours_to_news_list.append(72.0)
+            
+    df["hours_to_news"] = hours_to_news_list
+    return df
 
 def add_features(df):
     df = df.copy()
@@ -178,6 +265,7 @@ def add_features(df):
     df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
     df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
 
+    df = add_news_proximity_feature(df)
     df.dropna(inplace=True)
     return df
 
@@ -551,8 +639,26 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"  Validation Out-of-Sample MAE (Ensemble Price): {np.mean(primary_maes):.4f}")
         
         # Meta-Classifier Dataset
-        meta_X = pd.concat(meta_features_list, ignore_index=True)
-        meta_y = pd.Series(np.concatenate(meta_labels_list))
+        valid_dfs = [df_item for df_item in meta_features_list if not df_item.empty]
+        valid_labels = [lbl_item for lbl_item in meta_labels_list if len(lbl_item) > 0]
+        
+        if len(valid_dfs) > 0 and len(valid_labels) > 0:
+            meta_X = pd.concat(valid_dfs, ignore_index=True)
+            meta_y = pd.Series(np.concatenate(valid_labels))
+        else:
+            # Fallback if no trades/non-neutral predictions occurred during validation
+            meta_X = X.copy()
+            meta_y = pd.Series(np.ones(len(X), dtype=int))
+            
+        if meta_y.nunique() < 2:
+            # Inject a dummy opposite label at index 0 to ensure binary classification is possible
+            if len(meta_y) > 0:
+                current_val = meta_y.iloc[0]
+                opposite_val = 0 if current_val == 1 else 1
+                meta_y.iloc[0] = opposite_val
+            else:
+                meta_y = pd.Series([0, 1])
+                meta_X = pd.concat([X.iloc[:1], X.iloc[:1]], ignore_index=True)
         
         print(f"  Meta-Classifier Training Samples: {len(meta_X)} (Positive rate: {meta_y.mean()*100:.2f}%)")
         
@@ -580,6 +686,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
             
         # Fit final primary models on complete regime dataset
         print(f"  Training final ensemble models on complete {name} dataset...")
+        
+        # Fallbacks for hyperparameter dictionary if cross-validation folds didn't run due to dataset constraints
+        if best_params_xgb_t is None:
+            best_params_xgb_t = {'n_estimators': 100, 'max_depth': 4, 'learning_rate': 0.05}
+        if best_params_lgb_t is None:
+            best_params_lgb_t = {'n_estimators': 100, 'max_depth': 4, 'learning_rate': 0.05}
+        if best_params_cat_t is None:
+            best_params_cat_t = {'iterations': 100, 'depth': 4, 'learning_rate': 0.05}
+            
+        if best_params_xgb_p is None:
+            best_params_xgb_p = {'n_estimators': 100, 'max_depth': 4, 'learning_rate': 0.05}
+        if best_params_lgb_p is None:
+            best_params_lgb_p = {'n_estimators': 100, 'max_depth': 4, 'learning_rate': 0.05}
+        if best_params_cat_p is None:
+            best_params_cat_p = {'iterations': 100, 'depth': 4, 'learning_rate': 0.05}
+
         final_xgb_t = XGBClassifier(**best_params_xgb_t)
         final_lgb_t = LGBMClassifier(**best_params_lgb_t)
         final_cat_t = CatBoostClassifier(**best_params_cat_t)

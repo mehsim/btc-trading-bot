@@ -91,6 +91,9 @@ cached_news_sentiment = "Neutral"
 cached_news_titles = []
 news_sentiment_lock = threading.Lock()
 
+economic_calendar_cache = None
+economic_calendar_lock = threading.Lock()
+
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
 
 def save_history():
@@ -302,20 +305,16 @@ def force_close_trade():
         live_symbol_price = bot_state.get(f"live_price_{symbol}")
     actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
     
-    # Apply slippage on exit
-    atr_norm_val = trade_to_close.get("atr_dollars", 50.0) / entry_price
-    slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
-    if direction == "Bullish":
-        actual_price = actual_exit_price * (1.0 - slippage_pct / 100.0)
-    else:
-        actual_price = actual_exit_price * (1.0 + slippage_pct / 100.0)
+    # Maker execution: zero slippage on limit close
+    slippage_pct = 0.0
+    actual_price = actual_exit_price
         
     actual_change = actual_price - entry_price
     actual_change_pct = (actual_change / entry_price) * 100
     
     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
     leverage = trade_to_close.get("leverage", 1.0)
-    net_return_pct = (raw_return_pct * leverage) - 0.2
+    net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
     
     old_bal = bot_state.get("simulated_balance", 10000.0)
@@ -408,20 +407,16 @@ def force_close_all_trades():
                 live_symbol_price = bot_state.get(f"live_price_{symbol}")
             actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
             
-            # Apply slippage on exit
-            atr_norm_val = t.get("atr_dollars", 50.0) / entry_price if entry_price > 0 else 0.001
-            slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
-            if direction == "Bullish":
-                actual_price = actual_exit_price * (1.0 - slippage_pct / 100.0)
-            else:
-                actual_price = actual_exit_price * (1.0 + slippage_pct / 100.0)
+            # Maker execution: zero slippage on limit close
+            slippage_pct = 0.0
+            actual_price = actual_exit_price
                 
             actual_change = actual_price - entry_price
             actual_change_pct = (actual_change / entry_price) * 100 if entry_price > 0 else 0.0
             
             raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
             leverage = t.get("leverage", 1.0)
-            net_return_pct = (raw_return_pct * leverage) - 0.2
+            net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
             realized_pnl = position_size_usd * (net_return_pct / 100.0)
             
             old_bal = bot_state.get("simulated_balance", 10000.0)
@@ -799,6 +794,8 @@ for lag in [1, 2]:
     features.append(f"CVD_rolling_1h_lag{lag}")
     features.append(f"CVD_rolling_4h_lag{lag}")
 
+features.append("hours_to_news")
+
 # Initial load
 for iv in ["60", "120", "240", "360"]:
     load_model_weights(iv)
@@ -914,6 +911,7 @@ def add_features(df):
     df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
     df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
 
+    df = add_news_proximity_feature(df)
     df.dropna(inplace=True)
     return df
 
@@ -1224,6 +1222,86 @@ def run_news_sentiment_updater():
             print(f"[News/Sentiment] Background update success: {sentiment} (based on {len(titles)} inputs).")
         except Exception as e:
             print(f"[News/Sentiment] Error in background news sentiment update: {e}")
+
+def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
+    global economic_calendar_cache
+    with economic_calendar_lock:
+        if economic_calendar_cache is not None:
+            return economic_calendar_cache
+            
+        try:
+            finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            if start_ts_ms:
+                from_dt = datetime.utcfromtimestamp(start_ts_ms / 1000.0)
+            else:
+                from_dt = now - timedelta(days=60)
+                
+            if end_ts_ms:
+                to_dt = datetime.utcfromtimestamp(end_ts_ms / 1000.0) + timedelta(days=2)
+            else:
+                to_dt = now + timedelta(days=7)
+                
+            from_str = from_dt.strftime("%Y-%m-%d")
+            to_str = to_dt.strftime("%Y-%m-%d")
+            
+            print(f"[News/Sentiment] Fetching economic calendar from {from_str} to {to_str}...")
+            resp = requests.get(
+                "https://finnhub.io/api/v1/calendar/economic",
+                params={"token": finnhub_token, "from": from_str, "to": to_str},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                events = resp.json().get("economicCalendar", [])
+                high_impact = ["CPI", "FOMC", "NFP", "Non-Farm", "Federal Reserve", "Interest Rate"]
+                filtered_events = []
+                for ev in events:
+                    if any(kw.lower() in ev.get("event", "").lower() for kw in high_impact):
+                        ev_time_str = ev.get("time", "")
+                        try:
+                            ev_time = datetime.strptime(ev_time_str, "%Y-%m-%d %H:%M:%S")
+                            filtered_events.append(ev_time)
+                        except Exception:
+                            pass
+                economic_calendar_cache = sorted(filtered_events)
+                print(f"[News/Sentiment] Cached {len(economic_calendar_cache)} high-impact calendar events.")
+                return economic_calendar_cache
+        except Exception as e:
+            print(f"[News/Sentiment] Error caching economic calendar: {e}")
+        
+        economic_calendar_cache = []
+        return economic_calendar_cache
+
+def add_news_proximity_feature(df):
+    if df.empty:
+        df["hours_to_news"] = 72.0
+        return df
+        
+    start_ts = df["timestamp"].min()
+    end_ts = df["timestamp"].max()
+    events = fetch_economic_calendar_cached(start_ts, end_ts)
+    
+    if not events:
+        df["hours_to_news"] = 72.0
+        return df
+        
+    import bisect
+    df_dt = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    hours_to_news_list = []
+    events_utc = [pd.Timestamp(ev).tz_localize("UTC") for ev in events]
+    
+    for current_time in df_dt:
+        idx = bisect.bisect_right(events_utc, current_time)
+        if idx < len(events_utc):
+            next_event = events_utc[idx]
+            diff_hours = (next_event - current_time).total_seconds() / 3600.0
+            hours_to_news_list.append(min(72.0, max(0.0, diff_hours)))
+        else:
+            hours_to_news_list.append(72.0)
+            
+    df["hours_to_news"] = hours_to_news_list
+    return df
 
 # =========================
 # ORDER BOOK PRESSURE
@@ -2017,13 +2095,23 @@ def main():
                     exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
 
                 if exit_reason is not None:
-                    # Apply slippage on exit
-                    atr_norm_val = active_trade.get("atr_dollars", 50.0) / entry_price
-                    slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
-                    if direction == "Bullish":
-                        actual_price = current_price * (1.0 - slippage_pct / 100.0)
+                    # Maker vs Taker execution logic
+                    is_stop_loss = "STOP LOSS" in str(exit_reason).upper()
+                    
+                    if is_stop_loss:
+                        # Taker execution for Stop Loss exit
+                        atr_norm_val = active_trade.get("atr_dollars", 50.0) / entry_price
+                        slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
+                        if direction == "Bullish":
+                            actual_price = current_price * (1.0 - slippage_pct / 100.0)
+                        else:
+                            actual_price = current_price * (1.0 + slippage_pct / 100.0)
+                        fee_rate_roundtrip = 0.08  # Maker Entry + Taker Stop Loss roundtrip
                     else:
-                        actual_price = current_price * (1.0 + slippage_pct / 100.0)
+                        # Maker execution for Take Profit, Timer, etc.
+                        slippage_pct = 0.0
+                        actual_price = current_price
+                        fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
 
                     price_diff = actual_price - predicted_price
                     price_diff_pct = (price_diff / predicted_price) * 100
@@ -2034,7 +2122,7 @@ def main():
                     # Calculate PnL (long vs short) and simulated fees with leverage
                     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
                     leverage = active_trade.get("leverage", 1.0)
-                    net_return_pct = (raw_return_pct * leverage) - 0.2  # 0.2% roundtrip fee
+                    net_return_pct = (raw_return_pct * leverage) - fee_rate_roundtrip
                     realized_pnl = position_size_usd * (net_return_pct / 100.0)
                     
                     # Update simulated balance
@@ -2050,7 +2138,7 @@ def main():
                     print(f"[{active_symbol} {iv}m TRADE EXITED]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
                     print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
                     print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
-                    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees)")
+                    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
                     print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
                     print(f"Predicted Signal: {direction} ({trend_status})")
                     print("==================================================\n")
@@ -2310,15 +2398,14 @@ def main():
                                 status_msg = "Skipped (Low Confidence)"
                                 print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
                             else:
-                                # Check news window guard before running full confluence
+                                # Check news window proximity status for logging purposes
                                 in_news_window, news_event = is_high_impact_news_window()
                                 if in_news_window:
-                                    status_msg = "Skipped (News Window)"
-                                    print(f"[{iv}m] Prediction skipped: High-impact event window ({news_event}). Trading paused.")
-                                else:
-                                    with news_sentiment_lock:
-                                        news_sentiment = cached_news_sentiment
-                                        latest_titles = cached_news_titles
+                                    print(f"[{iv}m WARNING] High-impact event window active ({news_event}). Proceeding since ML models incorporate news proximity features.")
+                                    
+                                with news_sentiment_lock:
+                                    news_sentiment = cached_news_sentiment
+                                    latest_titles = cached_news_titles
                                     all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
                                         latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
                                     )
@@ -2386,16 +2473,15 @@ def main():
                                         tp_multiplier_adjusted = round(tp_multiplier * (sl_multiplier / 0.75), 2)
                                         print(f"[{iv}m Target Expansion] Scaled multipliers: SL Multiplier = {sl_multiplier:.2f}x (Base: {base_sl}), TP Multiplier Adjusted = {tp_multiplier_adjusted:.2f}x")
                                         
-                                        # Apply slippage on entry
-                                        slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)  # Dynamic slippage
+                                        # Maker execution: zero entry slippage for limit orders
+                                        slippage_pct = 0.0
                                         raw_entry_price = float(latest_candle["close"])
+                                        entry_price = raw_entry_price
 
                                         if ml_trend == "Bullish":
-                                            entry_price = raw_entry_price * (1.0 + slippage_pct / 100.0)
                                             stop_loss_price = entry_price - sl_multiplier * atr_dollars
                                             take_profit_price = entry_price + tp_multiplier_adjusted * atr_dollars
                                         else:
-                                            entry_price = raw_entry_price * (1.0 - slippage_pct / 100.0)
                                             stop_loss_price = entry_price + sl_multiplier * atr_dollars
                                             take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
 
