@@ -1249,6 +1249,90 @@ def get_funding_rate(symbol=SYMBOL):
     return 0.0
 
 # ==========================================
+# PORTFOLIO COVARIANCE CONSTRAINTS
+# ==========================================
+def calculate_covariance_multiplier(new_symbol, new_direction):
+    """
+    Calculates a position sizing multiplier based on portfolio covariance.
+    Penalizes highly correlated assets in the same direction.
+    Allows offsetting/hedging for assets in opposite directions.
+    """
+    CORRELATION_MAP = {
+        ("BTCUSDT", "BTCUSDT"): 1.0,
+        ("ETHUSDT", "ETHUSDT"): 1.0,
+        ("SOLUSDT", "SOLUSDT"): 1.0,
+        ("BNBUSDT", "BNBUSDT"): 1.0,
+        ("ADAUSDT", "ADAUSDT"): 1.0,
+        ("XRPUSDT", "XRPUSDT"): 1.0,
+        
+        ("BTCUSDT", "ETHUSDT"): 0.85,
+        ("BTCUSDT", "SOLUSDT"): 0.75,
+        ("BTCUSDT", "BNBUSDT"): 0.70,
+        ("BTCUSDT", "ADAUSDT"): 0.70,
+        ("BTCUSDT", "XRPUSDT"): 0.65,
+        
+        ("ETHUSDT", "SOLUSDT"): 0.80,
+        ("ETHUSDT", "BNBUSDT"): 0.75,
+        ("ETHUSDT", "ADAUSDT"): 0.75,
+        ("ETHUSDT", "XRPUSDT"): 0.65,
+        
+        ("SOLUSDT", "BNBUSDT"): 0.70,
+        ("SOLUSDT", "ADAUSDT"): 0.70,
+        ("SOLUSDT", "XRPUSDT"): 0.60,
+        
+        ("BNBUSDT", "ADAUSDT"): 0.70,
+        ("BNBUSDT", "XRPUSDT"): 0.60,
+        
+        ("ADAUSDT", "XRPUSDT"): 0.65
+    }
+
+    def get_correlation(s1, s2):
+        if s1 == s2:
+            return 1.0
+        return CORRELATION_MAP.get((s1, s2)) or CORRELATION_MAP.get((s2, s1)) or 0.70
+
+    # Collect active trades from all timeframes
+    open_trades = []
+    for tf_key in ["1h", "2h", "4h", "6h"]:
+        open_trades.extend(bot_state.get(f"active_trade_{tf_key}", []))
+
+    if not open_trades:
+        return 1.0, 0.0
+
+    total_risk = 0.0
+    breakdown = []
+    
+    for t in open_trades:
+        open_sym = t.get("symbol")
+        open_dir = t.get("direction")
+        if not open_sym or not open_dir:
+            continue
+        r = get_correlation(new_symbol, open_sym)
+        
+        if new_direction == open_dir:
+            impact = r
+            risk_type = "CONCENTRATION"
+        else:
+            impact = -r
+            risk_type = "HEDGE"
+            
+        total_risk += impact
+        breakdown.append(f"  - Active: {open_sym} {open_dir} | Correlation: {r:.2f} | Risk impact: {impact:+.2f} ({risk_type})")
+
+    if total_risk <= 0:
+        multiplier = 1.0
+    else:
+        multiplier = 1.0 / (1.0 + total_risk)
+        multiplier = max(0.20, min(1.0, multiplier))
+
+    print(f"\n[Portfolio Covariance Analysis] New Entry: {new_symbol} {new_direction}")
+    for item in breakdown:
+        print(item)
+    print(f"  - Total Net Correlation Risk: {total_risk:+.2f} -> Covariance Multiplier: {multiplier:.2f}x\n")
+
+    return float(multiplier), float(total_risk)
+
+# ==========================================
 # PRE-TRADE CONFLUENCE ANALYSIS
 # ==========================================
 def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval):
@@ -2225,7 +2309,12 @@ def main():
                                             sizing_multiplier = 0.25 + (confluence_score_pct - 70.0) / 25.0 * 0.75
                                         
                                         position_size_usd = position_size_usd * sizing_multiplier
-                                        print(f"[{iv}m Confluence Sizing] Confluence Score: {confluence_score_pct:.1f}% -> Position Sizing Multiplier: {sizing_multiplier:.2f}x (Adjusted Size: ${position_size_usd:.2f})")
+                                        print(f"[{iv}m Confluence Sizing] Confluence Score: {confluence_score_pct:.1f}% -> Position Sizing Multiplier: {sizing_multiplier:.2f}x (Confluence Adjusted Size: ${position_size_usd:.2f})")
+
+                                        # Multi-Asset Portfolio Covariance Sizing Multiplier
+                                        cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
+                                        position_size_usd = position_size_usd * cov_multiplier
+                                        print(f"[{iv}m Covariance Sizing] Portfolio Net Correlation Risk: {net_risk:+.2f} -> Covariance Multiplier: {cov_multiplier:.2f}x (Final Position Size: ${position_size_usd:.2f})")
 
                                         # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
                                         c = float(calibrated_confidence)
