@@ -303,6 +303,8 @@ def get_real_bybit_balance():
                 return get_real_bybit_balance_fallback(api_key, api_secret, "CONTRACT")
         else:
             print(f"[Bybit Balance] UNIFIED HTTP {resp.status_code}: {resp.text}")
+            if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
+                return "GEO_BLOCKED"
         return "FETCH_ERROR"
     except Exception as e:
         print(f"[Bybit Balance] Exception during UNIFIED fetch: {e}")
@@ -347,6 +349,8 @@ def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
                 print(f"[Bybit Balance] CONTRACT query error: Code {ret_code} - {ret_msg}")
         else:
             print(f"[Bybit Balance] CONTRACT HTTP {resp.status_code}: {resp.text}")
+            if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
+                return "GEO_BLOCKED"
         return "FETCH_ERROR"
     except Exception as e:
         print(f"[Bybit Balance] Exception during CONTRACT fetch: {e}")

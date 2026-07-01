@@ -1529,6 +1529,11 @@
                             realBalVal.style.fontSize = "26px";
                             realBalVal.style.color = "var(--text-muted)";
                             realBalSub.innerHTML = `<span style="color: var(--accent-orange); font-weight: 600;">Configure BYBIT_API_KEY and BYBIT_API_SECRET in your .env file</span>`;
+                        } else if (bal === "GEO_BLOCKED") {
+                            realBalVal.innerText = "Blocked";
+                            realBalVal.style.fontSize = "30px";
+                            realBalVal.style.color = "var(--accent-orange)";
+                            realBalSub.innerHTML = `<span style="color: var(--accent-orange); font-weight: 600;">Bybit blocks US cloud servers. Run locally to view balance.</span>`;
                         } else if (bal === "FETCH_ERROR") {
                             realBalVal.innerText = "Error";
                             realBalVal.style.fontSize = "36px";
