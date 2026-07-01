@@ -2563,19 +2563,20 @@ def main():
 
                             # Determine dynamic confidence threshold based on regime and volatility
                             atr_norm_val = latest_candle["ATR_norm"]
-                            dynamic_conf_threshold = 0.55
+                            dynamic_conf_threshold = 0.63
                             
                             # 1. Regime Adjustment (ADX)
                             if adx_regime >= 25.0:
-                                dynamic_conf_threshold = 0.50
+                                dynamic_conf_threshold = 0.58
                             elif adx_regime < 15.0:
-                                dynamic_conf_threshold = 0.60
+                                dynamic_conf_threshold = 0.65
                                 
                             # 2. Volatility Adjustment (ATR)
                             if atr_norm_val > 0.008:
-                                dynamic_conf_threshold = max(0.45, dynamic_conf_threshold - 0.05)
+                                # High volatility has wider stops, increase threshold to enter only high-conviction trades
+                                dynamic_conf_threshold = min(0.70, dynamic_conf_threshold + 0.03)
                             elif atr_norm_val < 0.003:
-                                dynamic_conf_threshold = min(0.65, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold = min(0.70, dynamic_conf_threshold + 0.02)
                                 
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
 
