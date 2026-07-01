@@ -357,15 +357,31 @@ def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
         return "FETCH_ERROR"
 
 def get_real_bybit_balance_cached():
-    global _last_balance_fetch, _cached_balance
     with _balance_lock:
-        now = time.time()
-        # Fetch every 15 seconds max to prevent rate-limiting
-        if now - _last_balance_fetch > 15.0 or _cached_balance is None:
-            val = get_real_bybit_balance()
-            _cached_balance = val
-            _last_balance_fetch = now
         return _cached_balance
+
+def run_bybit_balance_updater():
+    global _cached_balance, _last_balance_fetch
+    print("[Bybit Balance] Background updater thread started.")
+    # Fetch immediately at startup
+    try:
+        val = get_real_bybit_balance()
+        with _balance_lock:
+            _cached_balance = val
+            _last_balance_fetch = time.time()
+        print(f"[Bybit Balance] Startup background update success: {val}")
+    except Exception as e:
+        print(f"[Bybit Balance] Startup background update error: {e}")
+        
+    while True:
+        time.sleep(20)
+        try:
+            val = get_real_bybit_balance()
+            with _balance_lock:
+                _cached_balance = val
+                _last_balance_fetch = time.time()
+        except Exception as e:
+            print(f"[Bybit Balance] Error in background balance update: {e}")
 
 @app.route("/api/status")
 def get_status():
@@ -2736,6 +2752,8 @@ if __name__ == "__main__":
     import threading
     # Start background news sentiment updater thread
     threading.Thread(target=run_news_sentiment_updater, daemon=True).start()
+    # Start background Bybit balance updater thread
+    threading.Thread(target=run_bybit_balance_updater, daemon=True).start()
     # Start Bybit WebSocket feed in a background thread
     threading.Thread(target=start_ws, daemon=True).start()
     # Start local web dashboard server in a background thread
