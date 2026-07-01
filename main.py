@@ -78,10 +78,11 @@ bot_state = {
     "calibration_4h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     "calibration_6h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
     
-    "simulated_balance": 10000.0,
-    "daily_drawdown_start_balance": 10000.0,
+    "simulated_balance": 80.0,
+    "daily_drawdown_start_balance": 80.0,
     "daily_drawdown_reset_day": -1,
     "circuit_breaker_active": False,
+    "bot_running": True,
     "trade_history": [],
     "prediction_history": [],
     "win_rate_by_tf": {"60": None, "120": None, "240": None, "360": None}
@@ -115,7 +116,8 @@ def save_history():
         "active_trade_1h": bot_state.get("active_trade_1h", []),
         "active_trade_2h": bot_state.get("active_trade_2h", []),
         "active_trade_4h": bot_state.get("active_trade_4h", []),
-        "active_trade_6h": bot_state.get("active_trade_6h", [])
+        "active_trade_6h": bot_state.get("active_trade_6h", []),
+        "bot_running": bot_state.get("bot_running", True)
     }
     try:
         with open(HISTORY_FILE, "w") as f:
@@ -173,7 +175,7 @@ def load_history():
                 data = resp.json()
                 hf_trades = data.get("trade_history", [])
                 hf_predictions = data.get("prediction_history", [])
-                hf_balance = data.get("simulated_balance", 10000.0)
+                hf_balance = data.get("simulated_balance", 80.0)
                 
                 # Filter out old 5m and 15m intervals
                 hf_trades = [t for t in hf_trades if str(t.get("interval", "60")) not in ["5", "15"]]
@@ -187,6 +189,7 @@ def load_history():
                     bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
                     bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
+                    bot_state["bot_running"] = data.get("bot_running", True)
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
                     save_history()
                     return
@@ -198,7 +201,7 @@ def load_history():
         try:
             with open(HISTORY_FILE, "r") as f:
                 data = json.load(f)
-                bot_state["simulated_balance"] = data.get("simulated_balance", 10000.0)
+                bot_state["simulated_balance"] = data.get("simulated_balance", 80.0)
                 bot_state["trade_history"] = [t for t in data.get("trade_history", []) if str(t.get("interval", "60")) not in ["5", "15"]]
                 for t in bot_state["trade_history"]:
                     if "interval" not in t:
@@ -213,6 +216,7 @@ def load_history():
                 bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
                 bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
+                bot_state["bot_running"] = data.get("bot_running", True)
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
@@ -471,7 +475,7 @@ def force_close_trade():
     net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
     
-    old_bal = bot_state.get("simulated_balance", 10000.0)
+    old_bal = bot_state.get("simulated_balance", 80.0)
     new_bal = old_bal + realized_pnl
     bot_state["simulated_balance"] = new_bal
     
@@ -528,8 +532,7 @@ def force_close_trade():
     
     return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
 
-@app.route("/api/close_all_trades", methods=["POST"])
-def force_close_all_trades():
+def close_all_trades_internal(exit_reason):
     closed_count = 0
     tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
     
@@ -573,15 +576,13 @@ def force_close_all_trades():
             net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
             realized_pnl = position_size_usd * (net_return_pct / 100.0)
             
-            old_bal = bot_state.get("simulated_balance", 10000.0)
+            old_bal = bot_state.get("simulated_balance", 80.0)
             new_bal = old_bal + realized_pnl
             bot_state["simulated_balance"] = new_bal
             
             actual_trend = "Bullish" if actual_change > 0 else "Bearish"
             signal_correct = (actual_trend == direction)
             trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
-            
-            exit_reason = "Manual Exit (Force Closed All)"
             
             print("\n==================================================")
             print(f"[{symbol} {tf_key.upper()} MANUAL EXIT ALL]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
@@ -626,14 +627,36 @@ def force_close_all_trades():
         
     if closed_count > 0:
         save_history()
+    return closed_count
+
+@app.route("/api/close_all_trades", methods=["POST"])
+def force_close_all_trades():
+    closed_count = close_all_trades_internal("Manual Exit (Force Closed All)")
+    if closed_count > 0:
         return jsonify({"status": "success", "message": f"Successfully force-closed all {closed_count} open trades."})
     else:
         return jsonify({"status": "success", "message": "No active open trades found to close."})
 
+@app.route("/api/toggle_bot", methods=["POST"])
+def toggle_bot():
+    current_status = bot_state.get("bot_running", True)
+    new_status = not current_status
+    bot_state["bot_running"] = new_status
+    
+    message = ""
+    if not new_status:
+        closed_count = close_all_trades_internal("Manual Exit (Bot Stopped)")
+        message = f"Bot stopped successfully. Closed {closed_count} open trades."
+    else:
+        message = "Bot is now running."
+        
+    save_history()
+    return jsonify({"status": "success", "bot_running": new_status, "message": message})
+
 @app.route("/api/reset_circuit_breaker", methods=["POST"])
 def reset_circuit_breaker():
     bot_state["circuit_breaker_active"] = False
-    bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 10000.0)
+    bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 80.0)
     save_history()
     return jsonify({"status": "success", "message": "Daily drawdown circuit breaker successfully reset. Trading resumed!"})
 
@@ -2297,7 +2320,7 @@ def main():
                     realized_pnl = position_size_usd * (net_return_pct / 100.0)
                     
                     # Update simulated balance
-                    old_bal = bot_state.get("simulated_balance", 10000.0)
+                    old_bal = bot_state.get("simulated_balance", 80.0)
                     new_bal = old_bal + realized_pnl
                     bot_state["simulated_balance"] = new_bal
                     
@@ -2354,7 +2377,7 @@ def main():
         # --- Daily Drawdown Circuit Breaker & Profit Goal ---
         today = get_pkt_time().day
         if bot_state["daily_drawdown_reset_day"] != today:
-            bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 10000.0)
+            bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 80.0)
             bot_state["daily_drawdown_reset_day"] = today
             bot_state["circuit_breaker_active"] = False
             bot_state["daily_goal_reached"] = False
@@ -2568,7 +2591,10 @@ def main():
                             
                             # Parallel trades of same symbol are allowed
                             has_active_symbol_trade = False
-                            if bot_state.get("circuit_breaker_active", False):
+                            if not bot_state.get("bot_running", True):
+                                status_msg = "Skipped (Bot Stopped)"
+                                print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
+                            elif bot_state.get("circuit_breaker_active", False):
                                 status_msg = "Skipped (Circuit Breaker)"
                                 print(f"[{symbol} {iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
                             elif ml_trend == "Neutral":
@@ -2668,28 +2694,24 @@ def main():
                                             stop_loss_price = entry_price + sl_multiplier * atr_dollars
                                             take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
 
-                                        # Kelly Criterion position sizing calculation
+                                        # Kelly Criterion position sizing calculation (kept for logging)
                                         kelly_b = tp_multiplier_adjusted / sl_multiplier
                                         kelly_p = float(calibrated_confidence)
                                         f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
                                         kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
-                                        current_bal = bot_state.get("simulated_balance", 10000.0)
-                                        position_size_usd = current_bal * kelly_fraction
-
-                                        # Dynamic Portfolio-Level Kelly Position Sizing Multiplier (based on confluence score)
-                                        sizing_multiplier = 0.25
-                                        if confluence_score_pct >= 95.0:
-                                            sizing_multiplier = 1.0
-                                        elif confluence_score_pct >= 70.0:
-                                            sizing_multiplier = 0.25 + (confluence_score_pct - 70.0) / 25.0 * 0.75
                                         
-                                        position_size_usd = position_size_usd * sizing_multiplier
-                                        print(f"[{iv}m Confluence Sizing] Confluence Score: {confluence_score_pct:.1f}% -> Position Sizing Multiplier: {sizing_multiplier:.2f}x (Confluence Adjusted Size: ${position_size_usd:.2f})")
-
-                                        # Multi-Asset Portfolio Covariance Sizing Multiplier
+                                        # Dynamic Trade Size between $10 and $20 depending on confidence and confluence score
+                                        conf_min, conf_max = 0.70, 0.90
+                                        conf_fact = max(0.0, min(1.0, (float(calibrated_confidence) - conf_min) / (conf_max - conf_min)))
+                                        conf_score_min, conf_score_max = 70.0, 100.0
+                                        conf_score_fact = max(0.0, min(1.0, (float(confluence_score_pct) - conf_score_min) / (conf_score_max - conf_score_min)))
+                                        combined_fact = 0.5 * conf_fact + 0.5 * conf_score_fact
+                                        position_size_usd = 10.0 + 10.0 * combined_fact
+                                        
+                                        # Apply covariance multiplier and clamp final size between $10 and $20
                                         cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
-                                        position_size_usd = position_size_usd * cov_multiplier
-                                        print(f"[{iv}m Covariance Sizing] Portfolio Net Correlation Risk: {net_risk:+.2f} -> Covariance Multiplier: {cov_multiplier:.2f}x (Final Position Size: ${position_size_usd:.2f})")
+                                        position_size_usd = max(10.0, min(20.0, position_size_usd * cov_multiplier))
+                                        print(f"[{iv}m Dynamic Sizing] Confidence: {calibrated_confidence*100:.1f}%, Score: {confluence_score_pct:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                         # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
                                         c = float(calibrated_confidence)
