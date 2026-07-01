@@ -2404,14 +2404,12 @@ def main():
             curr_bal = bot_state.get("simulated_balance", start_bal)
             daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
             daily_profit = curr_bal - start_bal
-            if daily_dd_pct >= 5.0 and not bot_state["circuit_breaker_active"]:
-                bot_state["circuit_breaker_active"] = True
-                print(f"[Circuit Breaker] ACTIVATED — daily drawdown {daily_dd_pct:.2f}% >= 5%. Trading paused for today.")
-            elif daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
+            # Circuit breaker is deactivated for now
+            bot_state["circuit_breaker_active"] = False
+            if daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
                 bot_state["daily_goal_reached"] = True
                 print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
-            elif daily_dd_pct < 5.0 and daily_profit < 1000.0:
-                bot_state["circuit_breaker_active"] = False
+            elif daily_profit < 1000.0:
                 bot_state["daily_goal_reached"] = False
 
         # --- High-Impact News Window Guard ---
@@ -2611,9 +2609,6 @@ def main():
                             if not bot_state.get("bot_running", True):
                                 status_msg = "Skipped (Bot Stopped)"
                                 print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
-                            elif bot_state.get("circuit_breaker_active", False):
-                                status_msg = "Skipped (Circuit Breaker)"
-                                print(f"[{symbol} {iv}m] Prediction skipped: Daily drawdown circuit breaker is active. Trading paused for today.")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
