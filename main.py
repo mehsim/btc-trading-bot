@@ -117,7 +117,8 @@ def save_history():
         "active_trade_2h": bot_state.get("active_trade_2h", []),
         "active_trade_4h": bot_state.get("active_trade_4h", []),
         "active_trade_6h": bot_state.get("active_trade_6h", []),
-        "bot_running": bot_state.get("bot_running", True)
+        "bot_running": bot_state.get("bot_running", True),
+        "fresh_reset_v1": bot_state.get("fresh_reset_v1", False)
     }
     try:
         with open(HISTORY_FILE, "w") as f:
@@ -190,6 +191,7 @@ def load_history():
                     bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                     bot_state["bot_running"] = data.get("bot_running", True)
+                    bot_state["fresh_reset_v1"] = data.get("fresh_reset_v1", False)
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
                     save_history()
                     return
@@ -217,9 +219,24 @@ def load_history():
                 bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                 bot_state["bot_running"] = data.get("bot_running", True)
+                bot_state["fresh_reset_v1"] = data.get("fresh_reset_v1", False)
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
+
+    # Force auto-reset if it's the first time running this updated version
+    if not bot_state.get("fresh_reset_v1", False):
+        print("[System Reset] Migrating history to fresh reset v1. Setting balance to 80.0 and clearing all old trades.")
+        bot_state["simulated_balance"] = 80.0
+        bot_state["daily_drawdown_start_balance"] = 80.0
+        bot_state["trade_history"] = []
+        bot_state["prediction_history"] = []
+        bot_state["active_trade_1h"] = []
+        bot_state["active_trade_2h"] = []
+        bot_state["active_trade_4h"] = []
+        bot_state["active_trade_6h"] = []
+        bot_state["fresh_reset_v1"] = True
+        save_history()
 
 # Thread-safe print wrapper to redirect logs to dashboard log panel
 _print = print
