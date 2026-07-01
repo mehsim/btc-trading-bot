@@ -1897,9 +1897,11 @@
         function updateDailyPnlCard() {
             const todayPktStr = getPktDateStr(Date.now() / 1000);
             let todayProfit = 0;
+            let todayInvested = 0;
             allTrades.forEach(t => {
                 if (getPktDateStr(t.exit_time) === todayPktStr) {
                     todayProfit += t.pnl_usd || 0;
+                    todayInvested += t.position_size_usd || 0;
                 }
             });
 
@@ -1917,12 +1919,20 @@
 
             // Update subtitle status
             const goal = 1000.0;
+            let goalHtml = "";
             if (todayProfit >= goal) {
-                subtitleElem.innerHTML = `Daily Goal: $1,000 (Min) <span class="color-bullish" style="font-weight:700; margin-left:5px;">✓ Met</span>`;
+                goalHtml = `Daily Goal: $1,000 (Min) <span class="color-bullish" style="font-weight:700; margin-left:5px;">✓ Met</span>`;
             } else {
                 const needed = goal - todayProfit;
-                subtitleElem.innerHTML = `Daily Goal: $1,000 (Min) <span style="opacity:0.6; margin-left:5px;">($${needed.toFixed(2)} needed)</span>`;
+                goalHtml = `Daily Goal: $1,000 (Min) <span style="opacity:0.6; margin-left:5px;">($${needed.toFixed(2)} needed)</span>`;
             }
+
+            subtitleElem.innerHTML = `
+                <div style="display: flex; justify-content: space-between; width: 100%; flex-wrap: wrap; gap: 5px;">
+                    <div>${goalHtml}</div>
+                    <div style="font-weight: 700; color: var(--text-secondary);">Invested: <span style="color: var(--text-primary);">$${todayInvested.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                </div>
+            `;
         }
 
         function renderDailyPnlHistory() {
