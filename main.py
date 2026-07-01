@@ -493,7 +493,7 @@ def force_close_trade():
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
     
     old_bal = bot_state.get("simulated_balance", 80.0)
-    new_bal = old_bal + realized_pnl
+    new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
     bot_state["simulated_balance"] = new_bal
     
     actual_trend = "Bullish" if actual_change > 0 else "Bearish"
@@ -594,7 +594,7 @@ def close_all_trades_internal(exit_reason):
             realized_pnl = position_size_usd * (net_return_pct / 100.0)
             
             old_bal = bot_state.get("simulated_balance", 80.0)
-            new_bal = old_bal + realized_pnl
+            new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
             bot_state["simulated_balance"] = new_bal
             
             actual_trend = "Bullish" if actual_change > 0 else "Bearish"
@@ -2338,7 +2338,7 @@ def main():
                     
                     # Update simulated balance
                     old_bal = bot_state.get("simulated_balance", 80.0)
-                    new_bal = old_bal + realized_pnl
+                    new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
                     bot_state["simulated_balance"] = new_bal
                     
                     actual_trend = "Bullish" if actual_change > 0 else "Bearish"
@@ -2784,8 +2784,11 @@ def main():
                                             active_trades_list.append(active_trade)
                                             bot_state[active_trade_key] = active_trades_list
                                             
+                                            # Deduct size from wallet balance immediately
+                                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
+                                            
                                             print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
-                                            print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x\n")
+                                            print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x (New Balance: ${bot_state['simulated_balance']:.2f})\n")
                                     else:
                                         status_msg = "Skipped (Confluence Failed)"
                                         failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
