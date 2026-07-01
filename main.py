@@ -237,6 +237,19 @@ _last_balance_fetch = 0.0
 _cached_balance = None
 _balance_lock = threading.Lock()
 
+def get_bybit_time_offset():
+    import requests
+    import time
+    try:
+        resp = requests.get("https://api.bybit.com/v5/market/time", timeout=3)
+        if resp.status_code == 200:
+            server_time = int(resp.json()["result"]["timeNano"]) // 1000000
+            local_time = int(time.time() * 1000)
+            return server_time - local_time
+    except Exception:
+        pass
+    return 0
+
 def get_real_bybit_balance():
     import os
     import hmac
@@ -250,7 +263,8 @@ def get_real_bybit_balance():
     if not api_key or not api_secret:
         return "API_KEYS_MISSING"
         
-    timestamp = str(int(time.time() * 1000))
+    offset = get_bybit_time_offset()
+    timestamp = str(int(time.time() * 1000) + offset)
     recv_window = "5000"
     
     account_type = "UNIFIED"
@@ -299,7 +313,8 @@ def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
     import hashlib
     import time
     import requests
-    timestamp = str(int(time.time() * 1000))
+    offset = get_bybit_time_offset()
+    timestamp = str(int(time.time() * 1000) + offset)
     recv_window = "5000"
     query_string = f"accountType={account_type}"
     val_str = timestamp + api_key + recv_window + query_string
