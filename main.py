@@ -1508,32 +1508,65 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if change_pass:
         total_score += weight_exp
 
-    # ======= CHECK 13: Timeframe Trend Alignment (Weight: 2) =======
+    # ======= CHECK 13: Multi-Timeframe Trend Enforcer (HTF Gate - Weight: 2, Hard Gate for 5m/15m) =======
     weight_align = 2
     trend_align_pass = True
     align_detail = "Aligned with dominant trend"
     if str(interval) in ["5", "15"]:
         try:
+            # 1. Fetch 1h trend
             df_1h_align = get_history(symbol=SYMBOL, interval="60", limit=100)
+            ema9_1h, ema21_1h = None, None
             if df_1h_align is not None and len(df_1h_align) >= 21:
                 df_1h_align_completed = df_1h_align.iloc[:-1].copy()
                 ema9_1h = EMAIndicator(df_1h_align_completed["close"], window=9).ema_indicator().iloc[-1]
                 ema21_1h = EMAIndicator(df_1h_align_completed["close"], window=21).ema_indicator().iloc[-1]
+
+            # 2. Fetch/Retrieve 4h trend
+            if df_4h is None:
+                try:
+                    df_4h = get_history(symbol=SYMBOL, interval="240", limit=100)
+                except Exception as e:
+                    print(f"Error fetching 4h history for HTF Gate: {e}")
+            
+            ema9_4h, ema21_4h = None, None
+            if df_4h is not None and len(df_4h) >= 21:
+                df_4h_completed = df_4h.iloc[:-1].copy()
+                ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator().iloc[-1]
+                ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator().iloc[-1]
+
+            # 3. Check alignment
+            if ema9_1h is not None and ema21_1h is not None and ema9_4h is not None and ema21_4h is not None:
                 trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
-                if ml_trend == "Bullish" and trend_1h != "Bullish":
-                    trend_align_pass = False
-                    align_detail = f"Blocked (5m/15m Bullish signal contradicts 1h Bearish trend)"
-                elif ml_trend == "Bearish" and trend_1h != "Bearish":
-                    trend_align_pass = False
-                    align_detail = f"Blocked (5m/15m Bearish signal contradicts 1h Bullish trend)"
+                trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
+                
+                if ml_trend == "Bullish":
+                    if trend_1h == "Bullish" and trend_4h == "Bullish":
+                        align_detail = "Aligned with 1h Bullish and 4h Bullish trends"
+                    else:
+                        trend_align_pass = False
+                        hard_gate_failed = True
+                        align_detail = f"Blocked (HTF Gate: Bullish signal contradicts 1h {trend_1h} or 4h {trend_4h} trend)"
+                elif ml_trend == "Bearish":
+                    if trend_1h == "Bearish" and trend_4h == "Bearish":
+                        align_detail = "Aligned with 1h Bearish and 4h Bearish trends"
+                    else:
+                        trend_align_pass = False
+                        hard_gate_failed = True
+                        align_detail = f"Blocked (HTF Gate: Bearish signal contradicts 1h {trend_1h} or 4h {trend_4h} trend)"
                 else:
-                    align_detail = f"Aligned with 1h {trend_1h} trend"
+                    align_detail = f"Neutral ML trend, HTF check not applicable"
             else:
-                align_detail = "Could not fetch 1h trend data (Bypassed)"
+                trend_align_pass = False
+                hard_gate_failed = True
+                align_detail = "Could not calculate 1h/4h EMA trends (HTF Gate Blocked)"
         except Exception as e:
-            align_detail = f"Skipped trend alignment check (Error: {e})"
+            trend_align_pass = False
+            hard_gate_failed = True
+            align_detail = f"Error in HTF Gate alignment check: {e} (HTF Gate Blocked)"
     else:
-        align_detail = f"1h interval is already the dominant trend"
+        align_detail = f"1h/4h intervals are already dominant or equal"
+    
     results["Timeframe_Alignment"] = {"pass": trend_align_pass, "detail": align_detail, "weight": weight_align}
     max_score += weight_align
     if trend_align_pass:
@@ -2138,12 +2171,34 @@ def main():
                                         tp_multiplier = round(base_tp * vol_factor, 2)
                                         print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                         
+                                        # Trailing Target Expansion: Scale SL & TP dynamically by 1h ATR changes
+                                        atr_ratio = 1.0
+                                        try:
+                                            df_1h_vol = get_history(symbol=symbol, interval="60", limit=50)
+                                            if df_1h_vol is not None and len(df_1h_vol) >= 20:
+                                                atr_ind_1h = AverageTrueRange(high=df_1h_vol["high"], low=df_1h_vol["low"], close=df_1h_vol["close"], window=14)
+                                                df_1h_vol["ATR"] = atr_ind_1h.average_true_range()
+                                                current_atr_1h = df_1h_vol["ATR"].iloc[-1]
+                                                avg_atr_24h = df_1h_vol["ATR"].iloc[-24:].mean()
+                                                if avg_atr_24h > 0:
+                                                    atr_ratio = current_atr_1h / avg_atr_24h
+                                                    atr_ratio = max(0.6, min(1.8, atr_ratio))
+                                                    print(f"[{iv}m Target Expansion] Current 1h ATR: {current_atr_1h:.2f} | 24h Avg: {avg_atr_24h:.2f} | Ratio: {atr_ratio:.2f}x")
+                                                else:
+                                                    print(f"[{iv}m Target Expansion] Invalid 24h Avg 1h ATR ({avg_atr_24h}), using ratio = 1.0")
+                                            else:
+                                                print(f"[{iv}m Target Expansion] Not enough 1h candles, using ratio = 1.0")
+                                        except Exception as e:
+                                            print(f"[{iv}m Target Expansion] Error calculating 1h ATR ratio: {e}, using ratio = 1.0")
+
+                                        base_sl = 1.2
+                                        sl_multiplier = round(base_sl * atr_ratio, 2)
+                                        tp_multiplier_adjusted = round(tp_multiplier * (sl_multiplier / 0.75), 2)
+                                        print(f"[{iv}m Target Expansion] Scaled multipliers: SL Multiplier = {sl_multiplier:.2f}x (Base: {base_sl}), TP Multiplier Adjusted = {tp_multiplier_adjusted:.2f}x")
+                                        
                                         # Apply slippage on entry
                                         slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)  # Dynamic slippage
                                         raw_entry_price = float(latest_candle["close"])
-                                        # Option 2: Widen SL to 1.2 * ATR and scale TP proportionally
-                                        sl_multiplier = 1.2
-                                        tp_multiplier_adjusted = tp_multiplier * (sl_multiplier / 0.75)
 
                                         if ml_trend == "Bullish":
                                             entry_price = raw_entry_price * (1.0 + slippage_pct / 100.0)
