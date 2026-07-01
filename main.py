@@ -276,16 +276,22 @@ def get_real_bybit_balance():
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("retCode") == 0:
+            ret_code = data.get("retCode")
+            ret_msg = data.get("retMsg", "")
+            if ret_code == 0:
                 list_data = data.get("result", {}).get("list", [])
                 if list_data:
                     total_equity = list_data[0].get("totalEquity", "0")
                     return float(total_equity)
-            elif data.get("retCode") in [10003, 10005]:
+            else:
+                print(f"[Bybit Balance] UNIFIED query error: Code {ret_code} - {ret_msg}")
+                # Fallback to CONTRACT if it's a unified-related account error
                 return get_real_bybit_balance_fallback(api_key, api_secret, "CONTRACT")
+        else:
+            print(f"[Bybit Balance] UNIFIED HTTP {resp.status_code}: {resp.text}")
         return "FETCH_ERROR"
     except Exception as e:
-        print(f"[Bybit Balance] Error fetching balance: {e}")
+        print(f"[Bybit Balance] Exception during UNIFIED fetch: {e}")
         return "FETCH_ERROR"
 
 def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
@@ -315,13 +321,20 @@ def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("retCode") == 0:
+            ret_code = data.get("retCode")
+            ret_msg = data.get("retMsg", "")
+            if ret_code == 0:
                 list_data = data.get("result", {}).get("list", [])
                 if list_data:
                     total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
                     return float(total_equity)
+            else:
+                print(f"[Bybit Balance] CONTRACT query error: Code {ret_code} - {ret_msg}")
+        else:
+            print(f"[Bybit Balance] CONTRACT HTTP {resp.status_code}: {resp.text}")
         return "FETCH_ERROR"
-    except Exception:
+    except Exception as e:
+        print(f"[Bybit Balance] Exception during CONTRACT fetch: {e}")
         return "FETCH_ERROR"
 
 def get_real_bybit_balance_cached():
