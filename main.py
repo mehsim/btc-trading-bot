@@ -118,7 +118,7 @@ def save_history():
         "active_trade_4h": bot_state.get("active_trade_4h", []),
         "active_trade_6h": bot_state.get("active_trade_6h", []),
         "bot_running": bot_state.get("bot_running", True),
-        "fresh_reset_v1": bot_state.get("fresh_reset_v1", False)
+        "fresh_reset_v2": bot_state.get("fresh_reset_v2", False)
     }
     try:
         with open(HISTORY_FILE, "w") as f:
@@ -191,7 +191,7 @@ def load_history():
                     bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                     bot_state["bot_running"] = data.get("bot_running", True)
-                    bot_state["fresh_reset_v1"] = data.get("fresh_reset_v1", False)
+                    bot_state["fresh_reset_v2"] = data.get("fresh_reset_v2", False)
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
                     save_history()
                     return
@@ -219,14 +219,14 @@ def load_history():
                 bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                 bot_state["bot_running"] = data.get("bot_running", True)
-                bot_state["fresh_reset_v1"] = data.get("fresh_reset_v1", False)
+                bot_state["fresh_reset_v2"] = data.get("fresh_reset_v2", False)
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
 
     # Force auto-reset if it's the first time running this updated version
-    if not bot_state.get("fresh_reset_v1", False):
-        print("[System Reset] Migrating history to fresh reset v1. Setting balance to 80.0 and clearing all old trades.")
+    if not bot_state.get("fresh_reset_v2", False):
+        print("[System Reset] Migrating history to fresh reset v2. Setting balance to 80.0 and clearing all old trades.")
         bot_state["simulated_balance"] = 80.0
         bot_state["daily_drawdown_start_balance"] = 80.0
         bot_state["trade_history"] = []
@@ -235,7 +235,7 @@ def load_history():
         bot_state["active_trade_2h"] = []
         bot_state["active_trade_4h"] = []
         bot_state["active_trade_6h"] = []
-        bot_state["fresh_reset_v1"] = True
+        bot_state["fresh_reset_v2"] = True
         save_history()
 
 # Thread-safe print wrapper to redirect logs to dashboard log panel
@@ -2730,46 +2730,62 @@ def main():
                                         position_size_usd = max(10.0, min(20.0, position_size_usd * cov_multiplier))
                                         print(f"[{iv}m Dynamic Sizing] Confidence: {calibrated_confidence*100:.1f}%, Score: {confluence_score_pct:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
-                                        # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
-                                        c = float(calibrated_confidence)
-                                        if c >= 0.85:
-                                            leverage_val = 35.0 + (c - 0.85) / 0.15 * 15.0
-                                        else:
-                                            leverage_val = 10.0 + (c - 0.70) / 0.15 * 25.0
-                                            if leverage_val < 1.0:
-                                                leverage_val = 1.0
-
-                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit at 50.0x
-                                        stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
-                                        max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
-                                        leverage_val = round(max(1.0, min(50.0, min(leverage_val, max_safe_lev))), 1)
-
-                                        lookahead = 10
-                                        duration_seconds = int(iv) * 60.0 * lookahead
-                                        import uuid
-                                        trade_uuid = str(uuid.uuid4())[:8]
-                                        active_trade = {
-                                            "trade_id": f"{symbol}_{trade_uuid}",
-                                            "symbol": symbol,
-                                            "entry_price": float(entry_price),
-                                            "predicted_price": float(predicted_price),
-                                            "stop_loss": float(stop_loss_price),
-                                            "take_profit": float(take_profit_price),
-                                            "direction": str(ml_trend),
-                                            "end_time": float(time.time() + duration_seconds),
-                                            "atr_dollars": float(atr_dollars),
-                                            "highest_price": float(entry_price),
-                                            "lowest_price": float(entry_price),
-                                            "break_even_triggered": False,
-                                            "position_size_usd": float(position_size_usd),
-                                            "kelly_fraction": float(kelly_fraction),
-                                            "leverage": float(leverage_val)
-                                        }
-                                        active_trades_list.append(active_trade)
-                                        bot_state[active_trade_key] = active_trades_list
+                                        # Ensure total size of active trades does not exceed the wallet balance
+                                        total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                                        current_bal = bot_state.get("simulated_balance", 80.0)
                                         
-                                        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
-                                        print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x\n")
+                                        wallet_exceeded = False
+                                        if total_active_size + position_size_usd > current_bal:
+                                            remaining_bal = current_bal - total_active_size
+                                            if remaining_bal >= 10.0:
+                                                print(f"[{symbol} {iv}m] Sizing scaled down from ${position_size_usd:.2f} to ${remaining_bal:.2f} to fit remaining wallet balance (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}).")
+                                                position_size_usd = remaining_bal
+                                            else:
+                                                print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum $10 trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
+                                                status_msg = "Skipped (Exceeds Wallet)"
+                                                wallet_exceeded = True
+
+                                        if not wallet_exceeded:
+                                            # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
+                                            c = float(calibrated_confidence)
+                                            if c >= 0.85:
+                                                leverage_val = 35.0 + (c - 0.85) / 0.15 * 15.0
+                                            else:
+                                                leverage_val = 10.0 + (c - 0.70) / 0.15 * 25.0
+                                                if leverage_val < 1.0:
+                                                     leverage_val = 1.0
+
+                                            # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit at 50.0x
+                                            stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
+                                            max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
+                                            leverage_val = round(max(1.0, min(50.0, min(leverage_val, max_safe_lev))), 1)
+
+                                            lookahead = 10
+                                            duration_seconds = int(iv) * 60.0 * lookahead
+                                            import uuid
+                                            trade_uuid = str(uuid.uuid4())[:8]
+                                            active_trade = {
+                                                "trade_id": f"{symbol}_{trade_uuid}",
+                                                "symbol": symbol,
+                                                "entry_price": float(entry_price),
+                                                "predicted_price": float(predicted_price),
+                                                "stop_loss": float(stop_loss_price),
+                                                "take_profit": float(take_profit_price),
+                                                "direction": str(ml_trend),
+                                                "end_time": float(time.time() + duration_seconds),
+                                                "atr_dollars": float(atr_dollars),
+                                                "highest_price": float(entry_price),
+                                                "lowest_price": float(entry_price),
+                                                "break_even_triggered": False,
+                                                "position_size_usd": float(position_size_usd),
+                                                "kelly_fraction": float(kelly_fraction),
+                                                "leverage": float(leverage_val)
+                                            }
+                                            active_trades_list.append(active_trade)
+                                            bot_state[active_trade_key] = active_trades_list
+                                            
+                                            print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
+                                            print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x\n")
                                     else:
                                         status_msg = "Skipped (Confluence Failed)"
                                         failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
