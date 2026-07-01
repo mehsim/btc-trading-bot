@@ -1460,13 +1460,15 @@ def add_news_proximity_feature(df):
 # =========================
 # ORDER BOOK PRESSURE
 # =========================
-def get_orderbook_imbalance():
+def get_orderbook_imbalance(symbol=None):
+    if symbol is None:
+        symbol = SYMBOL
     try:
         url = "https://api.bybit.com/v5/market/orderbook"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": SYMBOL, "limit": 25}, headers=headers, timeout=10)
+        response = requests.get(url, params={"category": "spot", "symbol": symbol, "limit": 25}, headers=headers, timeout=10)
         res = None
         if response.status_code == 200:
             res = response.json()
@@ -1474,7 +1476,7 @@ def get_orderbook_imbalance():
             print(f"[Orderbook] Bybit returned HTTP {response.status_code}. Attempting Binance depth fallback...")
             # Try Binance depth fallback
             binance_url = "https://api.binance.com/api/v3/depth"
-            resp = requests.get(binance_url, params={"symbol": SYMBOL.upper(), "limit": 25}, headers=headers, timeout=10)
+            resp = requests.get(binance_url, params={"symbol": symbol.upper(), "limit": 25}, headers=headers, timeout=10)
             if resp.status_code == 200:
                 binance_data = resp.json()
                 res = {
@@ -1673,7 +1675,7 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
 # ==========================================
 # PRE-TRADE CONFLUENCE ANALYSIS
 # ==========================================
-def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval):
+def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None):
     """
     Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
     Critical checks are hard gates (instant reject if failed).
@@ -1681,17 +1683,25 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     Trade is approved if score >= 75% of max possible points AND no hard gate fails.
     Returns: (bool_approved, dict_results_details)
     """
+    if symbol is None:
+        symbol = SYMBOL
     results = {}
     hard_gate_failed = False
     total_score = 0
     max_score = 0
 
     # ======= CHECK 1: 1-Day Structural Trend (Weight: 1, Bypassed for 5m/15m) =======
-    try:
-        df_1d = get_history(symbol=SYMBOL, interval="D", limit=100)
-    except Exception as e:
-        print(f"Error fetching 1d candle history for confluence: {e}")
-        df_1d = None
+    df_1d = None
+    if htf_cache is not None and (symbol, "D") in htf_cache:
+        df_1d = htf_cache[(symbol, "D")]
+    if df_1d is None:
+        try:
+            df_1d = get_history(symbol=symbol, interval="D", limit=100)
+            if htf_cache is not None and df_1d is not None:
+                htf_cache[(symbol, "D")] = df_1d
+        except Exception as e:
+            print(f"Error fetching 1d candle history for confluence: {e}")
+            df_1d = None
 
     weight_1d = 1
     if str(interval) in ["5", "15"]:
@@ -1715,11 +1725,17 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             total_score += weight_1d
 
     # ======= CHECK 2: 4-Hour Tactical Trend & RSI (Weight: 1 each, Bypassed for 5m/15m) =======
-    try:
-        df_4h = get_history(symbol=SYMBOL, interval="240", limit=100)
-    except Exception as e:
-        print(f"Error fetching 4h candle history for confluence: {e}")
-        df_4h = None
+    df_4h = None
+    if htf_cache is not None and (symbol, "240") in htf_cache:
+        df_4h = htf_cache[(symbol, "240")]
+    if df_4h is None:
+        try:
+            df_4h = get_history(symbol=symbol, interval="240", limit=100)
+            if htf_cache is not None and df_4h is not None:
+                htf_cache[(symbol, "240")] = df_4h
+        except Exception as e:
+            print(f"Error fetching 4h candle history for confluence: {e}")
+            df_4h = None
 
     weight_4h = 1
     if str(interval) in ["5", "15"]:
@@ -1877,7 +1893,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # ======= CHECK 10: Order Book Imbalance & Spread (Weight: 1) =======
     weight_ob = 1
-    ob_metrics = get_orderbook_imbalance()
+    ob_metrics = get_orderbook_imbalance(symbol=symbol)
     ob_imbalance = ob_metrics["imbalance"]
     spread = ob_metrics["spread"]
     spread_pass = (spread <= 0.001)
@@ -1937,7 +1953,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if str(interval) in ["5", "15"]:
         try:
             # 1. Fetch 1h trend
-            df_1h_align = get_history(symbol=SYMBOL, interval="60", limit=100)
+            df_1h_align = get_history(symbol=symbol, interval="60", limit=100)
             ema9_1h, ema21_1h = None, None
             if df_1h_align is not None and len(df_1h_align) >= 21:
                 df_1h_align_completed = df_1h_align.iloc[:-1].copy()
@@ -1947,7 +1963,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             # 2. Fetch/Retrieve 4h trend
             if df_4h is None:
                 try:
-                    df_4h = get_history(symbol=SYMBOL, interval="240", limit=100)
+                    df_4h = get_history(symbol=symbol, interval="240", limit=100)
                 except Exception as e:
                     print(f"Error fetching 4h history for HTF Gate: {e}")
             
@@ -2130,6 +2146,7 @@ def main():
         "last_processed_240_ts": None,
         "last_processed_360_ts": None
     }
+    startup_check_done = False
 
     while True:
         current_time = time.time()
@@ -2386,16 +2403,28 @@ def main():
             return False, None
 
         check_and_hot_reload_models()
-        for iv in ["60", "120", "240", "360"]:
+        current_time_pkt = get_pkt_time()
+        in_check_window = (current_time_pkt.minute < 5) or (not startup_check_done)
+        
+        if in_check_window:
+            if not startup_check_done:
+                print("[Startup] Executing initial candle check for all symbols...")
+                startup_check_done = True
+            check_queue = []
+            for iv_q in ["60", "120", "240", "360"]:
+                for symbol_q in SUPPORTED_SYMBOLS:
+                    check_queue.append((symbol_q, iv_q))
+        else:
+            check_queue = []
+            
+        htf_cache = {}
+        for symbol, iv in check_queue:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
             active_trades_list = bot_state.get(active_trade_key, [])
             if not isinstance(active_trades_list, list):
                 active_trades_list = [] if active_trades_list is None else [active_trades_list]
                 bot_state[active_trade_key] = active_trades_list
-            
-            symbol_idx = int(time.time() / 10) % len(SUPPORTED_SYMBOLS)
-            symbol = SUPPORTED_SYMBOLS[symbol_idx]
                 
             try:
                 df_raw = get_history(symbol=symbol, interval=iv, limit=300)
@@ -2561,7 +2590,7 @@ def main():
                                     news_sentiment = cached_news_sentiment
                                     latest_titles = cached_news_titles
                                     all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
-                                        latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv
+                                        latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache
                                     )
 
                                     # Update global confluence status
@@ -2573,7 +2602,7 @@ def main():
                                     print(f"\n==================================================")
                                     print(f"[{iv}m] PRE-TRADE CONFLUENCE ANALYSIS REPORT")
                                     print("--------------------------------------------------")
-                                    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {SYMBOL}")
+                                    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {symbol}")
                                     print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
                                     print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.3f} [{expected_pct_change:.3f}%])")
                                     print("--------------------------------------------------")

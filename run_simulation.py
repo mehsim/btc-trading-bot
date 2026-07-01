@@ -33,7 +33,7 @@ sys.stdout = DualLogger(log_file_path)
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(workspace_dir)
 
-from data import get_history
+from data import get_history, merge_derivatives_sentiment_features
 from main import (
     add_features, 
     check_pre_trade_confluence, 
@@ -73,7 +73,7 @@ except Exception as e:
 
 # 2. Fetch calibration limits
 print("\n[Step 1] Calibrating confidence percentiles...")
-p95, max_conf = calculate_historical_thresholds(models_trending["trend"])
+p95, max_conf = calculate_historical_thresholds(models_trending["trend"], INTERVAL)
 
 # 3. Fetch latest data
 print("\n[Step 2] Fetching latest market klines...")
@@ -89,6 +89,7 @@ try:
     # Format and add features
     df = df_raw.copy()
     df["close_btc"] = df["close"] # target is BTCUSDT itself
+    df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=INTERVAL)
     df = add_features(df)
     print("Features engineered successfully.")
 except Exception as e:
@@ -151,8 +152,8 @@ else:
     print("Running Confluence Checks...")
     news_sentiment, news_titles = get_news_sentiment()
 
-    all_pass, confluence_results = check_pre_trade_confluence(
-        latest_close, df, ml_trend, news_sentiment, expected_pct_change
+    all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
+        latest_close, df, ml_trend, news_sentiment, expected_pct_change, interval=INTERVAL, symbol=SYMBOL
     )
 
     print("Checks Status:")
