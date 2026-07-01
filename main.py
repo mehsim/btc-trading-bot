@@ -375,6 +375,112 @@ def force_close_trade():
     
     return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
 
+@app.route("/api/close_all_trades", methods=["POST"])
+def force_close_all_trades():
+    closed_count = 0
+    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+    
+    # Iterate over all active trade timeframes
+    for tf_key in ["1h", "2h", "4h", "6h"]:
+        active_trade_key = f"active_trade_{tf_key}"
+        active_trades = bot_state.get(active_trade_key, [])
+        if not isinstance(active_trades, list):
+            active_trades = [] if active_trades is None else [active_trades]
+            bot_state[active_trade_key] = active_trades
+
+        # Close each trade in this list
+        for t in list(active_trades):
+            symbol = t.get("symbol", "BTCUSDT").upper()
+            direction = t.get("direction", "Bullish")
+            entry_price = t.get("entry_price", 0.0)
+            position_size_usd = t.get("position_size_usd", 100.0)
+            trade_id = t.get("trade_id")
+            
+            # Fetch interval number (e.g. "60") corresponding to tf_key
+            interval = "60"
+            for k, v in tf_map_local.items():
+                if v == tf_key:
+                    interval = k
+                    break
+
+            live_symbol_price = get_fallback_price(symbol)
+            if live_symbol_price is None:
+                live_symbol_price = bot_state.get(f"live_price_{symbol}")
+            actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
+            
+            # Apply slippage on exit
+            atr_norm_val = t.get("atr_dollars", 50.0) / entry_price if entry_price > 0 else 0.001
+            slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
+            if direction == "Bullish":
+                actual_price = actual_exit_price * (1.0 - slippage_pct / 100.0)
+            else:
+                actual_price = actual_exit_price * (1.0 + slippage_pct / 100.0)
+                
+            actual_change = actual_price - entry_price
+            actual_change_pct = (actual_change / entry_price) * 100 if entry_price > 0 else 0.0
+            
+            raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
+            leverage = t.get("leverage", 1.0)
+            net_return_pct = (raw_return_pct * leverage) - 0.2
+            realized_pnl = position_size_usd * (net_return_pct / 100.0)
+            
+            old_bal = bot_state.get("simulated_balance", 10000.0)
+            new_bal = old_bal + realized_pnl
+            bot_state["simulated_balance"] = new_bal
+            
+            actual_trend = "Bullish" if actual_change > 0 else "Bearish"
+            signal_correct = (actual_trend == direction)
+            trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
+            
+            exit_reason = "Manual Exit (Force Closed All)"
+            
+            print("\n==================================================")
+            print(f"[{symbol} {tf_key.upper()} MANUAL EXIT ALL]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
+            print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
+            print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
+            print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees with {leverage}x leverage)")
+            print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
+            print(f"Predicted Signal: {direction} ({trend_status})")
+            print("==================================================\n")
+            
+            bot_state["trade_history"].append({
+                "symbol": symbol,
+                "exit_time": float(time.time()),
+                "interval": interval,
+                "direction": direction,
+                "entry_price": float(entry_price),
+                "exit_price": float(actual_price),
+                "change_pct": float(net_return_pct),
+                "success": bool(signal_correct),
+                "reason": exit_reason,
+                "position_size_usd": float(position_size_usd),
+                "pnl_usd": float(realized_pnl),
+                "balance": float(new_bal),
+                "leverage": float(leverage)
+            })
+            
+            for p in bot_state["prediction_history"]:
+                if p.get("interval") == interval and p.get("symbol") == symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
+                    p["evaluation"] = {
+                        "evaluated": True,
+                        "exit_price": float(actual_price),
+                        "change": float(actual_change if direction == "Bullish" else -actual_change),
+                        "change_pct": float(raw_return_pct),
+                        "success": bool(signal_correct)
+                    }
+                    break
+            
+            closed_count += 1
+            
+        # Clear this active trades list
+        bot_state[active_trade_key] = []
+        
+    if closed_count > 0:
+        save_history()
+        return jsonify({"status": "success", "message": f"Successfully force-closed all {closed_count} open trades."})
+    else:
+        return jsonify({"status": "success", "message": "No active open trades found to close."})
+
 @app.route("/api/reset_circuit_breaker", methods=["POST"])
 def reset_circuit_breaker():
     bot_state["circuit_breaker_active"] = False

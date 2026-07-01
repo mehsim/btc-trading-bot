@@ -1023,6 +1023,7 @@
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <div id="active-open-trades-total-pnl" style="font-size: 13px; font-weight: 800; padding: 4px 12px; border-radius: 20px; display: none; font-family: 'Outfit', sans-serif;">Total PnL: $0.00</div>
                     <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
+                    <button id="close-all-trades-btn" onclick="forceCloseAllTrades()" style="padding: 4px 12px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 20px; cursor: pointer; font-weight: 800; transition: background 0.2s; display: none; font-family: 'Outfit', sans-serif;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Close All Trades</button>
                 </div>
             </div>
 
@@ -1220,6 +1221,28 @@
                     .catch(err => {
                         console.error("Error closing trade:", err);
                         alert("Error sending manual close request.");
+                    });
+            }
+        }
+
+        function forceCloseAllTrades() {
+            if (confirm("Are you sure you want to manually close ALL active trades across all timeframes? This cannot be undone.")) {
+                fetch('/api/close_all_trades', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+                    .then(response => response.json())
+                    .then(res => {
+                        if (res.status === 'success') {
+                            alert(res.message);
+                            updateDashboard();
+                        } else {
+                            alert(res.message || "Failed to close all trades.");
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error closing all trades:", err);
+                        alert("Error sending close all request.");
                     });
             }
         }
@@ -1462,6 +1485,12 @@
                 } else {
                     totalPnLElem.style.display = "none";
                 }
+            }
+
+            // Show/Hide Close All Trades button
+            const closeAllBtn = document.getElementById("close-all-trades-btn");
+            if (closeAllBtn) {
+                closeAllBtn.style.display = allActive.length > 0 ? "inline-block" : "none";
             }
         }
 
