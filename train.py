@@ -73,6 +73,14 @@ for lag in [1, 2]:
     features.append(f"CVD_rolling_1h_lag{lag}")
     features.append(f"CVD_rolling_4h_lag{lag}")
 
+# New Wick Volume features (absorption/liquidation proxies)
+features.extend([
+    "upper_wick_volume_ratio", "lower_wick_volume_ratio"
+])
+for lag in [1, 2]:
+    features.append(f"upper_wick_volume_ratio_lag{lag}")
+    features.append(f"lower_wick_volume_ratio_lag{lag}")
+
 features.append("hours_to_news")
 
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
@@ -286,10 +294,21 @@ def add_features(df):
     df["open_interest_pct_change"] = df["open_interest"].pct_change(1).fillna(0.0)
     df["funding_rate_diff"] = df["funding_rate"].diff(1).fillna(0.0)
     
-    # Signed volume & Cumulative Volume Delta (CVD) proxies
-    signed_vol = df["volume"] * np.sign(df["close"] - df["open"])
-    df["CVD_rolling_1h"] = signed_vol.rolling(window=4, min_periods=1).sum()
-    df["CVD_rolling_4h"] = signed_vol.rolling(window=16, min_periods=1).sum()
+    # High-fidelity Delta Volume / CVD Proxy
+    high_low_range = df["high"] - df["low"] + 1e-8
+    delta_volume = df["volume"] * (2 * (df["close"] - df["low"]) / high_low_range - 1.0)
+    df["CVD_rolling_1h"] = delta_volume.rolling(window=4, min_periods=1).sum()
+    df["CVD_rolling_4h"] = delta_volume.rolling(window=16, min_periods=1).sum()
+    
+    # Wick Volume (Liquidation & Stop-Loss Sweep Proxies)
+    upper_wick = df["high"] - df[["open", "close"]].max(axis=1)
+    lower_wick = df[["open", "close"]].min(axis=1) - df["low"]
+    
+    upper_wick_vol = df["volume"] * (upper_wick / high_low_range)
+    lower_wick_vol = df["volume"] * (lower_wick / high_low_range)
+    
+    df["upper_wick_volume_ratio"] = upper_wick_vol / (upper_wick_vol.rolling(20).mean() + 1e-8)
+    df["lower_wick_volume_ratio"] = lower_wick_vol / (lower_wick_vol.rolling(20).mean() + 1e-8)
     
     # Lag new features
     for lag in [1, 2]:
@@ -297,6 +316,8 @@ def add_features(df):
         df[f"funding_rate_diff_lag{lag}"] = df["funding_rate_diff"].shift(lag)
         df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
         df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
+        df[f"upper_wick_volume_ratio_lag{lag}"] = df["upper_wick_volume_ratio"].shift(lag)
+        df[f"lower_wick_volume_ratio_lag{lag}"] = df["lower_wick_volume_ratio"].shift(lag)
         
     # Cyclical time features
     datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
