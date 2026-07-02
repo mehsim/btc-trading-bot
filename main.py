@@ -1886,24 +1886,24 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if rsi_1h_pass:
         total_score += weight_rsi
 
-    # ======= CHECK 4: Volume Participation (Weight: 2) =======
-    weight_vol = 2
+    # ======= CHECK 4: Volume Confirmation (RVOL) Hard Gate =======
+    # Filter out low-liquidity fakeouts (RVOL must be >= 1.0x)
     try:
         vol_series = df_1h["volume"]
         avg_vol_20 = vol_series.iloc[:-1].rolling(20).mean().iloc[-1]
         latest_vol = vol_series.iloc[-2]
-        volume_pass = (latest_vol >= 0.8 * avg_vol_20)
-        results["Volume_Participation"] = {
+        rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
+        volume_pass = (rvol >= 1.0)
+        if not volume_pass:
+            hard_gate_failed = True
+        results["Volume_Confirmation"] = {
             "pass": volume_pass,
-            "detail": f"Vol: {latest_vol:.1f} vs Avg20: {avg_vol_20:.1f} ({latest_vol/avg_vol_20*100:.1f}%, Req >= 80%)",
-            "weight": weight_vol
+            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.0x",
+            "weight": 0
         }
     except Exception as e:
         volume_pass = True
-        results["Volume_Participation"] = {"pass": True, "detail": f"Skipped volume check (Error: {e})", "weight": weight_vol}
-    max_score += weight_vol
-    if volume_pass:
-        total_score += weight_vol
+        results["Volume_Confirmation"] = {"pass": True, "detail": f"Skipped volume check (Error: {e})", "weight": 0}
 
     # ======= CHECK 5: Bollinger Band Edge Guard (Weight: 2) =======
     weight_bb = 2
@@ -2573,6 +2573,35 @@ def main():
                 pass
             return False, None
 
+        # --- Consecutive Losses Cooldown Circuit Breaker ---
+        def is_symbol_interval_cooling_off(symbol, interval):
+            """
+            Checks if a symbol and interval combination is in a 6-hour cool-off period
+            after suffering 2 consecutive loss trades.
+            """
+            trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol and str(t.get("interval")) == str(interval)]
+            if len(trades) < 2:
+                return False, 0
+                
+            # Sort by exit_time descending to get latest trades
+            sorted_trades = sorted(trades, key=lambda x: x.get("exit_time", 0.0), reverse=True)
+            
+            latest_trade = sorted_trades[0]
+            second_latest = sorted_trades[1]
+            
+            is_latest_loss = (latest_trade.get("success") is False) or (latest_trade.get("pnl_usd", 0.0) < 0.0)
+            is_second_loss = (second_latest.get("success") is False) or (second_latest.get("pnl_usd", 0.0) < 0.0)
+            
+            if is_latest_loss and is_second_loss:
+                exit_time = latest_trade.get("exit_time", 0.0)
+                cooldown_duration = 6 * 3600  # 6 hours
+                time_elapsed = time.time() - exit_time
+                if time_elapsed < cooldown_duration:
+                    remaining_minutes = int((cooldown_duration - time_elapsed) / 60)
+                    return True, remaining_minutes
+                    
+            return False, 0
+
         check_and_hot_reload_models()
         current_time_pkt = get_pkt_time()
         in_check_window = (current_time_pkt.minute < 5) or (not startup_check_done)
@@ -2734,6 +2763,8 @@ def main():
                             strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > 0.05) or \
                                               (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
                             
+                            is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
+                            
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"
                             active_trades_list = bot_state.get(active_trade_key, [])
@@ -2743,6 +2774,9 @@ def main():
                             if not bot_state.get("bot_running", True):
                                 status_msg = "Skipped (Bot Stopped)"
                                 print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
+                            elif is_cooling:
+                                status_msg = "Skipped (Cool-Off)"
+                                print(f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
