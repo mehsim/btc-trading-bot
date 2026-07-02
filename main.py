@@ -403,7 +403,16 @@ def run_bybit_balance_updater():
 
 @app.route("/api/status")
 def get_status():
-    state_copy = bot_state.copy()
+    # Thread-safe dictionary copy with fallback
+    for _ in range(5):
+        try:
+            state_copy = bot_state.copy()
+            break
+        except RuntimeError:
+            time.sleep(0.01)
+    else:
+        state_copy = {k: v for k, v in list(bot_state.items())}
+
     with logs_lock:
         state_copy["logs"] = list(bot_logs)
     
