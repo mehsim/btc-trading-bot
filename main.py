@@ -2735,16 +2735,17 @@ def main():
         
         if (is_boundary_time and current_time_pkt.hour != last_check_hour) or (not startup_check_done):
             if not startup_check_done:
-                print("[Startup] Executing initial candle check for all symbols...")
+                print("[Startup] Executing fast initial candle check for BTCUSDT to update cards instantly...")
+                check_queue = [("BTCUSDT", iv) for iv in ["60", "120", "240", "360"]]
                 startup_check_done = True
-            
-            last_check_hour = current_time_pkt.hour
-            check_queue = []
-            for iv_q in ["60", "120", "240", "360"]:
-                iv_hours = int(iv_q) // 60
-                if current_time_pkt.hour % iv_hours == 0:
-                    for symbol_q in SUPPORTED_SYMBOLS:
-                        check_queue.append((symbol_q, iv_q))
+            else:
+                last_check_hour = current_time_pkt.hour
+                check_queue = []
+                for iv_q in ["60", "120", "240", "360"]:
+                    iv_hours = int(iv_q) // 60
+                    if current_time_pkt.hour % iv_hours == 0:
+                        for symbol_q in SUPPORTED_SYMBOLS:
+                            check_queue.append((symbol_q, iv_q))
         else:
             check_queue = []
             
