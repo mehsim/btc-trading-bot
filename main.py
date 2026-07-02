@@ -2551,6 +2551,7 @@ def main():
                     # Send email alert on Take Profit hit
                     if "TAKE PROFIT" in str(exit_reason).upper():
                         subject = f"🚀 [UBOTE TP Hit] {active_symbol} {iv}m Take Profit Triggered!"
+                        invested_margin_usd = original_size / leverage if leverage > 0 else original_size
                         body = f"""
                         <html>
                         <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
@@ -2584,6 +2585,10 @@ def main():
                                     <tr>
                                         <td style="padding: 6px 0; color: #8f9bb3;"><b>Position Size:</b></td>
                                         <td style="padding: 6px 0; font-family: monospace;">${original_size:.2f} USD ({leverage}x Leverage)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Invested Amount:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">${invested_margin_usd:.2f} USD</td>
                                     </tr>
                                     <tr>
                                         <td style="padding: 6px 0; color: #8f9bb3;"><b>Account Balance:</b></td>
