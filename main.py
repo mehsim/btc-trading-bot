@@ -258,11 +258,21 @@ _last_balance_fetch = 0.0
 _cached_balance = None
 _balance_lock = threading.Lock()
 
+def get_bybit_proxies():
+    import os
+    proxy = os.environ.get("BYBIT_PROXY")
+    if proxy:
+        return {
+            "http": proxy,
+            "https": proxy
+        }
+    return None
+
 def get_bybit_time_offset():
     import requests
     import time
     try:
-        resp = requests.get("https://api.bybit.com/v5/market/time", timeout=3)
+        resp = requests.get("https://api.bybit.com/v5/market/time", proxies=get_bybit_proxies(), timeout=3)
         if resp.status_code == 200:
             server_time = int(resp.json()["result"]["timeNano"]) // 1000000
             local_time = int(time.time() * 1000)
@@ -308,7 +318,7 @@ def get_real_bybit_balance():
     url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
     
     try:
-        resp = requests.get(url, headers=headers, timeout=5)
+        resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
         if resp.status_code == 200:
             data = resp.json()
             ret_code = data.get("retCode")
@@ -356,7 +366,7 @@ def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
     }
     url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
     try:
-        resp = requests.get(url, headers=headers, timeout=5)
+        resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
         if resp.status_code == 200:
             data = resp.json()
             ret_code = data.get("retCode")
@@ -1508,7 +1518,7 @@ def get_orderbook_imbalance(symbol=None):
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": symbol, "limit": 25}, headers=headers, timeout=10)
+        response = requests.get(url, params={"category": "spot", "symbol": symbol, "limit": 25}, headers=headers, proxies=get_bybit_proxies(), timeout=10)
         res = None
         if response.status_code == 200:
             res = response.json()
@@ -2108,7 +2118,7 @@ def get_fallback_price(symbol=SYMBOL):
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": symbol}, headers=headers, timeout=5)
+        response = requests.get(url, params={"category": "spot", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
         if response.status_code == 200:
             res = response.json()
             return float(res["result"]["list"][0]["lastPrice"])

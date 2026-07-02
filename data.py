@@ -1,6 +1,16 @@
+import os
 import time
 import requests
 import pandas as pd
+
+def get_bybit_proxies():
+    proxy = os.environ.get("BYBIT_PROXY")
+    if proxy:
+        return {
+            "http": proxy,
+            "https": proxy
+        }
+    return None
 
 def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     url = "https://api.bybit.com/v5/market/kline"
@@ -22,7 +32,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
             if response.status_code != 200:
                 print(f"Error fetching page {page + 1}: Received status code {response.status_code}")
                 print(f"Response content: {response.text[:300]}")
@@ -195,7 +205,7 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
             params["cursor"] = cursor
             
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, proxies=get_bybit_proxies(), timeout=10)
             if resp.status_code != 200:
                 break
             res = resp.json()
@@ -238,7 +248,7 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
             "endTime": current_end
         }
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, proxies=get_bybit_proxies(), timeout=10)
             if resp.status_code != 200:
                 break
             res = resp.json()
