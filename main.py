@@ -2374,13 +2374,17 @@ def main():
                 position_size_usd = active_trade.get("position_size_usd", 100.0)
 
                 # Volatility-Scaled Trailing Stops: multiplier is dynamic based on current ADX
-                current_adx = bot_state.get(f"adx_{tf}", 20.0)
-                if current_adx >= 25.0:
-                    trailing_multiplier = 1.50
-                elif current_adx < 18.0:
-                    trailing_multiplier = 0.90
+                # If the position has scaled out (half closed), we use a tighter trailing stop of 1.0 * ATR
+                if active_trade.get("half_closed", False):
+                    trailing_multiplier = 1.0
                 else:
-                    trailing_multiplier = 1.25
+                    current_adx = bot_state.get(f"adx_{tf}", 20.0)
+                    if current_adx >= 25.0:
+                        trailing_multiplier = 1.50
+                    elif current_adx < 18.0:
+                        trailing_multiplier = 0.90
+                    else:
+                        trailing_multiplier = 1.25
 
                 # Update trailing stop peak prices
                 if direction == "Bullish":
@@ -2498,15 +2502,16 @@ def main():
                 print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 exit_reason = None
+                half_closed = active_trade.get("half_closed", False)
                 if direction == "Bullish":
                     if current_price <= stop_loss:
-                        exit_reason = "STOP LOSS HIT [FAIL]"
-                    elif current_price >= take_profit:
+                        exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
+                    elif current_price >= take_profit and not half_closed:
                         exit_reason = "TAKE PROFIT HIT [SUCCESS]"
                 else:
                     if current_price >= stop_loss:
-                        exit_reason = "STOP LOSS HIT [FAIL]"
-                    elif current_price <= take_profit:
+                        exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
+                    elif current_price <= take_profit and not half_closed:
                         exit_reason = "TAKE PROFIT HIT [SUCCESS]"
 
                 if current_time >= end_time:
