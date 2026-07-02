@@ -237,6 +237,8 @@ def load_history():
         bot_state["active_trade_6h"] = []
         bot_state["fresh_reset_v3"] = True
         save_history()
+        
+    bot_state["retraining_status"] = "Idle"
 
 # Thread-safe print wrapper to redirect logs to dashboard log panel
 _print = print
@@ -694,7 +696,7 @@ def retrain_models_thread(is_manual=False):
             # Retrain for all intervals
             for iv in ["60", "120", "240", "360"]:
                 print(f"[Retraining] Retraining models for interval {iv}m...")
-                train_models(interval=iv, pages=20)
+                train_models(interval=iv, pages=5)
                 
             print("[Retraining] Rolling retraining completed successfully. Model files updated on disk.")
         except Exception as e:
