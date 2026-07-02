@@ -118,7 +118,7 @@ def save_history():
         "active_trade_4h": bot_state.get("active_trade_4h", []),
         "active_trade_6h": bot_state.get("active_trade_6h", []),
         "bot_running": bot_state.get("bot_running", True),
-        "fresh_reset_v2": bot_state.get("fresh_reset_v2", False)
+        "fresh_reset_v3": bot_state.get("fresh_reset_v3", False)
     }
     try:
         with open(HISTORY_FILE, "w") as f:
@@ -191,7 +191,7 @@ def load_history():
                     bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                     bot_state["bot_running"] = data.get("bot_running", True)
-                    bot_state["fresh_reset_v2"] = data.get("fresh_reset_v2", False)
+                    bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
                     save_history()
                     return
@@ -219,14 +219,14 @@ def load_history():
                 bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                 bot_state["bot_running"] = data.get("bot_running", True)
-                bot_state["fresh_reset_v2"] = data.get("fresh_reset_v2", False)
+                bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
 
     # Force auto-reset if it's the first time running this updated version
-    if not bot_state.get("fresh_reset_v2", False):
-        print("[System Reset] Migrating history to fresh reset v2. Setting balance to 80.0 and clearing all old trades.")
+    if not bot_state.get("fresh_reset_v3", False):
+        print("[System Reset] Migrating history to fresh reset v3. Setting balance to 80.0 and clearing all old trades.")
         bot_state["simulated_balance"] = 80.0
         bot_state["daily_drawdown_start_balance"] = 80.0
         bot_state["trade_history"] = []
@@ -235,7 +235,7 @@ def load_history():
         bot_state["active_trade_2h"] = []
         bot_state["active_trade_4h"] = []
         bot_state["active_trade_6h"] = []
-        bot_state["fresh_reset_v2"] = True
+        bot_state["fresh_reset_v3"] = True
         save_history()
 
 # Thread-safe print wrapper to redirect logs to dashboard log panel
@@ -2670,30 +2670,10 @@ def main():
                                         tp_multiplier = round(base_tp * vol_factor, 2)
                                         print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                         
-                                        # Trailing Target Expansion: Scale SL & TP dynamically by 1h ATR changes
-                                        atr_ratio = 1.0
-                                        try:
-                                            df_1h_vol = get_history(symbol=symbol, interval="60", limit=50)
-                                            if df_1h_vol is not None and len(df_1h_vol) >= 20:
-                                                atr_ind_1h = AverageTrueRange(high=df_1h_vol["high"], low=df_1h_vol["low"], close=df_1h_vol["close"], window=14)
-                                                df_1h_vol["ATR"] = atr_ind_1h.average_true_range()
-                                                current_atr_1h = df_1h_vol["ATR"].iloc[-1]
-                                                avg_atr_24h = df_1h_vol["ATR"].iloc[-24:].mean()
-                                                if avg_atr_24h > 0:
-                                                    atr_ratio = current_atr_1h / avg_atr_24h
-                                                    atr_ratio = max(0.6, min(1.8, atr_ratio))
-                                                    print(f"[{iv}m Target Expansion] Current 1h ATR: {current_atr_1h:.2f} | 24h Avg: {avg_atr_24h:.2f} | Ratio: {atr_ratio:.2f}x")
-                                                else:
-                                                    print(f"[{iv}m Target Expansion] Invalid 24h Avg 1h ATR ({avg_atr_24h}), using ratio = 1.0")
-                                            else:
-                                                print(f"[{iv}m Target Expansion] Not enough 1h candles, using ratio = 1.0")
-                                        except Exception as e:
-                                            print(f"[{iv}m Target Expansion] Error calculating 1h ATR ratio: {e}, using ratio = 1.0")
-
-                                        base_sl = 1.2
-                                        sl_multiplier = round(base_sl * atr_ratio, 2)
-                                        tp_multiplier_adjusted = round(tp_multiplier * (sl_multiplier / 0.75), 2)
-                                        print(f"[{iv}m Target Expansion] Scaled multipliers: SL Multiplier = {sl_multiplier:.2f}x (Base: {base_sl}), TP Multiplier Adjusted = {tp_multiplier_adjusted:.2f}x")
+                                        # Align stop loss and take profit multipliers strictly with model training labels
+                                        sl_multiplier = 0.80
+                                        tp_multiplier_adjusted = 1.20
+                                        print(f"[{iv}m Target Alignment] Aligned multipliers with ML training: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
                                         
                                         # Maker execution: zero entry slippage for limit orders
                                         slippage_pct = 0.0
