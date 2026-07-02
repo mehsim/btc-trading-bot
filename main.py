@@ -708,6 +708,7 @@ def retrain_models_thread(is_manual=False):
             print(f"[Retraining] Error during retraining process: {e}")
         finally:
             bot_state["retraining_status"] = "Idle"
+            save_history()
             retraining_lock.release()
 
     threading.Thread(target=run_training, daemon=True).start()
@@ -730,13 +731,15 @@ def run_rolling_retrain_scheduler():
             now = time.time()
             needs_retrain = False
             
-            # Check if any model file is missing or older than 7 days
+            # Check if any model file is missing or older than 3 days
             for iv in ["60", "120", "240", "360"]:
                 filenames = [
-                    f"xgb_trending_trend_{iv}.json",
-                    f"xgb_trending_price_{iv}.json",
-                    f"xgb_ranging_trend_{iv}.json",
-                    f"xgb_ranging_price_{iv}.json"
+                    f"ensemble_trending_trend_{iv}_xgb.json",
+                    f"ensemble_trending_price_{iv}_xgb.json",
+                    f"ensemble_ranging_trend_{iv}_xgb.json",
+                    f"ensemble_ranging_price_{iv}_xgb.json",
+                    f"meta_trending_trend_{iv}.json",
+                    f"meta_ranging_trend_{iv}.json"
                 ]
                 for filename in filenames:
                     if not os.path.exists(filename):
