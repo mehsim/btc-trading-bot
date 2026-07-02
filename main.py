@@ -2297,18 +2297,27 @@ def main():
                 break_even_triggered = active_trade.get("break_even_triggered", False)
                 position_size_usd = active_trade.get("position_size_usd", 100.0)
 
+                # Volatility-Scaled Trailing Stops: multiplier is dynamic based on current ADX
+                current_adx = bot_state.get(f"adx_{tf}", 20.0)
+                if current_adx >= 25.0:
+                    trailing_multiplier = 1.50
+                elif current_adx < 18.0:
+                    trailing_multiplier = 0.90
+                else:
+                    trailing_multiplier = 1.25
+
                 # Update trailing stop peak prices
                 if direction == "Bullish":
                     if current_price > highest_price:
                         highest_price = current_price
                         active_trade["highest_price"] = highest_price
-                        # Trailing Stop: SL trails highest price by 1.25 * ATR
-                        potential_sl = highest_price - 1.25 * atr_dollars
+                        # Trailing Stop: SL trails highest price by dynamic multiplier
+                        potential_sl = highest_price - trailing_multiplier * atr_dollars
                         if potential_sl > stop_loss:
                             stop_loss = potential_sl
                             active_trade["stop_loss"] = stop_loss
                             active_trades_updated = True
-                            print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f})")
+                            print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
                     
                     # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
@@ -2322,13 +2331,13 @@ def main():
                     if current_price < lowest_price:
                         lowest_price = current_price
                         active_trade["lowest_price"] = lowest_price
-                        # Trailing Stop: SL trails lowest price by 1.25 * ATR
-                        potential_sl = lowest_price + 1.25 * atr_dollars
+                        # Trailing Stop: SL trails lowest price by dynamic multiplier
+                        potential_sl = lowest_price + trailing_multiplier * atr_dollars
                         if potential_sl < stop_loss:
                             stop_loss = potential_sl
                             active_trade["stop_loss"] = stop_loss
                             active_trades_updated = True
-                            print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f})")
+                            print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
                             
                     # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
@@ -2433,14 +2442,11 @@ def main():
                     is_stop_loss = "STOP LOSS" in str(exit_reason).upper()
                     
                     if is_stop_loss:
-                        # Taker execution for Stop Loss exit
-                        atr_norm_val = active_trade.get("atr_dollars", 50.0) / entry_price
-                        slippage_pct = 0.02 + 0.01 * (atr_norm_val * 100.0)
-                        if direction == "Bullish":
-                            actual_price = current_price * (1.0 - slippage_pct / 100.0)
-                        else:
-                            actual_price = current_price * (1.0 + slippage_pct / 100.0)
-                        fee_rate_roundtrip = 0.08  # Maker Entry + Taker Stop Loss roundtrip
+                        # Maker limit execution for Stop Loss exit (Post-Only model)
+                        slippage_pct = 0.0
+                        actual_price = current_price
+                        fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
+                        exit_reason = str(exit_reason) + " [Limit order Maker close]"
                     else:
                         # Maker execution for Take Profit, Timer, etc.
                         slippage_pct = 0.0
