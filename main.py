@@ -937,6 +937,44 @@ def run_fallback_price_updater():
             pass
         time.sleep(6)
 
+def send_email_notification(subject, body):
+    """
+    Sends an email alert using SMTP.
+    Reads SMTP configuration from environment variables.
+    """
+    import smtplib
+    from email.mime.text import MIMEText
+    
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    try:
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    except ValueError:
+        smtp_port = 587
+        
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    email_to = os.getenv("EMAIL_TO", "mehsimleo@gmail.com")
+    
+    if not smtp_user or not smtp_password:
+        print("[Email Notification] Skipped: SMTP_USER or SMTP_PASSWORD environment variables not set.")
+        return False
+        
+    try:
+        msg = MIMEText(body, "html")
+        msg["Subject"] = subject
+        msg["From"] = smtp_user
+        msg["To"] = email_to
+        
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+            print(f"[Email Notification] Successfully sent email to {email_to}")
+            return True
+    except Exception as e:
+        print(f"[Email Notification] Error sending email: {e}")
+        return False
+
 def on_message(ws, message):
     global live_price, last_ws_update_time
     try:
@@ -2509,6 +2547,55 @@ def main():
                         "balance": float(new_bal),
                         "leverage": float(leverage)
                     })
+                    
+                    # Send email alert on Take Profit hit
+                    if "TAKE PROFIT" in str(exit_reason).upper():
+                        subject = f"🚀 [UBOTE TP Hit] {active_symbol} {iv}m Take Profit Triggered!"
+                        body = f"""
+                        <html>
+                        <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
+                            <h2 style="color: #00b0ff; margin-bottom: 20px;">🎉 Take Profit Target Hit!</h2>
+                            <div style="background-color: #161a22; padding: 15px; border-radius: 6px; border-left: 4px solid #00c853;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3; width: 140px;"><b>Symbol:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace; font-size: 14px;">{active_symbol}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Timeframe:</b></td>
+                                        <td style="padding: 6px 0;">{iv}m</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Direction:</b></td>
+                                        <td style="padding: 6px 0; color: {'#00c853' if direction == 'Bullish' else '#ff3d00'}; font-weight: bold;">{direction}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Entry Price:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">${entry_price:.4f}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Exit Price:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">${actual_price:.4f}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Profit/Loss:</b></td>
+                                        <td style="padding: 6px 0; color: #00c853; font-weight: bold; font-family: monospace;">+{total_pnl:+.2f} USD ({total_net_return_pct:+.4f}%)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Position Size:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">${original_size:.2f} USD ({leverage}x Leverage)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Account Balance:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace; font-weight: bold;">${new_bal:.2f} USD</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
+                        </body>
+                        </html>
+                        """
+                        threading.Thread(target=send_email_notification, args=(subject, body), daemon=True).start()
                     
                     for p in bot_state["prediction_history"]:
                         if p.get("interval") == str(iv) and p.get("symbol") == active_symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
