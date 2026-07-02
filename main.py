@@ -771,7 +771,7 @@ def run_flask():
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT"]
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor

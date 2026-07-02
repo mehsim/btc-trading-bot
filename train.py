@@ -32,6 +32,7 @@ economic_calendar_lock = threading.Lock()
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
 PAGES = 20  # 20 pages of candles provides ~20,000 candles (balanced dataset size)
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]
 
 # Feature list matches train.py and main.py
 features = [
@@ -508,46 +509,60 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
 
 def train_models(interval=INTERVAL, pages=PAGES):
     # =========================
-    # LOAD DATA
+    # LOAD & PROCESS DATA FOR ALL SUPPORTED COINS
     # =========================
-    if SYMBOL == "BTCUSDT":
-        print(f"Fetching {pages} pages of {interval}-minute {SYMBOL} data ({pages * 1000} candles)...")
-        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=pages)
-        print(f"Loaded {len(df_target)} {SYMBOL} candles.")
-        df = df_target.copy()
-        df["close_btc"] = df["close"]
-    else:
-        print(f"Fetching {pages} pages of {interval}-minute {SYMBOL} data ({pages * 1000} candles)...")
-        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=pages)
-        print(f"Loaded {len(df_target)} {SYMBOL} candles.")
+    dfs = []
+    for s in SUPPORTED_SYMBOLS:
+        try:
+            print(f"--- Processing {s} for interval {interval}m ({pages * 1000} candles) ---")
+            if s == "BTCUSDT":
+                df_target = get_history(symbol=s, interval=interval, limit=1000, pages=pages)
+                if df_target is None or len(df_target) == 0:
+                    continue
+                df_coin = df_target.copy()
+                df_coin["close_btc"] = df_coin["close"]
+            else:
+                df_target = get_history(symbol=s, interval=interval, limit=1000, pages=pages)
+                if df_target is None or len(df_target) == 0:
+                    continue
+                df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=pages)
+                if df_btc is None or len(df_btc) == 0:
+                    continue
+                df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
+                df_coin = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
+                
+            if len(df_coin) > 0:
+                print(f"Merging Open Interest, Funding Rate, and Fear & Greed for {s}...")
+                df_coin = merge_derivatives_sentiment_features(df_coin, symbol=s, interval=interval)
+                print(f"Engineering features for {s}...")
+                df_coin = add_features(df_coin)
+                
+                # Check features are present
+                cols_ok = True
+                for feat in features:
+                    if feat not in df_coin.columns:
+                        print(f"Missing feature {feat} in {s} data. Skipping.")
+                        cols_ok = False
+                        break
+                if cols_ok:
+                    # Generate targets individually per coin to avoid cross-symbol data leak!
+                    lookahead = 10
+                    df_coin["future"] = df_coin["close"].shift(-lookahead)
+                    df_coin["target_price_change"] = (df_coin["future"] - df_coin["close"]) / df_coin["close"]
+                    df_coin = add_triple_barrier_labels(df_coin, interval)
+                    df_coin.dropna(subset=["target_price_change", "target_trend"], inplace=True)
+                    
+                    dfs.append(df_coin)
+                    print(f"Successfully processed {s}: {len(df_coin)} rows.")
+        except Exception as e:
+            print(f"Error processing {s} during training dataset creation: {e}")
+            
+    if not dfs:
+        print("[Retraining Error] No symbol data could be processed. Aborting.")
+        return
         
-        print(f"Fetching {pages} pages of {interval}-minute BTCUSDT data ({pages * 1000} candles) for correlation...")
-        df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=pages)
-        print(f"Loaded {len(df_btc)} BTCUSDT candles.")
-        
-        # Inner merge to align timestamps
-        df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-        df = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
-        print(f"Aligned dataset has {len(df)} candles.")
-
-    # Merge Open Interest, Funding Rate, and Fear & Greed index historical data
-    print("Merging Open Interest, Funding Rate, and Fear & Greed historical data...")
-    df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
-
-    # =========================
-    # FEATURE ENGINEERING
-    # =========================
-    print("Engineering features...")
-    df = add_features(df)
-    
-    # =========================
-    # TARGET (TRIPLE BARRIER + REGRESSION PRICE CHANGE)
-    # =========================
-    lookahead = 10
-    df["future"] = df["close"].shift(-lookahead)
-    df["target_price_change"] = (df["future"] - df["close"]) / df["close"]
-    df = add_triple_barrier_labels(df, interval)
-    df.dropna(subset=["target_price_change", "target_trend"], inplace=True)
+    df = pd.concat(dfs, ignore_index=True)
+    print(f"\n=== Combined Training Dataset: {len(df)} total rows across {len(dfs)} symbols ===")
 
     # ==========================================
     # AUTOML FEATURE SELECTION (NOISE REDUCTION)
