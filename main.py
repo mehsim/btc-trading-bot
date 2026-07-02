@@ -949,7 +949,7 @@ features = [
     "btc_return_5m", "btc_return_5m_lag1", "btc_return_5m_lag2", "btc_return_5m_lag3",
     "RSI_24", "ROC_24", "volatility_24h",
     "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos",
-    "RSI_z", "ADX_z"
+    "RSI_z", "ADX_z", "close_to_Kalman"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")
@@ -983,6 +983,26 @@ features.append("hours_to_news")
 # Initial load
 for iv in ["60", "120", "240", "360"]:
     load_model_weights(iv)
+
+def calculate_kalman_feature(prices):
+    n = len(prices)
+    if n == 0:
+        return np.zeros(0)
+    state_estimate = np.zeros(n)
+    error_covariance = np.zeros(n)
+    state_estimate[0] = prices[0]
+    error_covariance[0] = 1.0
+    
+    process_variance = 1e-4
+    measurement_variance = 1e-2
+    
+    for i in range(1, n):
+        pred_state = state_estimate[i-1]
+        pred_error = error_covariance[i-1] + process_variance
+        kalman_gain = pred_error / (pred_error + measurement_variance)
+        state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
+        error_covariance[i] = (1.0 - kalman_gain) * pred_error
+    return (prices / (state_estimate + 1e-8)) - 1.0
 
 def add_features(df):
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
@@ -1094,6 +1114,9 @@ def add_features(df):
     df["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
     df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
     df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+
+    # 1D Kalman Filter trend feature
+    df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values)
 
     df = add_news_proximity_feature(df)
     df.dropna(inplace=True)
@@ -2273,6 +2296,73 @@ def main():
                         active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
 
+                # Scale-Out (50% partial profit taking at 0.6 * ATR)
+                half_closed = active_trade.get("half_closed", False)
+                if not half_closed:
+                    if direction == "Bullish" and current_price >= entry_price + 0.6 * atr_dollars:
+                        # Scale-Out Triggered for Long
+                        half_closed = True
+                        active_trade["half_closed"] = True
+                        
+                        # Close 50% of the position
+                        closed_size = round(position_size_usd * 0.5, 2)
+                        remaining_size = round(position_size_usd - closed_size, 2)
+                        
+                        # Calculate profit on closed half (use standard Taker fee on exit)
+                        raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
+                        net_return_pct = (raw_return_pct * active_trade.get("leverage", 1.0)) - 0.08
+                        pnl_usd = round(closed_size * (net_return_pct / 100.0), 2)
+                        
+                        # Save scaled out pnl
+                        active_trade["scaled_out_pnl"] = pnl_usd
+                        
+                        # Refund closed size + PnL to wallet balance
+                        bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
+                        
+                        # Update position details
+                        position_size_usd = remaining_size
+                        active_trade["position_size_usd"] = remaining_size
+                        
+                        # Move stop loss to entry price (break-even)
+                        stop_loss = entry_price
+                        active_trade["stop_loss"] = entry_price
+                        active_trade["break_even_triggered"] = True
+                        active_trades_updated = True
+                        
+                        print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                        
+                    elif direction == "Bearish" and current_price <= entry_price - 0.6 * atr_dollars:
+                        # Scale-Out Triggered for Short
+                        half_closed = True
+                        active_trade["half_closed"] = True
+                        
+                        # Close 50% of the position
+                        closed_size = round(position_size_usd * 0.5, 2)
+                        remaining_size = round(position_size_usd - closed_size, 2)
+                        
+                        # Calculate profit on closed half (use standard Taker fee on exit)
+                        raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
+                        net_return_pct = (raw_return_pct * active_trade.get("leverage", 1.0)) - 0.08
+                        pnl_usd = round(closed_size * (net_return_pct / 100.0), 2)
+                        
+                        # Save scaled out pnl
+                        active_trade["scaled_out_pnl"] = pnl_usd
+                        
+                        # Refund closed size + PnL to wallet balance
+                        bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
+                        
+                        # Update position details
+                        position_size_usd = remaining_size
+                        active_trade["position_size_usd"] = remaining_size
+                        
+                        # Move stop loss to entry price (break-even)
+                        stop_loss = entry_price
+                        active_trade["stop_loss"] = entry_price
+                        active_trade["break_even_triggered"] = True
+                        active_trades_updated = True
+                        
+                        print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)
                 countdown_str = f"{mins:02d}m {secs:02d}s"
@@ -2326,6 +2416,12 @@ def main():
                     net_return_pct = (raw_return_pct * leverage) - fee_rate_roundtrip
                     realized_pnl = position_size_usd * (net_return_pct / 100.0)
                     
+                    # Aggregate PnL and size for trade history logging if scaled out
+                    original_size = float(active_trade.get("original_size", position_size_usd))
+                    scaled_out_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
+                    total_pnl = round(realized_pnl + scaled_out_pnl, 2)
+                    total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
+                    
                     # Update simulated balance
                     old_bal = bot_state.get("simulated_balance", 80.0)
                     new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
@@ -2339,9 +2435,13 @@ def main():
                     print(f"[{active_symbol} {iv}m TRADE EXITED]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
                     print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
                     print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
-                    print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
-                    print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
-                    print(f"Predicted Signal: {direction} ({trend_status})")
+                    if active_trade.get("half_closed", False):
+                        print(f"Total Size: ${original_size:.2f} (Scaled-Out) | Net Return: {total_net_return_pct:+.4f}% (weighted)")
+                        print(f"Scaled-Out PnL: ${scaled_out_pnl:+.2f} | Remaining PnL: ${realized_pnl:+.2f} | Total PnL: ${total_pnl:+.2f}")
+                    else:
+                        print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
+                        print(f"Realized PnL: ${realized_pnl:+.2f}")
+                    print(f"New Balance: ${new_bal:.2f} | Predicted Signal: {direction} ({trend_status})")
                     print("==================================================\n")
                     
                     # Update Completed Trade History in global state
@@ -2352,11 +2452,11 @@ def main():
                         "direction": str(direction),
                         "entry_price": float(entry_price),
                         "exit_price": float(actual_price),
-                        "change_pct": float(net_return_pct),
+                        "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
                         "success": bool(signal_correct),
-                        "reason": str(exit_reason),
-                        "position_size_usd": float(position_size_usd),
-                        "pnl_usd": float(realized_pnl),
+                        "reason": str(exit_reason) + (" (Scale-Out)" if active_trade.get("half_closed", False) else ""),
+                        "position_size_usd": float(original_size),
+                        "pnl_usd": float(total_pnl),
                         "balance": float(new_bal),
                         "leverage": float(leverage)
                     })
@@ -2743,7 +2843,10 @@ def main():
                                                 "highest_price": float(entry_price),
                                                 "lowest_price": float(entry_price),
                                                 "break_even_triggered": False,
+                                                "half_closed": False,
+                                                "original_size": float(position_size_usd),
                                                 "position_size_usd": float(position_size_usd),
+                                                "scaled_out_pnl": 0.0,
                                                 "kelly_fraction": float(kelly_fraction),
                                                 "leverage": float(leverage_val)
                                             }

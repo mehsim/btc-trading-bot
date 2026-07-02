@@ -43,7 +43,7 @@ features = [
     "btc_return_5m", "btc_return_5m_lag1", "btc_return_5m_lag2", "btc_return_5m_lag3",
     "RSI_24", "ROC_24", "volatility_24h",
     "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos",
-    "RSI_z", "ADX_z"
+    "RSI_z", "ADX_z", "close_to_Kalman"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")
@@ -152,6 +152,26 @@ def add_news_proximity_feature(df):
             
     df["hours_to_news"] = hours_to_news_list
     return df
+
+def calculate_kalman_feature(prices):
+    n = len(prices)
+    if n == 0:
+        return np.zeros(0)
+    state_estimate = np.zeros(n)
+    error_covariance = np.zeros(n)
+    state_estimate[0] = prices[0]
+    error_covariance[0] = 1.0
+    
+    process_variance = 1e-4
+    measurement_variance = 1e-2
+    
+    for i in range(1, n):
+        pred_state = state_estimate[i-1]
+        pred_error = error_covariance[i-1] + process_variance
+        kalman_gain = pred_error / (pred_error + measurement_variance)
+        state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
+        error_covariance[i] = (1.0 - kalman_gain) * pred_error
+    return (prices / (state_estimate + 1e-8)) - 1.0
 
 def add_features(df):
     df = df.copy()
@@ -265,6 +285,9 @@ def add_features(df):
     df["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
     df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
     df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+
+    # 1D Kalman Filter trend feature
+    df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values)
 
     df = add_news_proximity_feature(df)
     df.dropna(inplace=True)
