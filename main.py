@@ -303,8 +303,8 @@ def get_real_bybit_balance():
     
     for account_type in ["UNIFIED", "CONTRACT", "SPOT", "FUND"]:
         if account_type == "FUND":
-            query_string = "accountType=FUND&coin=USDT"
-            url = f"https://api.bybit.com/v5/asset/transfer/query-account-coin-balance?{query_string}"
+            query_string = "accountType=FUND"
+            url = f"https://api.bybit.com/v5/asset/transfer/query-account-coins-balance?{query_string}"
         else:
             query_string = f"accountType={account_type}"
             url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
@@ -331,8 +331,20 @@ def get_real_bybit_balance():
                 ret_code = data.get("retCode")
                 if ret_code == 0:
                     if account_type == "FUND":
-                        balance_val = data.get("result", {}).get("walletBalance") or "0"
-                        max_balance = max(max_balance, float(balance_val))
+                        balances = data.get("result", {}).get("balance", [])
+                        fund_sum = 0.0
+                        for b_item in balances:
+                            coin_name = b_item.get("coin", "")
+                            coin_bal = float(b_item.get("walletBalance", "0"))
+                            if coin_name in ["USDT", "USDC"]:
+                                fund_sum += coin_bal
+                            elif coin_name == "BTC":
+                                fund_sum += coin_bal * float(get_fallback_price("BTCUSDT") or 60000.0)
+                            elif coin_name == "ETH":
+                                fund_sum += coin_bal * float(get_fallback_price("ETHUSDT") or 33000.0)
+                            elif coin_name == "SOL":
+                                fund_sum += coin_bal * float(get_fallback_price("SOLUSDT") or 140.0)
+                        max_balance = max(max_balance, fund_sum)
                     else:
                         list_data = data.get("result", {}).get("list", [])
                         if list_data:
