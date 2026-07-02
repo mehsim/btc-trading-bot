@@ -1970,20 +1970,17 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if combined_ob_pass:
         total_score += weight_ob
 
-    # ======= CHECK 11: News Sentiment (Weight: 1, Bypassed for 5m/15m) =======
-    weight_news = 1
+    # ======= CHECK 11: News Sentiment (Hard Gate & Direction Lock) =======
+    # Dynamic Sentiment Lock: Hard block trades contradicting general news sentiment (e.g. Bullish models blocked on Bearish news)
     is_opposed = (ml_trend == "Bullish" and news_sentiment == "Bearish") or (ml_trend == "Bearish" and news_sentiment == "Bullish")
-    if str(interval) in ["5", "15"]:
-        news_pass = True
-        detail_msg = f"Model: {ml_trend} vs News: {news_sentiment} (Bypassed for short TF)"
-        results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": 0}
+    news_pass = not is_opposed
+    if is_opposed:
+        hard_gate_failed = True
+        detail_msg = f"Blocked (Hard Direction Lock: Model is {ml_trend} but News sentiment is {news_sentiment})"
     else:
-        news_pass = not is_opposed
-        detail_msg = f"Model: {ml_trend} vs News: {news_sentiment}"
-        results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": weight_news}
-        max_score += weight_news
-        if news_pass:
-            total_score += weight_news
+        detail_msg = f"Passed (Direction Lock: Model is {ml_trend}, News sentiment is {news_sentiment})"
+        
+    results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": 0}
 
     # ======= CHECK 12: Expected Price Change Threshold (Weight: 2) =======
     weight_exp = 2
