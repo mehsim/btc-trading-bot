@@ -2764,6 +2764,13 @@ def main():
         if check_queue:
             from concurrent.futures import ThreadPoolExecutor
             
+            # Fetch BTCUSDT history once per interval to cache and share among workers (avoids rate limits and duplicate REST calls)
+            btc_hist_cache = {}
+            unique_intervals = set(iv for sym, iv in check_queue)
+            for iv_val in unique_intervals:
+                df_btc = get_history(symbol="BTCUSDT", interval=iv_val, limit=300)
+                btc_hist_cache[iv_val] = df_btc
+            
             def fetch_single_history(sym, interval_val):
                 df_raw_val = get_history(symbol=sym, interval=interval_val, limit=300)
                 if df_raw_val is None or len(df_raw_val) < 2:
@@ -2779,7 +2786,7 @@ def main():
                 
                 df_target_val = df_completed_val.copy()
                 if sym != "BTCUSDT":
-                    df_btc_val = get_history(symbol="BTCUSDT", interval=interval_val, limit=300)
+                    df_btc_val = btc_hist_cache.get(interval_val)
                     if df_btc_val is not None and len(df_btc_val) > 0:
                         df_btc_sub_val = df_btc_val[["timestamp", "close"]].rename(columns={"close": "close_btc"})
                         df_target_val = pd.merge(df_target_val, df_btc_sub_val, on="timestamp", how="inner")
@@ -3042,24 +3049,19 @@ def main():
                                         stop_loss_price = entry_price + sl_multiplier * atr_dollars
                                         take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
 
-                                    # Kelly Criterion position sizing calculation (kept for logging)
-                                    kelly_b = tp_multiplier_adjusted / sl_multiplier
-                                    kelly_p = float(calibrated_confidence)
-                                    f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
-                                    kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
-                                    
-                                    # Dynamic Trade Size between $10 and $13 depending on confidence and confluence score
-                                    conf_min, conf_max = 0.70, 0.90
-                                    conf_fact = max(0.0, min(1.0, (float(calibrated_confidence) - conf_min) / (conf_max - conf_min)))
-                                    conf_score_min, conf_score_max = 70.0, 100.0
-                                    conf_score_fact = max(0.0, min(1.0, (float(confluence_score_pct) - conf_score_min) / (conf_score_max - conf_score_min)))
-                                    combined_fact = 0.5 * conf_fact + 0.5 * conf_score_fact
-                                    position_size_usd = 10.0 + 3.0 * combined_fact
-                                    
+                                    # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
+                                    c_prob = float(calibrated_confidence)
+                                    if c_prob < 0.60:
+                                        position_size_usd = 10.0
+                                    elif c_prob <= 0.75:
+                                        position_size_usd = 11.5
+                                    else:
+                                        position_size_usd = 13.0
+                                        
                                     # Apply covariance multiplier and clamp final size between $10 and $13
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
                                     position_size_usd = max(10.0, min(13.0, position_size_usd * cov_multiplier))
-                                    print(f"[{iv}m Dynamic Sizing] Confidence: {calibrated_confidence*100:.1f}%, Score: {confluence_score_pct:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                    print(f"[{iv}m Calibrated Sizing] Calibrated Conf: {calibrated_confidence*100:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                     # Ensure total size of active trades does not exceed the wallet balance
                                     total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
