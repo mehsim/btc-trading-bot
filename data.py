@@ -277,7 +277,15 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
     df_funding = df_funding[["timestamp", "funding_rate"]].sort_values("timestamp").reset_index(drop=True)
     return df_funding
 
+fng_cache = None
+fng_cache_time = 0.0
+
 def get_fear_and_greed_history():
+    global fng_cache, fng_cache_time
+    # Cache for 4 hours (14400 seconds)
+    if fng_cache is not None and (time.time() - fng_cache_time) < 14400:
+        return fng_cache
+        
     url = "https://api.alternative.me/fng/?limit=0&format=json"
     try:
         resp = requests.get(url, timeout=15)
@@ -292,9 +300,13 @@ def get_fear_and_greed_history():
                     })
                 df_fng = pd.DataFrame(fng_data)
                 df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
+                fng_cache = df_fng
+                fng_cache_time = time.time()
                 return df_fng
     except Exception as e:
         print(f"Error fetching Fear & Greed history: {e}")
+        if fng_cache is not None:
+            return fng_cache
     return pd.DataFrame(columns=["timestamp", "fear_greed"])
 
 def merge_derivatives_sentiment_features(df, symbol, interval):
