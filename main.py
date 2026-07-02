@@ -803,12 +803,14 @@ for iv in ["60", "120", "240", "360"]:
         "trending": {
             "trend": None,
             "price": None,
-            "meta": None
+            "meta": None,
+            "calibrator": None
         },
         "ranging": {
             "trend": None,
             "price": None,
-            "meta": None
+            "meta": None,
+            "calibrator": None
         },
         "selected_features": None
     }
@@ -861,6 +863,23 @@ def load_model_weights(iv):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["ranging_meta"])
             models_by_interval[iv]["ranging"]["meta"] = meta_clf
+            
+        # Load calibrators if they exist
+        trending_cal_file = f"calibrator_trending_{iv}.json"
+        if os.path.exists(trending_cal_file):
+            with open(trending_cal_file, "r") as f:
+                models_by_interval[iv]["trending"]["calibrator"] = json.load(f)
+            print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
+        else:
+            models_by_interval[iv]["trending"]["calibrator"] = None
+
+        ranging_cal_file = f"calibrator_ranging_{iv}.json"
+        if os.path.exists(ranging_cal_file):
+            with open(ranging_cal_file, "r") as f:
+                models_by_interval[iv]["ranging"]["calibrator"] = json.load(f)
+            print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
+        else:
+            models_by_interval[iv]["ranging"]["calibrator"] = None
             
         print(f"Successfully loaded ensemble and meta models for interval {iv}")
     except Exception as e:
@@ -2860,10 +2879,18 @@ def main():
                             ml_trend = "Neutral"
                             ml_confidence = prob_neutral
 
-                        calibration = bot_state[f"calibration_{tf}"]
-                        p95 = calibration["p95"]
-                        max_conf = calibration["max_conf"]
-                        calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
+                        # Apply Isotonic Regression probability calibration if available
+                        calibrator = models_tf["trending"]["calibrator"] if adx_regime >= 20.0 else models_tf["ranging"]["calibrator"]
+                        if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
+                            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+                            print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Calibrated: {calibrated_confidence*100:.2f}%")
+                        else:
+                            # Fallback to piecewise linear calibration
+                            calibration = bot_state[f"calibration_{tf}"]
+                            p95 = calibration["p95"]
+                            max_conf = calibration["max_conf"]
+                            calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
+                            
                         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
                         # Update global state prediction metrics for this timeframe

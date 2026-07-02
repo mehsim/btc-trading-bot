@@ -630,6 +630,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
         primary_accuracies = []
         primary_maes = []
         
+        calibration_probs = []
+        calibration_labels = []
+        
         first_fold = True
         best_params_xgb_t = None
         best_params_lgb_t = None
@@ -683,6 +686,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
             mae = mean_absolute_error(y_val_p, pred_val_p)
             primary_accuracies.append(acc)
             primary_maes.append(mae)
+            
+            # Out of sample prediction probabilities for calibration
+            probs_val = ensemble_t.predict_proba(X_val)
+            for j in range(len(X_val)):
+                w_class = int(np.argmax(probs_val[j]))
+                if w_class in [0, 2]: # Bearish or Bullish only
+                    calibration_probs.append(float(probs_val[j][w_class]))
+                    calibration_labels.append(1 if w_class == y_val_t.values[j] else 0)
             
             # Generate Meta-labels for this validation fold
             actual_val_t = y_val_t.values
@@ -740,6 +751,31 @@ def train_models(interval=INTERVAL, pages=PAGES):
         else:
             meta_model.fit(X, np.ones(len(X)))
             print("  Warning: Insufficient samples for Meta-Classifier. Dummy classifier trained.")
+            
+        # Train Isotonic Regression Calibrator on validation predictions
+        from sklearn.isotonic import IsotonicRegression
+        ir = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+        
+        # Fit calibrator
+        if len(calibration_probs) > 10:
+            ir.fit(calibration_probs, calibration_labels)
+            calibrator_data = {
+                "X": ir.X_thresholds_.tolist(),
+                "y": ir.y_thresholds_.tolist()
+            }
+            calibrator_filename = f"calibrator_{name}_{interval}.json"
+            import json
+            with open(calibrator_filename, "w") as f:
+                json.dump(calibrator_data, f)
+            print(f"  [Calibrator] Saved Isotonic Regression calibrator to {calibrator_filename}")
+        else:
+            # Save default identity mapping if no predictions occurred
+            calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
+            calibrator_filename = f"calibrator_{name}_{interval}.json"
+            import json
+            with open(calibrator_filename, "w") as f:
+                json.dump(calibrator_data, f)
+            print(f"  [Calibrator] Saved default calibrator to {calibrator_filename}")
             
         # Fit final primary models on complete regime dataset
         print(f"  Training final ensemble models on complete {name} dataset...")
