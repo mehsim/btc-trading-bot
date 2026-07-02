@@ -43,6 +43,11 @@ bot_state = {
     "live_price_BNBUSDT": None,
     "live_price_ADAUSDT": None,
     "live_price_XRPUSDT": None,
+    "live_price_AVAXUSDT": None,
+    "live_price_NEARUSDT": None,
+    "live_price_LINKUSDT": None,
+    "live_price_LTCUSDT": None,
+    "live_price_DOGEUSDT": None,
     "last_update": 0.0,
     
     "active_trade_1h": [],
@@ -892,6 +897,42 @@ def check_and_hot_reload_models():
 # =========================
 live_price = None
 last_ws_update_time = 0.0
+
+def run_fallback_price_updater():
+    """
+    Periodic thread that queries Bybit REST API for spot prices.
+    Acts as a failover if WebSocket is geoblocked or disconnected.
+    """
+    global live_price, last_ws_update_time
+    print("[Price Fallback] Background updater thread started.")
+    while True:
+        try:
+            # If WebSocket hasn't updated in the last 12 seconds, query REST ticker
+            if (time.time() - last_ws_update_time) > 12.0:
+                url = "https://api.bybit.com/v5/market/tickers"
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
+                resp = requests.get(url, params={"category": "spot"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ticker_list = data.get("result", {}).get("list", [])
+                    for ticker in ticker_list:
+                        sym = ticker.get("symbol")
+                        if sym in SUPPORTED_SYMBOLS:
+                            val_str = ticker.get("lastPrice")
+                            if val_str:
+                                val = float(val_str)
+                                bot_state[f"live_price_{sym}"] = val
+                                if sym == "BTCUSDT":
+                                    live_price = val
+                                    bot_state["live_price"] = val
+                                    bot_state["last_update"] = time.time()
+                else:
+                    pass
+        except Exception:
+            pass
+        time.sleep(6)
 
 def on_message(ws, message):
     global live_price, last_ws_update_time
@@ -2911,6 +2952,8 @@ if __name__ == "__main__":
     threading.Thread(target=run_bybit_balance_updater, daemon=True).start()
     # Start Bybit WebSocket feed in a background thread
     threading.Thread(target=start_ws, daemon=True).start()
+    # Start Bybit REST API fallback price updater thread
+    threading.Thread(target=run_fallback_price_updater, daemon=True).start()
     # Start local web dashboard server in a background thread
     threading.Thread(target=run_flask, daemon=True).start()
     # Start automated rolling retraining scheduler in a background thread
