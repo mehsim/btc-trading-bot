@@ -298,94 +298,51 @@ def get_real_bybit_balance():
     timestamp = str(int(time.time() * 1000) + offset)
     recv_window = "5000"
     
-    account_type = "UNIFIED"
-    query_string = f"accountType={account_type}"
-    val_str = timestamp + api_key + recv_window + query_string
-    sign = hmac.new(
-        api_secret.encode("utf-8"),
-        val_str.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    max_balance = 0.0
+    geo_blocked_encountered = False
     
-    headers = {
-        "X-BAPI-API-KEY": api_key,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
-    
-    url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
-    
-    try:
-        resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            ret_code = data.get("retCode")
-            ret_msg = data.get("retMsg", "")
-            if ret_code == 0:
-                list_data = data.get("result", {}).get("list", [])
-                if list_data:
-                    total_equity = list_data[0].get("totalEquity", "0")
-                    return float(total_equity)
+    for account_type in ["UNIFIED", "CONTRACT", "SPOT"]:
+        query_string = f"accountType={account_type}"
+        val_str = timestamp + api_key + recv_window + query_string
+        sign = hmac.new(
+            api_secret.encode("utf-8"),
+            val_str.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-BAPI-API-KEY": api_key,
+            "X-BAPI-SIGN": sign,
+            "X-BAPI-TIMESTAMP": timestamp,
+            "X-BAPI-RECV-WINDOW": recv_window,
+            "Content-Type": "application/json"
+        }
+        url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
+        
+        try:
+            resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                ret_code = data.get("retCode")
+                if ret_code == 0:
+                    list_data = data.get("result", {}).get("list", [])
+                    if list_data:
+                        total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
+                        max_balance = max(max_balance, float(total_equity))
+                else:
+                    print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {data.get('retMsg')}")
             else:
-                print(f"[Bybit Balance] UNIFIED query error: Code {ret_code} - {ret_msg}")
-                # Fallback to CONTRACT if it's a unified-related account error
-                return get_real_bybit_balance_fallback(api_key, api_secret, "CONTRACT")
-        else:
-            print(f"[Bybit Balance] UNIFIED HTTP {resp.status_code}: {resp.text}")
-            if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
-                return "GEO_BLOCKED"
-        return "FETCH_ERROR"
-    except Exception as e:
-        print(f"[Bybit Balance] Exception during UNIFIED fetch: {e}")
-        return "FETCH_ERROR"
-
-def get_real_bybit_balance_fallback(api_key, api_secret, account_type):
-    import hmac
-    import hashlib
-    import time
-    import requests
-    offset = get_bybit_time_offset()
-    timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "5000"
-    query_string = f"accountType={account_type}"
-    val_str = timestamp + api_key + recv_window + query_string
-    sign = hmac.new(
-        api_secret.encode("utf-8"),
-        val_str.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
-    
-    headers = {
-        "X-BAPI-API-KEY": api_key,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
-    url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
-    try:
-        resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            ret_code = data.get("retCode")
-            ret_msg = data.get("retMsg", "")
-            if ret_code == 0:
-                list_data = data.get("result", {}).get("list", [])
-                if list_data:
-                    total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
-                    return float(total_equity)
-            else:
-                print(f"[Bybit Balance] CONTRACT query error: Code {ret_code} - {ret_msg}")
-        else:
-            print(f"[Bybit Balance] CONTRACT HTTP {resp.status_code}: {resp.text}")
-            if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
-                return "GEO_BLOCKED"
-        return "FETCH_ERROR"
-    except Exception as e:
-        print(f"[Bybit Balance] Exception during CONTRACT fetch: {e}")
-        return "FETCH_ERROR"
+                print(f"[Bybit Balance] HTTP {resp.status_code} for {account_type}: {resp.text}")
+                if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
+                    geo_blocked_encountered = True
+        except Exception as e:
+            print(f"[Bybit Balance] Exception during {account_type} fetch: {e}")
+            
+    if max_balance > 0.0:
+        return max_balance
+    if geo_blocked_encountered:
+        return "GEO_BLOCKED"
+    return 0.0
 
 def get_real_bybit_balance_cached():
     with _balance_lock:
