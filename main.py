@@ -301,8 +301,14 @@ def get_real_bybit_balance():
     max_balance = 0.0
     geo_blocked_encountered = False
     
-    for account_type in ["UNIFIED", "CONTRACT", "SPOT"]:
-        query_string = f"accountType={account_type}"
+    for account_type in ["UNIFIED", "CONTRACT", "SPOT", "FUND"]:
+        if account_type == "FUND":
+            query_string = "accountType=FUND&coin=USDT"
+            url = f"https://api.bybit.com/v5/asset/transfer/query-account-coin-balance?{query_string}"
+        else:
+            query_string = f"accountType={account_type}"
+            url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
+            
         val_str = timestamp + api_key + recv_window + query_string
         sign = hmac.new(
             api_secret.encode("utf-8"),
@@ -317,7 +323,6 @@ def get_real_bybit_balance():
             "X-BAPI-RECV-WINDOW": recv_window,
             "Content-Type": "application/json"
         }
-        url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
         
         try:
             resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
@@ -325,12 +330,18 @@ def get_real_bybit_balance():
                 data = resp.json()
                 ret_code = data.get("retCode")
                 if ret_code == 0:
-                    list_data = data.get("result", {}).get("list", [])
-                    if list_data:
-                        total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
-                        max_balance = max(max_balance, float(total_equity))
+                    if account_type == "FUND":
+                        balance_val = data.get("result", {}).get("walletBalance") or "0"
+                        max_balance = max(max_balance, float(balance_val))
+                    else:
+                        list_data = data.get("result", {}).get("list", [])
+                        if list_data:
+                            total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
+                            max_balance = max(max_balance, float(total_equity))
                 else:
-                    print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {data.get('retMsg')}")
+                    # Ignore the expected "accountType only support UNIFIED" error (Code 10001) for SPOT/CONTRACT to avoid log clutter
+                    if not (ret_code == 10001 and account_type in ["SPOT", "CONTRACT"]):
+                        print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {data.get('retMsg')}")
             else:
                 print(f"[Bybit Balance] HTTP {resp.status_code} for {account_type}: {resp.text}")
                 if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
