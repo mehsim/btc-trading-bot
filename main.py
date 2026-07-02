@@ -1941,11 +1941,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     weight_rsi = 2
     rsi_1h = df_1h["RSI"].iloc[-1]
     if ml_trend == "Bullish":
-        rsi_1h_pass = (rsi_1h < 70.0)
-        detail_msg = f"1h RSI is {rsi_1h:.2f} (< 70, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (>= 70, Overbought)"
+        rsi_1h_pass = (rsi_1h < 62.0)
+        detail_msg = f"1h RSI is {rsi_1h:.2f} (< 62, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (>= 62, Overbought)"
     else:
-        rsi_1h_pass = (rsi_1h > 30.0)
-        detail_msg = f"1h RSI is {rsi_1h:.2f} (> 30, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (<= 30, Oversold)"
+        rsi_1h_pass = (rsi_1h > 38.0)
+        detail_msg = f"1h RSI is {rsi_1h:.2f} (> 38, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (<= 38, Oversold)"
     results["1h_RSI"] = {"pass": rsi_1h_pass, "detail": detail_msg, "weight": weight_rsi}
     max_score += weight_rsi
     if rsi_1h_pass:
@@ -2188,17 +2188,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
     
-    # Regime-Aware Dynamic Confluence Threshold based on ADX
-    try:
-        adx_val = df_1h["ADX"].iloc[-1]
-        if adx_val > 25.0:
-            score_threshold = 70.0
-        elif adx_val < 18.0:
-            score_threshold = 90.0
-        else:
-            score_threshold = 80.0
-    except Exception as e:
-        score_threshold = 80.0
+    # Standardize confluence threshold to flat 80% for consistent accuracy across all market regimes
+    score_threshold = 80.0
         
     approved = (not hard_gate_failed) and (score_pct >= score_threshold)
 
@@ -2934,11 +2925,15 @@ def main():
                         active_trade_key = f"active_trade_{tf}"
                         active_trades_list = bot_state.get(active_trade_key, [])
                         
-                        # Parallel trades of same symbol are allowed
-                        has_active_symbol_trade = False
+                        # Prevent duplicate parallel trades of the same symbol on the same interval/timeframe
+                        already_active = any(t.get("symbol") == symbol for t in active_trades_list)
+                        
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
+                        elif already_active:
+                            status_msg = "Skipped (Already Active)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on this timeframe.")
                         elif is_cooling:
                             status_msg = "Skipped (Cool-Off)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
@@ -2951,7 +2946,8 @@ def main():
                         elif calibrated_confidence < dynamic_conf_threshold:
                             status_msg = "Skipped (Low Confidence)"
                             print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
-                        else:
+
+                        if status_msg == "Pending":
                             # Check news window proximity status for logging purposes
                             in_news_window, news_event = is_high_impact_news_window()
                             if in_news_window:
@@ -3025,17 +3021,17 @@ def main():
                                     f_star = (kelly_p * (kelly_b + 1) - 1) / kelly_b if kelly_b > 0 else 0
                                     kelly_fraction = max(0.01, min(0.20, 0.25 * f_star))
                                     
-                                    # Dynamic Trade Size between $10 and $20 depending on confidence and confluence score
+                                    # Dynamic Trade Size between $10 and $13 depending on confidence and confluence score
                                     conf_min, conf_max = 0.70, 0.90
                                     conf_fact = max(0.0, min(1.0, (float(calibrated_confidence) - conf_min) / (conf_max - conf_min)))
                                     conf_score_min, conf_score_max = 70.0, 100.0
                                     conf_score_fact = max(0.0, min(1.0, (float(confluence_score_pct) - conf_score_min) / (conf_score_max - conf_score_min)))
                                     combined_fact = 0.5 * conf_fact + 0.5 * conf_score_fact
-                                    position_size_usd = 10.0 + 10.0 * combined_fact
+                                    position_size_usd = 10.0 + 3.0 * combined_fact
                                     
-                                    # Apply covariance multiplier and clamp final size between $10 and $20
+                                    # Apply covariance multiplier and clamp final size between $10 and $13
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
-                                    position_size_usd = max(10.0, min(20.0, position_size_usd * cov_multiplier))
+                                    position_size_usd = max(10.0, min(13.0, position_size_usd * cov_multiplier))
                                     print(f"[{iv}m Dynamic Sizing] Confidence: {calibrated_confidence*100:.1f}%, Score: {confluence_score_pct:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                     # Ensure total size of active trades does not exceed the wallet balance
