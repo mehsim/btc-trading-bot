@@ -2372,9 +2372,9 @@ def main():
             updated_trades = []
             for active_trade in active_trades_list:
                 active_symbol = active_trade.get("symbol", "BTCUSDT")
-                symbol_price = get_fallback_price(active_symbol)
+                symbol_price = bot_state.get(f"live_price_{active_symbol}")
                 if symbol_price is None:
-                    symbol_price = bot_state.get(f"live_price_{active_symbol}")
+                    symbol_price = get_fallback_price(active_symbol)
                 if symbol_price is None:
                     updated_trades.append(active_trade)
                     continue
@@ -2798,7 +2798,10 @@ def main():
                 btc_hist_cache[iv_val] = df_btc
             
             def fetch_single_history(sym, interval_val):
-                df_raw_val = get_history(symbol=sym, interval=interval_val, limit=300)
+                if sym == "BTCUSDT" and interval_val in btc_hist_cache:
+                    df_raw_val = btc_hist_cache[interval_val]
+                else:
+                    df_raw_val = get_history(symbol=sym, interval=interval_val, limit=300)
                 if df_raw_val is None or len(df_raw_val) < 2:
                     return sym, interval_val, None, None
                 
