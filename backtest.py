@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Add workspace path to python path
 sys.path.append("/Users/mehsimkhurshid/Downloads/btc-trading-bot")
-from data import get_history
+from data import get_history, merge_derivatives_sentiment_features
 from main import (
     add_features,
     calibrate_confidence,
@@ -305,6 +305,7 @@ def run_backtest():
     # Add 1-hour indicators (Features list)
     print("Engineering 1-hour candle indicators...")
     df["close_btc"] = df["close"]
+    df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=INTERVAL)
     df = add_features(df)
     df.reset_index(drop=True, inplace=True)
 
@@ -317,7 +318,7 @@ def run_backtest():
 
     # 5. Fetch Calibration limits
     print("\n[Step 3] Calibrating confidence thresholds...")
-    p95, max_conf = calculate_historical_thresholds(models_trending["trend"])
+    p95, max_conf = calculate_historical_thresholds(models_trending["trend"], INTERVAL)
 
     # Drop any rows that still have NaNs due to lookbacks
     df.dropna(subset=["EMA_9_1d", "EMA_21_1d", "EMA_9_4h", "EMA_21_4h", "RSI_4h", "p10_atr", "p90_atr"], inplace=True)

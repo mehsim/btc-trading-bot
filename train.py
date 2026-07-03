@@ -334,7 +334,7 @@ def add_features(df):
     return df
 
 def add_triple_barrier_labels(df, interval):
-    # Dynamic SL & TP targets based on ATR: TP = 1.2 * ATR, SL = 0.8 * ATR
+    # Dynamic SL & TP targets based on ATR: TP = 1.5/2.5 * ATR, SL = 0.8 * ATR
     atr = df["ATR_norm"] * df["close"]
     
     lookahead = 10
@@ -342,6 +342,7 @@ def add_triple_barrier_labels(df, interval):
     highs = df["high"].values
     lows = df["low"].values
     atr_vals = atr.values
+    adxs = df["ADX"].values
     
     n_samples = len(df)
     labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral/Expiration
@@ -349,12 +350,14 @@ def add_triple_barrier_labels(df, interval):
     for i in range(n_samples):
         p_t = closes[i]
         atr_t = atr_vals[i]
+        adx_t = adxs[i]
         
         # Fallback if ATR is 0
         if atr_t <= 0:
             atr_t = p_t * 0.001
             
-        upper_barrier = p_t + 1.2 * atr_t
+        tp_mult = 2.5 if adx_t >= 20.0 else 1.5
+        upper_barrier = p_t + tp_mult * atr_t
         lower_barrier = p_t - 0.8 * atr_t
         
         for step in range(1, lookahead + 1):

@@ -198,6 +198,11 @@ def load_history():
                     bot_state["bot_running"] = data.get("bot_running", True)
                     bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
+                    
+                    # Startup Balance Audit
+                    active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                    print(f"[Startup Sync Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
+                    
                     save_history()
                     return
         except Exception as e:
@@ -226,6 +231,10 @@ def load_history():
                 bot_state["bot_running"] = data.get("bot_running", True)
                 bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
+                
+                # Startup Balance Audit
+                active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                print(f"[Startup Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
         except Exception as e:
             print(f"Error loading history from disk: {e}")
 
@@ -2541,6 +2550,11 @@ def main():
                 if current_time >= end_time and not half_closed:
                     lookahead = 10
                     exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
+                
+                # Flat-Market Time-Based Exit (after 6 candles instead of 10)
+                elapsed_sec = current_time - (end_time - int(iv) * 60.0 * 10)
+                if elapsed_sec >= int(iv) * 60.0 * 6 and not half_closed and exit_reason is None:
+                    exit_reason = f"TIME EXPIRED (6-CANDLE FLAT MARKET GATE)"
 
                 if exit_reason is not None:
                     # Maker vs Taker execution logic
@@ -3072,9 +3086,9 @@ def main():
                                     tp_multiplier = round(base_tp * vol_factor, 2)
                                     print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
-                                    # Align stop loss and take profit multipliers strictly with model training labels
+                                    # Align stop loss and take profit multipliers dynamically based on ADX regime
                                     sl_multiplier = 0.80
-                                    tp_multiplier_adjusted = 1.20
+                                    tp_multiplier_adjusted = 2.50 if latest_candle["ADX"] >= 20.0 else 1.50
                                     print(f"[{iv}m Target Alignment] Aligned multipliers with ML training: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
                                     
                                     # Maker execution: zero entry slippage for limit orders
@@ -3131,12 +3145,20 @@ def main():
                                         else:
                                             leverage_val = 10.0 + (c - 0.70) / 0.15 * 25.0
                                             if leverage_val < 1.0:
-                                                 leverage_val = 1.0
-
-                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit at 50.0x
+                                                leverage_val = 1.0
+                                        
+                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
                                         stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
                                         max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
-                                        leverage_val = round(max(1.0, min(50.0, min(leverage_val, max_safe_lev))), 1)
+                                        
+                                        if symbol == "BTCUSDT":
+                                            lev_cap = 20.0
+                                        elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
+                                            lev_cap = 10.0
+                                        else:
+                                            lev_cap = 5.0
+                                            
+                                        leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
                                         lookahead = 10
                                         duration_seconds = int(iv) * 60.0 * lookahead
