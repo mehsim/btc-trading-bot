@@ -530,6 +530,9 @@ def force_close_trade():
     leverage = trade_to_close.get("leverage", 1.0)
     net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
+    if realized_pnl < -position_size_usd:
+        realized_pnl = -position_size_usd
+        net_return_pct = -100.0
     
     old_bal = bot_state.get("simulated_balance", 80.0)
     new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
@@ -631,6 +634,9 @@ def close_all_trades_internal(exit_reason):
             leverage = t.get("leverage", 1.0)
             net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
             realized_pnl = position_size_usd * (net_return_pct / 100.0)
+            if realized_pnl < -position_size_usd:
+                realized_pnl = -position_size_usd
+                net_return_pct = -100.0
             
             old_bal = bot_state.get("simulated_balance", 80.0)
             new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
@@ -2569,6 +2575,9 @@ def main():
                         raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
                         net_return_pct = (raw_return_pct * active_trade.get("leverage", 1.0)) - 0.08
                         pnl_usd = round(closed_size * (net_return_pct / 100.0), 2)
+                        if pnl_usd < -closed_size:
+                            pnl_usd = -closed_size
+                            net_return_pct = -100.0
                         
                         # Save scaled out pnl
                         active_trade["scaled_out_pnl"] = pnl_usd
@@ -2601,6 +2610,9 @@ def main():
                         raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
                         net_return_pct = (raw_return_pct * active_trade.get("leverage", 1.0)) - 0.08
                         pnl_usd = round(closed_size * (net_return_pct / 100.0), 2)
+                        if pnl_usd < -closed_size:
+                            pnl_usd = -closed_size
+                            net_return_pct = -100.0
                         
                         # Save scaled out pnl
                         active_trade["scaled_out_pnl"] = pnl_usd
@@ -2675,6 +2687,9 @@ def main():
                     leverage = active_trade.get("leverage", 1.0)
                     net_return_pct = (raw_return_pct * leverage) - fee_rate_roundtrip
                     realized_pnl = position_size_usd * (net_return_pct / 100.0)
+                    if realized_pnl < -position_size_usd:
+                        realized_pnl = -position_size_usd
+                        net_return_pct = -100.0
                     
                     # Aggregate PnL and size for trade history logging if scaled out
                     original_size = float(active_trade.get("original_size", position_size_usd))
