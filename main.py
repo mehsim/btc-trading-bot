@@ -2650,7 +2650,11 @@ def main():
                         "position_size_usd": float(original_size),
                         "pnl_usd": float(total_pnl),
                         "balance": float(new_bal),
-                        "leverage": float(leverage)
+                        "leverage": float(leverage),
+                        "confidence": float(active_trade.get("confidence", 0.0)),
+                        "take_profit": float(active_trade.get("take_profit", 0.0)),
+                        "stop_loss": float(active_trade.get("stop_loss", 0.0)),
+                        "atr_dollars": float(active_trade.get("atr_dollars", 0.0))
                     })
                     
                     # Send email alert on any profitable trade exit

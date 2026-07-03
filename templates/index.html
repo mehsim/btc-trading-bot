@@ -2154,6 +2154,22 @@
                     <span class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700;">${t.direction.toUpperCase()}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">Confidence</span>
+                    <span style="font-weight:700; color:var(--accent-purple);">${t.confidence ? (t.confidence * 100).toFixed(1) + '%' : '—'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">Take Profit (Original Target)</span>
+                    <span style="font-weight:700; color:var(--accent-green);">${t.take_profit ? '$' + t.take_profit.toFixed(4) : '—'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">Stop Loss (Original Target)</span>
+                    <span style="font-weight:700; color:var(--accent-red);">${t.stop_loss ? '$' + t.stop_loss.toFixed(4) : '—'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">ATR at Entry</span>
+                    <span style="font-weight:700; color:var(--accent-blue);">${t.atr_dollars ? '$' + t.atr_dollars.toFixed(4) : '—'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Entry Price</span>
                     <span style="font-weight:700; color:var(--text-primary);">$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
