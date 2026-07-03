@@ -2612,14 +2612,18 @@ def main():
                         "leverage": float(leverage)
                     })
                     
-                    # Send email alert on Take Profit hit
-                    if "TAKE PROFIT" in str(exit_reason).upper():
-                        subject = f"🚀 [UBOTE TP Hit] {active_symbol} {iv}m Take Profit Triggered!"
+                    # Send email alert on any profitable trade exit
+                    if total_pnl > 0:
+                        subject = f"🚀 [UBOTE Profit Target] {active_symbol} {iv}m Closed with Profit!"
                         invested_margin_usd = original_size / leverage if leverage > 0 else original_size
+                        
+                        # Dynamic header based on exit reason
+                        exit_title = "🎉 Take Profit Hit!" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 Trailing Stop Hit (Profitable Close)!" if "TRAILING" in str(exit_reason).upper() else "✅ Trade Closed with Profit!"
+                        
                         body = f"""
                         <html>
                         <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
-                            <h2 style="color: #00b0ff; margin-bottom: 20px;">🎉 Take Profit Target Hit!</h2>
+                            <h2 style="color: #00b0ff; margin-bottom: 20px;">{exit_title}</h2>
                             <div style="background-color: #161a22; padding: 15px; border-radius: 6px; border-left: 4px solid #00c853;">
                                 <table style="width: 100%; border-collapse: collapse;">
                                     <tr>
@@ -2645,6 +2649,10 @@ def main():
                                     <tr>
                                         <td style="padding: 6px 0; color: #8f9bb3;"><b>Profit/Loss:</b></td>
                                         <td style="padding: 6px 0; color: #00c853; font-weight: bold; font-family: monospace;">+{total_pnl:+.2f} USD ({total_net_return_pct:+.4f}%)</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Exit Reason:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">{exit_reason}</td>
                                     </tr>
                                     <tr>
                                         <td style="padding: 6px 0; color: #8f9bb3;"><b>Position Size:</b></td>
