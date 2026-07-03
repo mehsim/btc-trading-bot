@@ -336,7 +336,7 @@ def get_real_bybit_balance():
         
     offset = get_bybit_time_offset()
     timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "5000"
+    recv_window = "30000"
     
     max_balance = 0.0
     geo_blocked_encountered = False
