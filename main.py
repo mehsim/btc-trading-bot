@@ -150,6 +150,20 @@ def save_history():
     except Exception as e:
         print(f"Error saving history to disk: {e}")
 
+def migrate_active_trades(active_trades_list):
+    if not isinstance(active_trades_list, list):
+        return
+    for t in active_trades_list:
+        if "confidence" not in t:
+            # Estimate confidence based on original sizing thresholds
+            orig_size = t.get("original_size", t.get("position_size_usd", 11.5))
+            if orig_size >= 13.0:
+                t["confidence"] = 0.785
+            elif orig_size >= 11.5:
+                t["confidence"] = 0.685
+            else:
+                t["confidence"] = 0.585
+
 def load_history():
     token = os.environ.get("HF_TOKEN") or os.environ.get("token")
     space_id = os.environ.get("SPACE_ID")
@@ -195,6 +209,11 @@ def load_history():
                     bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
                     bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
+                    
+                    # Migrate legacy active trades
+                    for tf_key in ["1h", "2h", "4h", "6h"]:
+                        migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
+                        
                     bot_state["bot_running"] = data.get("bot_running", True)
                     bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                     print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
@@ -228,6 +247,11 @@ def load_history():
                 bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
                 bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
+                
+                # Migrate legacy active trades
+                for tf_key in ["1h", "2h", "4h", "6h"]:
+                    migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
+                    
                 bot_state["bot_running"] = data.get("bot_running", True)
                 bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                 print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
