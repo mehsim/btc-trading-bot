@@ -1022,6 +1022,22 @@
                         <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">DOGE:</span>
                         <span id="live-price-doge" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
                     </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">TON:</span>
+                        <span id="live-price-ton" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">SUI:</span>
+                        <span id="live-price-sui" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">APT:</span>
+                        <span id="live-price-apt" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">DOT:</span>
+                        <span id="live-price-dot" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+                    </div>
                 </div>
                 <div class="card-subtitle" style="font-size: 9px; opacity: 0.8; display: flex; align-items: center; gap: 4px;">
                     <span id="price-trend-icon" style="font-size: 8px;">●</span> Bybit Live Spot Feed
@@ -1369,7 +1385,7 @@
         let activeFilter = 'all'; // 'all', 'success', 'failed'
         let activeConfluenceTimeframe = '1h'; // default to 1H
         let activeTradesState = {};
-        let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null};
+        let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null, TON: null, SUI: null, APT: null, DOT: null};
         let globalDataCache = null;
 
         function setConfluenceTimeframe(tf, element) {
@@ -1785,7 +1801,7 @@
                     // 2. Update Live Price
                     globalDataCache = data;
                     const currentPrice = data.live_price;
-                    const symbols = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "AVAX", "NEAR", "LINK", "LTC", "DOGE"];
+                    const symbols = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "AVAX", "NEAR", "LINK", "LTC", "DOGE", "TON", "SUI", "APT", "DOT"];
                     
                     symbols.forEach(sym => {
                         const val = data[`live_price_${sym}USDT`];

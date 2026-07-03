@@ -32,7 +32,7 @@ economic_calendar_lock = threading.Lock()
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
 PAGES = 20  # 20 pages of candles provides ~20,000 candles (balanced dataset size)
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT", "TONUSDT", "SUIUSDT", "APTUSDT", "DOTUSDT"]
 
 # Feature list matches train.py and main.py
 features = [
