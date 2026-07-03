@@ -425,7 +425,7 @@ def run_bybit_balance_updater():
         print(f"[Bybit Balance] Startup background update error: {e}")
         
     while True:
-        time.sleep(20)
+        time.sleep(300)  # Query Bybit balance every 5 minutes to conserve proxy bandwidth
         try:
             val = get_real_bybit_balance()
             with _balance_lock:
