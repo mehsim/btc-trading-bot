@@ -1669,8 +1669,8 @@
                         <td style="font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         <td class="hide-mobile" style="font-weight: 600; color: var(--text-primary);">${currentPriceVal ? '$' + currentPriceVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
                         <td>
-                            <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(2)}</span> / 
-                            <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(2)}</span>
+                            <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(4)}</span> / 
+                            <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(4)}</span>
                         </td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</td>
                         <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
@@ -2362,8 +2362,8 @@
                             <div style="display: flex; justify-content: space-between;">
                                 <span>TP / SL:</span>
                                 <span>
-                                    <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(1)}</span> / 
-                                    <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(1)}</span>
+                                    <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(4)}</span> / 
+                                    <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(4)}</span>
                                 </span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
