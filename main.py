@@ -3168,7 +3168,8 @@ def main():
                                             "position_size_usd": float(position_size_usd),
                                             "scaled_out_pnl": 0.0,
                                             "kelly_fraction": float(kelly_fraction),
-                                            "leverage": float(leverage_val)
+                                            "leverage": float(leverage_val),
+                                            "confidence": float(calibrated_confidence)
                                         }
                                         active_trades_list.append(active_trade)
                                         bot_state[active_trade_key] = active_trades_list

@@ -1240,6 +1240,7 @@
                             <th>Timeframe</th>
                             <th>Symbol</th>
                             <th>Direction</th>
+                            <th class="hide-mobile">Confidence</th>
                             <th class="hide-mobile">Leverage</th>
                             <th class="hide-mobile">Size</th>
                             <th>Entry Price</th>
@@ -1252,7 +1253,7 @@
                     </thead>
                     <tbody id="active-open-trades-rows">
                         <tr>
-                            <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                            <td colspan="12" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1626,7 +1627,7 @@
             if (allActive.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="11" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                        <td colspan="12" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                     </tr>
                 `;
                 if (totalPnLElem) {
@@ -1678,11 +1679,15 @@
                 const secs = remainingSeconds % 60;
                 const countdownStr = `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
 
+                // Calculate confidence percentage if available
+                const confidencePctStr = trade.confidence ? (trade.confidence * 100).toFixed(1) + '%' : '—';
+
                 htmlRows += `
                     <tr>
                         <td style="font-weight: 800; color: var(--accent-purple);">${trade.intervalStr}</td>
                         <td style="font-weight: 700; color: var(--text-primary);">${symbol.replace("USDT", "")}</td>
                         <td><span class="badge ${trade.direction === "Bullish" ? "badge-success" : "badge-danger"}">${trade.direction.toUpperCase()}</span></td>
+                        <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 700;">${confidencePctStr}</td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${trade.leverage ? trade.leverage.toFixed(1) + 'x' : '1.0x'}</td>
                         <td class="hide-mobile" style="font-weight: 700; color: var(--accent-blue);">$${(trade.position_size_usd || 0.00).toFixed(2)}</td>
                         <td style="font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -2377,6 +2382,10 @@
                             <div style="display: flex; justify-content: space-between;">
                                 <span>Entry Price:</span>
                                 <span style="color: var(--text-primary); font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Confidence:</span>
+                                <span style="color: var(--accent-purple); font-weight: 700;">${trade.confidence ? (trade.confidence * 100).toFixed(1) + '%' : '—'}</span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
                                 <span>TP / SL:</span>
