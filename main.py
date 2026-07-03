@@ -718,26 +718,41 @@ def reset_circuit_breaker():
 
 @app.route("/api/test_email", methods=["POST"])
 def test_email_endpoint():
-    subject = "🚀 [UBOTE Test Alert] SMTP Verification Test"
-    body = """
-    <html>
-    <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
-        <h2 style="color: #00b0ff; margin-bottom: 20px;">✅ SMTP Test Successful!</h2>
-        <p>If you are reading this email, your UBOTE trading bot email notification setup is correctly configured and working.</p>
-        <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
-    </body>
-    </html>
-    """
+    resend_key = os.getenv("RESEND_API_KEY", "")
+    if resend_key:
+        subject = "🚀 [UBOTE Test Alert] Resend API Verification Test"
+        body = """
+        <html>
+        <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
+            <h2 style="color: #00b0ff; margin-bottom: 20px;">✅ Resend HTTP API Test Successful!</h2>
+            <p>If you are reading this email, your UBOTE trading bot email notification setup via Resend API is correctly configured and working over HTTPS.</p>
+            <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
+        </body>
+        </html>
+        """
+    else:
+        subject = "🚀 [UBOTE Test Alert] SMTP Verification Test"
+        body = """
+        <html>
+        <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
+            <h2 style="color: #00b0ff; margin-bottom: 20px;">✅ SMTP Test Successful!</h2>
+            <p>If you are reading this email, your UBOTE trading bot email notification setup is correctly configured and working.</p>
+            <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
+        </body>
+        </html>
+        """
     success = send_email_notification(subject, body)
     if success:
-        return jsonify({"status": "success", "message": "Test email sent successfully! Please check your inbox (including Spam folder)."})
+        return jsonify({"status": "success", "message": f"Test email sent successfully via {'Resend HTTPS API' if resend_key else 'SMTP'}! Please check your inbox (including Spam folder)."})
     else:
         smtp_user = os.getenv("SMTP_USER", "")
         smtp_password = os.getenv("SMTP_PASSWORD", "")
-        if not smtp_user or not smtp_password:
-            return jsonify({"status": "error", "message": "SMTP_USER or SMTP_PASSWORD environment variables are not set in your environment (Hugging Face Secrets)."}), 400
+        if resend_key:
+            return jsonify({"status": "error", "message": "Resend HTTP API request failed. Please check your Hugging Face Space logs for the exact HTTP error response."}), 500
+        elif not smtp_user or not smtp_password:
+            return jsonify({"status": "error", "message": "SMTP credentials are not configured. To bypass Hugging Face firewall SMTP blocks, please set a RESEND_API_KEY secret to use HTTPS emails instead."}), 400
         else:
-            return jsonify({"status": "error", "message": "SMTP connection failed. Check your Hugging Face Space logs for the exact SMTP error trace. This is usually due to Hugging Face firewall blocking port 587/465."}), 500
+            return jsonify({"status": "error", "message": "SMTP connection failed. Hugging Face blocks outgoing SMTP ports (587/465). To fix this, register for a free account at Resend.com and add a RESEND_API_KEY secret to use firewall-resistant HTTPS emails instead."}), 500
 
 @app.route("/")
 def index():
@@ -1023,12 +1038,43 @@ def run_fallback_price_updater():
 
 def send_email_notification(subject, body):
     """
-    Sends an email alert using SMTP.
-    Reads SMTP configuration from environment variables.
+    Sends an email alert.
+    Uses Resend HTTP API (port 443) if RESEND_API_KEY is configured.
+    Otherwise, falls back to standard SMTP (port 587/465).
     """
+    import requests
     import smtplib
     from email.mime.text import MIMEText
     
+    email_to = os.getenv("EMAIL_TO", "mehsimleo@gmail.com")
+    resend_api_key = os.getenv("RESEND_API_KEY", "")
+    
+    # 1. Attempt to send via Resend HTTPS API (firewall resistant)
+    if resend_api_key:
+        try:
+            print("[Email Notification] Sending email via Resend HTTP API...")
+            url = "https://api.resend.com/emails"
+            headers = {
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json"
+            }
+            # Resend onboarding@resend.dev allows sending to your own email address (email_to)
+            payload = {
+                "from": "UBOTE Alerts <onboarding@resend.dev>",
+                "to": email_to,
+                "subject": subject,
+                "html": body
+            }
+            resp = requests.post(url, headers=headers, json=payload, timeout=10)
+            if resp.status_code in [200, 201, 202]:
+                print(f"[Email Notification] Successfully sent email via Resend to {email_to}")
+                return True
+            else:
+                print(f"[Email Notification] Resend API error ({resp.status_code}): {resp.text}")
+        except Exception as e:
+            print(f"[Email Notification] Resend HTTP API failed: {e}")
+            
+    # 2. Fallback to SMTP
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     try:
         smtp_port = int(os.getenv("SMTP_PORT", "587"))
@@ -1037,10 +1083,9 @@ def send_email_notification(subject, body):
         
     smtp_user = os.getenv("SMTP_USER", "")
     smtp_password = os.getenv("SMTP_PASSWORD", "")
-    email_to = os.getenv("EMAIL_TO", "mehsimleo@gmail.com")
     
     if not smtp_user or not smtp_password:
-        print("[Email Notification] Skipped: SMTP_USER or SMTP_PASSWORD environment variables not set.")
+        print("[Email Notification] Skipped SMTP fallback: SMTP_USER or SMTP_PASSWORD environment variables not set.")
         return False
         
     try:
@@ -1053,10 +1098,10 @@ def send_email_notification(subject, body):
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.send_message(msg)
-            print(f"[Email Notification] Successfully sent email to {email_to}")
+            print(f"[Email Notification] Successfully sent email via SMTP to {email_to}")
             return True
     except Exception as e:
-        print(f"[Email Notification] Error sending email: {e}")
+        print(f"[Email Notification] SMTP connection failed: {e}")
         return False
 
 def on_message(ws, message):
