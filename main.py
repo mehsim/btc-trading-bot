@@ -2346,7 +2346,7 @@ def main():
         
         # 1. Health check & current price update (Adaptive to save proxy bandwidth)
         has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
-        timeout_threshold = 60.0 if has_active_trades else 300.0
+        timeout_threshold = 15.0 if has_active_trades else 30.0
         
         if live_price is None or (current_time - last_ws_update_time > timeout_threshold):
             fallback_price = get_fallback_price()
