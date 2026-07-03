@@ -3220,15 +3220,15 @@ def main():
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
                                     c_prob = float(calibrated_confidence)
                                     if c_prob < 0.60:
-                                        position_size_usd = 8.0
+                                        position_size_usd = 15.0
                                     elif c_prob <= 0.75:
-                                        position_size_usd = 9.5
+                                        position_size_usd = 20.0
                                     else:
-                                        position_size_usd = 11.0
+                                        position_size_usd = 25.0
                                         
-                                    # Apply covariance multiplier and clamp final size between $8 and $11
+                                    # Apply covariance multiplier and clamp final size between $15 and $25
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
-                                    position_size_usd = max(8.0, min(11.0, position_size_usd * cov_multiplier))
+                                    position_size_usd = max(15.0, min(25.0, position_size_usd * cov_multiplier))
                                     print(f"[{iv}m Calibrated Sizing] Calibrated Conf: {calibrated_confidence*100:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                     # Calculate Kelly parameters for logs and metadata
@@ -3241,17 +3241,17 @@ def main():
                                     current_bal = bot_state.get("simulated_balance", 80.0)
                                     
                                     wallet_exceeded = False
-                                    if current_bal <= 12.0:
-                                        print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than $12.00 to open new trades.")
+                                    if current_bal <= 20.0:
+                                        print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than $20.00 to open new trades.")
                                         status_msg = "Skipped (Insufficient Balance)"
                                         wallet_exceeded = True
                                     elif total_active_size + position_size_usd > current_bal:
                                         remaining_bal = current_bal - total_active_size
-                                        if remaining_bal >= 8.0:
+                                        if remaining_bal >= 15.0:
                                             print(f"[{symbol} {iv}m] Sizing scaled down from ${position_size_usd:.2f} to ${remaining_bal:.2f} to fit remaining wallet balance (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}).")
                                             position_size_usd = remaining_bal
                                         else:
-                                            print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum $8 trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
+                                            print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum $15 trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
                                             status_msg = "Skipped (Exceeds Wallet)"
                                             wallet_exceeded = True
 
@@ -3270,11 +3270,11 @@ def main():
                                         max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
                                         
                                         if symbol == "BTCUSDT":
-                                            lev_cap = 20.0
+                                            lev_cap = 30.0
                                         elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
-                                            lev_cap = 10.0
+                                            lev_cap = 20.0
                                         else:
-                                            lev_cap = 5.0
+                                            lev_cap = 15.0
                                             
                                         leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
