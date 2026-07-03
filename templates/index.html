@@ -1265,14 +1265,23 @@
 
         <!-- Completed Trades Panel -->
         <div class="card">
-            <div class="section-header">
+            <div class="section-header" style="flex-wrap: wrap; gap: 15px;">
                 <div class="section-title">📜 Completed Trades History</div>
-                <div class="filter-tabs">
-                    <button class="tab-btn active" onclick="setTradeFilter('all', this)">All Signals</button>
-                    <button class="tab-btn" onclick="setTradeFilter('success', this)"
-                        style="color: var(--accent-green);">Successful</button>
-                    <button class="tab-btn" onclick="setTradeFilter('failed', this)"
-                        style="color: var(--accent-red);">Unsuccessful</button>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <div class="filter-tabs">
+                        <button class="tab-btn active" onclick="setTradeTimeframeFilter('all', this)">All TFs</button>
+                        <button class="tab-btn" onclick="setTradeTimeframeFilter('60', this)">1H</button>
+                        <button class="tab-btn" onclick="setTradeTimeframeFilter('120', this)">2H</button>
+                        <button class="tab-btn" onclick="setTradeTimeframeFilter('240', this)">4H</button>
+                        <button class="tab-btn" onclick="setTradeTimeframeFilter('360', this)">6H</button>
+                    </div>
+                    <div class="filter-tabs">
+                        <button class="tab-btn active" onclick="setTradeFilter('all', this)">All Status</button>
+                        <button class="tab-btn" onclick="setTradeFilter('success', this)"
+                            style="color: var(--accent-green);">Successful</button>
+                        <button class="tab-btn" onclick="setTradeFilter('failed', this)"
+                            style="color: var(--accent-red);">Unsuccessful</button>
+                    </div>
                 </div>
             </div>
 
@@ -1383,6 +1392,7 @@
         let loggedLinesCount = 0;
         let allTrades = [];
         let activeFilter = 'all'; // 'all', 'success', 'failed'
+        let activeTimeframeFilter = 'all'; // 'all', '60', '120', '240', '360'
         let activeConfluenceTimeframe = '1h'; // default to 1H
         let activeTradesState = {};
         let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null, TON: null, SUI: null, APT: null, DOT: null};
@@ -1398,6 +1408,15 @@
 
         function setTradeFilter(filterType, element) {
             activeFilter = filterType;
+            tradeHistoryPage = 1; // Reset to page 1 on filter change
+            const buttons = element.parentElement.querySelectorAll(".tab-btn");
+            buttons.forEach(btn => btn.classList.remove("active"));
+            element.classList.add("active");
+            renderTrades();
+        }
+
+        function setTradeTimeframeFilter(tf, element) {
+            activeTimeframeFilter = tf;
             tradeHistoryPage = 1; // Reset to page 1 on filter change
             const buttons = element.parentElement.querySelectorAll(".tab-btn");
             buttons.forEach(btn => btn.classList.remove("active"));
@@ -1471,7 +1490,11 @@
 
             // Filter to show only 1h, 2h, 4h, and 6h trades
             const validIntervals = ['60', '120', '240', '360'];
-            const activeTradesOnly = allTrades.filter(t => validIntervals.includes(String(t.interval || '60')));
+            let activeTradesOnly = allTrades.filter(t => validIntervals.includes(String(t.interval || '60')));
+
+            if (activeTimeframeFilter !== 'all') {
+                activeTradesOnly = activeTradesOnly.filter(t => String(t.interval) === activeTimeframeFilter);
+            }
 
             // Calculate stats
             const total = activeTradesOnly.length;
