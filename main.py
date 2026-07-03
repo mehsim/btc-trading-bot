@@ -2768,11 +2768,15 @@ def main():
                                         <td style="padding: 6px 0; font-family: monospace;">{exit_reason}</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Position Size:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">${original_size:.2f} USD ({leverage}x Leverage)</td>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Position Size (USD):</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">${original_size:.2f} USD</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Invested Amount:</b></td>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Leverage:</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">{leverage}x</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Invested Margin (USD):</b></td>
                                         <td style="padding: 6px 0; font-family: monospace;">${invested_margin_usd:.2f} USD</td>
                                     </tr>
                                     <tr>
