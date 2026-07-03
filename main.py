@@ -3241,7 +3241,11 @@ def main():
                                     current_bal = bot_state.get("simulated_balance", 80.0)
                                     
                                     wallet_exceeded = False
-                                    if total_active_size + position_size_usd > current_bal:
+                                    if current_bal <= 12.0:
+                                        print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than $12.00 to open new trades.")
+                                        status_msg = "Skipped (Insufficient Balance)"
+                                        wallet_exceeded = True
+                                    elif total_active_size + position_size_usd > current_bal:
                                         remaining_bal = current_bal - total_active_size
                                         if remaining_bal >= 8.0:
                                             print(f"[{symbol} {iv}m] Sizing scaled down from ${position_size_usd:.2f} to ${remaining_bal:.2f} to fit remaining wallet balance (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}).")
