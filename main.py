@@ -3092,6 +3092,11 @@ def main():
                                     position_size_usd = max(10.0, min(13.0, position_size_usd * cov_multiplier))
                                     print(f"[{iv}m Calibrated Sizing] Calibrated Conf: {calibrated_confidence*100:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
+                                    # Calculate Kelly parameters for logs and metadata
+                                    kelly_p = float(calibrated_confidence)
+                                    kelly_b = float(tp_multiplier_adjusted / sl_multiplier) if sl_multiplier > 0 else 1.5
+                                    kelly_fraction = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
+
                                     # Ensure total size of active trades does not exceed the wallet balance
                                     total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
                                     current_bal = bot_state.get("simulated_balance", 80.0)
