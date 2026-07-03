@@ -2344,8 +2344,11 @@ def main():
     while True:
         current_time = time.time()
         
-        # 1. Health check & current price update
-        if live_price is None or (current_time - last_ws_update_time > 15.0):
+        # 1. Health check & current price update (Adaptive to save proxy bandwidth)
+        has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+        timeout_threshold = 60.0 if has_active_trades else 300.0
+        
+        if live_price is None or (current_time - last_ws_update_time > timeout_threshold):
             fallback_price = get_fallback_price()
             if fallback_price is not None:
                 print(f"[{get_pkt_time().strftime('%H:%M:%S')}] WebSocket price is stale or disconnected. Fallback price: {fallback_price:.2f}")
