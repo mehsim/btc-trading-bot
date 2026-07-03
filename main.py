@@ -2737,25 +2737,11 @@ def main():
             """Returns True if within 15 minutes of a known high-impact event (CPI, FOMC, NFP)."""
             try:
                 now_utc = datetime.utcnow()
-                finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
-                resp = requests.get(
-                    "https://finnhub.io/api/v1/calendar/economic",
-                    params={"token": finnhub_token},
-                    timeout=5
-                )
-                if resp.status_code == 200:
-                    events = resp.json().get("economicCalendar", [])
-                    high_impact = ["CPI", "FOMC", "NFP", "Non-Farm", "Federal Reserve", "Interest Rate"]
-                    for ev in events:
-                        if any(kw.lower() in ev.get("event", "").lower() for kw in high_impact):
-                            ev_time_str = ev.get("time", "")
-                            try:
-                                ev_time = datetime.strptime(ev_time_str, "%Y-%m-%d %H:%M:%S")
-                                diff = abs((now_utc - ev_time).total_seconds())
-                                if diff <= 900:  # 15 minute window
-                                    return True, ev.get("event", "Unknown")
-                            except Exception:
-                                pass
+                events = fetch_economic_calendar_cached()
+                for ev_time in events:
+                    diff = abs((now_utc - ev_time).total_seconds())
+                    if diff <= 900:  # 15 minute window
+                        return True, "High-Impact Economic Event"
             except Exception:
                 pass
             return False, None
