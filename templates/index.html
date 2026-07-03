@@ -1242,7 +1242,7 @@
                             <th>Direction</th>
                             <th class="hide-mobile">Confidence</th>
                             <th class="hide-mobile">Leverage</th>
-                            <th class="hide-mobile">Size</th>
+                            <th class="hide-mobile">Actual Investment</th>
                             <th>Entry Price</th>
                             <th class="hide-mobile">Current Price</th>
                             <th>TP / SL</th>
@@ -1339,7 +1339,7 @@
                             <th>Direction</th>
                             <th>Entry Price</th>
                             <th>Exit Price</th>
-                            <th class="hide-mobile">Pos Size (USD)</th>
+                            <th class="hide-mobile">Actual Investment</th>
                             <th class="hide-mobile">Leverage</th>
                             <th>Profit/Loss</th>
                             <th>PnL (USD)</th>
@@ -1569,11 +1569,12 @@
                     const posSize = t.position_size_usd !== undefined ? t.position_size_usd : 100.00;
                     const leverage = t.leverage || 1.0;
                     const investedVal = posSize.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    const marginVal = (posSize / leverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const leveragedVal = (posSize * leverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     const leverageStr = leverage.toFixed(1) + 'x';
                     const rawPnL = t.pnl_usd !== undefined ? t.pnl_usd : (t.change_pct / 100 * posSize);
                     const pnlSign = rawPnL >= 0 ? '+' : '';
                     const formattedRealizedPnL = `${pnlSign}${rawPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    const displayPnLPct = posSize > 0 ? (rawPnL / posSize * 100) : 0;
 
                     htmlRows += `
                         <tr onclick="showTradeDetails(${allTrades.indexOf(t)})" style="cursor: pointer;" title="Click to view details" class="hover-row">
@@ -1584,10 +1585,10 @@
                             <td>$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 600;">
                                 <div>$${investedVal}</div>
-                                <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Margin: $${marginVal}</div>
+                                <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged Size: $${leveragedVal}</div>
                             </td>
                             <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 600;">${leverageStr}</td>
-                            <td class="${pnlClass}" style="font-weight: 800;">${changeSign}${t.change_pct.toFixed(3)}%</td>
+                            <td class="${pnlClass}" style="font-weight: 800;">${displayPnLPct >= 0 ? '+' : ''}${displayPnLPct.toFixed(3)}%</td>
                             <td class="${pnlClass}" style="font-weight: 800;">$${formattedRealizedPnL}</td>
                             <td class="hide-mobile ${successClass}" style="font-weight: 700;">${successStr}</td>
                             <td class="hide-mobile" style="color: var(--text-secondary); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t.reason}</td>
@@ -1690,7 +1691,7 @@
 
                 const tradePosSize = trade.position_size_usd || 0.00;
                 const tradeLeverage = trade.leverage || 1.0;
-                const tradeMarginVal = (tradePosSize / tradeLeverage).toFixed(2);
+                const tradeLeveragedVal = (tradePosSize * tradeLeverage).toFixed(2);
 
                 htmlRows += `
                     <tr>
@@ -1701,7 +1702,7 @@
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${tradeLeverage.toFixed(1)}x</td>
                         <td class="hide-mobile" style="font-weight: 700; color: var(--accent-blue);">
                             <div>$${tradePosSize.toFixed(2)}</div>
-                            <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Margin: $${tradeMarginVal}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged Size: $${tradeLeveragedVal}</div>
                         </td>
                         <td style="font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         <td class="hide-mobile" style="font-weight: 600; color: var(--text-primary);">${currentPriceVal ? '$' + currentPriceVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
@@ -2155,7 +2156,10 @@
 
             const posSize = t.position_size_usd !== undefined ? t.position_size_usd : 100.00;
             const leverage = t.leverage || 1.0;
-            const marginVal = posSize / leverage;
+            const leveragedVal = posSize * leverage;
+            const rawPnL = t.pnl_usd !== undefined ? t.pnl_usd : (t.change_pct / 100 * posSize);
+            const displayPnLPct = posSize > 0 ? (rawPnL / posSize * 100) : 0;
+            const displayPnLSign = displayPnLPct >= 0 ? '+' : '';
 
             const contentHtml = `
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
@@ -2195,24 +2199,24 @@
                     <span style="font-weight:700; color:var(--text-primary);">$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
-                    <span style="opacity:0.6;">Position Size (USD)</span>
-                    <span style="font-weight:700; color:var(--accent-orange);">$${posSize.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span style="opacity:0.6;">Leveraged Position Size (USD)</span>
+                    <span style="font-weight:700; color:var(--accent-orange);">$${leveragedVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Leverage</span>
                     <span style="font-weight:700; color:var(--accent-purple);">${leverage.toFixed(1)}x</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
-                    <span style="opacity:0.6;">Invested Margin (USD)</span>
-                    <span style="font-weight:700; color:var(--accent-blue);">$${marginVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span style="opacity:0.6;">Actual Investment (USD)</span>
+                    <span style="font-weight:700; color:var(--accent-blue);">$${posSize.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Net Return Pct</span>
-                    <span class="${pnlClass}" style="font-weight:800;">${changeSign}${t.change_pct.toFixed(3)}%</span>
+                    <span class="${pnlClass}" style="font-weight:800;">${displayPnLSign}${displayPnLPct.toFixed(3)}%</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Realized Profit/Loss</span>
-                    <span class="${pnlClass}" style="font-weight:800;">${t.pnl_usd ? (t.pnl_usd >= 0 ? '+' : '') + t.pnl_usd.toFixed(2) : changeSign + (t.change_pct * 1).toFixed(2)} USD</span>
+                    <span class="${pnlClass}" style="font-weight:800;">${rawPnL >= 0 ? '+' : ''}${rawPnL.toFixed(2)} USD</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Exit Outcome</span>

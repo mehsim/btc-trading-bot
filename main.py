@@ -156,10 +156,10 @@ def migrate_active_trades(active_trades_list):
     for t in active_trades_list:
         if "confidence" not in t:
             # Estimate confidence based on original sizing thresholds
-            orig_size = t.get("original_size", t.get("position_size_usd", 11.5))
-            if orig_size >= 13.0:
+            orig_size = t.get("original_size", t.get("position_size_usd", 9.5))
+            if orig_size >= 11.0:
                 t["confidence"] = 0.785
-            elif orig_size >= 11.5:
+            elif orig_size >= 9.5:
                 t["confidence"] = 0.685
             else:
                 t["confidence"] = 0.585
@@ -2728,7 +2728,8 @@ def main():
                     # Send email alert on any profitable trade exit
                     if total_pnl > 0:
                         subject = f"🚀 [UBOTE Profit Target] {active_symbol} {iv}m Closed with Profit!"
-                        invested_margin_usd = original_size / leverage if leverage > 0 else original_size
+                        invested_margin_usd = original_size
+                        leveraged_position_usd = original_size * leverage if leverage > 0 else original_size
                         
                         # Dynamic header based on exit reason
                         exit_title = "🎉 Take Profit Hit!" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 Trailing Stop Hit (Profitable Close)!" if "TRAILING" in str(exit_reason).upper() else "✅ Trade Closed with Profit!"
@@ -2768,15 +2769,15 @@ def main():
                                         <td style="padding: 6px 0; font-family: monospace;">{exit_reason}</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Position Size (USD):</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">${original_size:.2f} USD</td>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Leveraged Position Size (USD):</b></td>
+                                        <td style="padding: 6px 0; font-family: monospace;">${leveraged_position_usd:.2f} USD</td>
                                     </tr>
                                     <tr>
                                         <td style="padding: 6px 0; color: #8f9bb3;"><b>Leverage:</b></td>
                                         <td style="padding: 6px 0; font-family: monospace;">{leverage}x</td>
                                     </tr>
                                     <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Invested Margin (USD):</b></td>
+                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Actual Investment (USD):</b></td>
                                         <td style="padding: 6px 0; font-family: monospace;">${invested_margin_usd:.2f} USD</td>
                                     </tr>
                                     <tr>
@@ -3192,15 +3193,15 @@ def main():
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
                                     c_prob = float(calibrated_confidence)
                                     if c_prob < 0.60:
-                                        position_size_usd = 10.0
+                                        position_size_usd = 8.0
                                     elif c_prob <= 0.75:
-                                        position_size_usd = 11.5
+                                        position_size_usd = 9.5
                                     else:
-                                        position_size_usd = 13.0
+                                        position_size_usd = 11.0
                                         
-                                    # Apply covariance multiplier and clamp final size between $10 and $13
+                                    # Apply covariance multiplier and clamp final size between $8 and $11
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
-                                    position_size_usd = max(10.0, min(13.0, position_size_usd * cov_multiplier))
+                                    position_size_usd = max(8.0, min(11.0, position_size_usd * cov_multiplier))
                                     print(f"[{iv}m Calibrated Sizing] Calibrated Conf: {calibrated_confidence*100:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                     # Calculate Kelly parameters for logs and metadata
@@ -3215,11 +3216,11 @@ def main():
                                     wallet_exceeded = False
                                     if total_active_size + position_size_usd > current_bal:
                                         remaining_bal = current_bal - total_active_size
-                                        if remaining_bal >= 10.0:
+                                        if remaining_bal >= 8.0:
                                             print(f"[{symbol} {iv}m] Sizing scaled down from ${position_size_usd:.2f} to ${remaining_bal:.2f} to fit remaining wallet balance (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}).")
                                             position_size_usd = remaining_bal
                                         else:
-                                            print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum $10 trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
+                                            print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum $8 trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
                                             status_msg = "Skipped (Exceeds Wallet)"
                                             wallet_exceeded = True
 
