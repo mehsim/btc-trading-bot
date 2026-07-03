@@ -254,37 +254,6 @@
             box-shadow: none;
         }
 
-        .test-email-btn {
-            background: rgba(245, 158, 11, 0.08);
-            border: 1px solid rgba(245, 158, 11, 0.25);
-            border-radius: 30px;
-            color: var(--accent-orange);
-            font-family: 'Outfit', sans-serif;
-            font-size: 13px;
-            font-weight: 600;
-            padding: 8px 20px;
-            cursor: pointer;
-            transition: var(--transition-smooth);
-            margin-right: 12px;
-        }
-
-        .test-email-btn:hover {
-            background: var(--accent-orange);
-            color: #ffffff;
-            border-color: var(--accent-orange);
-            box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
-            transform: translateY(-1px);
-        }
-
-        .test-email-btn:disabled {
-            background: rgba(107, 114, 128, 0.08);
-            border-color: rgba(107, 114, 128, 0.15);
-            color: var(--text-muted);
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
         .bot-toggle-btn {
             background: rgba(16, 185, 129, 0.08);
             border: 1px solid rgba(16, 185, 129, 0.25);
@@ -895,7 +864,7 @@
                 gap: 8px;
             }
 
-            .bot-toggle-btn, .optimize-btn, .test-email-btn, .status-pill, .terminate-btn {
+            .bot-toggle-btn, .optimize-btn, .status-pill, .terminate-btn {
                 margin-right: 0 !important;
                 flex-grow: 1;
                 justify-content: center;
@@ -982,7 +951,6 @@
                     <span id="bot-toggle-text">Bot running</span>
                 </button>
                 <button id="optimize-btn" class="optimize-btn" onclick="optimizeModels()">Optimize Models</button>
-                <button id="test-email-btn" class="test-email-btn" onclick="testEmailNotification()">Test Email</button>
                 <div class="status-pill">
                     <div class="status-dot"></div>
                     <span id="bot-status">INITIALIZING</span>
@@ -2155,33 +2123,6 @@
                         alert(err.message || "Could not trigger model optimization.");
                     });
             }
-        }
-
-        function testEmailNotification() {
-            const btn = document.getElementById("test-email-btn");
-            const originalText = btn ? btn.innerText : "Test Email";
-            if (btn) {
-                btn.disabled = true;
-                btn.innerText = "Sending test...";
-            }
-            fetch('/api/test_email', { method: 'POST' })
-                .then(async response => {
-                    const data = await response.json();
-                    if (response.ok) {
-                        alert("🎉 Success: " + data.message);
-                    } else {
-                        alert("❌ Error: " + data.message);
-                    }
-                })
-                .catch(err => {
-                    alert("❌ Connection failed: " + err.message);
-                })
-                .finally(() => {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.innerText = originalText;
-                    }
-                });
         }
 
         // Run immediately, then poll every 1.5 seconds
