@@ -223,6 +223,27 @@
             transform: translateY(-1px);
         }
 
+        .clear-history-btn {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            border-radius: 30px;
+            color: var(--accent-orange);
+            font-family: 'Outfit', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 20px;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+        }
+
+        .clear-history-btn:hover {
+            background: var(--accent-orange);
+            color: #ffffff;
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+            transform: translateY(-1px);
+        }
+
         .optimize-btn {
             background: rgba(139, 92, 246, 0.08);
             border: 1px solid rgba(139, 92, 246, 0.25);
@@ -951,6 +972,7 @@
                     <span id="bot-toggle-text">Bot running</span>
                 </button>
                 <button id="optimize-btn" class="optimize-btn" onclick="optimizeModels()">Optimize Models</button>
+                <button id="clear-history-btn" class="clear-history-btn" onclick="clearTradeHistory()">Clear History</button>
                 <div class="status-pill">
                     <div class="status-dot"></div>
                     <span id="bot-status">INITIALIZING</span>
@@ -2465,6 +2487,24 @@
                 })
                 .catch(err => {
                     console.error("Error resetting circuit breaker:", err);
+                });
+            }
+        }
+
+        function clearTradeHistory() {
+            if (confirm("Are you sure you want to clear the entire trade and prediction history from the backend and Hugging Face space? This will reset the simulated balance back to $80.00.")) {
+                fetch('/api/clear_history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+                .then(response => response.json())
+                .then(res => {
+                    alert(res.message);
+                    updateDashboard();
+                })
+                .catch(err => {
+                    console.error("Error clearing trade history:", err);
+                    alert("Failed to clear trade history.");
                 });
             }
         }

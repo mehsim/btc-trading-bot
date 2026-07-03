@@ -722,6 +722,18 @@ def reset_circuit_breaker():
     save_history()
     return jsonify({"status": "success", "message": "Daily drawdown circuit breaker successfully reset. Trading resumed!"})
 
+@app.route("/api/clear_history", methods=["POST"])
+def clear_history_endpoint():
+    bot_state["trade_history"] = []
+    bot_state["prediction_history"] = []
+    bot_state["simulated_balance"] = 80.0
+    bot_state["daily_drawdown_start_balance"] = 80.0
+    bot_state["circuit_breaker_active"] = False
+    for tf_key in ["60", "120", "240", "360"]:
+        bot_state["win_rate_by_tf"][tf_key] = None
+    save_history()
+    return jsonify({"status": "success", "message": "All completed trades and prediction history have been successfully cleared from the backend and Hugging Face Dataset space. Simulated balance has been reset to $80.00."})
+
 @app.route("/api/test_email", methods=["POST"])
 def test_email_endpoint():
     resend_key = os.getenv("RESEND_API_KEY", "")
