@@ -716,6 +716,29 @@ def reset_circuit_breaker():
     save_history()
     return jsonify({"status": "success", "message": "Daily drawdown circuit breaker successfully reset. Trading resumed!"})
 
+@app.route("/api/test_email", methods=["POST"])
+def test_email_endpoint():
+    subject = "🚀 [UBOTE Test Alert] SMTP Verification Test"
+    body = """
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #00b0ff; margin-bottom: 20px;">✅ SMTP Test Successful!</h2>
+        <p>If you are reading this email, your UBOTE trading bot email notification setup is correctly configured and working.</p>
+        <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
+    </body>
+    </html>
+    """
+    success = send_email_notification(subject, body)
+    if success:
+        return jsonify({"status": "success", "message": "Test email sent successfully! Please check your inbox (including Spam folder)."})
+    else:
+        smtp_user = os.getenv("SMTP_USER", "")
+        smtp_password = os.getenv("SMTP_PASSWORD", "")
+        if not smtp_user or not smtp_password:
+            return jsonify({"status": "error", "message": "SMTP_USER or SMTP_PASSWORD environment variables are not set in your environment (Hugging Face Secrets)."}), 400
+        else:
+            return jsonify({"status": "error", "message": "SMTP connection failed. Check your Hugging Face Space logs for the exact SMTP error trace. This is usually due to Hugging Face firewall blocking port 587/465."}), 500
+
 @app.route("/")
 def index():
     return render_template("index.html")
