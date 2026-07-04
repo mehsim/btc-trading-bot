@@ -333,8 +333,8 @@ def bybit_post_request(endpoint, payload):
     import json
     import requests
     
-    api_key = os.getenv("BYBIT_API_KEY", "")
-    api_secret = os.getenv("BYBIT_API_SECRET", "")
+    api_key = os.getenv("BYBIT_API_KEY", "").strip()
+    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
     
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
@@ -430,8 +430,8 @@ def bybit_get_request(endpoint, query_params):
     import urllib.parse
     import requests
     
-    api_key = os.getenv("BYBIT_API_KEY", "")
-    api_secret = os.getenv("BYBIT_API_SECRET", "")
+    api_key = os.getenv("BYBIT_API_KEY", "").strip()
+    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
     
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
@@ -515,8 +515,8 @@ def get_bybit_last_execution(symbol):
     return None
 
 def get_real_bybit_balance():
-    api_key = os.getenv("BYBIT_API_KEY", "")
-    api_secret = os.getenv("BYBIT_API_SECRET", "")
+    api_key = os.getenv("BYBIT_API_KEY", "").strip()
+    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
     
     if not api_key or not api_secret:
         return "API_KEYS_MISSING"
