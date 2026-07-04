@@ -584,8 +584,8 @@ def get_real_bybit_balance():
                             total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
                             max_balance = max(max_balance, float(total_equity))
                 else:
-                    # Ignore the expected "accountType only support UNIFIED" error (Code 10001) for SPOT/CONTRACT to avoid log clutter
-                    if not (ret_code == 10001 and account_type in ["SPOT", "CONTRACT"]):
+                    # Ignore the expected errors (Code 10001/10003) for legacy account types on Unified Accounts to avoid log clutter
+                    if not (ret_code in [10001, 10003] and account_type in ["SPOT", "CONTRACT", "FUND"]):
                         print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {data.get('retMsg')}")
             else:
                 print(f"[Bybit Balance] HTTP {resp.status_code} for {account_type}: {resp.text}")
