@@ -1022,13 +1022,19 @@ def run_fallback_price_updater():
     """
     Periodic thread that queries Bybit REST API for spot prices.
     Acts as a failover if WebSocket is geoblocked or disconnected.
+    Uses adaptive polling intervals (1 min if active trades exist, 5 min if idle)
+    to minimize proxy bandwidth consumption.
     """
     global live_price, last_ws_update_time
     print("[Price Fallback] Background updater thread started.")
     while True:
         try:
-            # If WebSocket hasn't updated in the last 12 seconds, query REST ticker
-            if (time.time() - last_ws_update_time) > 12.0:
+            # Check if there are active trades to monitor
+            has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+            sleep_time = 60 if has_active_trades else 300
+            
+            # If WebSocket hasn't updated in the last (sleep_time * 1.5) seconds, query REST ticker
+            if (time.time() - last_ws_update_time) > (sleep_time * 1.5):
                 url = "https://api.bybit.com/v5/market/tickers"
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -1048,11 +1054,15 @@ def run_fallback_price_updater():
                                     live_price = val
                                     bot_state["live_price"] = val
                                     bot_state["last_update"] = time.time()
+                                    last_ws_update_time = time.time()
                 else:
                     pass
         except Exception:
             pass
-        time.sleep(6)
+        
+        # Recalculate sleep time dynamically in case trade state changed during API call
+        has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+        time.sleep(60 if has_active_trades else 300)
 
 def send_email_notification(subject, body):
     """
@@ -2464,13 +2474,12 @@ def main():
         current_time = time.time()
         
         # 1. Health check & current price update (Adaptive to save proxy bandwidth)
-        has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
-        timeout_threshold = 15.0 if has_active_trades else 30.0
-        
-        if live_price is None or (current_time - last_ws_update_time > timeout_threshold):
+        # Rely on background run_fallback_price_updater. Only query directly if live_price is None
+        # or has not been updated in over 10 minutes (600s) as a fail-safe.
+        if live_price is None or (current_time - last_ws_update_time > 600.0):
             fallback_price = get_fallback_price()
             if fallback_price is not None:
-                print(f"[{get_pkt_time().strftime('%H:%M:%S')}] WebSocket price is stale or disconnected. Fallback price: {fallback_price:.2f}")
+                print(f"[{get_pkt_time().strftime('%H:%M:%S')}] WebSocket/Fallback price is stale or disconnected. Fetching price: {fallback_price:.2f}")
                 live_price = fallback_price
                 last_ws_update_time = current_time
             
