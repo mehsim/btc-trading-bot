@@ -5,6 +5,11 @@ os.environ["MKL_NUM_THREADS"] = "1"
 from dotenv import load_dotenv
 load_dotenv()
 
+TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
+BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
+BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/spot" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/spot"
+
+
 import websocket
 import json
 import requests
@@ -312,7 +317,7 @@ def get_bybit_time_offset():
     import requests
     import time
     try:
-        resp = requests.get("https://api.bybit.com/v5/market/time", proxies=get_bybit_proxies(), timeout=3)
+        resp = requests.get(f"{BYBIT_BASE_URL}/v5/market/time", proxies=get_bybit_proxies(), timeout=3)
         if resp.status_code == 200:
             server_time = int(resp.json()["result"]["timeNano"]) // 1000000
             local_time = int(time.time() * 1000)
@@ -320,6 +325,194 @@ def get_bybit_time_offset():
     except Exception:
         pass
     return 0
+
+def bybit_post_request(endpoint, payload):
+    import time
+    import hmac
+    import hashlib
+    import json
+    import requests
+    
+    api_key = os.getenv("BYBIT_API_KEY", "")
+    api_secret = os.getenv("BYBIT_API_SECRET", "")
+    
+    if not api_key or not api_secret:
+        return {"retCode": -1, "retMsg": "API keys missing"}
+        
+    offset = get_bybit_time_offset()
+    timestamp = str(int(time.time() * 1000) + offset)
+    recv_window = "30000"
+    
+    payload_str = json.dumps(payload)
+    val_str = timestamp + api_key + recv_window + payload_str
+    sign = hmac.new(
+        api_secret.encode("utf-8"),
+        val_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    
+    headers = {
+        "X-BAPI-API-KEY": api_key,
+        "X-BAPI-SIGN": sign,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json"
+    }
+    
+    url = f"{BYBIT_BASE_URL}{endpoint}"
+    
+    try:
+        resp = requests.post(url, headers=headers, json=payload, proxies=get_bybit_proxies(), timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
+    except Exception as e:
+        return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+
+def set_bybit_leverage(symbol, leverage):
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "buyLeverage": str(leverage),
+        "sellLeverage": str(leverage)
+    }
+    res = bybit_post_request("/v5/position/set-leverage", payload)
+    # 110043 means leverage is already set to this value, which is safe to ignore
+    if res.get("retCode") in [0, 110043]:
+        print(f"[Bybit API] Leverage set to {leverage}x for {symbol} successfully.")
+        return True
+    else:
+        print(f"[Bybit API Error] Failed to set leverage for {symbol}: {res.get('retMsg')} (code: {res.get('retCode')})")
+        return False
+
+def format_bybit_qty(symbol, qty):
+    precisions = {
+        "BTCUSDT": 3,
+        "ETHUSDT": 2,
+        "SOLUSDT": 1,
+        "BNBUSDT": 1,
+        "AVAXUSDT": 1,
+        "NEARUSDT": 1,
+        "LINKUSDT": 1,
+        "LTCUSDT": 1,
+        "ADAUSDT": 0,
+        "XRPUSDT": 0,
+        "DOGEUSDT": 0
+    }
+    p = precisions.get(symbol, 1)
+    if p == 0:
+        return str(int(round(qty)))
+    return str(round(qty, p))
+
+def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None):
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "side": side,
+        "orderType": "Market", # Market order ensures instant execution
+        "qty": str(qty),
+        "timeInForce": "GTC",
+        "positionIdx": 0
+    }
+    if sl:
+        payload["stopLoss"] = str(round(sl, 4))
+    if tp:
+        payload["takeProfit"] = str(round(tp, 4))
+        
+    res = bybit_post_request("/v5/order/create", payload)
+    return res
+
+def bybit_get_request(endpoint, query_params):
+    import time
+    import hmac
+    import hashlib
+    import urllib.parse
+    import requests
+    
+    api_key = os.getenv("BYBIT_API_KEY", "")
+    api_secret = os.getenv("BYBIT_API_SECRET", "")
+    
+    if not api_key or not api_secret:
+        return {"retCode": -1, "retMsg": "API keys missing"}
+        
+    offset = get_bybit_time_offset()
+    timestamp = str(int(time.time() * 1000) + offset)
+    recv_window = "30000"
+    
+    query_string = urllib.parse.urlencode(query_params)
+    
+    val_str = timestamp + api_key + recv_window + query_string
+    sign = hmac.new(
+        api_secret.encode("utf-8"),
+        val_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    
+    headers = {
+        "X-BAPI-API-KEY": api_key,
+        "X-BAPI-SIGN": sign,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json"
+    }
+    
+    url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
+    
+    try:
+        resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
+    except Exception as e:
+        return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+
+def get_bybit_position(symbol):
+    res = bybit_get_request("/v5/position/list", {"category": "linear", "symbol": symbol})
+    if res.get("retCode") == 0:
+        pos_list = res.get("result", {}).get("list", [])
+        for pos in pos_list:
+            if pos.get("symbol") == symbol:
+                return pos
+    return None
+
+def update_bybit_stop_loss(symbol, sl_price):
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "stopLoss": str(round(sl_price, 4)),
+        "positionIdx": 0
+    }
+    res = bybit_post_request("/v5/position/set-trading-stop", payload)
+    if res.get("retCode") == 0:
+        print(f"[Bybit API] Successfully updated Stop Loss on Bybit to {sl_price:.4f} for {symbol}.")
+        return True
+    else:
+        print(f"[Bybit API Error] Failed to update Stop Loss for {symbol}: {res.get('retMsg')}")
+        return False
+
+def place_bybit_limit_order(symbol, side, qty, price):
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "side": side,
+        "orderType": "Limit",
+        "qty": str(qty),
+        "price": str(round(price, 4)),
+        "timeInForce": "GTC",
+        "positionIdx": 0
+    }
+    res = bybit_post_request("/v5/order/create", payload)
+    return res
+
+def get_bybit_last_execution(symbol):
+    res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "limit": 1})
+    if res.get("retCode") == 0:
+        exec_list = res.get("result", {}).get("list", [])
+        if exec_list:
+            return exec_list[0]
+    return None
 
 def get_real_bybit_balance():
     import os
@@ -344,10 +537,10 @@ def get_real_bybit_balance():
     for account_type in ["UNIFIED", "CONTRACT", "SPOT", "FUND"]:
         if account_type == "FUND":
             query_string = "accountType=FUND"
-            url = f"https://api.bybit.com/v5/asset/transfer/query-account-coins-balance?{query_string}"
+            url = f"{BYBIT_BASE_URL}/v5/asset/transfer/query-account-coins-balance?{query_string}"
         else:
             query_string = f"accountType={account_type}"
-            url = f"https://api.bybit.com/v5/account/wallet-balance?{query_string}"
+            url = f"{BYBIT_BASE_URL}/v5/account/wallet-balance?{query_string}"
             
         val_str = timestamp + api_key + recv_window + query_string
         sign = hmac.new(
@@ -1035,7 +1228,7 @@ def run_fallback_price_updater():
             
             # If WebSocket hasn't updated in the last (sleep_time * 1.5) seconds, query REST ticker
             if (time.time() - last_ws_update_time) > (sleep_time * 1.5):
-                url = "https://api.bybit.com/v5/market/tickers"
+                url = f"{BYBIT_BASE_URL}/v5/market/tickers"
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
@@ -1161,7 +1354,7 @@ def on_close(ws, close_status_code, close_msg):
     pass
 
 def start_ws():
-    url = "wss://stream.bybit.com/v5/public/spot"
+    url = BYBIT_WS_URL
     while True:
         try:
             ws = websocket.WebSocketApp(
@@ -1797,7 +1990,7 @@ def get_orderbook_imbalance(symbol=None):
     if symbol is None:
         symbol = SYMBOL
     try:
-        url = "https://api.bybit.com/v5/market/orderbook"
+        url = f"{BYBIT_BASE_URL}/v5/market/orderbook"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
@@ -2385,7 +2578,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 def get_fallback_price(symbol=SYMBOL):
     # 1. Try Bybit API
     try:
-        url = "https://api.bybit.com/v5/market/tickers"
+        url = f"{BYBIT_BASE_URL}/v5/market/tickers"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
@@ -2518,6 +2711,34 @@ def main():
                 entry_price = active_trade["entry_price"]
                 predicted_price = active_trade["predicted_price"]
 
+                # Bybit Live position query and state tracking
+                bybit_closed = False
+                bybit_scaled_out = False
+                bybit_exit_price = None
+                bybit_realized_pnl = None
+                
+                if TRADE_MODE != "simulation" and active_trade.get("bybit_order_id"):
+                    pos = get_bybit_position(active_symbol)
+                    if pos:
+                        qty_str = pos.get("size", "0")
+                        qty_val = float(qty_str)
+                        if qty_val == 0:
+                            bybit_closed = True
+                        else:
+                            # Detect scale-out fill
+                            original_qty = active_trade.get("qty", 0.0)
+                            if original_qty > 0 and qty_val <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
+                                bybit_scaled_out = True
+                    else:
+                        bybit_closed = True
+                        
+                    if bybit_closed:
+                        # Retrieve last execution log to capture exact figures
+                        exec_log = get_bybit_last_execution(active_symbol)
+                        if exec_log:
+                            bybit_exit_price = float(exec_log.get("execPrice", current_price))
+                            bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
+
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
                 highest_price = active_trade.get("highest_price", entry_price)
@@ -2550,6 +2771,8 @@ def main():
                             active_trade["stop_loss"] = stop_loss
                             active_trades_updated = True
                             print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                            if TRADE_MODE != "simulation":
+                                update_bybit_stop_loss(active_symbol, stop_loss)
                     
                     # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
@@ -2559,6 +2782,8 @@ def main():
                         active_trade["stop_loss"] = stop_loss
                         active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                        if TRADE_MODE != "simulation":
+                            update_bybit_stop_loss(active_symbol, stop_loss)
                 else:
                     if current_price < lowest_price:
                         lowest_price = current_price
@@ -2570,6 +2795,8 @@ def main():
                             active_trade["stop_loss"] = stop_loss
                             active_trades_updated = True
                             print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                            if TRADE_MODE != "simulation":
+                                update_bybit_stop_loss(active_symbol, stop_loss)
                             
                     # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
@@ -2579,11 +2806,23 @@ def main():
                         active_trade["stop_loss"] = stop_loss
                         active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                        if TRADE_MODE != "simulation":
+                            update_bybit_stop_loss(active_symbol, stop_loss)
 
                 # Scale-Out (50% partial profit taking at 0.6 * ATR)
                 half_closed = active_trade.get("half_closed", False)
+                trigger_scale_out = False
                 if not half_closed:
-                    if direction == "Bullish" and current_price >= entry_price + 0.6 * atr_dollars:
+                    if TRADE_MODE != "simulation":
+                        trigger_scale_out = bybit_scaled_out
+                    else:
+                        if direction == "Bullish" and current_price >= entry_price + 0.6 * atr_dollars:
+                            trigger_scale_out = True
+                        elif direction == "Bearish" and current_price <= entry_price - 0.6 * atr_dollars:
+                            trigger_scale_out = True
+
+                if trigger_scale_out and not half_closed:
+                    if direction == "Bullish":
                         # Scale-Out Triggered for Long
                         half_closed = True
                         active_trade["half_closed"] = True
@@ -2617,8 +2856,10 @@ def main():
                         active_trades_updated = True
                         
                         print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                        if TRADE_MODE != "simulation":
+                            update_bybit_stop_loss(active_symbol, entry_price)
                         
-                    elif direction == "Bearish" and current_price <= entry_price - 0.6 * atr_dollars:
+                    elif direction == "Bearish":
                         # Scale-Out Triggered for Short
                         half_closed = True
                         active_trade["half_closed"] = True
@@ -2652,6 +2893,8 @@ def main():
                         active_trades_updated = True
                         
                         print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                        if TRADE_MODE != "simulation":
+                            update_bybit_stop_loss(active_symbol, entry_price)
 
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)
@@ -2661,25 +2904,33 @@ def main():
 
                 exit_reason = None
                 half_closed = active_trade.get("half_closed", False)
-                if direction == "Bullish":
-                    if current_price <= stop_loss:
-                        exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
-                    elif current_price >= take_profit and not half_closed:
-                        exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                if TRADE_MODE != "simulation":
+                    if bybit_closed:
+                        exit_pnl = bybit_realized_pnl if bybit_realized_pnl is not None else 0.0
+                        if exit_pnl >= 0:
+                            exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                        else:
+                            exit_reason = "STOP LOSS HIT [FAIL]"
                 else:
-                    if current_price >= stop_loss:
-                        exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
-                    elif current_price <= take_profit and not half_closed:
-                        exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                    if direction == "Bullish":
+                        if current_price <= stop_loss:
+                            exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
+                        elif current_price >= take_profit and not half_closed:
+                            exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                    else:
+                        if current_price >= stop_loss:
+                            exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
+                        elif current_price <= take_profit and not half_closed:
+                            exit_reason = "TAKE PROFIT HIT [SUCCESS]"
 
-                if current_time >= end_time and not half_closed:
-                    lookahead = 10
-                    exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
-                
-                # Flat-Market Time-Based Exit (after 6 candles instead of 10)
-                elapsed_sec = current_time - (end_time - int(iv) * 60.0 * 10)
-                if elapsed_sec >= int(iv) * 60.0 * 6 and not half_closed and exit_reason is None:
-                    exit_reason = f"TIME EXPIRED (6-CANDLE FLAT MARKET GATE)"
+                    if current_time >= end_time and not half_closed:
+                        lookahead = 10
+                        exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
+                    
+                    # Flat-Market Time-Based Exit (after 6 candles instead of 10)
+                    elapsed_sec = current_time - (end_time - int(iv) * 60.0 * 10)
+                    if elapsed_sec >= int(iv) * 60.0 * 6 and not half_closed and exit_reason is None:
+                        exit_reason = f"TIME EXPIRED (6-CANDLE FLAT MARKET GATE)"
 
                 if exit_reason is not None:
                     # Maker vs Taker execution logic
@@ -2688,13 +2939,13 @@ def main():
                     if is_stop_loss:
                         # Maker limit execution for Stop Loss exit (Post-Only model)
                         slippage_pct = 0.0
-                        actual_price = current_price
+                        actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
                         fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
                         exit_reason = str(exit_reason) + " [Limit order Maker close]"
                     else:
                         # Maker execution for Take Profit, Timer, etc.
                         slippage_pct = 0.0
-                        actual_price = current_price
+                        actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
                         fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
 
                     price_diff = actual_price - predicted_price
@@ -2708,6 +2959,10 @@ def main():
                     leverage = active_trade.get("leverage", 1.0)
                     net_return_pct = (raw_return_pct * leverage) - fee_rate_roundtrip
                     realized_pnl = position_size_usd * (net_return_pct / 100.0)
+                    if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
+                        realized_pnl = bybit_realized_pnl
+                        net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
+                        
                     if realized_pnl < -position_size_usd:
                         realized_pnl = -position_size_usd
                         net_return_pct = -100.0
@@ -3313,35 +3568,88 @@ def main():
                                         duration_seconds = int(iv) * 60.0 * lookahead
                                         import uuid
                                         trade_uuid = str(uuid.uuid4())[:8]
-                                        active_trade = {
-                                            "trade_id": f"{symbol}_{trade_uuid}",
-                                            "symbol": symbol,
-                                            "entry_price": float(entry_price),
-                                            "predicted_price": float(predicted_price),
-                                            "stop_loss": float(stop_loss_price),
-                                            "take_profit": float(take_profit_price),
-                                            "direction": str(ml_trend),
-                                            "end_time": float(time.time() + duration_seconds),
-                                            "atr_dollars": float(atr_dollars),
-                                            "highest_price": float(entry_price),
-                                            "lowest_price": float(entry_price),
-                                            "break_even_triggered": False,
-                                            "half_closed": False,
-                                            "original_size": float(position_size_usd),
-                                            "position_size_usd": float(position_size_usd),
-                                            "scaled_out_pnl": 0.0,
-                                            "kelly_fraction": float(kelly_fraction),
-                                            "leverage": float(leverage_val),
-                                            "confidence": float(calibrated_confidence)
-                                        }
-                                        active_trades_list.append(active_trade)
-                                        bot_state[active_trade_key] = active_trades_list
+                                        # Calculate quantity (qty) in coins rounded according to symbol requirements
+                                        leveraged_size = position_size_usd * leverage_val
+                                        raw_qty = leveraged_size / entry_price
+                                        qty_str = format_bybit_qty(symbol, raw_qty)
+                                        qty_val = float(qty_str)
+
+                                        # Set Bybit Leverage and Place Order if in live/testnet mode
+                                        bybit_success = True
+                                        bybit_order_id = None
                                         
-                                        # Deduct size from wallet balance immediately
-                                        bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
-                                        
-                                        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
-                                        print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x (New Balance: ${bot_state['simulated_balance']:.2f})\n")
+                                        if TRADE_MODE != "simulation":
+                                            print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
+                                            # 1. Set leverage on exchange
+                                            leverage_ok = set_bybit_leverage(symbol, leverage_val)
+                                            if leverage_ok:
+                                                side = "Buy" if ml_trend == "Bullish" else "Sell"
+                                                # 2. Place entry order on Bybit with SL/TP
+                                                order_res = place_bybit_order(
+                                                    symbol=symbol,
+                                                    side=side,
+                                                    qty=qty_str,
+                                                    sl=stop_loss_price,
+                                                    tp=take_profit_price
+                                                )
+                                                if order_res.get("retCode") == 0:
+                                                    bybit_order_id = order_res.get("result", {}).get("orderId")
+                                                    print(f"[{symbol} {iv}m API] Success! Bybit Order Placed. Order ID: {bybit_order_id}")
+                                                    
+                                                    # Place scale-out limit order on Bybit immediately
+                                                    limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
+                                                    limit_price = entry_price + 0.6 * atr_dollars if ml_trend == "Bullish" else entry_price - 0.6 * atr_dollars
+                                                    limit_qty_str = format_bybit_qty(symbol, raw_qty * 0.5)
+                                                    
+                                                    print(f"[{symbol} {iv}m API] Placing scale-out limit order for {limit_qty_str} at ${limit_price:.4f}...")
+                                                    limit_res = place_bybit_limit_order(symbol, limit_side, limit_qty_str, limit_price)
+                                                    bybit_scale_out_order_id = None
+                                                    if limit_res.get("retCode") == 0:
+                                                        bybit_scale_out_order_id = limit_res.get("result", {}).get("orderId")
+                                                        print(f"[{symbol} {iv}m API] Scale-out limit order placed successfully. Order ID: {bybit_scale_out_order_id}")
+                                                    else:
+                                                        print(f"[{symbol} {iv}m API WARNING] Failed to place scale-out limit order: {limit_res.get('retMsg')} (but keeping trade open)")
+                                                else:
+                                                    bybit_success = False
+                                                    status_msg = "Skipped (Bybit Order Error)"
+                                                    print(f"[{symbol} {iv}m API ERROR] Failed to place order: {order_res.get('retMsg')} (code: {order_res.get('retCode')})")
+                                            else:
+                                                bybit_success = False
+                                                status_msg = "Skipped (Bybit Leverage Error)"
+
+                                        if bybit_success:
+                                            active_trade = {
+                                                "trade_id": f"{symbol}_{trade_uuid}",
+                                                "bybit_order_id": bybit_order_id,
+                                                "bybit_scale_out_order_id": bybit_scale_out_order_id,
+                                                "symbol": symbol,
+                                                "entry_price": float(entry_price),
+                                                "predicted_price": float(predicted_price),
+                                                "stop_loss": float(stop_loss_price),
+                                                "take_profit": float(take_profit_price),
+                                                "direction": str(ml_trend),
+                                                "end_time": float(time.time() + duration_seconds),
+                                                "atr_dollars": float(atr_dollars),
+                                                "highest_price": float(entry_price),
+                                                "lowest_price": float(entry_price),
+                                                "break_even_triggered": False,
+                                                "half_closed": False,
+                                                "original_size": float(position_size_usd),
+                                                "position_size_usd": float(position_size_usd),
+                                                "scaled_out_pnl": 0.0,
+                                                "kelly_fraction": float(kelly_fraction),
+                                                "leverage": float(leverage_val),
+                                                "confidence": float(calibrated_confidence),
+                                                "qty": qty_val
+                                            }
+                                            active_trades_list.append(active_trade)
+                                            bot_state[active_trade_key] = active_trades_list
+                                            
+                                            # Deduct size from wallet balance immediately
+                                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
+                                            
+                                            print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
+                                            print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x (New Balance: ${bot_state['simulated_balance']:.2f})\n")
                                 else:
                                     status_msg = "Skipped (Confluence Failed)"
                                     failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
