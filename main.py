@@ -613,6 +613,8 @@ def run_bybit_balance_updater():
         with _balance_lock:
             _cached_balance = val
             _last_balance_fetch = time.time()
+        if TRADE_MODE != "simulation" and isinstance(val, (int, float)) and val > 0:
+            bot_state["simulated_balance"] = val
         print(f"[Bybit Balance] Startup background update success: {val}")
     except Exception as e:
         print(f"[Bybit Balance] Startup background update error: {e}")
@@ -624,6 +626,8 @@ def run_bybit_balance_updater():
             with _balance_lock:
                 _cached_balance = val
                 _last_balance_fetch = time.time()
+            if TRADE_MODE != "simulation" and isinstance(val, (int, float)) and val > 0:
+                bot_state["simulated_balance"] = val
         except Exception as e:
             print(f"[Bybit Balance] Error in background balance update: {e}")
 
@@ -712,9 +716,48 @@ def force_close_trade():
         live_symbol_price = bot_state.get(f"live_price_{symbol}")
     actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
     
+    # 1. Close position on Bybit if in live/testnet mode
+    bybit_exit_price = None
+    bybit_realized_pnl = None
+    
+    if TRADE_MODE != "simulation" and trade_to_close.get("bybit_order_id"):
+        # Cancel scale-out limit order if it exists
+        scale_out_id = trade_to_close.get("bybit_scale_out_order_id")
+        if scale_out_id:
+            cancel_payload = {
+                "category": "linear",
+                "symbol": symbol,
+                "orderId": scale_out_id
+            }
+            bybit_post_request("/v5/order/cancel", cancel_payload)
+            print(f"[Bybit API] Canceled scale-out limit order {scale_out_id} for {symbol}.")
+            
+        # Close position
+        pos = get_bybit_position(symbol)
+        if pos:
+            qty_str = pos.get("size", "0")
+            qty_val = float(qty_str)
+            if qty_val > 0:
+                side = "Sell" if direction == "Bullish" else "Buy"
+                print(f"[Bybit API] Placing Market close order for {qty_str} {symbol}...")
+                close_res = place_bybit_order(
+                    symbol=symbol,
+                    side=side,
+                    qty=qty_str
+                )
+                if close_res.get("retCode") == 0:
+                    print(f"[Bybit API] Successfully closed position for {symbol} on Bybit.")
+                    # Fetch execution log to get exact exit metrics
+                    exec_log = get_bybit_last_execution(symbol)
+                    if exec_log:
+                        bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
+                        bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
+                else:
+                    print(f"[Bybit API Error] Failed to close position on Bybit: {close_res.get('retMsg')}")
+
     # Maker execution: zero slippage on limit close
     slippage_pct = 0.0
-    actual_price = actual_exit_price
+    actual_price = bybit_exit_price if bybit_exit_price is not None else actual_exit_price
         
     actual_change = actual_price - entry_price
     actual_change_pct = (actual_change / entry_price) * 100
@@ -723,13 +766,22 @@ def force_close_trade():
     leverage = trade_to_close.get("leverage", 1.0)
     net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
     realized_pnl = position_size_usd * (net_return_pct / 100.0)
+    
+    if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
+        realized_pnl = bybit_realized_pnl
+        net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
+        
     if realized_pnl < -position_size_usd:
         realized_pnl = -position_size_usd
         net_return_pct = -100.0
     
-    old_bal = bot_state.get("simulated_balance", 80.0)
-    new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
-    bot_state["simulated_balance"] = new_bal
+    # Update simulated balance (only in simulation)
+    if TRADE_MODE == "simulation":
+        old_bal = bot_state.get("simulated_balance", 80.0)
+        new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
+        bot_state["simulated_balance"] = new_bal
+    else:
+        new_bal = bot_state.get("simulated_balance", 0.0)
     
     actual_trend = "Bullish" if actual_change > 0 else "Bearish"
     signal_correct = (actual_trend == direction)
@@ -816,9 +868,48 @@ def close_all_trades_internal(exit_reason):
                 live_symbol_price = bot_state.get(f"live_price_{symbol}")
             actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
             
+            # 1. Close position on Bybit if in live/testnet mode
+            bybit_exit_price = None
+            bybit_realized_pnl = None
+            
+            if TRADE_MODE != "simulation" and t.get("bybit_order_id"):
+                # Cancel scale-out limit order if it exists
+                scale_out_id = t.get("bybit_scale_out_order_id")
+                if scale_out_id:
+                    cancel_payload = {
+                        "category": "linear",
+                        "symbol": symbol,
+                        "orderId": scale_out_id
+                    }
+                    bybit_post_request("/v5/order/cancel", cancel_payload)
+                    print(f"[Bybit API] Canceled scale-out limit order {scale_out_id} for {symbol}.")
+                    
+                # Close position
+                pos = get_bybit_position(symbol)
+                if pos:
+                    qty_str = pos.get("size", "0")
+                    qty_val = float(qty_str)
+                    if qty_val > 0:
+                        side = "Sell" if direction == "Bullish" else "Buy"
+                        print(f"[Bybit API] Placing Market close order for {qty_str} {symbol}...")
+                        close_res = place_bybit_order(
+                            symbol=symbol,
+                            side=side,
+                            qty=qty_str
+                        )
+                        if close_res.get("retCode") == 0:
+                            print(f"[Bybit API] Successfully closed position for {symbol} on Bybit.")
+                            # Fetch execution log to get exact exit metrics
+                            exec_log = get_bybit_last_execution(symbol)
+                            if exec_log:
+                                bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
+                                bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
+                        else:
+                            print(f"[Bybit API Error] Failed to close position on Bybit: {close_res.get('retMsg')}")
+
             # Maker execution: zero slippage on limit close
             slippage_pct = 0.0
-            actual_price = actual_exit_price
+            actual_price = bybit_exit_price if bybit_exit_price is not None else actual_exit_price
                 
             actual_change = actual_price - entry_price
             actual_change_pct = (actual_change / entry_price) * 100 if entry_price > 0 else 0.0
@@ -827,13 +918,22 @@ def close_all_trades_internal(exit_reason):
             leverage = t.get("leverage", 1.0)
             net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
             realized_pnl = position_size_usd * (net_return_pct / 100.0)
+            
+            if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
+                realized_pnl = bybit_realized_pnl
+                net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
+                
             if realized_pnl < -position_size_usd:
                 realized_pnl = -position_size_usd
                 net_return_pct = -100.0
             
-            old_bal = bot_state.get("simulated_balance", 80.0)
-            new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
-            bot_state["simulated_balance"] = new_bal
+            # Update simulated balance (only in simulation)
+            if TRADE_MODE == "simulation":
+                old_bal = bot_state.get("simulated_balance", 80.0)
+                new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
+                bot_state["simulated_balance"] = new_bal
+            else:
+                new_bal = bot_state.get("simulated_balance", 0.0)
             
             actual_trend = "Bullish" if actual_change > 0 else "Bearish"
             signal_correct = (actual_trend == direction)
@@ -919,8 +1019,13 @@ def reset_circuit_breaker():
 def clear_history_endpoint():
     bot_state["trade_history"] = []
     bot_state["prediction_history"] = []
-    bot_state["simulated_balance"] = 80.0
-    bot_state["daily_drawdown_start_balance"] = 80.0
+    if TRADE_MODE == "simulation":
+        bot_state["simulated_balance"] = 80.0
+        bot_state["daily_drawdown_start_balance"] = 80.0
+    else:
+        real_bal = get_real_bybit_balance_cached() or 0.0
+        bot_state["simulated_balance"] = real_bal
+        bot_state["daily_drawdown_start_balance"] = real_bal
     bot_state["circuit_breaker_active"] = False
     for tf_key in ["60", "120", "240", "360"]:
         bot_state["win_rate_by_tf"][tf_key] = None
@@ -2842,8 +2947,9 @@ def main():
                         # Save scaled out pnl
                         active_trade["scaled_out_pnl"] = pnl_usd
                         
-                        # Refund closed size + PnL to wallet balance
-                        bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
+                        # Refund closed size + PnL to wallet balance (only in simulation)
+                        if TRADE_MODE == "simulation":
+                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
                         
                         # Update position details
                         position_size_usd = remaining_size
@@ -2879,8 +2985,9 @@ def main():
                         # Save scaled out pnl
                         active_trade["scaled_out_pnl"] = pnl_usd
                         
-                        # Refund closed size + PnL to wallet balance
-                        bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
+                        # Refund closed size + PnL to wallet balance (only in simulation)
+                        if TRADE_MODE == "simulation":
+                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
                         
                         # Update position details
                         position_size_usd = remaining_size
@@ -2973,10 +3080,13 @@ def main():
                     total_pnl = round(realized_pnl + scaled_out_pnl, 2)
                     total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
                     
-                    # Update simulated balance
-                    old_bal = bot_state.get("simulated_balance", 80.0)
-                    new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
-                    bot_state["simulated_balance"] = new_bal
+                    # Update simulated balance (only in simulation)
+                    if TRADE_MODE == "simulation":
+                        old_bal = bot_state.get("simulated_balance", 80.0)
+                        new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
+                        bot_state["simulated_balance"] = new_bal
+                    else:
+                        new_bal = bot_state.get("simulated_balance", 0.0)
                     
                     actual_trend = "Bullish" if actual_change > 0 else "Bearish"
                     signal_correct = (actual_trend == direction)
@@ -3645,8 +3755,9 @@ def main():
                                             active_trades_list.append(active_trade)
                                             bot_state[active_trade_key] = active_trades_list
                                             
-                                            # Deduct size from wallet balance immediately
-                                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
+                                            # Deduct size from wallet balance immediately (only in simulation)
+                                            if TRADE_MODE == "simulation":
+                                                bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
                                             
                                             print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
                                             print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x (New Balance: ${bot_state['simulated_balance']:.2f})\n")
