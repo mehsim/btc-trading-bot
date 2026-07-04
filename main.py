@@ -3276,6 +3276,13 @@ def main():
                                         else:
                                             lev_cap = 15.0
                                             
+                                        # Double leverage target and cap during Golden Hour (02:00 AM - 04:00 AM PKT)
+                                        current_hour_pkt = get_pkt_time().hour
+                                        if 2 <= current_hour_pkt < 4:
+                                            leverage_val *= 2.0
+                                            lev_cap *= 2.0
+                                            print(f"[{symbol} {iv}m Golden Hour Boost] 02:00 - 04:00 AM PKT: Doubled leverage target to {leverage_val:.1f}x and cap to {lev_cap:.1f}x")
+                                            
                                         leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
                                         lookahead = 10
