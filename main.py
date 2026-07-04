@@ -515,85 +515,55 @@ def get_bybit_last_execution(symbol):
     return None
 
 def get_real_bybit_balance():
-    import os
-    import hmac
-    import hashlib
-    import time
-    import requests
-    
     api_key = os.getenv("BYBIT_API_KEY", "")
     api_secret = os.getenv("BYBIT_API_SECRET", "")
     
     if not api_key or not api_secret:
         return "API_KEYS_MISSING"
         
-    offset = get_bybit_time_offset()
-    timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "30000"
-    
     max_balance = 0.0
     geo_blocked_encountered = False
     
     for account_type in ["UNIFIED", "CONTRACT", "SPOT", "FUND"]:
         if account_type == "FUND":
-            query_string = "accountType=FUND"
-            url = f"{BYBIT_BASE_URL}/v5/asset/transfer/query-account-coins-balance?{query_string}"
+            res = bybit_get_request("/v5/asset/transfer/query-account-coins-balance", {"accountType": "FUND"})
         else:
-            query_string = f"accountType={account_type}"
-            url = f"{BYBIT_BASE_URL}/v5/account/wallet-balance?{query_string}"
+            res = bybit_get_request("/v5/account/wallet-balance", {"accountType": account_type})
             
-        val_str = timestamp + api_key + recv_window + query_string
-        sign = hmac.new(
-            api_secret.encode("utf-8"),
-            val_str.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
-        
-        headers = {
-            "X-BAPI-API-KEY": api_key,
-            "X-BAPI-SIGN": sign,
-            "X-BAPI-TIMESTAMP": timestamp,
-            "X-BAPI-RECV-WINDOW": recv_window,
-            "Content-Type": "application/json"
-        }
-        
-        try:
-            resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                ret_code = data.get("retCode")
-                if ret_code == 0:
-                    if account_type == "FUND":
-                        balances = data.get("result", {}).get("balance", [])
-                        fund_sum = 0.0
-                        for b_item in balances:
-                            coin_name = b_item.get("coin", "")
-                            coin_bal = float(b_item.get("walletBalance", "0"))
-                            if coin_name in ["USDT", "USDC"]:
-                                fund_sum += coin_bal
-                            elif coin_name == "BTC":
-                                fund_sum += coin_bal * float(get_fallback_price("BTCUSDT") or 60000.0)
-                            elif coin_name == "ETH":
-                                fund_sum += coin_bal * float(get_fallback_price("ETHUSDT") or 33000.0)
-                            elif coin_name == "SOL":
-                                fund_sum += coin_bal * float(get_fallback_price("SOLUSDT") or 140.0)
-                        max_balance = max(max_balance, fund_sum)
-                    else:
-                        list_data = data.get("result", {}).get("list", [])
-                        if list_data:
-                            total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
-                            max_balance = max(max_balance, float(total_equity))
-                else:
-                    # Ignore the expected errors (Code 10001/10003) for legacy account types on Unified Accounts to avoid log clutter
-                    if not (ret_code in [10001, 10003] and account_type in ["SPOT", "CONTRACT", "FUND"]):
-                        print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {data.get('retMsg')}")
+        ret_code = res.get("retCode")
+        if ret_code == 0:
+            if account_type == "FUND":
+                balances = res.get("result", {}).get("balance", [])
+                fund_sum = 0.0
+                for b_item in balances:
+                    coin_name = b_item.get("coin", "")
+                    coin_bal = float(b_item.get("walletBalance", "0"))
+                    if coin_name in ["USDT", "USDC"]:
+                        fund_sum += coin_bal
+                    elif coin_name == "BTC":
+                        fund_sum += coin_bal * float(get_fallback_price("BTCUSDT") or 60000.0)
+                    elif coin_name == "ETH":
+                        fund_sum += coin_bal * float(get_fallback_price("ETHUSDT") or 33000.0)
+                    elif coin_name == "SOL":
+                        fund_sum += coin_bal * float(get_fallback_price("SOLUSDT") or 140.0)
+                max_balance = max(max_balance, fund_sum)
             else:
-                print(f"[Bybit Balance] HTTP {resp.status_code} for {account_type}: {resp.text}")
-                if resp.status_code == 403 and ("cloudfront" in resp.text.lower() or "block" in resp.text.lower()):
+                list_data = res.get("result", {}).get("list", [])
+                if list_data:
+                    total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
+                    max_balance = max(max_balance, float(total_equity))
+        else:
+            ret_msg = res.get("retMsg", "")
+            # If the response is HTTP error (retCode is HTTP status code)
+            if isinstance(ret_code, int) and ret_code >= 400:
+                print(f"[Bybit Balance] HTTP {ret_code} for {account_type}: {ret_msg}")
+                if ret_code == 403 and ("cloudfront" in ret_msg.lower() or "block" in ret_msg.lower()):
                     geo_blocked_encountered = True
-        except Exception as e:
-            print(f"[Bybit Balance] Exception during {account_type} fetch: {e}")
-            
+            else:
+                # Suppress legacy warnings (10001, 10003) for Unified accounts
+                if not (ret_code in [10001, 10003] and account_type in ["SPOT", "CONTRACT", "FUND"]):
+                    print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {ret_msg}")
+                    
     if max_balance > 0.0:
         return max_balance
     if geo_blocked_encountered:
