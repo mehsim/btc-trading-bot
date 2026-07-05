@@ -12,8 +12,11 @@ def get_bybit_proxies():
         }
     return None
 
+TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
+BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
+
 def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
-    url = "https://api.bybit.com/v5/market/kline"
+    url = f"{BYBIT_BASE_URL}/v5/market/kline"
     all_data = []
     
     current_end = None
@@ -181,7 +184,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     return df
 
 def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
-    url = "https://api.bybit.com/v5/market/open-interest"
+    url = f"{BYBIT_BASE_URL}/v5/market/open-interest"
     interval_time = "1h"
     if str(interval) == "5":
         interval_time = "5min"
@@ -237,7 +240,7 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
     return df_oi
 
 def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
-    url = "https://api.bybit.com/v5/market/funding/history"
+    url = f"{BYBIT_BASE_URL}/v5/market/funding/history"
     funding_data = []
     current_end = int(end_ts_ms) if end_ts_ms else int(time.time() * 1000)
     for page in range(50):
