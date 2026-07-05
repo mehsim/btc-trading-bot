@@ -1,11 +1,1 @@
-{
-  "simulated_balance": 80.0,
-  "trade_history": [],
-  "prediction_history": [],
-  "active_trade_1h": [],
-  "active_trade_2h": [],
-  "active_trade_4h": [],
-  "active_trade_6h": [],
-  "bot_running": true,
-  "fresh_reset_v3": true
-}
+{"simulated_balance": 72440.90686683, "trade_history": [], "prediction_history": [{"symbol": "BTCUSDT", "timestamp": 1783241919.93436, "candle_timestamp": 1783234800000, "interval": "60", "direction": "Bearish", "ref_price": 63020.3, "predicted_change": -206.8296908908025, "predicted_price": 62813.4703091092, "status": "Skipped (Confluence Failed)", "evaluation": {"evaluated": false, "exit_price": null, "change": null, "change_pct": null, "success": null}}, {"symbol": "BTCUSDT", "timestamp": 1783241920.443702, "candle_timestamp": 1783231200000, "interval": "120", "direction": "Bullish", "ref_price": 63020.3, "predicted_change": 373.46054621111097, "predicted_price": 63393.76054621112, "status": "Skipped (Confluence Failed)", "evaluation": {"evaluated": false, "exit_price": null, "change": null, "change_pct": null, "success": null}}, {"symbol": "BTCUSDT", "timestamp": 1783241920.469263, "candle_timestamp": 1783224000000, "interval": "240", "direction": "Bullish", "ref_price": 63020.3, "predicted_change": 230.0082772108067, "predicted_price": 63250.30827721081, "status": "Skipped (Low Confidence)", "evaluation": {"evaluated": false, "exit_price": null, "change": null, "change_pct": null, "success": null}}, {"symbol": "BTCUSDT", "timestamp": 1783241920.4846988, "candle_timestamp": 1783209600000, "interval": "360", "direction": "Bullish", "ref_price": 62742.4, "predicted_change": -282.32527127163416, "predicted_price": 62460.07472872837, "status": "Skipped (Contradiction)", "evaluation": {"evaluated": false, "exit_price": null, "change": null, "change_pct": null, "success": null}}, {"symbol": "BTCUSDT", "timestamp": 1783243686.406511, "candle_timestamp": 1783238400000, "interval": "60", "direction": "Bearish", "ref_price": 62868.6, "predicted_change": -374.26852792255596, "predicted_price": 62494.33147207744, "status": "Skipped (Confluence Failed)", "evaluation": {"evaluated": false, "exit_price": null, "change": null, "change_pct": null, "success": null}}], "active_trade_1h": [], "active_trade_2h": [], "active_trade_4h": [], "active_trade_6h": [], "bot_running": true, "fresh_reset_v3": true}

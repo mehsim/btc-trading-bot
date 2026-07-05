@@ -1305,24 +1305,27 @@ def run_fallback_price_updater():
     """
     Periodic thread that queries Bybit REST API for spot prices.
     Acts as a failover if WebSocket is geoblocked or disconnected.
-    Uses adaptive polling intervals (1 min if active trades exist, 5 min if idle)
-    to minimize proxy bandwidth consumption.
+    Also ensures symbols not pushed by WebSocket (e.g. missing testnet symbols) are periodically updated.
     """
     global live_price, last_ws_update_time
     print("[Price Fallback] Background updater thread started.")
+    last_fallback_run = 0.0
     while True:
         try:
             # Check if there are active trades to monitor
             has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
             sleep_time = 60 if has_active_trades else 300
             
-            # If WebSocket hasn't updated in the last (sleep_time * 1.5) seconds, query REST ticker
-            if (time.time() - last_ws_update_time) > (sleep_time * 1.5):
+            now = time.time()
+            # Run fallback REST update if websocket is stale OR if it's been more than 5 minutes since last run
+            if (now - last_ws_update_time > sleep_time * 1.5) or (now - last_fallback_run > 300):
+                last_fallback_run = now
                 url = f"{BYBIT_BASE_URL}/v5/market/tickers"
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
                 resp = requests.get(url, params={"category": "spot"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+                found_symbols = set()
                 if resp.status_code == 200:
                     data = resp.json()
                     ticker_list = data.get("result", {}).get("list", [])
@@ -1333,15 +1336,28 @@ def run_fallback_price_updater():
                             if val_str:
                                 val = float(val_str)
                                 bot_state[f"live_price_{sym}"] = val
+                                found_symbols.add(sym)
                                 if sym == "BTCUSDT":
                                     live_price = val
                                     bot_state["live_price"] = val
                                     bot_state["last_update"] = time.time()
+                                    if now - last_ws_update_time > sleep_time * 1.5:
+                                        last_ws_update_time = time.time()
+                
+                # Update any missing symbols from external API fallback (Binance)
+                for sym in SUPPORTED_SYMBOLS:
+                    if sym not in found_symbols:
+                        val = get_fallback_price(sym)
+                        if val is not None:
+                            bot_state[f"live_price_{sym}"] = val
+                            if sym == "BTCUSDT":
+                                live_price = val
+                                bot_state["live_price"] = val
+                                bot_state["last_update"] = time.time()
+                                if now - last_ws_update_time > sleep_time * 1.5:
                                     last_ws_update_time = time.time()
-                else:
-                    pass
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Price Fallback Exception] {e}")
         
         # Recalculate sleep time dynamically in case trade state changed during API call
         has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
@@ -1430,32 +1446,42 @@ def on_message(ws, message):
                     bot_state["live_price"] = val
                     last_ws_update_time = time.time()
                     bot_state["last_update"] = last_ws_update_time
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WebSocket msg exception] {e}")
 
 def on_open(ws):
     print("Connected to Bybit WebSocket for multi-asset prices")
-    ws.send(json.dumps({
-        "op": "subscribe",
-        "args": [f"tickers.{s}" for s in SUPPORTED_SYMBOLS]
-    }))
+    # Bybit public websocket ticker subscription allows at most 10 arguments per subscription message
+    chunk_size = 10
+    args = [f"tickers.{s}" for s in SUPPORTED_SYMBOLS]
+    for i in range(0, len(args), chunk_size):
+        chunk = args[i:i + chunk_size]
+        ws.send(json.dumps({
+            "op": "subscribe",
+            "args": chunk
+        }))
 
 def on_close(ws, close_status_code, close_msg):
-    pass
+    print(f"[WebSocket Closed] code={close_status_code}, msg={close_msg}")
+
+def on_error(ws, error):
+    print(f"[WebSocket Error] {error}")
 
 def start_ws():
     url = BYBIT_WS_URL
+    print(f"[WebSocket Connecting] url={url}")
     while True:
         try:
             ws = websocket.WebSocketApp(
                 url,
                 on_open=on_open,
                 on_message=on_message,
+                on_error=on_error,
                 on_close=on_close
             )
             ws.run_forever(ping_interval=20, ping_timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WebSocket run_forever exception] {e}")
         time.sleep(3)
 
 # WebSocket thread is started inside if __name__ == "__main__" block at the bottom
@@ -2675,7 +2701,11 @@ def get_fallback_price(symbol=SYMBOL):
         response = requests.get(url, params={"category": "spot", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
         if response.status_code == 200:
             res = response.json()
-            return float(res["result"]["list"][0]["lastPrice"])
+            ticker_list = res.get("result", {}).get("list", [])
+            if ticker_list:
+                return float(ticker_list[0]["lastPrice"])
+            else:
+                print(f"Bybit price ticker list is empty for {symbol}")
         else:
             print(f"Bybit price ticker for {symbol} returned HTTP {response.status_code}")
     except Exception as e:
@@ -2702,12 +2732,54 @@ def get_fallback_price(symbol=SYMBOL):
     except Exception as e:
         print(f"Error fetching Binance price fallback for {symbol}: {e}")
 
-    return None
+def load_initial_prices():
+    global live_price, last_ws_update_time
+    print("[Startup] Loading initial market prices for all assets...")
+    try:
+        url = f"{BYBIT_BASE_URL}/v5/market/tickers"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(url, params={"category": "spot"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+        found_symbols = set()
+        if resp.status_code == 200:
+            ticker_list = resp.json().get("result", {}).get("list", [])
+            for ticker in ticker_list:
+                sym = ticker.get("symbol")
+                if sym in SUPPORTED_SYMBOLS:
+                    val_str = ticker.get("lastPrice")
+                    if val_str:
+                        val = float(val_str)
+                        bot_state[f"live_price_{sym}"] = val
+                        found_symbols.add(sym)
+                        if sym == "BTCUSDT":
+                            live_price = val
+                            bot_state["live_price"] = val
+                            last_ws_update_time = time.time()
+                            bot_state["last_update"] = last_ws_update_time
+        
+        # Fall back to external sources (Binance/Coinbase) for any missing symbols (e.g. LINKUSDT on testnet)
+        for sym in SUPPORTED_SYMBOLS:
+            if sym not in found_symbols:
+                val = get_fallback_price(sym)
+                if val is not None:
+                    bot_state[f"live_price_{sym}"] = val
+                    if sym == "BTCUSDT" and live_price is None:
+                        live_price = val
+                        bot_state["live_price"] = val
+                        last_ws_update_time = time.time()
+                        bot_state["last_update"] = last_ws_update_time
+    except Exception as e:
+        print(f"[Initial Prices] Error loading prices at startup: {e}")
 
 def main():
     global live_price, last_ws_update_time
     load_history()
     print(f"{SYMBOL} LIVE BOT RUNNING...")
+    
+    # Pre-load initial prices for all supported symbols
+    load_initial_prices()
+
     print("Connecting to WebSocket and waiting for initial price...")
 
     startup_timeout = 5
