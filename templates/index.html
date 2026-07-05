@@ -1414,7 +1414,7 @@
         let activeTimeframeFilter = 'all'; // 'all', '60', '120', '240', '360'
         let activeConfluenceTimeframe = '1h'; // default to 1H
         let activeTradesState = {};
-        let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null, SUI: null, APT: null, DOT: null};
+        let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null, AVAX: null, NEAR: null, LINK: null, LTC: null, DOGE: null, SUI: null, APT: null, DOT: null};
         let globalDataCache = null;
 
         function setConfluenceTimeframe(tf, element) {
@@ -1873,12 +1873,14 @@
                             })}`;
                             
                             const prevVal = lastPrices[sym];
-                            if (prevVal !== null) {
+                            if (prevVal !== null && prevVal !== undefined) {
                                 if (val > prevVal) {
                                     elem.style.color = "var(--accent-green)";
                                 } else if (val < prevVal) {
                                     elem.style.color = "var(--accent-red)";
                                 }
+                            } else {
+                                elem.style.color = "var(--accent-green)";
                             }
                             lastPrices[sym] = val;
                         }
