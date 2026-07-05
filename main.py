@@ -3590,19 +3590,19 @@ def main():
                                         # Option A: Split total account value (balance + active positions) into 5 slots to allow up to 5 concurrent positions
                                         account_value = current_bal + total_active_size
                                         golden_target = account_value / 5.0
-                                        # Clamp between $10 and $15 for Golden Hour
-                                        position_size_usd = max(10.0, min(15.0, golden_target))
-                                        position_size_usd = max(10.0, min(15.0, position_size_usd * cov_multiplier))
+                                        # Clamp between $2000 and $3000 for Golden Hour
+                                        position_size_usd = max(2000.0, min(3000.0, golden_target))
+                                        position_size_usd = max(2000.0, min(3000.0, position_size_usd * cov_multiplier))
                                         print(f"[{iv}m Golden Hour Sizing] Target: ${position_size_usd:.2f} (Split-slot sizing of total ${account_value:.2f} account value)")
                                     else:
-                                        # Regular Hours Sizing ($15 - $25)
+                                        # Regular Hours Sizing ($2000 - $3000)
                                         if c_prob < 0.60:
-                                            position_size_usd = 15.0
+                                            position_size_usd = 2000.0
                                         elif c_prob <= 0.75:
-                                            position_size_usd = 20.0
+                                            position_size_usd = 2500.0
                                         else:
-                                            position_size_usd = 25.0
-                                        position_size_usd = max(15.0, min(25.0, position_size_usd * cov_multiplier))
+                                            position_size_usd = 3000.0
+                                        position_size_usd = max(2000.0, min(3000.0, position_size_usd * cov_multiplier))
                                         print(f"[{iv}m Calibrated Sizing] Calibrated Conf: {calibrated_confidence*100:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                     # Calculate Kelly parameters for logs and metadata
@@ -3611,8 +3611,8 @@ def main():
                                     kelly_fraction = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
 
                                     # Ensure total size of active trades does not exceed the wallet balance
-                                    min_bal_limit = 10.0 if is_golden_hour else 20.0
-                                    min_size_limit = 10.0 if is_golden_hour else 15.0
+                                    min_bal_limit = 2000.0
+                                    min_size_limit = 2000.0
                                     
                                     wallet_exceeded = False
                                     if current_bal <= min_bal_limit:
