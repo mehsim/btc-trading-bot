@@ -761,8 +761,10 @@ def force_close_trade():
     
     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
     leverage = trade_to_close.get("leverage", 1.0)
-    net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
-    realized_pnl = position_size_usd * (net_return_pct / 100.0)
+    gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
+    taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker fee per side on leveraged size
+    realized_pnl = gross_pnl - taker_fee_cost
+    net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
     
     if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
         realized_pnl = bybit_realized_pnl
@@ -913,8 +915,10 @@ def close_all_trades_internal(exit_reason):
             
             raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
             leverage = t.get("leverage", 1.0)
-            net_return_pct = (raw_return_pct * leverage) - 0.04  # 0.04% maker roundtrip fee
-            realized_pnl = position_size_usd * (net_return_pct / 100.0)
+            gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
+            taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker fee per side on leveraged size
+            realized_pnl = gross_pnl - taker_fee_cost
+            net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
             
             if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
                 realized_pnl = bybit_realized_pnl
@@ -2487,8 +2491,6 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         latest_vol = vol_series.iloc[-2]
         rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
         volume_pass = (rvol >= 1.0)
-        if not volume_pass:
-            hard_gate_failed = True
         results["Volume_Confirmation"] = {
             "pass": volume_pass,
             "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.0x",
@@ -2614,12 +2616,15 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     is_opposed = (ml_trend == "Bullish" and news_sentiment == "Bearish") or (ml_trend == "Bearish" and news_sentiment == "Bullish")
     news_pass = not is_opposed
     if is_opposed:
-        hard_gate_failed = True
-        detail_msg = f"Blocked (Hard Direction Lock: Model is {ml_trend} but News sentiment is {news_sentiment})"
+        detail_msg = f"News Conflict: Model is {ml_trend} but News sentiment is {news_sentiment}"
     else:
         detail_msg = f"Passed (Direction Lock: Model is {ml_trend}, News sentiment is {news_sentiment})"
         
-    results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": 0}
+    weight_news = 1
+    results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": weight_news}
+    max_score += weight_news
+    if news_pass:
+        total_score += weight_news
 
     # ======= CHECK 12: Expected Price Change Threshold (Weight: 2) =======
     weight_exp = 2
@@ -2717,7 +2722,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
     
     # Standardize confluence threshold to flat 80% for consistent accuracy across all market regimes
-    score_threshold = 80.0
+    score_threshold = 70.0
         
     approved = (not hard_gate_failed) and (score_pct >= score_threshold)
 
@@ -2937,6 +2942,11 @@ def main():
                         if qty_val == 0:
                             bybit_closed = True
                         else:
+                            # Store Bybit's real unrealized PnL for accurate dashboard display
+                            try:
+                                active_trade["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
+                            except (ValueError, TypeError):
+                                pass
                             # Detect scale-out fill
                             original_qty = active_trade.get("qty", 0.0)
                             if original_qty > 0 and qty_val <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
@@ -3028,9 +3038,9 @@ def main():
                     if TRADE_MODE != "simulation":
                         trigger_scale_out = bybit_scaled_out
                     else:
-                        if direction == "Bullish" and current_price >= entry_price + 0.6 * atr_dollars:
+                        if direction == "Bullish" and current_price >= entry_price + 1.0 * atr_dollars:
                             trigger_scale_out = True
-                        elif direction == "Bearish" and current_price <= entry_price - 0.6 * atr_dollars:
+                        elif direction == "Bearish" and current_price <= entry_price - 1.0 * atr_dollars:
                             trigger_scale_out = True
 
                 if trigger_scale_out and not half_closed:
@@ -3043,10 +3053,12 @@ def main():
                         closed_size = round(position_size_usd * 0.5, 2)
                         remaining_size = round(position_size_usd - closed_size, 2)
                         
-                        # Calculate profit on closed half (use standard Taker fee on exit)
+                        # Calculate profit on closed half (correct taker fee on leveraged size)
                         raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
-                        net_return_pct = (raw_return_pct * active_trade.get("leverage", 1.0)) - 0.08
-                        pnl_usd = round(closed_size * (net_return_pct / 100.0), 2)
+                        lev = active_trade.get("leverage", 1.0)
+                        gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
+                        taker_fee_cost = closed_size * lev * 0.00055  # exit side only
+                        pnl_usd = round(gross_pnl - taker_fee_cost, 2)
                         if pnl_usd < -closed_size:
                             pnl_usd = -closed_size
                             net_return_pct = -100.0
@@ -3081,10 +3093,12 @@ def main():
                         closed_size = round(position_size_usd * 0.5, 2)
                         remaining_size = round(position_size_usd - closed_size, 2)
                         
-                        # Calculate profit on closed half (use standard Taker fee on exit)
+                        # Calculate profit on closed half (correct taker fee on leveraged size)
                         raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
-                        net_return_pct = (raw_return_pct * active_trade.get("leverage", 1.0)) - 0.08
-                        pnl_usd = round(closed_size * (net_return_pct / 100.0), 2)
+                        lev = active_trade.get("leverage", 1.0)
+                        gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
+                        taker_fee_cost = closed_size * lev * 0.00055  # exit side only
+                        pnl_usd = round(gross_pnl - taker_fee_cost, 2)
                         if pnl_usd < -closed_size:
                             pnl_usd = -closed_size
                             net_return_pct = -100.0
@@ -3140,11 +3154,7 @@ def main():
                     if current_time >= end_time and not half_closed:
                         lookahead = 10
                         exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
-                    
-                    # Flat-Market Time-Based Exit (after 6 candles instead of 10)
-                    elapsed_sec = current_time - (end_time - int(iv) * 60.0 * 10)
-                    if elapsed_sec >= int(iv) * 60.0 * 6 and not half_closed and exit_reason is None:
-                        exit_reason = f"TIME EXPIRED (6-CANDLE FLAT MARKET GATE)"
+
 
                 if exit_reason is not None:
                     # Maker vs Taker execution logic
@@ -3168,11 +3178,13 @@ def main():
                     actual_change = actual_price - entry_price
                     actual_change_pct = (actual_change / entry_price) * 100
                     
-                    # Calculate PnL (long vs short) and simulated fees with leverage
+                    # Calculate PnL (long vs short) with correct taker fees on leveraged size
                     raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
                     leverage = active_trade.get("leverage", 1.0)
-                    net_return_pct = (raw_return_pct * leverage) - fee_rate_roundtrip
-                    realized_pnl = position_size_usd * (net_return_pct / 100.0)
+                    gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
+                    taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker per side on leveraged size
+                    realized_pnl = gross_pnl - taker_fee_cost
+                    net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
                     if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
                         realized_pnl = bybit_realized_pnl
                         net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
@@ -3682,7 +3694,7 @@ def main():
                                     print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
                                     # Align stop loss and take profit multipliers dynamically based on ADX regime
-                                    sl_multiplier = 0.80
+                                    sl_multiplier = 1.20
                                     tp_multiplier_adjusted = 2.50 if latest_candle["ADX"] >= 20.0 else 1.50
                                     print(f"[{iv}m Target Alignment] Aligned multipliers with ML training: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
                                     
@@ -3813,9 +3825,18 @@ def main():
                                                     bybit_order_id = order_res.get("result", {}).get("orderId")
                                                     print(f"[{symbol} {iv}m API] Success! Bybit Order Placed. Order ID: {bybit_order_id}")
                                                     
+                                                    # Query actual fill price from execution log
+                                                    time.sleep(0.5)  # Brief delay for fill to register
+                                                    fill_exec = get_bybit_last_execution(symbol)
+                                                    if fill_exec:
+                                                        actual_fill_price = float(fill_exec.get("execPrice", entry_price))
+                                                        if actual_fill_price > 0:
+                                                            entry_price = actual_fill_price
+                                                            print(f"[{symbol} {iv}m API] Actual fill price: ${entry_price:.4f}")
+
                                                     # Place scale-out limit order on Bybit immediately
                                                     limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
-                                                    limit_price = entry_price + 0.6 * atr_dollars if ml_trend == "Bullish" else entry_price - 0.6 * atr_dollars
+                                                    limit_price = entry_price + 1.0 * atr_dollars if ml_trend == "Bullish" else entry_price - 1.0 * atr_dollars
                                                     limit_qty_str = format_bybit_qty(symbol, raw_qty * 0.5)
                                                     
                                                     print(f"[{symbol} {iv}m API] Placing scale-out limit order for {limit_qty_str} at ${limit_price:.4f}...")

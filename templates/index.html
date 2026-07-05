@@ -1681,7 +1681,15 @@
 
                 let pnlVal = 0;
                 let pnlPct = 0;
-                if (currentPriceVal) {
+                if (trade.bybit_unrealized_pnl !== undefined && trade.bybit_unrealized_pnl !== null) {
+                    // Use Bybit's real unrealized PnL (live/testnet mode)
+                    pnlVal = trade.bybit_unrealized_pnl;
+                    const posSize = trade.position_size_usd || 100.0;
+                    pnlPct = posSize > 0 ? (pnlVal / posSize) * 100 : 0;
+                    totalPnLVal += pnlVal;
+                    totalPosSize += posSize;
+                } else if (currentPriceVal) {
+                    // Fallback: simulated PnL calculation with correct fee deduction
                     let diff = 0;
                     if (trade.direction === "Bullish") {
                         diff = currentPriceVal - entryPrice;
@@ -1692,8 +1700,10 @@
                     const lev = trade.leverage || 1.0;
                     const posSize = trade.position_size_usd || 100.0;
                     
-                    pnlPct = rawPct * lev;
-                    pnlVal = posSize * (pnlPct / 100);
+                    const grossPnl = posSize * (rawPct * lev / 100);
+                    const feeCost = posSize * lev * 0.00055 * 2;  // 0.055% taker per side on leveraged size
+                    pnlVal = grossPnl - feeCost;
+                    pnlPct = posSize > 0 ? (pnlVal / posSize) * 100 : 0;
 
                     // Accumulate totals
                     totalPnLVal += pnlVal;
