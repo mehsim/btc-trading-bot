@@ -3701,7 +3701,7 @@ def main():
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
                                     c_prob = float(calibrated_confidence)
                                     current_hour_pkt = get_pkt_time().hour
-                                    is_golden_hour = 2 <= current_hour_pkt < 4
+                                    is_golden_hour = 18 <= current_hour_pkt < 21
                                     
                                     # Pre-calculate active trade stats needed for dynamic sizing
                                     total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
@@ -3709,13 +3709,13 @@ def main():
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
                                     
                                     if is_golden_hour:
-                                        # Option A: Split total account value (balance + active positions) into 5 slots to allow up to 5 concurrent positions
+                                        # Option A: Split total account value (balance + active positions) into 5 slots to allow up to 5 concurrent positions (doubled for Golden Hour)
                                         account_value = current_bal + total_active_size
-                                        golden_target = account_value / 5.0
-                                        # Clamp between $2000 and $3000 for Golden Hour
-                                        position_size_usd = max(2000.0, min(3000.0, golden_target))
-                                        position_size_usd = max(2000.0, min(3000.0, position_size_usd * cov_multiplier))
-                                        print(f"[{iv}m Golden Hour Sizing] Target: ${position_size_usd:.2f} (Split-slot sizing of total ${account_value:.2f} account value)")
+                                        golden_target = (account_value / 5.0) * 2.0
+                                        # Clamp between $4000 and $6000 for Golden Hour
+                                        position_size_usd = max(4000.0, min(6000.0, golden_target))
+                                        position_size_usd = max(4000.0, min(6000.0, position_size_usd * cov_multiplier))
+                                        print(f"[{iv}m Golden Hour Sizing] Target: ${position_size_usd:.2f} (Split-slot sizing of total ${account_value:.2f} account value - Doubled)")
                                     else:
                                         # Regular Hours Sizing ($2000 - $3000)
                                         if c_prob < 0.60:
@@ -3772,12 +3772,12 @@ def main():
                                         else:
                                             lev_cap = 15.0
                                             
-                                        # Double leverage target and cap during Golden Hour (02:00 AM - 04:00 AM PKT)
+                                        # Double leverage target and cap during Golden Hour (18:00 - 21:00 PKT)
                                         current_hour_pkt = get_pkt_time().hour
-                                        if 2 <= current_hour_pkt < 4:
+                                        if 18 <= current_hour_pkt < 21:
                                             leverage_val *= 2.0
                                             lev_cap *= 2.0
-                                            print(f"[{symbol} {iv}m Golden Hour Boost] 02:00 - 04:00 AM PKT: Doubled leverage target to {leverage_val:.1f}x and cap to {lev_cap:.1f}x")
+                                            print(f"[{symbol} {iv}m Golden Hour Boost] 18:00 - 21:00 PKT: Doubled leverage target to {leverage_val:.1f}x and cap to {lev_cap:.1f}x")
                                             
                                         leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
