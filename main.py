@@ -313,6 +313,18 @@ def get_bybit_proxies():
         }
     return None
 
+def parse_proxy_url(proxy_url):
+    """Parse proxy URL into components for websocket-client."""
+    from urllib.parse import urlparse
+    parsed = urlparse(proxy_url)
+    host = parsed.hostname
+    port = parsed.port
+    proxy_type = parsed.scheme or "http"
+    auth = None
+    if parsed.username and parsed.password:
+        auth = (parsed.username, parsed.password)
+    return host, port, auth, proxy_type
+
 _cached_time_offset = None
 _time_offset_lock = threading.Lock()
 
@@ -1300,25 +1312,37 @@ def check_and_hot_reload_models():
 # =========================
 live_price = None
 last_ws_update_time = 0.0
+ws_connected = False  # Track if WebSocket is currently connected
+ws_retry_delay = 3  # Reconnection backoff delay (reset on successful connect)
 
 def run_fallback_price_updater():
     """
     Periodic thread that queries Bybit REST API for spot prices.
     Acts as a failover if WebSocket is geoblocked or disconnected.
-    Also ensures symbols not pushed by WebSocket (e.g. missing testnet symbols) are periodically updated.
+    Polls adaptively: every 10s when WS is down, every 5min when WS is active.
     """
     global live_price, last_ws_update_time
     print("[Price Fallback] Background updater thread started.")
     last_fallback_run = 0.0
+    last_binance_run = 0.0
     while True:
         try:
-            # Check if there are active trades to monitor
-            has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
-            sleep_time = 60 if has_active_trades else 300
-            
             now = time.time()
-            # Run fallback REST update if websocket is stale OR if it's been more than 5 minutes since last run
-            if (now - last_ws_update_time > sleep_time * 1.5) or (now - last_fallback_run > 300):
+            ws_active = ws_connected and (now - last_ws_update_time < 30)
+            has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+
+            # Adaptive interval: 10s if WS down, 60s if WS up with trades, 300s if WS up idle
+            if not ws_active:
+                poll_interval = 10
+                binance_interval = 60
+            elif has_active_trades:
+                poll_interval = 60
+                binance_interval = 300
+            else:
+                poll_interval = 300
+                binance_interval = 300
+
+            if now - last_fallback_run >= poll_interval:
                 last_fallback_run = now
                 url = f"{BYBIT_BASE_URL}/v5/market/tickers"
                 headers = {
@@ -1341,27 +1365,32 @@ def run_fallback_price_updater():
                                     live_price = val
                                     bot_state["live_price"] = val
                                     bot_state["last_update"] = time.time()
-                                    if now - last_ws_update_time > sleep_time * 1.5:
+                                    if not ws_active:
                                         last_ws_update_time = time.time()
-                
-                # Update any missing symbols from external API fallback (Binance)
-                for sym in SUPPORTED_SYMBOLS:
-                    if sym not in found_symbols:
-                        val = get_fallback_price(sym)
-                        if val is not None:
-                            bot_state[f"live_price_{sym}"] = val
-                            if sym == "BTCUSDT":
-                                live_price = val
-                                bot_state["live_price"] = val
-                                bot_state["last_update"] = time.time()
-                                if now - last_ws_update_time > sleep_time * 1.5:
-                                    last_ws_update_time = time.time()
+
+                # Bulk Binance fallback for missing symbols (throttled)
+                missing = [s for s in SUPPORTED_SYMBOLS if s not in found_symbols]
+                if missing and (now - last_binance_run >= binance_interval):
+                    last_binance_run = now
+                    try:
+                        bresp = requests.get("https://api.binance.com/api/v3/ticker/price", timeout=8)
+                        if bresp.status_code == 200:
+                            binance_prices = {t["symbol"]: float(t["price"]) for t in bresp.json()}
+                            for sym in missing:
+                                if sym in binance_prices:
+                                    bot_state[f"live_price_{sym}"] = binance_prices[sym]
+                                    if sym == "BTCUSDT":
+                                        live_price = binance_prices[sym]
+                                        bot_state["live_price"] = binance_prices[sym]
+                                        bot_state["last_update"] = time.time()
+                                        if not ws_active:
+                                            last_ws_update_time = time.time()
+                    except Exception as be:
+                        print(f"[Price Fallback] Binance bulk fetch error: {be}")
         except Exception as e:
             print(f"[Price Fallback Exception] {e}")
-        
-        # Recalculate sleep time dynamically in case trade state changed during API call
-        has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
-        time.sleep(60 if has_active_trades else 300)
+
+        time.sleep(5)  # Short sleep, actual polling gated by interval checks above
 
 def send_email_notification(subject, body):
     """
@@ -1450,6 +1479,9 @@ def on_message(ws, message):
         print(f"[WebSocket msg exception] {e}")
 
 def on_open(ws):
+    global ws_connected, ws_retry_delay
+    ws_connected = True
+    ws_retry_delay = 3  # Reset backoff on successful connection
     print("Connected to Bybit WebSocket for multi-asset prices")
     # Bybit public websocket ticker subscription allows at most 10 arguments per subscription message
     chunk_size = 10
@@ -1462,14 +1494,23 @@ def on_open(ws):
         }))
 
 def on_close(ws, close_status_code, close_msg):
+    global ws_connected
+    ws_connected = False
     print(f"[WebSocket Closed] code={close_status_code}, msg={close_msg}")
 
 def on_error(ws, error):
     print(f"[WebSocket Error] {error}")
 
 def start_ws():
+    global ws_connected, ws_retry_delay
     url = BYBIT_WS_URL
     print(f"[WebSocket Connecting] url={url}")
+    # Parse proxy settings from BYBIT_PROXY env var
+    proxy_host, proxy_port, proxy_auth, proxy_type_str = None, None, None, None
+    proxy_url = os.environ.get("BYBIT_PROXY")
+    if proxy_url:
+        proxy_host, proxy_port, proxy_auth, proxy_type_str = parse_proxy_url(proxy_url)
+        print(f"[WebSocket] Using proxy: {proxy_host}:{proxy_port} (type={proxy_type_str})")
     while True:
         try:
             ws = websocket.WebSocketApp(
@@ -1479,10 +1520,19 @@ def start_ws():
                 on_error=on_error,
                 on_close=on_close
             )
-            ws.run_forever(ping_interval=20, ping_timeout=10)
+            ws.run_forever(
+                ping_interval=20, ping_timeout=10,
+                http_proxy_host=proxy_host,
+                http_proxy_port=proxy_port,
+                http_proxy_auth=proxy_auth,
+                proxy_type=proxy_type_str
+            )
         except Exception as e:
             print(f"[WebSocket run_forever exception] {e}")
-        time.sleep(3)
+        ws_connected = False
+        print(f"[WebSocket] Reconnecting in {ws_retry_delay}s...")
+        time.sleep(ws_retry_delay)
+        ws_retry_delay = min(ws_retry_delay * 2, 60)  # Backoff up to 60s
 
 # WebSocket thread is started inside if __name__ == "__main__" block at the bottom
 
