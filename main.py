@@ -717,7 +717,7 @@ def force_close_trade():
     bybit_exit_price = None
     bybit_realized_pnl = None
     
-    if TRADE_MODE != "simulation" and trade_to_close.get("bybit_order_id"):
+    if TRADE_MODE != "simulation":
         # Cancel scale-out limit order if it exists
         scale_out_id = trade_to_close.get("bybit_scale_out_order_id")
         if scale_out_id:
@@ -871,7 +871,7 @@ def close_all_trades_internal(exit_reason):
             bybit_exit_price = None
             bybit_realized_pnl = None
             
-            if TRADE_MODE != "simulation" and t.get("bybit_order_id"):
+            if TRADE_MODE != "simulation":
                 # Cancel scale-out limit order if it exists
                 scale_out_id = t.get("bybit_scale_out_order_id")
                 if scale_out_id:
@@ -2934,7 +2934,7 @@ def main():
                 bybit_exit_price = None
                 bybit_realized_pnl = None
                 
-                if TRADE_MODE != "simulation" and active_trade.get("bybit_order_id"):
+                if TRADE_MODE != "simulation":
                     pos = get_bybit_position(active_symbol)
                     if pos:
                         qty_str = pos.get("size", "0")
@@ -2942,11 +2942,27 @@ def main():
                         if qty_val == 0:
                             bybit_closed = True
                         else:
-                            # Store Bybit's real unrealized PnL for accurate dashboard display
+                            # Calculate proportional unrealized PnL if multiple active trades for this symbol exist
                             try:
-                                active_trade["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
-                            except (ValueError, TypeError):
-                                pass
+                                same_symbol_trades = []
+                                for tf_key in ["1h", "2h", "4h", "6h"]:
+                                    for t_item in bot_state.get(f"active_trade_{tf_key}", []):
+                                        if t_item.get("symbol") == active_symbol:
+                                            same_symbol_trades.append(t_item)
+                                
+                                total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
+                                position_pnl = float(pos.get("unrealisedPnl", 0.0))
+                                
+                                if total_lev_size > 0:
+                                    this_lev_size = float(active_trade.get("position_size_usd", 0.0)) * float(active_trade.get("leverage", 1.0))
+                                    active_trade["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
+                                else:
+                                    active_trade["bybit_unrealized_pnl"] = position_pnl
+                            except Exception:
+                                try:
+                                    active_trade["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
+                                except Exception:
+                                    pass
                             # Detect scale-out fill
                             original_qty = active_trade.get("qty", 0.0)
                             if original_qty > 0 and qty_val <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
