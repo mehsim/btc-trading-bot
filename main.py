@@ -570,7 +570,7 @@ def get_real_bybit_balance():
         else:
             ret_msg = res.get("retMsg", "")
             # If the response is HTTP error (retCode is HTTP status code)
-            if isinstance(ret_code, int) and ret_code >= 400:
+            if isinstance(ret_code, int) and (400 <= ret_code <= 599):
                 print(f"[Bybit Balance] HTTP {ret_code} for {account_type}: {ret_msg}")
                 if ret_code == 403 and ("cloudfront" in ret_msg.lower() or "block" in ret_msg.lower()):
                     geo_blocked_encountered = True
