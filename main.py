@@ -313,17 +313,32 @@ def get_bybit_proxies():
         }
     return None
 
+_cached_time_offset = None
+_time_offset_lock = threading.Lock()
+
 def get_bybit_time_offset():
+    global _cached_time_offset
+    with _time_offset_lock:
+        if _cached_time_offset is not None:
+            return _cached_time_offset
+            
     import requests
     import time
-    try:
-        resp = requests.get(f"{BYBIT_BASE_URL}/v5/market/time", proxies=get_bybit_proxies(), timeout=3)
-        if resp.status_code == 200:
-            server_time = int(resp.json()["result"]["timeNano"]) // 1000000
-            local_time = int(time.time() * 1000)
-            return server_time - local_time
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            resp = requests.get(f"{BYBIT_BASE_URL}/v5/market/time", proxies=get_bybit_proxies(), timeout=5)
+            if resp.status_code == 200:
+                server_time = int(resp.json()["result"]["timeNano"]) // 1000000
+                local_time = int(time.time() * 1000)
+                offset = server_time - local_time
+                print(f"[Bybit API] Successfully synced time offset: {offset}ms")
+                with _time_offset_lock:
+                    _cached_time_offset = offset
+                return offset
+        except Exception as e:
+            if attempt == 2:
+                print(f"[Bybit API Error] Failed to sync time after 3 attempts: {e}")
+            time.sleep(1)
     return 0
 
 def bybit_post_request(endpoint, payload):
