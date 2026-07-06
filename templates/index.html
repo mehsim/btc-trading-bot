@@ -1576,6 +1576,18 @@
             }
         }
 
+        function getFormattedReason(t) {
+            let reason = t.reason || "Unknown";
+            const success = t.success;
+            if (!success && (reason.includes("SUCCESS") || reason.includes("TAKE PROFIT"))) {
+                if (reason.includes("TRAILING")) {
+                    return "TRAILING STOP HIT [FAIL]";
+                }
+                return "STOP LOSS HIT [FAIL]";
+            }
+            return reason;
+        }
+
         let tradeHistoryPage = 1;
         const tradeHistoryPageSize = 10;
 
@@ -1708,7 +1720,7 @@
                                 })()}</div>
                             </td>
                             <td class="hide-mobile ${successClass}" style="font-weight: 700;">${successStr}</td>
-                            <td class="hide-mobile" style="color: var(--text-secondary); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t.reason}</td>
+                            <td class="hide-mobile" style="color: var(--text-secondary); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${getFormattedReason(t)}</td>
                         </tr>
                     `;
                 });
@@ -2430,7 +2442,7 @@
                 </div>
                 <div style="display:flex; flex-direction:column; gap:4px;">
                     <span style="opacity:0.6;">Exit Reason</span>
-                    <span style="color:var(--text-secondary); background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.04); font-size:11px;">${t.reason}</span>
+                    <span style="color:var(--text-secondary); background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:1px solid rgba(255,255,255,0.04); font-size:11px;">${getFormattedReason(t)}</span>
                 </div>
                 ${scaleOutHtml}
             `;
