@@ -9,6 +9,10 @@ load_dotenv()
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache")
 
 def get_bybit_proxies():
+    # If running on Hugging Face and no explicit BYBIT_PROXY is set, bypass internal HF proxy
+    if os.environ.get("SPACE_ID") and not os.environ.get("BYBIT_PROXY"):
+        return None
+
     proxy = (
         os.environ.get("BYBIT_PROXY") or
         os.environ.get("HTTPS_PROXY") or

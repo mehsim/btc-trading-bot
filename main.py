@@ -305,6 +305,10 @@ _balance_lock = threading.Lock()
 
 def get_bybit_proxies():
     import os
+    # If running on Hugging Face and no explicit BYBIT_PROXY is set, bypass internal HF proxy
+    if os.environ.get("SPACE_ID") and not os.environ.get("BYBIT_PROXY"):
+        return None
+
     proxy = (
         os.environ.get("BYBIT_PROXY") or
         os.environ.get("HTTPS_PROXY") or
