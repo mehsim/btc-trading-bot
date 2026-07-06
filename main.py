@@ -896,7 +896,22 @@ def close_all_trades_internal(exit_reason):
     # 1. Direct Bybit Fail-safe Panic Close
     if TRADE_MODE != "simulation":
         try:
-            print("[Panic Close All] Querying all active positions on Bybit...")
+            print("[Panic Close All] Cancelling ALL pending limit and conditional orders on Bybit...")
+            # Cancel all USDT-settled orders globally
+            cancel_usdt_res = bybit_post_request("/v5/order/cancel-all", {
+                "category": "linear",
+                "settleCoin": "USDT"
+            })
+            print(f"[Panic Close All] Cancel USDT orders response: {cancel_usdt_res.get('retMsg')}")
+            
+            # Cancel all USDC-settled orders globally
+            cancel_usdc_res = bybit_post_request("/v5/order/cancel-all", {
+                "category": "linear",
+                "settleCoin": "USDC"
+            })
+            print(f"[Panic Close All] Cancel USDC orders response: {cancel_usdc_res.get('retMsg')}")
+            
+            print("[Panic Close All] Querying all active positions on Bybit to close them...")
             bybit_positions = get_all_bybit_positions()
             for pos in bybit_positions:
                 symbol = pos.get("symbol")
@@ -906,15 +921,6 @@ def close_all_trades_internal(exit_reason):
                     side_pos = pos.get("side")
                     close_side = "Sell" if side_pos == "Buy" else "Buy"
                     
-                    # Cancel all pending orders for this symbol on Bybit
-                    try:
-                        bybit_post_request("/v5/order/cancel-all", {
-                            "category": "linear",
-                            "symbol": symbol
-                        })
-                    except Exception as ce:
-                        print(f"[Panic Close All Error] Failed to cancel orders for {symbol}: {ce}")
-                        
                     print(f"[Panic Close All] Closing position: {qty_str} {symbol} ({side_pos}) via Market close...")
                     close_res = place_bybit_order(
                         symbol=symbol,
