@@ -3053,7 +3053,7 @@ def sync_active_positions_from_bybit():
         # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
         recovered = 0
         for symbol, pos in open_positions.items():
-            if symbol not in matched_symbols and symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]:
+            if symbol not in matched_symbols and symbol in SUPPORTED_SYMBOLS:
                 avg_price = float(pos.get("avgPrice", "0"))
                 liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
                 mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
