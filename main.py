@@ -881,116 +881,96 @@ def close_all_trades_internal(exit_reason):
     closed_count = 0
     tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
     
-    # Iterate over all active trade timeframes
+    # 1. Direct Bybit Fail-safe Panic Close
+    if TRADE_MODE != "simulation":
+        try:
+            print("[Panic Close All] Querying all active positions on Bybit...")
+            bybit_positions = get_all_bybit_positions()
+            for pos in bybit_positions:
+                symbol = pos.get("symbol")
+                qty_str = pos.get("size", "0")
+                qty_val = float(qty_str)
+                if qty_val > 0:
+                    side_pos = pos.get("side")
+                    close_side = "Sell" if side_pos == "Buy" else "Buy"
+                    
+                    # Cancel all pending orders for this symbol on Bybit
+                    try:
+                        bybit_post_request("/v5/order/cancel-all", {
+                            "category": "linear",
+                            "symbol": symbol
+                        })
+                    except Exception as ce:
+                        print(f"[Panic Close All Error] Failed to cancel orders for {symbol}: {ce}")
+                        
+                    print(f"[Panic Close All] Closing position: {qty_str} {symbol} ({side_pos}) via Market close...")
+                    close_res = place_bybit_order(
+                        symbol=symbol,
+                        side=close_side,
+                        qty=qty_str
+                    )
+                    if close_res.get("retCode") == 0:
+                        print(f"[Panic Close All] Successfully closed {symbol} on Bybit.")
+                        closed_count += 1
+                    else:
+                        print(f"[Panic Close All Error] Failed to close {symbol}: {close_res.get('retMsg')}")
+        except Exception as e:
+            print(f"[Panic Close All Exception] Error: {e}")
+            
+    # 2. Iterate and clear all local active trades from bot_state
     for tf_key in ["1h", "2h", "4h", "6h"]:
         active_trade_key = f"active_trade_{tf_key}"
         active_trades = bot_state.get(active_trade_key, [])
         if not isinstance(active_trades, list):
             active_trades = [] if active_trades is None else [active_trades]
-            bot_state[active_trade_key] = active_trades
-
-        # Close each trade in this list
+            
         for t in list(active_trades):
             symbol = t.get("symbol", "BTCUSDT").upper()
             direction = t.get("direction", "Bullish")
             entry_price = t.get("entry_price", 0.0)
             position_size_usd = t.get("position_size_usd", 100.0)
-            trade_id = t.get("trade_id")
             
-            # Fetch interval number (e.g. "60") corresponding to tf_key
             interval = "60"
             for k, v in tf_map_local.items():
                 if v == tf_key:
                     interval = k
                     break
-
+                    
             live_symbol_price = get_fallback_price(symbol)
             if live_symbol_price is None:
                 live_symbol_price = bot_state.get(f"live_price_{symbol}")
-            actual_exit_price = live_symbol_price if live_symbol_price is not None else entry_price
+            actual_price = live_symbol_price if live_symbol_price is not None else entry_price
             
-            # 1. Close position on Bybit if in live/testnet mode
-            bybit_exit_price = None
-            bybit_realized_pnl = None
-            
-            if TRADE_MODE != "simulation":
-                # Cancel scale-out limit order if it exists
-                scale_out_id = t.get("bybit_scale_out_order_id")
-                if scale_out_id:
-                    cancel_payload = {
-                        "category": "linear",
-                        "symbol": symbol,
-                        "orderId": scale_out_id
-                    }
-                    bybit_post_request("/v5/order/cancel", cancel_payload)
-                    print(f"[Bybit API] Canceled scale-out limit order {scale_out_id} for {symbol}.")
-                    
-                # Close position
-                pos = get_bybit_position(symbol)
-                if pos:
-                    qty_str = pos.get("size", "0")
-                    qty_val = float(qty_str)
-                    if qty_val > 0:
-                        side = "Sell" if direction == "Bullish" else "Buy"
-                        print(f"[Bybit API] Placing Market close order for {qty_str} {symbol}...")
-                        close_res = place_bybit_order(
-                            symbol=symbol,
-                            side=side,
-                            qty=qty_str
-                        )
-                        if close_res.get("retCode") == 0:
-                            print(f"[Bybit API] Successfully closed position for {symbol} on Bybit.")
-                            time.sleep(0.5) # Brief sleep for order registration
-                            closed_pnl_record = get_bybit_closed_pnl(symbol)
-                            if closed_pnl_record:
-                                bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
-                                bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
-                            else:
-                                exec_log = get_bybit_last_execution(symbol)
-                                if exec_log:
-                                    bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
-
-            # Maker execution: zero slippage on limit close
-            slippage_pct = 0.0
-            actual_price = bybit_exit_price if bybit_exit_price is not None else actual_exit_price
-                
             actual_change = actual_price - entry_price
             actual_change_pct = (actual_change / entry_price) * 100 if entry_price > 0 else 0.0
-            
             raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
             leverage = t.get("leverage", 1.0)
             gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
-            taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker fee per side on leveraged size
+            taker_fee_cost = position_size_usd * leverage * 0.00055 * 2
             realized_pnl = gross_pnl - taker_fee_cost
             net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
             
-            if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
-                realized_pnl = bybit_realized_pnl
-                net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
-                
             if realized_pnl < -position_size_usd:
                 realized_pnl = -position_size_usd
                 net_return_pct = -100.0
-            
-            # Update simulated balance (only in simulation)
+                
             if TRADE_MODE == "simulation":
                 old_bal = bot_state.get("simulated_balance", 80.0)
                 new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
                 bot_state["simulated_balance"] = new_bal
+                closed_count += 1
             else:
                 new_bal = bot_state.get("simulated_balance", 0.0)
-            
+                
             actual_trend = "Bullish" if actual_change > 0 else "Bearish"
             signal_correct = (actual_trend == direction)
             trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
             
             print("\n==================================================")
-            print(f"[{symbol} {tf_key.upper()} MANUAL EXIT ALL]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
+            print(f"[{symbol} {tf_key.upper()} MANUAL EXIT ALL]: {exit_reason}")
             print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
             print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
-            print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after 0.2% fees with {leverage}x leverage)")
-            print(f"Realized PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
-            print(f"Predicted Signal: {direction} ({trend_status})")
+            print(f"PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
             print("==================================================\n")
             
             bot_state["trade_history"].append({
@@ -1019,10 +999,7 @@ def close_all_trades_internal(exit_reason):
                         "success": bool(signal_correct)
                     }
                     break
-            
-            closed_count += 1
-            
-        # Clear this active trades list
+                    
         bot_state[active_trade_key] = []
         
     if closed_count > 0:
