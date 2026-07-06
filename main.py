@@ -3022,9 +3022,16 @@ def sync_active_positions_from_bybit():
             if not isinstance(current_trades, list):
                 current_trades = []
             
+            seen_symbols_in_tf = set()
             updated_trades = []
             for t in current_trades:
                 symbol = t.get("symbol")
+                if not symbol:
+                    continue
+                if symbol in seen_symbols_in_tf:
+                    print(f"[De-duplication] Discarded duplicate active trade for {symbol} in timeframe {tf_key}.")
+                    continue
+                seen_symbols_in_tf.add(symbol)
                 if symbol in open_positions:
                     pos = open_positions[symbol]
                     t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
