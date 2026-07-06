@@ -1953,7 +1953,22 @@
                             })}`;
                             realBalVal.style.fontSize = "36px";
                             realBalVal.style.color = "var(--accent-green)";
-                            realBalSub.innerHTML = `<span style="color: var(--accent-green); font-weight: 600;">✓ Balance synced successfully</span>`;
+                            
+                            // Calculate cumulative Mainnet PnL
+                            let cumulativeMainnetPnL = 0;
+                            allTrades.forEach(t => {
+                                const mObj = calculateMainnetPnL(t, null);
+                                cumulativeMainnetPnL += mObj.pnlVal;
+                            });
+                            const sign = cumulativeMainnetPnL >= 0 ? "+" : "";
+                            const colorClass = cumulativeMainnetPnL >= 0 ? "color-bullish" : "color-bearish";
+                            realBalSub.innerHTML = `
+                                <div style="display: flex; justify-content: space-between; width: 100%; font-weight: 700; margin-bottom: 4px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 4px;">
+                                    <span>Assumed Mainnet PnL:</span>
+                                    <span class="${colorClass}">${sign}$${cumulativeMainnetPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
+                                <div style="font-size: 10px; color: var(--accent-green); margin-top: 4px;">✓ Balance synced successfully</div>
+                            `;
                         } else {
                             realBalVal.innerText = "--";
                             realBalVal.style.fontSize = "36px";
