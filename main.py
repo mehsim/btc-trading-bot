@@ -504,6 +504,15 @@ def get_bybit_position(symbol):
                 return pos
     return None
 
+def get_bybit_closed_pnl(symbol, limit=1):
+    """Fetch the most recent closed PnL record from Bybit for exact settled realized PnL."""
+    res = bybit_get_request("/v5/position/closed-pnl", {"category": "linear", "symbol": symbol, "limit": str(limit)})
+    if res.get("retCode") == 0:
+        pnl_list = res.get("result", {}).get("list", [])
+        if pnl_list:
+            return pnl_list[0]
+    return None
+
 def update_bybit_stop_loss(symbol, sl_price):
     payload = {
         "category": "linear",
@@ -517,6 +526,22 @@ def update_bybit_stop_loss(symbol, sl_price):
         return True
     else:
         print(f"[Bybit API Error] Failed to update Stop Loss for {symbol}: {res.get('retMsg')}")
+        return False
+
+def update_bybit_take_profit(symbol, tp_price):
+    """Sync the Take Profit on the Bybit server."""
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "takeProfit": str(round(tp_price, 4)),
+        "positionIdx": 0
+    }
+    res = bybit_post_request("/v5/position/set-trading-stop", payload)
+    if res.get("retCode") == 0:
+        print(f"[Bybit API] Successfully updated Take Profit on Bybit to {tp_price:.4f} for {symbol}.")
+        return True
+    else:
+        print(f"[Bybit API Error] Failed to update Take Profit for {symbol}: {res.get('retMsg')}")
         return False
 
 def place_bybit_limit_order(symbol, side, qty, price):
@@ -2827,6 +2852,97 @@ def load_initial_prices():
     except Exception as e:
         print(f"[Initial Prices] Error loading prices at startup: {e}")
 
+def sync_active_positions_from_bybit():
+    """Crash Recovery: re-sync any open Bybit positions that the bot lost track of after a restart."""
+    if TRADE_MODE == "simulation":
+        return
+    
+    print("[Crash Recovery] Checking Bybit for orphaned open positions...")
+    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+    # Collect all symbols currently tracked in active trades
+    tracked_symbols = set()
+    for tf_key in ["1h", "2h", "4h", "6h"]:
+        for t in bot_state.get(f"active_trade_{tf_key}", []):
+            tracked_symbols.add(t.get("symbol", ""))
+    
+    # Check each supported symbol for open positions on Bybit
+    symbols_to_check = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]
+    recovered = 0
+    for symbol in symbols_to_check:
+        if symbol in tracked_symbols:
+            continue
+        try:
+            pos = get_bybit_position(symbol)
+            if not pos:
+                continue
+            qty_val = float(pos.get("size", "0"))
+            if qty_val <= 0:
+                continue
+            
+            # Found an orphaned position — reconstruct active trade
+            avg_price = float(pos.get("avgPrice", "0"))
+            liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
+            mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
+            leverage_val = float(pos.get("leverage", "1"))
+            side_str = pos.get("side", "Buy")  # "Buy" or "Sell"
+            direction = "Bullish" if side_str == "Buy" else "Bearish"
+            sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+            tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
+            position_value = float(pos.get("positionValue", "0"))
+            position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
+            
+            import uuid
+            trade_uuid = str(uuid.uuid4())[:8]
+            
+            # Default to 1h timeframe for recovered positions
+            tf_key = "1h"
+            active_trade_key = f"active_trade_{tf_key}"
+            
+            recovered_trade = {
+                "trade_id": f"{symbol}_{trade_uuid}_recovered",
+                "bybit_order_id": None,
+                "bybit_scale_out_order_id": None,
+                "symbol": symbol,
+                "entry_price": avg_price,
+                "predicted_price": avg_price,
+                "stop_loss": sl_price,
+                "take_profit": tp_price,
+                "direction": direction,
+                "end_time": float(time.time() + 3600 * 10),  # 10h default
+                "atr_dollars": abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 50.0,
+                "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
+                "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
+                "break_even_triggered": False,
+                "half_closed": False,
+                "original_size": position_size_usd,
+                "position_size_usd": position_size_usd,
+                "scaled_out_pnl": 0.0,
+                "kelly_fraction": 0.0,
+                "leverage": leverage_val,
+                "confidence": 0.0,
+                "qty": qty_val,
+                "liq_price": liq_price,
+                "mark_price": mark_price,
+                "recovered": True
+            }
+            
+            active_trades_list = bot_state.get(active_trade_key, [])
+            if not isinstance(active_trades_list, list):
+                active_trades_list = []
+            active_trades_list.append(recovered_trade)
+            bot_state[active_trade_key] = active_trades_list
+            recovered += 1
+            
+            print(f"[Crash Recovery] Recovered {symbol} {direction} position: Entry={avg_price:.2f}, Size=${position_size_usd:.2f}, Lev={leverage_val}x, SL={sl_price:.2f}, TP={tp_price:.2f}, Liq={liq_price:.2f}")
+        except Exception as e:
+            print(f"[Crash Recovery] Error checking {symbol}: {e}")
+    
+    if recovered > 0:
+        save_history()
+        print(f"[Crash Recovery] Successfully recovered {recovered} orphaned position(s) from Bybit.")
+    else:
+        print("[Crash Recovery] No orphaned positions found. All clear.")
+
 def main():
     global live_price, last_ws_update_time
     load_history()
@@ -2834,6 +2950,9 @@ def main():
     
     # Pre-load initial prices for all supported symbols
     load_initial_prices()
+
+    # Crash Recovery: re-sync orphaned Bybit positions
+    sync_active_positions_from_bybit()
 
     print("Connecting to WebSocket and waiting for initial price...")
 
@@ -2963,6 +3082,17 @@ def main():
                                     active_trade["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
                                 except Exception:
                                     pass
+                            # Map real-time position metrics from Bybit
+                            try:
+                                bybit_avg_price = float(pos.get("avgPrice", "0"))
+                                if bybit_avg_price > 0:
+                                    active_trade["entry_price"] = bybit_avg_price
+                                bybit_liq_price = pos.get("liqPrice", "")
+                                active_trade["liq_price"] = float(bybit_liq_price) if bybit_liq_price else 0.0
+                                bybit_mark_price = pos.get("markPrice", "")
+                                active_trade["mark_price"] = float(bybit_mark_price) if bybit_mark_price else 0.0
+                            except Exception:
+                                pass
                             # Detect scale-out fill
                             original_qty = active_trade.get("qty", 0.0)
                             if original_qty > 0 and qty_val <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
@@ -2971,11 +3101,17 @@ def main():
                         bybit_closed = True
                         
                     if bybit_closed:
-                        # Retrieve last execution log to capture exact figures
-                        exec_log = get_bybit_last_execution(active_symbol)
-                        if exec_log:
-                            bybit_exit_price = float(exec_log.get("execPrice", current_price))
-                            bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
+                        # Retrieve exact settled PnL from closed-pnl endpoint (includes funding fees)
+                        closed_pnl_record = get_bybit_closed_pnl(active_symbol)
+                        if closed_pnl_record:
+                            bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
+                            bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", current_price))
+                        else:
+                            # Fallback to execution log
+                            exec_log = get_bybit_last_execution(active_symbol)
+                            if exec_log:
+                                bybit_exit_price = float(exec_log.get("execPrice", current_price))
+                                bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
 
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
@@ -3099,6 +3235,7 @@ def main():
                         print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                         if TRADE_MODE != "simulation":
                             update_bybit_stop_loss(active_symbol, entry_price)
+                            update_bybit_take_profit(active_symbol, take_profit)
                         
                     elif direction == "Bearish":
                         # Scale-Out Triggered for Short
@@ -3139,6 +3276,7 @@ def main():
                         print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                         if TRADE_MODE != "simulation":
                             update_bybit_stop_loss(active_symbol, entry_price)
+                            update_bybit_take_profit(active_symbol, take_profit)
 
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)

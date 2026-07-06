@@ -1268,6 +1268,7 @@
                             <th>Entry Price</th>
                             <th class="hide-mobile">Current Price</th>
                             <th>TP / SL</th>
+                            <th class="hide-mobile">Liq Price</th>
                             <th class="hide-mobile">Time Left</th>
                             <th>PnL</th>
                             <th>Action</th>
@@ -1275,7 +1276,7 @@
                     </thead>
                     <tbody id="active-open-trades-rows">
                         <tr>
-                            <td colspan="12" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                            <td colspan="13" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1656,7 +1657,7 @@
             if (allActive.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="12" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                        <td colspan="13" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                     </tr>
                 `;
                 if (totalPnLElem) {
@@ -1742,6 +1743,16 @@
                             <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(4)}</span> / 
                             <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(4)}</span>
                         </td>
+                        <td class="hide-mobile">${(() => {
+                            const liqP = trade.liq_price || 0;
+                            if (liqP <= 0) return '<span style="color: var(--text-muted);">—</span>';
+                            const cp = currentPriceVal || entryPrice;
+                            const distPct = Math.abs((cp - liqP) / cp * 100);
+                            const isClose = distPct < 3;
+                            const liqColor = isClose ? 'var(--accent-red)' : 'var(--accent-orange)';
+                            const glow = isClose ? 'text-shadow: 0 0 8px rgba(244,63,94,0.6);' : '';
+                            return `<span style="color: ${liqColor}; font-weight: 700; ${glow}">$${liqP.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>`;
+                        })()}</td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</td>
                         <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
                         <td>
