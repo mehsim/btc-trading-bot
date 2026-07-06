@@ -1420,7 +1420,10 @@ def run_fallback_price_updater():
                     for ticker in ticker_list:
                         sym = ticker.get("symbol")
                         if sym in SUPPORTED_SYMBOLS:
-                            val_str = ticker.get("lastPrice")
+                            if TRADE_MODE == "testnet":
+                                val_str = ticker.get("indexPrice") or ticker.get("lastPrice")
+                            else:
+                                val_str = ticker.get("lastPrice")
                             if val_str:
                                 val = float(val_str)
                                 bot_state[f"live_price_{sym}"] = val
@@ -1529,8 +1532,11 @@ def on_message(ws, message):
     try:
         data = json.loads(message)
         if "data" in data and isinstance(data["data"], dict):
-            price_str = data["data"].get("lastPrice")
             sym = data["data"].get("symbol")
+            if TRADE_MODE == "testnet":
+                price_str = data["data"].get("indexPrice") or data["data"].get("lastPrice")
+            else:
+                price_str = data["data"].get("lastPrice")
             if price_str and sym:
                 val = float(price_str)
                 bot_state[f"live_price_{sym}"] = val
@@ -2819,7 +2825,9 @@ def get_fallback_price(symbol=SYMBOL):
             res = response.json()
             ticker_list = res.get("result", {}).get("list", [])
             if ticker_list:
-                return float(ticker_list[0]["lastPrice"])
+                ticker = ticker_list[0]
+                price_key = "indexPrice" if TRADE_MODE == "testnet" else "lastPrice"
+                return float(ticker.get(price_key) or ticker.get("lastPrice"))
             else:
                 print(f"Bybit price ticker list is empty for {symbol}")
         else:
@@ -2863,7 +2871,10 @@ def load_initial_prices():
             for ticker in ticker_list:
                 sym = ticker.get("symbol")
                 if sym in SUPPORTED_SYMBOLS:
-                    val_str = ticker.get("lastPrice")
+                    if TRADE_MODE == "testnet":
+                        val_str = ticker.get("indexPrice") or ticker.get("lastPrice")
+                    else:
+                        val_str = ticker.get("lastPrice")
                     if val_str:
                         val = float(val_str)
                         bot_state[f"live_price_{sym}"] = val
