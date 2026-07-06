@@ -809,6 +809,14 @@ def force_close_trade():
                         if abs(current_time_ms - record_time_ms) <= 60000:
                             bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
                             bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
+                            # Correct database position size to match actual filled size on Bybit
+                            entry_val = float(closed_pnl_record.get("cumEntryValue", 0.0))
+                            if entry_val > 0:
+                                lev = float(trade_to_close.get("leverage", 1.0))
+                                actual_margin = round(entry_val / lev, 2)
+                                trade_to_close["position_size_usd"] = actual_margin
+                                trade_to_close["original_size"] = actual_margin
+                                position_size_usd = actual_margin
                         else:
                             print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
                             closed_pnl_record = None
@@ -3226,6 +3234,13 @@ def main():
                             if abs(current_time_ms - record_time_ms) <= 60000:
                                 bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
                                 bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", current_price))
+                                # Correct database position size to match actual filled size on Bybit
+                                entry_val = float(closed_pnl_record.get("cumEntryValue", 0.0))
+                                if entry_val > 0:
+                                    lev = float(active_trade.get("leverage", 1.0))
+                                    actual_margin = round(entry_val / lev, 2)
+                                    active_trade["position_size_usd"] = actual_margin
+                                    active_trade["original_size"] = actual_margin
                             else:
                                 print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
                                 closed_pnl_record = None
