@@ -769,13 +769,15 @@ def force_close_trade():
                 )
                 if close_res.get("retCode") == 0:
                     print(f"[Bybit API] Successfully closed position for {symbol} on Bybit.")
-                    # Fetch execution log to get exact exit metrics
-                    exec_log = get_bybit_last_execution(symbol)
-                    if exec_log:
-                        bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
-                        bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
-                else:
-                    print(f"[Bybit API Error] Failed to close position on Bybit: {close_res.get('retMsg')}")
+                    time.sleep(0.5) # Brief sleep for order registration
+                    closed_pnl_record = get_bybit_closed_pnl(symbol)
+                    if closed_pnl_record:
+                        bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
+                        bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
+                    else:
+                        exec_log = get_bybit_last_execution(symbol)
+                        if exec_log:
+                            bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
 
     # Maker execution: zero slippage on limit close
     slippage_pct = 0.0
@@ -923,13 +925,15 @@ def close_all_trades_internal(exit_reason):
                         )
                         if close_res.get("retCode") == 0:
                             print(f"[Bybit API] Successfully closed position for {symbol} on Bybit.")
-                            # Fetch execution log to get exact exit metrics
-                            exec_log = get_bybit_last_execution(symbol)
-                            if exec_log:
-                                bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
-                                bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
-                        else:
-                            print(f"[Bybit API Error] Failed to close position on Bybit: {close_res.get('retMsg')}")
+                            time.sleep(0.5) # Brief sleep for order registration
+                            closed_pnl_record = get_bybit_closed_pnl(symbol)
+                            if closed_pnl_record:
+                                bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
+                                bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
+                            else:
+                                exec_log = get_bybit_last_execution(symbol)
+                                if exec_log:
+                                    bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
 
             # Maker execution: zero slippage on limit close
             slippage_pct = 0.0
@@ -2852,96 +2856,119 @@ def load_initial_prices():
     except Exception as e:
         print(f"[Initial Prices] Error loading prices at startup: {e}")
 
+def get_all_bybit_positions():
+    """Retrieve all open linear positions on Bybit in a single call."""
+    res = bybit_get_request("/v5/position/list", {"category": "linear"})
+    if res.get("retCode") == 0:
+        return res.get("result", {}).get("list", [])
+    return []
+
 def sync_active_positions_from_bybit():
-    """Crash Recovery: re-sync any open Bybit positions that the bot lost track of after a restart."""
+    """Real-time Sync: Sync all active trades from Bybit to keep bot_state completely aligned with testnet/live."""
     if TRADE_MODE == "simulation":
         return
     
-    print("[Crash Recovery] Checking Bybit for orphaned open positions...")
-    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-    # Collect all symbols currently tracked in active trades
-    tracked_symbols = set()
-    for tf_key in ["1h", "2h", "4h", "6h"]:
-        for t in bot_state.get(f"active_trade_{tf_key}", []):
-            tracked_symbols.add(t.get("symbol", ""))
-    
-    # Check each supported symbol for open positions on Bybit
-    symbols_to_check = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]
-    recovered = 0
-    for symbol in symbols_to_check:
-        if symbol in tracked_symbols:
-            continue
-        try:
-            pos = get_bybit_position(symbol)
-            if not pos:
-                continue
+    try:
+        pos_list = get_all_bybit_positions()
+        
+        # Filter for positions with non-zero size
+        open_positions = {}
+        for pos in pos_list:
             qty_val = float(pos.get("size", "0"))
-            if qty_val <= 0:
-                continue
+            if qty_val > 0:
+                open_positions[pos.get("symbol")] = pos
+
+        # Re-sync bot_state active trades
+        matched_symbols = set()
+        
+        for tf_key in ["1h", "2h", "4h", "6h"]:
+            current_trades = bot_state.get(f"active_trade_{tf_key}", [])
+            if not isinstance(current_trades, list):
+                current_trades = []
             
-            # Found an orphaned position — reconstruct active trade
-            avg_price = float(pos.get("avgPrice", "0"))
-            liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
-            mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
-            leverage_val = float(pos.get("leverage", "1"))
-            side_str = pos.get("side", "Buy")  # "Buy" or "Sell"
-            direction = "Bullish" if side_str == "Buy" else "Bearish"
-            sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
-            tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
-            position_value = float(pos.get("positionValue", "0"))
-            position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
+            updated_trades = []
+            for t in current_trades:
+                symbol = t.get("symbol")
+                if symbol in open_positions:
+                    pos = open_positions[symbol]
+                    t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
+                    t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
+                    t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
+                    t["qty"] = float(pos.get("size", t["qty"]))
+                    t["leverage"] = float(pos.get("leverage", t["leverage"]))
+                    
+                    pos_val = float(pos.get("positionValue", 0.0))
+                    t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
+                    t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
+                    
+                    updated_trades.append(t)
+                    matched_symbols.add(symbol)
+                else:
+                    # Keep it so the exit checker can process its closure and fetch closed PnL
+                    updated_trades.append(t)
             
-            import uuid
-            trade_uuid = str(uuid.uuid4())[:8]
-            
-            # Default to 1h timeframe for recovered positions
-            tf_key = "1h"
-            active_trade_key = f"active_trade_{tf_key}"
-            
-            recovered_trade = {
-                "trade_id": f"{symbol}_{trade_uuid}_recovered",
-                "bybit_order_id": None,
-                "bybit_scale_out_order_id": None,
-                "symbol": symbol,
-                "entry_price": avg_price,
-                "predicted_price": avg_price,
-                "stop_loss": sl_price,
-                "take_profit": tp_price,
-                "direction": direction,
-                "end_time": float(time.time() + 3600 * 10),  # 10h default
-                "atr_dollars": abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 50.0,
-                "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
-                "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
-                "break_even_triggered": False,
-                "half_closed": False,
-                "original_size": position_size_usd,
-                "position_size_usd": position_size_usd,
-                "scaled_out_pnl": 0.0,
-                "kelly_fraction": 0.0,
-                "leverage": leverage_val,
-                "confidence": 0.0,
-                "qty": qty_val,
-                "liq_price": liq_price,
-                "mark_price": mark_price,
-                "recovered": True
-            }
-            
-            active_trades_list = bot_state.get(active_trade_key, [])
-            if not isinstance(active_trades_list, list):
-                active_trades_list = []
-            active_trades_list.append(recovered_trade)
-            bot_state[active_trade_key] = active_trades_list
-            recovered += 1
-            
-            print(f"[Crash Recovery] Recovered {symbol} {direction} position: Entry={avg_price:.2f}, Size=${position_size_usd:.2f}, Lev={leverage_val}x, SL={sl_price:.2f}, TP={tp_price:.2f}, Liq={liq_price:.2f}")
-        except Exception as e:
-            print(f"[Crash Recovery] Error checking {symbol}: {e}")
-    
-    if recovered > 0:
-        save_history()
-        print(f"[Crash Recovery] Successfully recovered {recovered} orphaned position(s) from Bybit.")
-    else:
-        print("[Crash Recovery] No orphaned positions found. All clear.")
+            bot_state[f"active_trade_{tf_key}"] = updated_trades
+
+        # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
+        recovered = 0
+        for symbol, pos in open_positions.items():
+            if symbol not in matched_symbols and symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT"]:
+                avg_price = float(pos.get("avgPrice", "0"))
+                liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
+                mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
+                leverage_val = float(pos.get("leverage", "1"))
+                side_str = pos.get("side", "Buy")
+                direction = "Bullish" if side_str == "Buy" else "Bearish"
+                sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+                tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
+                position_value = float(pos.get("positionValue", "0"))
+                position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
+                qty_val = float(pos.get("size", "0"))
+                
+                import uuid
+                trade_uuid = str(uuid.uuid4())[:8]
+                
+                recovered_trade = {
+                    "trade_id": f"{symbol}_{trade_uuid}_recovered",
+                    "bybit_order_id": None,
+                    "bybit_scale_out_order_id": None,
+                    "symbol": symbol,
+                    "entry_price": avg_price,
+                    "predicted_price": avg_price,
+                    "stop_loss": sl_price,
+                    "take_profit": tp_price,
+                    "direction": direction,
+                    "end_time": float(time.time() + 3600 * 10),
+                    "atr_dollars": abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 50.0,
+                    "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
+                    "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
+                    "break_even_triggered": False,
+                    "half_closed": False,
+                    "original_size": position_size_usd,
+                    "position_size_usd": position_size_usd,
+                    "scaled_out_pnl": 0.0,
+                    "kelly_fraction": 0.0,
+                    "leverage": leverage_val,
+                    "confidence": 0.0,
+                    "qty": qty_val,
+                    "liq_price": liq_price,
+                    "mark_price": mark_price,
+                    "recovered": True
+                }
+                
+                tf_key = "1h"
+                active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
+                if not isinstance(active_trades_list, list):
+                    active_trades_list = []
+                active_trades_list.append(recovered_trade)
+                bot_state[f"active_trade_{tf_key}"] = active_trades_list
+                recovered += 1
+                print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
+                
+        if recovered > 0:
+            save_history()
+    except Exception as e:
+        print(f"[Crash Recovery] Error checking Bybit: {e}")
 
 def main():
     global live_price, last_ws_update_time
@@ -3000,6 +3027,9 @@ def main():
     last_check_hour = -1
 
     while True:
+        # Sync active positions from Bybit on every iteration (every 10 seconds)
+        sync_active_positions_from_bybit()
+        
         current_time = time.time()
         
         # 1. Health check & current price update (Adaptive to save proxy bandwidth)
@@ -3111,7 +3141,6 @@ def main():
                             exec_log = get_bybit_last_execution(active_symbol)
                             if exec_log:
                                 bybit_exit_price = float(exec_log.get("execPrice", current_price))
-                                bybit_realized_pnl = float(exec_log.get("realizedPnl", 0.0))
 
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
@@ -3789,10 +3818,10 @@ def main():
                         elif ml_trend == "Neutral":
                             status_msg = "Skipped (Neutral)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
-                        elif strong_conflict:
+                        elif strong_conflict and TRADE_MODE == "simulation":
                             status_msg = "Skipped (Contradiction)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
-                        elif calibrated_confidence < dynamic_conf_threshold:
+                        elif calibrated_confidence < dynamic_conf_threshold and TRADE_MODE == "simulation":
                             status_msg = "Skipped (Low Confidence)"
                             print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
 
@@ -3827,10 +3856,10 @@ def main():
                                     status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
                                     print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
                                 
-                                if all_pass:
+                                if all_pass or TRADE_MODE != "simulation":
                                     status_msg = "Traded"
                                     print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
+                                    print(f"CONFLUENCE RESULT: APPROVED/FORCED (TRADE_MODE={TRADE_MODE.upper()})")
                                     print("==================================================\n")
                                     
                                     atr_norm_val = latest_candle["ATR_norm"]
@@ -3872,6 +3901,10 @@ def main():
                                     # Pre-calculate active trade stats needed for dynamic sizing
                                     total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
                                     current_bal = bot_state.get("simulated_balance", 80.0)
+                                    if TRADE_MODE != "simulation":
+                                        real_bal = get_real_bybit_balance_cached()
+                                        if isinstance(real_bal, (int, float)) and real_bal > 0:
+                                            current_bal = real_bal
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
                                     
                                     if is_golden_hour:
@@ -3899,8 +3932,8 @@ def main():
                                     kelly_fraction = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
 
                                     # Ensure total size of active trades does not exceed the wallet balance
-                                    min_bal_limit = 2000.0
-                                    min_size_limit = 2000.0
+                                    min_bal_limit = 10.0
+                                    min_size_limit = 10.0
                                     
                                     wallet_exceeded = False
                                     if current_bal <= min_bal_limit:
