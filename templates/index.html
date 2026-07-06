@@ -1779,19 +1779,19 @@
             allActive.forEach(trade => {
                 const symbol = trade.symbol || "BTCUSDT";
                 const dirClass = trade.direction === "Bullish" ? "color-bullish" : "color-bearish";
-                const entryPrice = trade.entry_price || 0;
-                const exitTarget = trade.take_profit || 0;
-                const stopTarget = trade.stop_loss || 0;
+                const entryPrice = parseFloat(trade.entry_price) || 0;
+                const exitTarget = parseFloat(trade.take_profit) || 0;
+                const stopTarget = parseFloat(trade.stop_loss) || 0;
 
                 const livePriceKey = `live_price_${symbol}`;
-                const currentPriceVal = globalDataCache && globalDataCache[livePriceKey] ? globalDataCache[livePriceKey] : (symbol === "BTCUSDT" ? lastPrice : null);
+                const currentPriceVal = globalDataCache && globalDataCache[livePriceKey] ? parseFloat(globalDataCache[livePriceKey]) : (symbol === "BTCUSDT" ? parseFloat(lastPrice) : null);
 
                 let pnlVal = 0;
                 let pnlPct = 0;
                 if (trade.bybit_unrealized_pnl !== undefined && trade.bybit_unrealized_pnl !== null) {
                     // Use Bybit's real unrealized PnL (live/testnet mode)
-                    pnlVal = trade.bybit_unrealized_pnl;
-                    const posSize = trade.position_size_usd || 100.0;
+                    pnlVal = parseFloat(trade.bybit_unrealized_pnl) || 0;
+                    const posSize = parseFloat(trade.position_size_usd) || 100.0;
                     pnlPct = posSize > 0 ? (pnlVal / posSize) * 100 : 0;
                     totalPnLVal += pnlVal;
                     totalPosSize += posSize;
@@ -1804,8 +1804,8 @@
                         diff = entryPrice - currentPriceVal;
                     }
                     const rawPct = (diff / entryPrice) * 100;
-                    const lev = trade.leverage || 1.0;
-                    const posSize = trade.position_size_usd || 100.0;
+                    const lev = parseFloat(trade.leverage) || 1.0;
+                    const posSize = parseFloat(trade.position_size_usd) || 100.0;
                     
                     const grossPnl = posSize * (rawPct * lev / 100);
                     const feeCost = posSize * lev * 0.00055 * 2;  // 0.055% taker per side on leveraged size
@@ -1826,10 +1826,11 @@
                 const countdownStr = `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
 
                 // Calculate confidence percentage if available
-                const confidencePctStr = trade.confidence ? (trade.confidence * 100).toFixed(1) + '%' : '—';
+                const confidencePctVal = parseFloat(trade.confidence);
+                const confidencePctStr = !isNaN(confidencePctVal) ? (confidencePctVal * 100).toFixed(1) + '%' : '—';
 
-                const tradePosSize = trade.position_size_usd || 0.00;
-                const tradeLeverage = trade.leverage || 1.0;
+                const tradePosSize = parseFloat(trade.position_size_usd) || 0.00;
+                const tradeLeverage = parseFloat(trade.leverage) || 1.0;
                 const tradeLeveragedVal = (tradePosSize * tradeLeverage).toFixed(2);
 
                 htmlRows += `
@@ -1850,7 +1851,7 @@
                             <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(4)}</span>
                         </td>
                         <td class="hide-mobile">${(() => {
-                            const liqP = trade.liq_price || 0;
+                            const liqP = parseFloat(trade.liq_price) || 0;
                             if (liqP <= 0) return '<span style="color: var(--text-muted);">—</span>';
                             const cp = currentPriceVal || entryPrice;
                             const distPct = Math.abs((cp - liqP) / cp * 100);
@@ -2607,13 +2608,13 @@
             let html = "";
             trades.forEach((trade, idx) => {
                 const dirClass = trade.direction === "Bullish" ? "color-bullish" : "color-bearish";
-                const entryPrice = trade.entry_price || 0;
-                const exitTarget = trade.take_profit || 0;
-                const stopTarget = trade.stop_loss || 0;
+                const entryPrice = parseFloat(trade.entry_price) || 0;
+                const exitTarget = parseFloat(trade.take_profit) || 0;
+                const stopTarget = parseFloat(trade.stop_loss) || 0;
                 const symbol = trade.symbol || "BTCUSDT";
 
                 const livePriceKey = `live_price_${symbol}`;
-                const currentPriceVal = globalDataCache && globalDataCache[livePriceKey] ? globalDataCache[livePriceKey] : (symbol === "BTCUSDT" ? lastPrice : null);
+                const currentPriceVal = globalDataCache && globalDataCache[livePriceKey] ? parseFloat(globalDataCache[livePriceKey]) : (symbol === "BTCUSDT" ? parseFloat(lastPrice) : null);
 
                 let pnlVal = 0;
                 let pnlPct = 0;
@@ -2625,8 +2626,8 @@
                         diff = entryPrice - currentPriceVal;
                     }
                     const rawPct = (diff / entryPrice) * 100;
-                    const lev = trade.leverage || 1.0;
-                    const posSize = trade.position_size_usd || 100.0;
+                    const lev = parseFloat(trade.leverage) || 1.0;
+                    const posSize = parseFloat(trade.position_size_usd) || 100.0;
                     
                     pnlPct = rawPct * lev;
                     pnlVal = posSize * (pnlPct / 100);
@@ -2644,7 +2645,7 @@
                     <div style="border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.01);">
                         <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 13px; margin-bottom: 8px; border-bottom: 1px dashed rgba(255,255,255,0.06); padding-bottom: 6px;">
                             <span class="${dirClass}">${symbol.replace("USDT", "")} ${trade.direction.toUpperCase()}</span>
-                            <span style="color: var(--accent-orange);">${trade.leverage ? trade.leverage.toFixed(1) + 'x' : '1.0x'}</span>
+                            <span style="color: var(--accent-orange);">${!isNaN(parseFloat(trade.leverage)) ? parseFloat(trade.leverage).toFixed(1) + 'x' : '1.0x'}</span>
                         </div>
                         <div style="font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary);">
                             <div style="display: flex; justify-content: space-between;">
@@ -2653,7 +2654,7 @@
                             </div>
                             <div style="display: flex; justify-content: space-between;">
                                 <span>Confidence:</span>
-                                <span style="color: var(--accent-purple); font-weight: 700;">${trade.confidence ? (trade.confidence * 100).toFixed(1) + '%' : '—'}</span>
+                                <span style="color: var(--accent-purple); font-weight: 700;">${!isNaN(parseFloat(trade.confidence)) ? (parseFloat(trade.confidence) * 100).toFixed(1) + '%' : '—'}</span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
                                 <span>TP / SL:</span>
