@@ -546,6 +546,32 @@ def get_bybit_closed_pnl(symbol, limit=1):
     return None
 
 def update_bybit_stop_loss(symbol, sl_price):
+    pos = get_bybit_position(symbol)
+    if not pos:
+        print(f"[Bybit API] Stop Loss update skipped for {symbol}: No active position found.")
+        return False
+        
+    qty_val = float(pos.get("size", "0"))
+    if qty_val == 0:
+        print(f"[Bybit API] Stop Loss update skipped for {symbol}: Position size is 0.")
+        return False
+        
+    side = pos.get("side", "Buy")  # "Buy" for Long, "Sell" for Short
+    
+    live_price = get_fallback_price(symbol)
+    if live_price is None:
+        live_price = bot_state.get(f"live_price_{symbol}")
+        
+    if live_price is not None:
+        if side == "Buy":  # Long position: Stop Loss must be < current price
+            if sl_price >= live_price:
+                print(f"[Bybit API] Stop Loss update skipped for Long {symbol}: Proposed SL {sl_price:.4f} is >= current price {live_price:.4f}.")
+                return False
+        else:  # Short position: Stop Loss must be > current price
+            if sl_price <= live_price:
+                print(f"[Bybit API] Stop Loss update skipped for Short {symbol}: Proposed SL {sl_price:.4f} is <= current price {live_price:.4f}.")
+                return False
+
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -562,6 +588,32 @@ def update_bybit_stop_loss(symbol, sl_price):
 
 def update_bybit_take_profit(symbol, tp_price):
     """Sync the Take Profit on the Bybit server."""
+    pos = get_bybit_position(symbol)
+    if not pos:
+        print(f"[Bybit API] Take Profit update skipped for {symbol}: No active position found.")
+        return False
+        
+    qty_val = float(pos.get("size", "0"))
+    if qty_val == 0:
+        print(f"[Bybit API] Take Profit update skipped for {symbol}: Position size is 0.")
+        return False
+        
+    side = pos.get("side", "Buy")  # "Buy" for Long, "Sell" for Short
+    
+    live_price = get_fallback_price(symbol)
+    if live_price is None:
+        live_price = bot_state.get(f"live_price_{symbol}")
+        
+    if live_price is not None:
+        if side == "Buy":  # Long position: Take Profit must be > current price
+            if tp_price <= live_price:
+                print(f"[Bybit API] Take Profit update skipped for Long {symbol}: Proposed TP {tp_price:.4f} is <= current price {live_price:.4f}.")
+                return False
+        else:  # Short position: Take Profit must be < current price
+            if tp_price >= live_price:
+                print(f"[Bybit API] Take Profit update skipped for Short {symbol}: Proposed TP {tp_price:.4f} is >= current price {live_price:.4f}.")
+                return False
+
     payload = {
         "category": "linear",
         "symbol": symbol,
