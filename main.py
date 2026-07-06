@@ -858,7 +858,7 @@ def force_close_trade():
                     if closed_pnl_record:
                         record_time_ms = int(closed_pnl_record.get("updatedTime", 0))
                         current_time_ms = int(time.time() * 1000)
-                        if abs(current_time_ms - record_time_ms) <= 60000:
+                        if abs(current_time_ms - record_time_ms) <= 300000:
                             bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
                             bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
                             # Correct database position size to match actual filled size on Bybit
@@ -878,7 +878,7 @@ def force_close_trade():
                         if exec_log:
                             exec_time_ms = int(exec_log.get("execTime", 0))
                             current_time_ms = int(time.time() * 1000)
-                            if abs(current_time_ms - exec_time_ms) <= 60000:
+                            if abs(current_time_ms - exec_time_ms) <= 300000:
                                 bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
                             else:
                                 print(f"[Bybit API] Stale execution log ignored (Age: {int((current_time_ms - exec_time_ms)/1000)}s).")
@@ -1480,10 +1480,7 @@ def run_fallback_price_updater():
                     for ticker in ticker_list:
                         sym = ticker.get("symbol")
                         if sym in SUPPORTED_SYMBOLS:
-                            if TRADE_MODE == "testnet":
-                                val_str = ticker.get("indexPrice") or ticker.get("lastPrice")
-                            else:
-                                val_str = ticker.get("lastPrice")
+                            val_str = ticker.get("lastPrice")
                             if val_str:
                                 val = float(val_str)
                                 bot_state[f"live_price_{sym}"] = val
@@ -1614,10 +1611,7 @@ def on_message(ws, message):
         data = json.loads(message)
         if "data" in data and isinstance(data["data"], dict):
             sym = data["data"].get("symbol")
-            if TRADE_MODE == "testnet":
-                price_str = data["data"].get("indexPrice") or data["data"].get("lastPrice")
-            else:
-                price_str = data["data"].get("lastPrice")
+            price_str = data["data"].get("lastPrice")
             if price_str and sym:
                 val = float(price_str)
                 bot_state[f"live_price_{sym}"] = val
@@ -2907,8 +2901,8 @@ def get_fallback_price(symbol=SYMBOL):
             ticker_list = res.get("result", {}).get("list", [])
             if ticker_list:
                 ticker = ticker_list[0]
-                price_key = "indexPrice" if TRADE_MODE == "testnet" else "lastPrice"
-                return float(ticker.get(price_key) or ticker.get("lastPrice"))
+                price_key = "lastPrice"
+                return float(ticker.get("lastPrice"))
             else:
                 print(f"Bybit price ticker list is empty for {symbol}")
         else:
@@ -2969,10 +2963,7 @@ def load_initial_prices():
             for ticker in ticker_list:
                 sym = ticker.get("symbol")
                 if sym in SUPPORTED_SYMBOLS:
-                    if TRADE_MODE == "testnet":
-                        val_str = ticker.get("indexPrice") or ticker.get("lastPrice")
-                    else:
-                        val_str = ticker.get("lastPrice")
+                    val_str = ticker.get("lastPrice")
                     if val_str:
                         val = float(val_str)
                         bot_state[f"live_price_{sym}"] = val
@@ -3037,6 +3028,14 @@ def sync_active_positions_from_bybit():
                     t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
                     t["qty"] = float(pos.get("size", t["qty"]))
                     t["leverage"] = float(pos.get("leverage", t["leverage"]))
+                    
+                    # Sync TP/SL from Bybit exchange if they exist and are non-zero
+                    bybit_sl = float(pos.get("stopLoss", 0.0)) if pos.get("stopLoss") else 0.0
+                    bybit_tp = float(pos.get("takeProfit", 0.0)) if pos.get("takeProfit") else 0.0
+                    if bybit_sl > 0.0:
+                        t["stop_loss"] = bybit_sl
+                    if bybit_tp > 0.0:
+                        t["take_profit"] = bybit_tp
                     
                     pos_val = float(pos.get("positionValue", 0.0))
                     t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
@@ -3352,7 +3351,7 @@ def main():
                         if closed_pnl_record:
                             record_time_ms = int(closed_pnl_record.get("updatedTime", 0))
                             current_time_ms = int(time.time() * 1000)
-                            if abs(current_time_ms - record_time_ms) <= 60000:
+                            if abs(current_time_ms - record_time_ms) <= 300000:
                                 bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
                                 bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", current_price))
                                 # Correct database position size to match actual filled size on Bybit
@@ -3372,7 +3371,7 @@ def main():
                             if exec_log:
                                 exec_time_ms = int(exec_log.get("execTime", 0))
                                 current_time_ms = int(time.time() * 1000)
-                                if abs(current_time_ms - exec_time_ms) <= 60000:
+                                if abs(current_time_ms - exec_time_ms) <= 300000:
                                     bybit_exit_price = float(exec_log.get("execPrice", current_price))
                                 else:
                                     print(f"[Bybit API] Stale execution log ignored (Age: {int((current_time_ms - exec_time_ms)/1000)}s).")
@@ -4243,6 +4242,7 @@ def main():
                                         # Set Bybit Leverage and Place Order if in live/testnet mode
                                         bybit_success = True
                                         bybit_order_id = None
+                                        bybit_scale_out_order_id = None
                                         
                                         if TRADE_MODE != "simulation":
                                             print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
