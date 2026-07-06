@@ -3,9 +3,22 @@ import time
 import requests
 import pandas as pd
 
+from dotenv import load_dotenv
+load_dotenv()
+
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache")
+
 def get_bybit_proxies():
-    proxy = os.environ.get("BYBIT_PROXY")
+    proxy = (
+        os.environ.get("BYBIT_PROXY") or
+        os.environ.get("HTTPS_PROXY") or
+        os.environ.get("HTTP_PROXY") or
+        os.environ.get("https_proxy") or
+        os.environ.get("http_proxy")
+    )
     if proxy:
+        if "://" not in proxy:
+            proxy = "http://" + proxy
         return {
             "http": proxy,
             "https": proxy
@@ -16,48 +29,172 @@ TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 
 def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_{interval}.csv")
+    
+    target_count = limit * pages
+    
+    # 1. Load cache if it exists
+    df_cache = None
+    if os.path.exists(cache_file):
+        try:
+            df_cache = pd.read_csv(cache_file)
+            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
+            df_cache = df_cache.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        except Exception as e:
+            print(f"[Cache Load Error] {e}. Rebuilding cache for {symbol} {interval}.")
+            df_cache = None
+
     url = f"{BYBIT_BASE_URL}/v5/market/kline"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     all_data = []
     
-    current_end = None
-    
-    for page in range(pages):
-        params = {
-            "category": "linear",
-            "symbol": symbol,
-            "interval": str(interval),
-            "limit": limit
-        }
-        if current_end is not None:
-            params["end"] = current_end
-            
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    if df_cache is not None and len(df_cache) > 0:
+        # Cache exists. Fetch only new candles (timestamp > cache_max_ts)
+        cache_max_ts = float(df_cache["timestamp"].max())
+        
+        # Step A: Fetch newer candles
+        new_data = []
+        current_end = None
+        stop_fetching = False
+        
+        for page in range(pages):
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "interval": str(interval),
+                "limit": limit
             }
-            response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
-            if response.status_code != 200:
-                print(f"Error fetching page {page + 1}: Received status code {response.status_code}")
-                print(f"Response content: {response.text[:300]}")
-                break
-            res = response.json()
-            if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
-                batch = res["result"]["list"]
-                all_data.extend(batch)
+            if current_end is not None:
+                params["end"] = current_end
                 
-                # Get the oldest timestamp (last element in the descending list)
-                oldest_ts = int(float(batch[-1][0]))
-                current_end = oldest_ts - 1
-            else:
+            try:
+                response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+                if response.status_code == 200:
+                    res = response.json()
+                    batch = res.get("result", {}).get("list", [])
+                    if not batch:
+                        break
+                    
+                    # Parse batch
+                    for item in batch:
+                        ts = float(item[0])
+                        if ts <= cache_max_ts:
+                            stop_fetching = True
+                            break
+                        new_data.append(item)
+                    
+                    if stop_fetching:
+                        break
+                        
+                    oldest_ts = int(float(batch[-1][0]))
+                    current_end = oldest_ts - 1
+                else:
+                    print(f"Error fetching newer page {page + 1}: Received status code {response.status_code}")
+                    break
+            except Exception as e:
+                print(f"Error fetching newer page {page + 1}: {e}")
                 break
-        except Exception as e:
-            print(f"Error fetching page {page + 1}: {e}")
-            break
+                
+            if pages > 1:
+                time.sleep(0.1)
+
+        # Convert new_data list to DataFrame structure matching cache
+        if new_data:
+            df_new = pd.DataFrame(new_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+            df_new = df_new.astype(float)
+            df_merged = pd.concat([df_new, df_cache], ignore_index=True)
+        else:
+            df_merged = df_cache.copy()
             
-        if pages > 1:
-            time.sleep(0.1)
+        df_merged = df_merged.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        
+        # Step B: If the merged dataset does not have enough candles to satisfy requested target_count, fetch older candles
+        if len(df_merged) < target_count:
+            needed = target_count - len(df_merged)
+            pages_needed = (needed // limit) + 1
+            current_end = int(df_merged["timestamp"].min()) - 1
+            older_data = []
             
-    if not all_data:
+            for page in range(pages_needed):
+                params = {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "interval": str(interval),
+                    "limit": limit,
+                    "end": current_end
+                }
+                try:
+                    response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+                    if response.status_code == 200:
+                        res = response.json()
+                        batch = res.get("result", {}).get("list", [])
+                        if not batch:
+                            break
+                        older_data.extend(batch)
+                        oldest_ts = int(float(batch[-1][0]))
+                        current_end = oldest_ts - 1
+                    else:
+                        break
+                except Exception as e:
+                    print(f"Error fetching older page: {e}")
+                    break
+                time.sleep(0.1)
+                
+            if older_data:
+                df_older = pd.DataFrame(older_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+                df_older = df_older.astype(float)
+                df_merged = pd.concat([df_merged, df_older], ignore_index=True)
+                df_merged = df_merged.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                
+        df_history = df_merged
+        
+    else:
+        # Cache does not exist. Fetch full history from Bybit
+        current_end = None
+        for page in range(pages):
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "interval": str(interval),
+                "limit": limit
+            }
+            if current_end is not None:
+                params["end"] = current_end
+                
+            try:
+                response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+                if response.status_code == 200:
+                    res = response.json()
+                    if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
+                        batch = res["result"]["list"]
+                        all_data.extend(batch)
+                        oldest_ts = int(float(batch[-1][0]))
+                        current_end = oldest_ts - 1
+                    else:
+                        break
+                else:
+                    print(f"Error fetching page {page + 1}: Received status code {response.status_code}")
+                    break
+            except Exception as e:
+                print(f"Error fetching page {page + 1}: {e}")
+                break
+                
+            if pages > 1:
+                time.sleep(0.1)
+                
+        if all_data:
+            df_history = pd.DataFrame(all_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+            df_history = df_history.astype(float)
+            df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        else:
+            df_history = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+
+    # If Bybit fetches failed/returned nothing, try fallback endpoints (Binance/Kraken)
+    if len(df_history) == 0:
         print(f"Bybit klines returned no data. Attempting Binance API fallback for {symbol}...")
         try:
             binance_interval = "1h"
@@ -82,29 +219,31 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                 "interval": binance_interval,
                 "limit": min(limit * pages, 1000)
             }
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            # Binance fallback does not use proxy to conserve metered proxy bandwidth
             resp = requests.get(binance_url, params=binance_params, headers=headers, timeout=10)
             if resp.status_code == 200:
                 binance_data = resp.json()
+                fallback_data = []
                 for item in binance_data:
-                    all_data.append([
+                    fallback_data.append([
                         float(item[0]), # timestamp
                         float(item[1]), # open
                         float(item[2]), # high
                         float(item[3]), # low
                         float(item[4]), # close
                         float(item[5]), # volume
-                        float(item[7])  # turnover (quote asset volume)
+                        float(item[7])  # turnover
                     ])
-                print(f"Successfully loaded {len(binance_data)} candles from Binance API fallback.")
+                df_history = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+                df_history = df_history.astype(float)
+                df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                print(f"Successfully loaded {len(df_history)} candles from Binance API fallback.")
             else:
                 print(f"Binance fallback failed with HTTP {resp.status_code}")
         except Exception as ex:
             print(f"Error fetching Binance fallback klines: {ex}")
 
-    if not all_data:
+    if len(df_history) == 0:
         print(f"Bybit & Binance failed. Attempting Kraken API fallback for {symbol}...")
         try:
             kraken_interval = 60
@@ -115,11 +254,11 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             elif str(interval) == "60":
                 kraken_interval = 60
             elif str(interval) == "120":
-                kraken_interval = 60  # Kraken does not support 120
+                kraken_interval = 60
             elif str(interval) == "240":
                 kraken_interval = 240
             elif str(interval) == "360":
-                kraken_interval = 240  # Kraken does not support 360
+                kraken_interval = 240
             elif str(interval).upper() == "D":
                 kraken_interval = 1440
 
@@ -139,9 +278,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                 "pair": kraken_pair,
                 "interval": kraken_interval
             }
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            # Kraken fallback does not use proxy to conserve metered proxy bandwidth
             resp = requests.get(kraken_url, params=kraken_params, headers=headers, timeout=10)
             if resp.status_code == 200:
                 res = resp.json()
@@ -149,10 +286,10 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                     pair_key = [k for k in res["result"].keys() if k != "last"][0]
                     kraken_data = res["result"][pair_key]
                     
-                    # Take the last 'limit' candles (Kraken returns 720 by default)
                     candles_to_take = kraken_data[-limit:] if len(kraken_data) > limit else kraken_data
+                    fallback_data = []
                     for item in candles_to_take:
-                        all_data.append([
+                        fallback_data.append([
                             float(item[0]) * 1000, # timestamp in ms
                             float(item[1]),        # open
                             float(item[2]),        # high
@@ -161,7 +298,10 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                             float(item[6]),        # volume
                             float(item[6]) * float(item[4]) # turnover
                         ])
-                    print(f"Successfully loaded {len(candles_to_take)} candles from Kraken API fallback.")
+                    df_history = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+                    df_history = df_history.astype(float)
+                    df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                    print(f"Successfully loaded {len(df_history)} candles from Kraken API fallback.")
                 else:
                     print(f"Kraken returned empty results or error: {res.get('error')}")
             else:
@@ -169,19 +309,28 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         except Exception as ex:
             print(f"Error fetching Kraken fallback klines: {ex}")
 
-    if not all_data:
+    if len(df_history) == 0:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
 
-    df = pd.DataFrame(all_data, columns=[
-        "timestamp", "open", "high", "low", "close", "volume", "turnover"
-    ])
+    # Save/update cache
+    if len(df_history) > 0:
+        if df_cache is not None:
+            df_combined = pd.concat([df_history, df_cache], ignore_index=True)
+        else:
+            df_combined = df_history
+            
+        df_combined = df_combined.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        
+        # Keep at most 30,000 candles to save disk space
+        if len(df_combined) > 30000:
+            df_combined = df_combined.iloc[-30000:]
+            
+        try:
+            df_combined.to_csv(cache_file, index=False)
+        except Exception as e:
+            print(f"[Cache Write Error] {e}")
 
-    df = df.astype(float)
-    df = df.drop_duplicates(subset=["timestamp"])
-    df = df.sort_values("timestamp")
-    df.reset_index(drop=True, inplace=True)
-
-    return df
+    return df_history.iloc[-target_count:].reset_index(drop=True)
 
 def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
     url = f"{BYBIT_BASE_URL}/v5/market/open-interest"

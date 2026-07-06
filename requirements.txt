@@ -12,4 +12,5 @@ transformers
 torch
 optuna
 lightgbm
-catboost
+catboost
+PySocks

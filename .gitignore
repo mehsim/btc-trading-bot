@@ -22,3 +22,6 @@ catboost_info/
 
 # Secrets
 .env
+
+# Local candle cache
+kline_cache/

@@ -305,8 +305,16 @@ _balance_lock = threading.Lock()
 
 def get_bybit_proxies():
     import os
-    proxy = os.environ.get("BYBIT_PROXY")
+    proxy = (
+        os.environ.get("BYBIT_PROXY") or
+        os.environ.get("HTTPS_PROXY") or
+        os.environ.get("HTTP_PROXY") or
+        os.environ.get("https_proxy") or
+        os.environ.get("http_proxy")
+    )
     if proxy:
+        if "://" not in proxy:
+            proxy = "http://" + proxy
         return {
             "http": proxy,
             "https": proxy
@@ -316,10 +324,14 @@ def get_bybit_proxies():
 def parse_proxy_url(proxy_url):
     """Parse proxy URL into components for websocket-client."""
     from urllib.parse import urlparse
+    if "://" not in proxy_url:
+        proxy_url = "http://" + proxy_url
     parsed = urlparse(proxy_url)
     host = parsed.hostname
     port = parsed.port
     proxy_type = parsed.scheme or "http"
+    if proxy_type == "socks":
+        proxy_type = "socks5"
     auth = None
     if parsed.username and parsed.password:
         auth = (parsed.username, parsed.password)
@@ -860,6 +872,9 @@ def force_close_trade():
         active_trades_list = [t for t in active_trades_list if not (t.get("symbol", "").upper() == symbol)]
     bot_state[active_trade_key] = active_trades_list
     
+    # Sync positions immediately to make UI responsive
+    sync_active_positions_from_bybit()
+    
     return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
 
 def close_all_trades_internal(exit_reason):
@@ -1012,6 +1027,7 @@ def close_all_trades_internal(exit_reason):
         
     if closed_count > 0:
         save_history()
+        sync_active_positions_from_bybit()
     return closed_count
 
 @app.route("/api/close_all_trades", methods=["POST"])
@@ -1364,10 +1380,10 @@ def run_fallback_price_updater():
             ws_active = ws_connected and (now - last_ws_update_time < 30)
             has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
 
-            # Adaptive interval: 10s if WS down, 60s if WS up with trades, 300s if WS up idle
+            # Adaptive interval: 20s if WS down with trades, 60s if WS down idle, 60s if WS up with trades, 300s if WS up idle
             if not ws_active:
-                poll_interval = 10
-                binance_interval = 60
+                poll_interval = 20 if has_active_trades else 60
+                binance_interval = 60 if has_active_trades else 180
             elif has_active_trades:
                 poll_interval = 60
                 binance_interval = 300
@@ -2297,10 +2313,11 @@ def calibrate_confidence(raw_conf, p95, max_conf):
 
 def get_funding_rate(symbol=SYMBOL):
     try:
+        url = f"{BYBIT_BASE_URL}/v5/market/tickers"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "linear", "symbol": symbol}, headers=headers, timeout=5)
+        response = requests.get(url, params={"category": "linear", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
         if response.status_code != 200:
             print(f"Error fetching funding rate: HTTP status {response.status_code}")
             return 0.0
@@ -3025,12 +3042,18 @@ def main():
     }
     startup_check_done = False
     last_check_hour = -1
+    last_position_sync_time = 0.0
 
     while True:
-        # Sync active positions from Bybit on every iteration (every 10 seconds)
-        sync_active_positions_from_bybit()
-        
         current_time = time.time()
+        
+        # Sync active positions from Bybit periodically to save proxy bandwidth
+        has_active_positions = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+        sync_interval = 30.0 if has_active_positions else 120.0
+        
+        if (current_time - last_position_sync_time >= sync_interval):
+            sync_active_positions_from_bybit()
+            last_position_sync_time = current_time
         
         # 1. Health check & current price update (Adaptive to save proxy bandwidth)
         # Rely on background run_fallback_price_updater. Only query directly if live_price is None
@@ -4069,6 +4092,10 @@ def main():
                                             }
                                             active_trades_list.append(active_trade)
                                             bot_state[active_trade_key] = active_trades_list
+                                            
+                                            # Sync positions immediately to load live Bybit state parameters
+                                            if TRADE_MODE != "simulation":
+                                                sync_active_positions_from_bybit()
                                             
                                             # Deduct size from wallet balance immediately (only in simulation)
                                             if TRADE_MODE == "simulation":
