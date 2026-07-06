@@ -1249,6 +1249,7 @@
             <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 10px;">
                 <div class="section-title">💼 Active Open Trades</div>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <div id="active-open-trades-total-mainnet-pnl" style="font-size: 13px; font-weight: 800; padding: 4px 12px; border-radius: 20px; display: none; font-family: 'Outfit', sans-serif;">Total Mainnet PnL (Assumed): $0.00</div>
                     <div id="active-open-trades-total-pnl" style="font-size: 13px; font-weight: 800; padding: 4px 12px; border-radius: 20px; display: none; font-family: 'Outfit', sans-serif;">Total PnL: $0.00</div>
                     <div id="active-open-trades-count" style="font-size: 13px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">0 Active Positions</div>
                     <button id="close-all-trades-btn" onclick="forceCloseAllTrades()" style="padding: 4px 12px; font-size: 11px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 20px; cursor: pointer; font-weight: 800; transition: background 0.2s; display: none; font-family: 'Outfit', sans-serif;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Close All Trades</button>
@@ -1738,6 +1739,7 @@
             const tbody = document.getElementById("active-open-trades-rows");
             const countBadge = document.getElementById("active-open-trades-count");
             const totalPnLElem = document.getElementById("active-open-trades-total-pnl");
+            const totalMainnetPnLElem = document.getElementById("active-open-trades-total-mainnet-pnl");
             if (!tbody) return;
 
             // Gather all active trades from activeTradesState
@@ -1769,11 +1771,15 @@
                 if (totalPnLElem) {
                     totalPnLElem.style.display = "none";
                 }
+                if (totalMainnetPnLElem) {
+                    totalMainnetPnLElem.style.display = "none";
+                }
                 return;
             }
 
             let htmlRows = "";
             let totalPnLVal = 0;
+            let totalMainnetPnLVal = 0;
             let totalPosSize = 0;
 
             allActive.forEach(trade => {
@@ -1864,6 +1870,7 @@
                         <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
                         <td><span class="${(() => {
                             const mObj = calculateMainnetPnL(trade, currentPriceVal);
+                            totalMainnetPnLVal += mObj.pnlVal;
                             return mObj.pnlVal >= 0 ? 'color-bullish' : 'color-bearish';
                         })()}" style="font-weight: 800;">${(() => {
                             const mObj = calculateMainnetPnL(trade, currentPriceVal);
@@ -1879,7 +1886,7 @@
 
             tbody.innerHTML = htmlRows;
 
-            // Render Total PnL badge
+            // Render Total PnL and Total Mainnet PnL badges
             if (totalPnLElem) {
                 if (allActive.length > 0) {
                     const totalPnLPct = totalPosSize > 0 ? (totalPnLVal / totalPosSize * 100) : 0;
@@ -1892,6 +1899,21 @@
                     totalPnLElem.innerText = `Total PnL: ${totalPnLVal >= 0 ? '+' : ''}$${totalPnLVal.toFixed(2)} (${totalPnLVal >= 0 ? '+' : ''}${totalPnLPct.toFixed(3)}%)`;
                 } else {
                     totalPnLElem.style.display = "none";
+                }
+            }
+
+            if (totalMainnetPnLElem) {
+                if (allActive.length > 0) {
+                    const totalMainnetPnLPct = totalPosSize > 0 ? (totalMainnetPnLVal / totalPosSize * 100) : 0;
+                    const mainnetBg = totalMainnetPnLVal >= 0 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)";
+                    const mainnetColor = totalMainnetPnLVal >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+                    
+                    totalMainnetPnLElem.style.display = "block";
+                    totalMainnetPnLElem.style.color = mainnetColor;
+                    totalMainnetPnLElem.style.background = mainnetBg;
+                    totalMainnetPnLElem.innerText = `Total Mainnet PnL (Assumed): ${totalMainnetPnLVal >= 0 ? '+' : ''}$${totalMainnetPnLVal.toFixed(2)} (${totalMainnetPnLVal >= 0 ? '+' : ''}${totalMainnetPnLPct.toFixed(3)}%)`;
+                } else {
+                    totalMainnetPnLElem.style.display = "none";
                 }
             }
 
