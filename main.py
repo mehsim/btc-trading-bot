@@ -784,12 +784,24 @@ def force_close_trade():
                     time.sleep(0.5) # Brief sleep for order registration
                     closed_pnl_record = get_bybit_closed_pnl(symbol)
                     if closed_pnl_record:
-                        bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
-                        bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
-                    else:
+                        record_time_ms = int(closed_pnl_record.get("updatedTime", 0))
+                        current_time_ms = int(time.time() * 1000)
+                        if abs(current_time_ms - record_time_ms) <= 60000:
+                            bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
+                            bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", live_symbol_price))
+                        else:
+                            print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
+                            closed_pnl_record = None
+                            
+                    if not closed_pnl_record:
                         exec_log = get_bybit_last_execution(symbol)
                         if exec_log:
-                            bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
+                            exec_time_ms = int(exec_log.get("execTime", 0))
+                            current_time_ms = int(time.time() * 1000)
+                            if abs(current_time_ms - exec_time_ms) <= 60000:
+                                bybit_exit_price = float(exec_log.get("execPrice", live_symbol_price))
+                            else:
+                                print(f"[Bybit API] Stale execution log ignored (Age: {int((current_time_ms - exec_time_ms)/1000)}s).")
 
     # Maker execution: zero slippage on limit close
     slippage_pct = 0.0
@@ -3134,13 +3146,25 @@ def main():
                         # Retrieve exact settled PnL from closed-pnl endpoint (includes funding fees)
                         closed_pnl_record = get_bybit_closed_pnl(active_symbol)
                         if closed_pnl_record:
-                            bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
-                            bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", current_price))
-                        else:
+                            record_time_ms = int(closed_pnl_record.get("updatedTime", 0))
+                            current_time_ms = int(time.time() * 1000)
+                            if abs(current_time_ms - record_time_ms) <= 60000:
+                                bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
+                                bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", current_price))
+                            else:
+                                print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
+                                closed_pnl_record = None
+                                
+                        if not closed_pnl_record:
                             # Fallback to execution log
                             exec_log = get_bybit_last_execution(active_symbol)
                             if exec_log:
-                                bybit_exit_price = float(exec_log.get("execPrice", current_price))
+                                exec_time_ms = int(exec_log.get("execTime", 0))
+                                current_time_ms = int(time.time() * 1000)
+                                if abs(current_time_ms - exec_time_ms) <= 60000:
+                                    bybit_exit_price = float(exec_log.get("execPrice", current_price))
+                                else:
+                                    print(f"[Bybit API] Stale execution log ignored (Age: {int((current_time_ms - exec_time_ms)/1000)}s).")
 
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
