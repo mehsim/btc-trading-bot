@@ -3416,11 +3416,20 @@ def main():
                 half_closed = active_trade.get("half_closed", False)
                 if TRADE_MODE != "simulation":
                     if bybit_closed:
-                        exit_pnl = bybit_realized_pnl if bybit_realized_pnl is not None else 0.0
-                        if exit_pnl >= 0:
-                            exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                        if bybit_realized_pnl is not None:
+                            if bybit_realized_pnl >= 0:
+                                exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                            else:
+                                exit_reason = "STOP LOSS HIT [FAIL]"
                         else:
-                            exit_reason = "STOP LOSS HIT [FAIL]"
+                            # Fallback: determine based on price change direction
+                            actual_exit_price = bybit_exit_price if bybit_exit_price is not None else current_price
+                            actual_change = actual_exit_price - entry_price
+                            is_profit = actual_change > 0 if direction == "Bullish" else actual_change < 0
+                            if is_profit:
+                                exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                            else:
+                                exit_reason = "STOP LOSS HIT [FAIL]"
                 else:
                     if direction == "Bullish":
                         if current_price <= stop_loss:
