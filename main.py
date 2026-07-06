@@ -7,7 +7,7 @@ load_dotenv()
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
-BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/spot" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/spot"
+BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/linear" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/linear"
 
 
 import websocket
@@ -1377,7 +1377,7 @@ def run_fallback_price_updater():
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
-                resp = requests.get(url, params={"category": "spot"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+                resp = requests.get(url, params={"category": "linear"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
                 found_symbols = set()
                 if resp.status_code == 200:
                     data = resp.json()
@@ -2189,7 +2189,7 @@ def get_orderbook_imbalance(symbol=None):
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": symbol, "limit": 25}, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+        response = requests.get(url, params={"category": "linear", "symbol": symbol, "limit": 25}, headers=headers, proxies=get_bybit_proxies(), timeout=10)
         res = None
         if response.status_code == 200:
             res = response.json()
@@ -2778,7 +2778,7 @@ def get_fallback_price(symbol=SYMBOL):
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params={"category": "spot", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
+        response = requests.get(url, params={"category": "linear", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
         if response.status_code == 200:
             res = response.json()
             ticker_list = res.get("result", {}).get("list", [])
@@ -2820,7 +2820,7 @@ def load_initial_prices():
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        resp = requests.get(url, params={"category": "spot"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+        resp = requests.get(url, params={"category": "linear"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
         found_symbols = set()
         if resp.status_code == 200:
             ticker_list = resp.json().get("result", {}).get("list", [])

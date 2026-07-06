@@ -23,7 +23,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     
     for page in range(pages):
         params = {
-            "category": "spot",
+            "category": "linear",
             "symbol": symbol,
             "interval": str(interval),
             "limit": limit
