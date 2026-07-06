@@ -2557,9 +2557,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         ema21_1d = EMAIndicator(df_1d_completed["close"], window=21).ema_indicator().iloc[-1]
         trend_1d = "Bullish" if ema9_1d > ema21_1d else "Bearish"
         trend_1d_pass = (ml_trend == "Bullish" and trend_1d == "Bullish") or (ml_trend == "Bearish" and trend_1d == "Bearish")
+        if not trend_1d_pass:
+            hard_gate_failed = True
         results["1d_Trend"] = {
             "pass": trend_1d_pass,
-            "detail": f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f})",
+            "detail": f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f}) [HARD GATE]",
             "weight": weight_1d
         }
         max_score += weight_1d
@@ -2762,9 +2764,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     is_opposed = (ml_trend == "Bullish" and news_sentiment == "Bearish") or (ml_trend == "Bearish" and news_sentiment == "Bullish")
     news_pass = not is_opposed
     if is_opposed:
-        detail_msg = f"News Conflict: Model is {ml_trend} but News sentiment is {news_sentiment}"
+        hard_gate_failed = True
+        detail_msg = f"News Conflict: Model is {ml_trend} but News sentiment is {news_sentiment} [HARD GATE]"
     else:
-        detail_msg = f"Passed (Direction Lock: Model is {ml_trend}, News sentiment is {news_sentiment})"
+        detail_msg = f"Passed (Direction Lock: Model is {ml_trend}, News sentiment is {news_sentiment}) [HARD GATE]"
         
     weight_news = 1
     results["News_Sentiment"] = {"pass": news_pass, "detail": detail_msg, "weight": weight_news}
@@ -4137,9 +4140,9 @@ def main():
                                     print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
                                     # Align stop loss and take profit multipliers dynamically based on ADX regime
-                                    sl_multiplier = 1.20
-                                    tp_multiplier_adjusted = 2.50 if latest_candle["ADX"] >= 20.0 else 1.50
-                                    print(f"[{iv}m Target Alignment] Aligned multipliers with ML training: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
+                                    sl_multiplier = 1.50
+                                    tp_multiplier_adjusted = 3.00 if latest_candle["ADX"] >= 20.0 else 2.00
+                                    print(f"[{iv}m Target Alignment] Aligned multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
                                     
                                     # Maker execution: zero entry slippage for limit orders
                                     slippage_pct = 0.0
