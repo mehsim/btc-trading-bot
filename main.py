@@ -3042,6 +3042,48 @@ def sync_active_positions_from_bybit():
                     t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
                     t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
                     
+                    # Sanitize ATR, TP, and SL for active trades to prevent invalid/stuck parameters
+                    avg_price = t["entry_price"]
+                    mark_price = t["mark_price"]
+                    liq_price = t["liq_price"]
+                    direction = t.get("direction", "Bullish")
+                    
+                    # Fix ATR if it's unreasonably large or unset
+                    current_atr = t.get("atr_dollars", 0.0)
+                    if current_atr <= 0 or current_atr > 0.05 * avg_price:
+                        current_atr = 0.015 * avg_price
+                        t["atr_dollars"] = current_atr
+                        
+                    # Fix Take Profit if it is unset (0.0)
+                    if t.get("take_profit", 0.0) == 0.0:
+                        if direction == "Bullish":
+                            t["take_profit"] = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
+                        else:
+                            t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
+                        if TRADE_MODE != "simulation":
+                            update_bybit_take_profit(symbol, t["take_profit"])
+                            
+                    # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
+                    sl_val = t.get("stop_loss", 0.0)
+                    sl_updated = False
+                    if direction == "Bullish":
+                        if sl_val <= 0.0 or (liq_price > 0.0 and sl_val <= liq_price) or sl_val < avg_price - 3.0 * current_atr:
+                            sl_val = avg_price - 0.75 * current_atr
+                            if liq_price > 0.0 and sl_val <= liq_price:
+                                sl_val = liq_price + 0.2 * current_atr
+                            t["stop_loss"] = sl_val
+                            sl_updated = True
+                    else:
+                        if sl_val <= 0.0 or (liq_price > 0.0 and sl_val >= liq_price) or sl_val > avg_price + 3.0 * current_atr:
+                            sl_val = avg_price + 0.75 * current_atr
+                            if liq_price > 0.0 and sl_val >= liq_price:
+                                sl_val = liq_price - 0.2 * current_atr
+                            t["stop_loss"] = sl_val
+                            sl_updated = True
+                            
+                    if sl_updated and TRADE_MODE != "simulation":
+                        update_bybit_stop_loss(symbol, sl_val)
+                    
                     updated_trades.append(t)
                     matched_symbols.add(symbol)
                 else:
@@ -3069,6 +3111,33 @@ def sync_active_positions_from_bybit():
                 import uuid
                 trade_uuid = str(uuid.uuid4())[:8]
                 
+                # Calculate proper ATR on recovery
+                calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
+                if calc_atr > 0.05 * avg_price or calc_atr == 0:
+                    calc_atr = 0.015 * avg_price
+                
+                # Sanitize TP and SL on recovery
+                if tp_price == 0.0:
+                    if direction == "Bullish":
+                        tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
+                    else:
+                        tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
+                        
+                if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
+                    if direction == "Bullish":
+                        sl_price = avg_price - 0.75 * calc_atr
+                        if liq_price > 0.0 and sl_price <= liq_price:
+                            sl_price = liq_price + 0.2 * calc_atr
+                    else:
+                        sl_price = avg_price + 0.75 * calc_atr
+                        if liq_price > 0.0 and sl_price >= liq_price:
+                            sl_price = liq_price - 0.2 * calc_atr
+                            
+                # Push the recovered/sanitized TP & SL to Bybit
+                if TRADE_MODE != "simulation":
+                    update_bybit_take_profit(symbol, tp_price)
+                    update_bybit_stop_loss(symbol, sl_price)
+
                 recovered_trade = {
                     "trade_id": f"{symbol}_{trade_uuid}_recovered",
                     "bybit_order_id": None,
@@ -3080,7 +3149,7 @@ def sync_active_positions_from_bybit():
                     "take_profit": tp_price,
                     "direction": direction,
                     "end_time": float(time.time() + 3600 * 10),
-                    "atr_dollars": abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 50.0,
+                    "atr_dollars": calc_atr,
                     "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
                     "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
                     "break_even_triggered": False,
