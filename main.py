@@ -3826,15 +3826,21 @@ def main():
                         active_trade_key = f"active_trade_{tf}"
                         active_trades_list = bot_state.get(active_trade_key, [])
                         
-                        # Prevent duplicate parallel trades of the same symbol on the same interval/timeframe
-                        already_active = any(t.get("symbol") == symbol for t in active_trades_list)
+                        # Prevent duplicate parallel trades of the same symbol on ANY interval/timeframe
+                        already_active = False
+                        active_on_tf = None
+                        for tf_key in ["1h", "2h", "4h", "6h"]:
+                            if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
+                                already_active = True
+                                active_on_tf = tf_key
+                                break
                         
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
                         elif already_active:
                             status_msg = "Skipped (Already Active)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on this timeframe.")
+                            print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
                         elif is_cooling:
                             status_msg = "Skipped (Cool-Off)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
