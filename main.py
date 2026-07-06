@@ -1435,6 +1435,27 @@ def run_fallback_price_updater():
                                     if not ws_active:
                                         last_ws_update_time = time.time()
 
+                # Try Bulk Bybit Live API fallback for missing symbols first (such as AVAX and LTC on testnet)
+                missing = [s for s in SUPPORTED_SYMBOLS if s not in found_symbols]
+                if missing and TRADE_MODE == "testnet":
+                    try:
+                        url = "https://api.bybit.com/v5/market/tickers"
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        }
+                        bresp = requests.get(url, params={"category": "linear"}, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+                        if bresp.status_code == 200:
+                            ticker_list = bresp.json().get("result", {}).get("list", [])
+                            for ticker in ticker_list:
+                                sym = ticker.get("symbol")
+                                if sym in missing:
+                                    val_str = ticker.get("lastPrice")
+                                    if val_str:
+                                        bot_state[f"live_price_{sym}"] = float(val_str)
+                                        found_symbols.add(sym)
+                    except Exception as ble:
+                        print(f"[Price Fallback] Bybit Live bulk fetch error: {ble}")
+
                 # Bulk Binance fallback for missing symbols (throttled)
                 missing = [s for s in SUPPORTED_SYMBOLS if s not in found_symbols]
                 if missing and (now - last_binance_run >= binance_interval):
@@ -2834,6 +2855,23 @@ def get_fallback_price(symbol=SYMBOL):
             print(f"Bybit price ticker for {symbol} returned HTTP {response.status_code}")
     except Exception as e:
         print(f"Error fetching Bybit price fallback for {symbol}: {e}")
+
+    # 1b. Try Bybit Live API as fallback for testnet missing symbols
+    if TRADE_MODE == "testnet":
+        try:
+            url = "https://api.bybit.com/v5/market/tickers"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            response = requests.get(url, params={"category": "linear", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
+            if response.status_code == 200:
+                res = response.json()
+                ticker_list = res.get("result", {}).get("list", [])
+                if ticker_list:
+                    ticker = ticker_list[0]
+                    return float(ticker.get("lastPrice"))
+        except Exception as e:
+            print(f"Error fetching Bybit Live price fallback for {symbol}: {e}")
 
     # 2. Try Coinbase API (only for BTCUSDT)
     if symbol == "BTCUSDT":
