@@ -425,6 +425,26 @@ def set_bybit_leverage(symbol, leverage):
         print(f"[Bybit API Error] Failed to set leverage for {symbol}: {res.get('retMsg')} (code: {res.get('retCode')})")
         return False
 
+def format_bybit_price(symbol, price):
+    price_precisions = {
+        "BTCUSDT": 2,
+        "ETHUSDT": 2,
+        "SOLUSDT": 3,
+        "BNBUSDT": 2,
+        "AVAXUSDT": 3,
+        "NEARUSDT": 3,
+        "LINKUSDT": 3,
+        "LTCUSDT": 2,
+        "ADAUSDT": 4,
+        "XRPUSDT": 4,
+        "DOGEUSDT": 5,
+        "DOTUSDT": 3,
+        "SUIUSDT": 4,
+        "APTUSDT": 3
+    }
+    p = price_precisions.get(symbol, 2)
+    return str(round(price, p))
+
 def format_bybit_qty(symbol, qty):
     precisions = {
         "BTCUSDT": 3,
@@ -455,9 +475,9 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None):
         "positionIdx": 0
     }
     if sl:
-        payload["stopLoss"] = str(round(sl, 4))
+        payload["stopLoss"] = format_bybit_price(symbol, sl)
     if tp:
-        payload["takeProfit"] = str(round(tp, 4))
+        payload["takeProfit"] = format_bybit_price(symbol, tp)
         
     res = bybit_post_request("/v5/order/create", payload)
     return res
@@ -529,7 +549,7 @@ def update_bybit_stop_loss(symbol, sl_price):
     payload = {
         "category": "linear",
         "symbol": symbol,
-        "stopLoss": str(round(sl_price, 4)),
+        "stopLoss": format_bybit_price(symbol, sl_price),
         "positionIdx": 0
     }
     res = bybit_post_request("/v5/position/set-trading-stop", payload)
@@ -545,7 +565,7 @@ def update_bybit_take_profit(symbol, tp_price):
     payload = {
         "category": "linear",
         "symbol": symbol,
-        "takeProfit": str(round(tp_price, 4)),
+        "takeProfit": format_bybit_price(symbol, tp_price),
         "positionIdx": 0
     }
     res = bybit_post_request("/v5/position/set-trading-stop", payload)
@@ -563,7 +583,7 @@ def place_bybit_limit_order(symbol, side, qty, price):
         "side": side,
         "orderType": "Limit",
         "qty": str(qty),
-        "price": str(round(price, 4)),
+        "price": format_bybit_price(symbol, price),
         "timeInForce": "GTC",
         "positionIdx": 0
     }
