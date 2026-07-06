@@ -552,7 +552,7 @@ def update_bybit_stop_loss(symbol, sl_price):
         "stopLoss": format_bybit_price(symbol, sl_price),
         "positionIdx": 0
     }
-    res = bybit_post_request("/v5/position/set-trading-stop", payload)
+    res = bybit_post_request("/v5/position/trading-stop", payload)
     if res.get("retCode") == 0:
         print(f"[Bybit API] Successfully updated Stop Loss on Bybit to {sl_price:.4f} for {symbol}.")
         return True
@@ -568,7 +568,7 @@ def update_bybit_take_profit(symbol, tp_price):
         "takeProfit": format_bybit_price(symbol, tp_price),
         "positionIdx": 0
     }
-    res = bybit_post_request("/v5/position/set-trading-stop", payload)
+    res = bybit_post_request("/v5/position/trading-stop", payload)
     if res.get("retCode") == 0:
         print(f"[Bybit API] Successfully updated Take Profit on Bybit to {tp_price:.4f} for {symbol}.")
         return True
