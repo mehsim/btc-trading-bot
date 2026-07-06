@@ -2890,7 +2890,7 @@ def load_initial_prices():
 
 def get_all_bybit_positions():
     """Retrieve all open linear positions on Bybit in a single call."""
-    res = bybit_get_request("/v5/position/list", {"category": "linear"})
+    res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
     if res.get("retCode") == 0:
         return res.get("result", {}).get("list", [])
     return []
