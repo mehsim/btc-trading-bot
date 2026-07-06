@@ -1511,16 +1511,27 @@
             
             if (isScaleOut) {
                 const atr = t.atr_dollars;
-                const originalSize = t.position_size_usd;
+                const originalSize = t.position_size_usd; // original margin
                 const halfSize = originalSize * 0.5;
+                const leveragedHalfSize = halfSize * lev;
                 
-                const rawScaleOutReturn = (0.6 * atr / entry) * 100;
-                const netScaleOutReturn = (rawScaleOutReturn * lev) - 0.08;
-                const scaleOutPnL = halfSize * (netScaleOutReturn / 100);
+                // Qty of half position
+                const qtyHalf = entry > 0 ? (leveragedHalfSize / entry) : 0;
                 
-                const rawExitReturn = t.direction === "Bullish" ? ((exitPrice - entry) / entry) * 100 : ((entry - exitPrice) / entry) * 100;
-                const netExitReturn = (rawExitReturn * lev) - 0.04;
-                const exitPnL = halfSize * (netExitReturn / 100);
+                // Stage 1 (Scale-Out at 0.6 * ATR)
+                const scaleOutPrice = t.direction === "Bullish" ? (entry + 0.6 * atr) : (entry - 0.6 * atr);
+                const rawScaleOutDiff = t.direction === "Bullish" ? (scaleOutPrice - entry) : (entry - scaleOutPrice);
+                const grossScaleOutPnL = qtyHalf * rawScaleOutDiff;
+                const entryFee1 = leveragedHalfSize * 0.00055;
+                const exitFee1 = qtyHalf * scaleOutPrice * 0.00055;
+                const scaleOutPnL = grossScaleOutPnL - (entryFee1 + exitFee1);
+                
+                // Stage 2 (Trailing stop close at exitPrice)
+                const rawExitDiff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
+                const grossExitPnL = qtyHalf * rawExitDiff;
+                const entryFee2 = leveragedHalfSize * 0.00055;
+                const exitFee2 = qtyHalf * exitPrice * 0.00055;
+                const exitPnL = grossExitPnL - (entryFee2 + exitFee2);
                 
                 const mainnetPnL = scaleOutPnL + exitPnL;
                 return {
@@ -1531,11 +1542,16 @@
                 if (t.half_closed && t.scaled_out_pnl !== undefined) {
                     const originalSize = t.original_size || posSize * 2.0;
                     const halfSize = originalSize * 0.5;
+                    const leveragedHalfSize = halfSize * lev;
+                    const qtyHalf = entry > 0 ? (leveragedHalfSize / entry) : 0;
                     
                     const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
-                    const grossPnl = halfSize * (diff / entry * lev);
-                    const feeCost = halfSize * lev * 0.00055;
-                    const remainingPnL = grossPnl - feeCost;
+                    const grossPnl = qtyHalf * diff;
+                    
+                    // Stage 1 PnL is already saved in t.scaled_out_pnl
+                    // For Stage 2, entry fee was paid at entry, we only pay exit fee now:
+                    const exitFee2 = qtyHalf * exitPrice * 0.00055;
+                    const remainingPnL = grossPnl - exitFee2;
                     
                     const mainnetPnL = t.scaled_out_pnl + remainingPnL;
                     return {
@@ -1543,11 +1559,15 @@
                         pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
                     };
                 } else {
+                    const leveragedSize = posSize * lev;
+                    const qty = entry > 0 ? (leveragedSize / entry) : 0;
                     const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
-                    const rawPct = (diff / entry) * 100;
-                    const grossPnl = posSize * (rawPct * lev / 100);
-                    const feeCost = posSize * lev * 0.0011;
-                    const mainnetPnL = grossPnl - feeCost;
+                    const grossPnl = qty * diff;
+                    
+                    const entryFee = leveragedSize * 0.00055;
+                    const exitFee = qty * exitPrice * 0.00055;
+                    const mainnetPnL = grossPnl - (entryFee + exitFee);
+                    
                     return {
                         pnlVal: mainnetPnL,
                         pnlPct: posSize > 0 ? (mainnetPnL / posSize * 100) : 0
