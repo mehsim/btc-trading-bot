@@ -1265,6 +1265,7 @@
                             <th>Direction</th>
                             <th class="hide-mobile">Confidence</th>
                             <th class="hide-mobile">Leverage</th>
+                            <th>Fill %</th>
                             <th class="hide-mobile">Actual Investment</th>
                             <th>Entry Price</th>
                             <th class="hide-mobile">Current Price</th>
@@ -1278,7 +1279,7 @@
                     </thead>
                     <tbody id="active-open-trades-rows">
                         <tr>
-                            <td colspan="14" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                            <td colspan="15" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1366,6 +1367,7 @@
                             <th>Exit Price</th>
                             <th class="hide-mobile">Actual Investment</th>
                             <th class="hide-mobile">Leverage</th>
+                            <th>Fill %</th>
                             <th>Profit/Loss</th>
                             <th>PnL (USD)</th>
                             <th>Mainnet PnL (Assumed)</th>
@@ -1375,7 +1377,7 @@
                     </thead>
                     <tbody id="trade-history-rows">
                         <tr>
-                            <td colspan="13"
+                            <td colspan="14"
                                 style="text-align: center; color: var(--text-secondary); font-style: italic;">No trades
                                 completed in this session yet.</td>
                         </tr>
@@ -1702,6 +1704,10 @@
                     const pnlSign = rawPnL >= 0 ? '+' : '';
                     const formattedRealizedPnL = `${pnlSign}${rawPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                     const displayPnLPct = posSize > 0 ? (rawPnL / posSize * 100) : 0;
+                    
+                    const fillPct = t.fill_pct !== undefined ? t.fill_pct : (posSize > 0 && t.original_size > 0 ? Math.min(100.0, (posSize / t.original_size) * 100.0) : 100.0);
+                    const fillPctStr = fillPct.toFixed(1) + '%';
+                    const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
                     htmlRows += `
                         <tr onclick="showTradeDetails(${allTrades.indexOf(t)})" style="cursor: pointer;" title="Click to view details" class="hover-row">
@@ -1715,6 +1721,7 @@
                                 <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged Size: $${leveragedVal}</div>
                             </td>
                             <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 600;">${leverageStr}</td>
+                            <td style="font-weight: 800; color: ${fillPctColor}; font-family: 'Outfit', sans-serif;">${fillPctStr}</td>
                             <td class="${pnlClass}" style="font-weight: 800;">${displayPnLPct >= 0 ? '+' : ''}${displayPnLPct.toFixed(3)}%</td>
                             <td class="${pnlClass}" style="font-weight: 800;">$${formattedRealizedPnL}</td>
                             <td class="${(() => {
@@ -1850,6 +1857,10 @@
                 const tradePosSize = parseFloat(trade.position_size_usd) || 0.00;
                 const tradeLeverage = parseFloat(trade.leverage) || 1.0;
                 const tradeLeveragedVal = (tradePosSize * tradeLeverage).toFixed(2);
+                
+                const fillPct = trade.fill_pct !== undefined ? trade.fill_pct : (tradePosSize > 0 && parseFloat(trade.original_size) > 0 ? Math.min(100.0, (tradePosSize / parseFloat(trade.original_size)) * 100.0) : 100.0);
+                const fillPctStr = fillPct.toFixed(1) + '%';
+                const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
                 htmlRows += `
                     <tr>
@@ -1858,6 +1869,7 @@
                         <td><span class="badge ${trade.direction === "Bullish" ? "badge-success" : "badge-danger"}">${trade.direction.toUpperCase()}</span></td>
                         <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 700;">${confidencePctStr}</td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${tradeLeverage.toFixed(1)}x</td>
+                        <td style="font-weight: 800; color: ${fillPctColor}; font-family: 'Outfit', sans-serif;">${fillPctStr}</td>
                         <td class="hide-mobile" style="font-weight: 700; color: var(--accent-blue);">
                             <div>$${tradePosSize.toFixed(2)}</div>
                             <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged Size: $${tradeLeveragedVal}</div>

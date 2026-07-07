@@ -983,7 +983,8 @@ def force_close_trade():
         "position_size_usd": float(position_size_usd),
         "pnl_usd": float(realized_pnl),
         "balance": float(new_bal),
-        "leverage": float(leverage)
+        "leverage": float(leverage),
+        "fill_pct": float(trade_to_close.get("fill_pct", 100.0))
     })
     
     for p in bot_state["prediction_history"]:
@@ -3744,7 +3745,8 @@ def main():
                         "confidence": float(active_trade.get("confidence", 0.0)),
                         "take_profit": float(active_trade.get("take_profit", 0.0)),
                         "stop_loss": float(active_trade.get("stop_loss", 0.0)),
-                        "atr_dollars": float(active_trade.get("atr_dollars", 0.0))
+                        "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
+                        "fill_pct": float(active_trade.get("fill_pct", 100.0))
                     })
                     
                     # Send email alert on any profitable trade exit
@@ -4406,7 +4408,8 @@ def main():
                                                 "kelly_fraction": float(kelly_fraction),
                                                 "leverage": float(leverage_val),
                                                 "confidence": float(calibrated_confidence),
-                                                "qty": float(actual_qty)
+                                                "qty": float(actual_qty),
+                                                "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
                                             }
                                             active_trades_list.append(active_trade)
                                             bot_state[active_trade_key] = active_trades_list
