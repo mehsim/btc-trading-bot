@@ -404,14 +404,22 @@ def bybit_post_request(endpoint, payload):
     
     url = f"{BYBIT_BASE_URL}{endpoint}"
     
-    try:
-        resp = requests.post(url, headers=headers, json=payload, proxies=get_bybit_proxies(), timeout=5)
-        if resp.status_code == 200:
-            return resp.json()
-        else:
-            return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
-    except Exception as e:
-        return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, proxies=get_bybit_proxies(), timeout=8)
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                if resp.status_code in [402, 429, 502, 503, 504] and attempt < max_retries - 1:
+                    time.sleep(1 + attempt * 1.5)
+                    continue
+                return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(1 + attempt * 1.5)
+                continue
+            return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
 
 def set_bybit_leverage(symbol, leverage):
     payload = {
@@ -543,14 +551,22 @@ def bybit_get_request(endpoint, query_params):
     
     url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
     
-    try:
-        resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=5)
-        if resp.status_code == 200:
-            return resp.json()
-        else:
-            return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
-    except Exception as e:
-        return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                if resp.status_code in [402, 429, 502, 503, 504] and attempt < max_retries - 1:
+                    time.sleep(1 + attempt * 1.5)
+                    continue
+                return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(1 + attempt * 1.5)
+                continue
+            return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
 
 def get_bybit_position(symbol):
     res = bybit_get_request("/v5/position/list", {"category": "linear", "symbol": symbol})
