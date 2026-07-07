@@ -1696,7 +1696,16 @@
                         <tr onclick="showTradeDetails(${allTrades.indexOf(t)})" style="cursor: pointer;" title="Click to view details" class="hover-row">
                             <td style="font-weight: 700; color: var(--accent-purple);">${tfLabel}</td>
                             <td class="hide-mobile">${exitTimeStr}</td>
-                            <td class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">${(t.symbol || 'BTCUSDT').replace('USDT', '')} ${t.direction.toUpperCase()}</td>
+                            <td class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">
+                                <div>${(t.symbol || 'BTCUSDT').replace('USDT', '')} ${t.direction.toUpperCase()}</div>
+                                <div style="font-size: 8px; color: var(--text-secondary); font-weight: normal; margin-top: 2px; font-family: monospace;">
+                                    Entry ID: ${t.bybit_order_id || 'N/A'}
+                                </div>
+                                ${t.bybit_scale_out_order_id ? `
+                                <div style="font-size: 8px; color: var(--accent-orange); font-weight: normal; font-family: monospace; margin-top: 1px;">
+                                    Scale ID: ${t.bybit_scale_out_order_id}
+                                </div>` : ''}
+                            </td>
                             <td>$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td>$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 600;">
@@ -1851,7 +1860,16 @@
                 htmlRows += `
                     <tr>
                         <td style="font-weight: 800; color: var(--accent-purple);">${trade.intervalStr}</td>
-                        <td style="font-weight: 700; color: var(--text-primary);">${symbol.replace("USDT", "")}</td>
+                        <td style="font-weight: 700; color: var(--text-primary);">
+                            <div>${symbol.replace("USDT", "")}</div>
+                            <div style="font-size: 9px; color: var(--text-secondary); font-weight: normal; margin-top: 2px; font-family: monospace;">
+                                Entry: ${trade.bybit_order_id || 'N/A'}
+                            </div>
+                            ${trade.bybit_scale_out_order_id ? `
+                            <div style="font-size: 9px; color: var(--accent-orange); font-weight: normal; font-family: monospace; margin-top: 1px;">
+                                Scale-out: ${trade.bybit_scale_out_order_id}
+                            </div>` : ''}
+                        </td>
                         <td><span class="badge ${trade.direction === "Bullish" ? "badge-success" : "badge-danger"}">${trade.direction.toUpperCase()}</span></td>
                         <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 700;">${confidencePctStr}</td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${tradeLeverage.toFixed(1)}x</td>
