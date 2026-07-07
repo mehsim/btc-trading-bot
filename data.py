@@ -29,8 +29,21 @@ def get_bybit_proxies():
         }
     return None
 
-TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
-BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
+def bybit_public_get(url, params=None, headers=None, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+            if resp.status_code == 200:
+                return resp
+            elif resp.status_code in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
+                time.sleep(1 + attempt * 1.5)
+                continue
+            return resp
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(1 + attempt * 1.5)
+                continue
+            raise e
 
 def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -76,7 +89,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                 params["end"] = current_end
                 
             try:
-                response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+                response = bybit_public_get(url, params=params, headers=headers)
                 if response.status_code == 200:
                     res = response.json()
                     batch = res.get("result", {}).get("list", [])
@@ -132,7 +145,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                     "end": current_end
                 }
                 try:
-                    response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+                    response = bybit_public_get(url, params=params, headers=headers)
                     if response.status_code == 200:
                         res = response.json()
                         batch = res.get("result", {}).get("list", [])
@@ -170,7 +183,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                 params["end"] = current_end
                 
             try:
-                response = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+                response = bybit_public_get(url, params=params, headers=headers)
                 if response.status_code == 200:
                     res = response.json()
                     if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
@@ -361,7 +374,7 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
             params["cursor"] = cursor
             
         try:
-            resp = requests.get(url, params=params, proxies=get_bybit_proxies(), timeout=10)
+            resp = bybit_public_get(url, params=params)
             if resp.status_code != 200:
                 break
             res = resp.json()
@@ -404,7 +417,7 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
             "endTime": current_end
         }
         try:
-            resp = requests.get(url, params=params, proxies=get_bybit_proxies(), timeout=10)
+            resp = bybit_public_get(url, params=params)
             if resp.status_code != 200:
                 break
             res = resp.json()

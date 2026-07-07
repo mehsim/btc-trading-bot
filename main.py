@@ -411,7 +411,7 @@ def bybit_post_request(endpoint, payload):
             if resp.status_code == 200:
                 return resp.json()
             else:
-                if resp.status_code in [402, 429, 502, 503, 504] and attempt < max_retries - 1:
+                if resp.status_code in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
                     time.sleep(1 + attempt * 1.5)
                     continue
                 return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
@@ -558,7 +558,7 @@ def bybit_get_request(endpoint, query_params):
             if resp.status_code == 200:
                 return resp.json()
             else:
-                if resp.status_code in [402, 429, 502, 503, 504] and attempt < max_retries - 1:
+                if resp.status_code in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
                     time.sleep(1 + attempt * 1.5)
                     continue
                 return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
