@@ -1560,7 +1560,8 @@
                         pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
                     };
                 } else {
-                    const leveragedSize = posSize * lev;
+                    const originalSize = t.original_size || posSize;
+                    const leveragedSize = originalSize * lev;
                     const qty = entry > 0 ? (leveragedSize / entry) : 0;
                     const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
                     const grossPnl = qty * diff;
@@ -1571,7 +1572,7 @@
                     
                     return {
                         pnlVal: mainnetPnL,
-                        pnlPct: posSize > 0 ? (mainnetPnL / posSize * 100) : 0
+                        pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
                     };
                 }
             }

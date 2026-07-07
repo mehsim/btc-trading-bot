@@ -908,7 +908,8 @@ def force_close_trade():
                                 lev = float(trade_to_close.get("leverage", 1.0))
                                 actual_margin = round(entry_val / lev, 2)
                                 trade_to_close["position_size_usd"] = actual_margin
-                                trade_to_close["original_size"] = actual_margin
+                                # Keep original_size as the unscaled full size to calculate correct assumed mainnet PnL
+                                trade_to_close["original_size"] = float(trade_to_close.get("original_size", actual_margin))
                                 position_size_usd = actual_margin
                         else:
                             print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
@@ -3436,7 +3437,6 @@ def main():
                                     lev = float(active_trade.get("leverage", 1.0))
                                     actual_margin = round(entry_val / lev, 2)
                                     active_trade["position_size_usd"] = actual_margin
-                                    active_trade["original_size"] = actual_margin
                             else:
                                 print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
                                 closed_pnl_record = None
@@ -4397,7 +4397,7 @@ def main():
                                                 "lowest_price": float(entry_price),
                                                 "break_even_triggered": False,
                                                 "half_closed": False,
-                                                "original_size": actual_size_usd,
+                                                "original_size": float(position_size_usd),
                                                 "position_size_usd": actual_size_usd,
                                                 "scaled_out_pnl": 0.0,
                                                 "kelly_fraction": float(kelly_fraction),
