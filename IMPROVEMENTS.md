@@ -72,3 +72,21 @@ This document summarizes the architecture upgrades, feature updates, layout opti
   - Added a new pre-trade confluence check (**Check 15**) that monitors the percentage change of Open Interest. If OI drops by more than `2.0%` over the last candle, the check fails (preventing entries during trend exhaustion).
 - **Dynamic ATR Sizing (Take Profit Multipliers)**:
   - Implemented volatility-adaptive TP multipliers. Low volatility scales the multiplier up to `3.0x` to capture breakout extensions; high volatility scales it down to `0.9x - 1.5x` to lock in profits early.
+
+---
+
+## 7. API Reliability, Proxy, & Trading Integrity Upgrades (July 2026)
+- **Hugging Face Proxy Optimization**:
+  - Implemented a **3x automatic retry loop with exponential backoff** in REST API helpers (`bybit_get_request`, `bybit_post_request`) to absorb transient proxy connection drops and latency spikes.
+  - Isolated proxy traffic to Bybit trading endpoints only, routing 90% of requests (model history candle downloads, sentiment feeds) directly for low latency and zero proxy bandwidth exhaustion.
+  - Automatically bypasses Hugging Face internal proxies if no explicit `BYBIT_PROXY` secret is defined.
+- **Partial Fill Sizing on Entry**:
+  - Upgraded order execution to query the actual average fill price and executed quantity (`cumExecQty`) from order details.
+  - Dynamically resizes scale-out limit orders and metadata metrics based on the actual filled amount instead of target size.
+- **Exchange Side Mismatch Guard**:
+  - Added a self-healing mismatch guard during Bybit position sync. If the bot's local direction (e.g. Bearish) mismatches the actual exchange side (e.g. Buy/Long due to partial fills or manual trading), it immediately force-closes the position and discards the trade to prevent unhedged SL/TP targets.
+- **De-duplication Logic**:
+  - Added timeframe de-duplication inside position syncs. The bot will automatically discard duplicate active trade references for the same symbol to avoid corrupted, doubled Assumed PnL calculations on the dashboard.
+- **Testnet Price & TP/SL Syncing**:
+  - Corrected testnet pricing anomalies by extracting contract `lastPrice` instead of `indexPrice`.
+  - Added real-time synchronization of active position TP/SL parameters directly from the exchange.
