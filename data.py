@@ -6,6 +6,9 @@ import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
 
+TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
+BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
+
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache")
 
 def get_bybit_proxies():
@@ -519,4 +522,4 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     df["funding_rate"] = df["funding_rate"].ffill().bfill().fillna(0.0)
     df["fear_greed"] = df["fear_greed"].ffill().bfill().fillna(50.0)
     
-    return df
+    return df
