@@ -3911,9 +3911,12 @@ def main():
             else:
                 last_check_hour = current_time_pkt.hour
                 check_queue = []
+                # Use UTC hours to check intervals since Bybit candle closes are aligned to UTC
+                from datetime import datetime as dt
+                utc_hour = dt.utcnow().hour
                 for iv_q in ["60", "120", "240", "360"]:
                     iv_hours = int(iv_q) // 60
-                    if current_time_pkt.hour % iv_hours == 0:
+                    if utc_hour % iv_hours == 0:
                         for symbol_q in SUPPORTED_SYMBOLS:
                             check_queue.append((symbol_q, iv_q))
         else:
