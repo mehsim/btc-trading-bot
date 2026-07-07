@@ -857,6 +857,7 @@ def force_close_trade():
     entry_price = trade_to_close["entry_price"]
     direction = trade_to_close["direction"]
     position_size_usd = trade_to_close.get("position_size_usd", 100.0)
+    original_size = trade_to_close.get("original_size", position_size_usd)
     
     live_symbol_price = get_fallback_price(symbol)
     if live_symbol_price is None:
@@ -981,6 +982,7 @@ def force_close_trade():
         "success": bool(signal_correct),
         "reason": exit_reason,
         "position_size_usd": float(position_size_usd),
+        "original_size": float(original_size),
         "pnl_usd": float(realized_pnl),
         "balance": float(new_bal),
         "leverage": float(leverage),
@@ -1070,6 +1072,7 @@ def close_all_trades_internal(exit_reason):
             direction = t.get("direction", "Bullish")
             entry_price = t.get("entry_price", 0.0)
             position_size_usd = t.get("position_size_usd", 100.0)
+            original_size = t.get("original_size", position_size_usd)
             
             interval = "60"
             for k, v in tf_map_local.items():
@@ -1125,6 +1128,7 @@ def close_all_trades_internal(exit_reason):
                 "success": bool(signal_correct),
                 "reason": exit_reason,
                 "position_size_usd": float(position_size_usd),
+                "original_size": float(original_size),
                 "pnl_usd": float(realized_pnl),
                 "balance": float(new_bal),
                 "leverage": float(leverage)
@@ -3783,7 +3787,8 @@ def main():
                         "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
                         "success": bool(signal_correct),
                         "reason": str(exit_reason) + (" (Scale-Out)" if active_trade.get("half_closed", False) else ""),
-                        "position_size_usd": float(original_size),
+                        "position_size_usd": float(position_size_usd),
+                        "original_size": float(original_size),
                         "pnl_usd": float(total_pnl),
                         "balance": float(new_bal),
                         "leverage": float(leverage),
