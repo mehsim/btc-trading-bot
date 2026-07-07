@@ -1524,7 +1524,7 @@
                 posSize = originalSize;
             }
             
-            const isScaleOut = t.reason && t.reason.includes("Scale-Out") && t.atr_dollars;
+            const isScaleOut = ((t.reason && t.reason.includes("Scale-Out")) || t.half_closed) && t.atr_dollars;
             
             if (isScaleOut) {
                 const atr = t.atr_dollars;
@@ -1534,8 +1534,8 @@
                 // Qty of half position
                 const qtyHalf = entry > 0 ? (leveragedHalfSize / entry) : 0;
                 
-                // Stage 1 (Scale-Out at 0.6 * ATR)
-                const scaleOutPrice = t.direction === "Bullish" ? (entry + 0.6 * atr) : (entry - 0.6 * atr);
+                // Stage 1 (Scale-Out at 1.0 * ATR to match backend)
+                const scaleOutPrice = t.direction === "Bullish" ? (entry + 1.0 * atr) : (entry - 1.0 * atr);
                 const rawScaleOutDiff = t.direction === "Bullish" ? (scaleOutPrice - entry) : (entry - scaleOutPrice);
                 const grossScaleOutPnL = qtyHalf * rawScaleOutDiff;
                 const entryFee1 = leveragedHalfSize * 0.00055;
@@ -1555,39 +1555,19 @@
                     pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
                 };
             } else {
-                if (t.half_closed && t.scaled_out_pnl !== undefined) {
-                    const halfSize = originalSize * 0.5;
-                    const leveragedHalfSize = halfSize * lev;
-                    const qtyHalf = entry > 0 ? (leveragedHalfSize / entry) : 0;
-                    
-                    const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
-                    const grossPnl = qtyHalf * diff;
-                    
-                    // Stage 1 PnL is already saved in t.scaled_out_pnl
-                    // For Stage 2, entry fee was paid at entry, we only pay exit fee now:
-                    const exitFee2 = qtyHalf * exitPrice * 0.00055;
-                    const remainingPnL = grossPnl - exitFee2;
-                    
-                    const mainnetPnL = t.scaled_out_pnl + remainingPnL;
-                    return {
-                        pnlVal: mainnetPnL,
-                        pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
-                    };
-                } else {
-                    const leveragedSize = originalSize * lev;
-                    const qty = entry > 0 ? (leveragedSize / entry) : 0;
-                    const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
-                    const grossPnl = qty * diff;
-                    
-                    const entryFee = leveragedSize * 0.00055;
-                    const exitFee = qty * exitPrice * 0.00055;
-                    const mainnetPnL = grossPnl - (entryFee + exitFee);
-                    
-                    return {
-                        pnlVal: mainnetPnL,
-                        pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
-                    };
-                }
+                const leveragedSize = originalSize * lev;
+                const qty = entry > 0 ? (leveragedSize / entry) : 0;
+                const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
+                const grossPnl = qty * diff;
+                
+                const entryFee = leveragedSize * 0.00055;
+                const exitFee = qty * exitPrice * 0.00055;
+                const mainnetPnL = grossPnl - (entryFee + exitFee);
+                
+                return {
+                    pnlVal: mainnetPnL,
+                    pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
+                };
             }
         }
 

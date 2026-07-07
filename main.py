@@ -586,25 +586,28 @@ def get_bybit_closed_pnl(symbol, limit=1):
             return pnl_list[0]
     return None
 
-def update_bybit_stop_loss(symbol, sl_price):
-    pos = get_bybit_position(symbol)
-    if not pos:
-        print(f"[Bybit API] Stop Loss update skipped for {symbol}: No active position found.")
-        return False
+def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
+    if active_trade:
+        qty_val = float(active_trade.get("qty", 0.0))
+        side = "Buy" if active_trade.get("direction") == "Bullish" else "Sell"
+    else:
+        pos = get_bybit_position(symbol)
+        if not pos:
+            print(f"[Bybit API] Stop Loss update skipped for {symbol}: No active position found.")
+            return False
+        qty_val = float(pos.get("size", "0"))
+        side = pos.get("side", "Buy")  # "Buy" for Long, "Sell" for Short
         
-    qty_val = float(pos.get("size", "0"))
     if qty_val == 0:
         print(f"[Bybit API] Stop Loss update skipped for {symbol}: Position size is 0.")
         return False
         
-    side = pos.get("side", "Buy")  # "Buy" for Long, "Sell" for Short
-    
-    live_price = get_fallback_price(symbol)
+    live_price = bot_state.get(f"live_price_{symbol}")
     if live_price is None:
-        live_price = bot_state.get(f"live_price_{symbol}")
+        live_price = get_fallback_price(symbol)
         
     if live_price is not None:
-        if side == "Buy":  # Long position: Stop Loss must be < current price
+        if side == "Buy" or side == "Long":  # Long position: Stop Loss must be < current price
             if sl_price >= live_price:
                 print(f"[Bybit API] Stop Loss update skipped for Long {symbol}: Proposed SL {sl_price:.4f} is >= current price {live_price:.4f}.")
                 return False
@@ -627,26 +630,29 @@ def update_bybit_stop_loss(symbol, sl_price):
         print(f"[Bybit API Error] Failed to update Stop Loss for {symbol}: {res.get('retMsg')}")
         return False
 
-def update_bybit_take_profit(symbol, tp_price):
+def update_bybit_take_profit(symbol, tp_price, active_trade=None):
     """Sync the Take Profit on the Bybit server."""
-    pos = get_bybit_position(symbol)
-    if not pos:
-        print(f"[Bybit API] Take Profit update skipped for {symbol}: No active position found.")
-        return False
+    if active_trade:
+        qty_val = float(active_trade.get("qty", 0.0))
+        side = "Buy" if active_trade.get("direction") == "Bullish" else "Sell"
+    else:
+        pos = get_bybit_position(symbol)
+        if not pos:
+            print(f"[Bybit API] Take Profit update skipped for {symbol}: No active position found.")
+            return False
+        qty_val = float(pos.get("size", "0"))
+        side = pos.get("side", "Buy")  # "Buy" for Long, "Sell" for Short
         
-    qty_val = float(pos.get("size", "0"))
     if qty_val == 0:
         print(f"[Bybit API] Take Profit update skipped for {symbol}: Position size is 0.")
         return False
         
-    side = pos.get("side", "Buy")  # "Buy" for Long, "Sell" for Short
-    
-    live_price = get_fallback_price(symbol)
+    live_price = bot_state.get(f"live_price_{symbol}")
     if live_price is None:
-        live_price = bot_state.get(f"live_price_{symbol}")
+        live_price = get_fallback_price(symbol)
         
     if live_price is not None:
-        if side == "Buy":  # Long position: Take Profit must be > current price
+        if side == "Buy" or side == "Long":  # Long position: Take Profit must be > current price
             if tp_price <= live_price:
                 print(f"[Bybit API] Take Profit update skipped for Long {symbol}: Proposed TP {tp_price:.4f} is <= current price {live_price:.4f}.")
                 return False
@@ -2663,12 +2669,14 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= CHECK 3: 1h RSI (Weight: 2) =======
     weight_rsi = 2
     rsi_1h = df_1h["RSI"].iloc[-1]
+    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h", "5": "5m", "15": "15m"}
+    tf_label = tf_map_local.get(str(interval), "1h")
     if ml_trend == "Bullish":
         rsi_1h_pass = (rsi_1h < 62.0)
-        detail_msg = f"1h RSI is {rsi_1h:.2f} (< 62, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (>= 62, Overbought)"
+        detail_msg = f"{tf_label} RSI is {rsi_1h:.2f} (< 62, Safe)" if rsi_1h_pass else f"{tf_label} RSI is {rsi_1h:.2f} (>= 62, Overbought)"
     else:
         rsi_1h_pass = (rsi_1h > 38.0)
-        detail_msg = f"1h RSI is {rsi_1h:.2f} (> 38, Safe)" if rsi_1h_pass else f"1h RSI is {rsi_1h:.2f} (<= 38, Oversold)"
+        detail_msg = f"{tf_label} RSI is {rsi_1h:.2f} (> 38, Safe)" if rsi_1h_pass else f"{tf_label} RSI is {rsi_1h:.2f} (<= 38, Oversold)"
     results["1h_RSI"] = {"pass": rsi_1h_pass, "detail": detail_msg, "weight": weight_rsi}
     max_score += weight_rsi
     if rsi_1h_pass:
@@ -2682,14 +2690,14 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         latest_vol = vol_series.iloc[-2]
         rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
         volume_pass = (rvol >= 1.0)
-        results["Volume_Confirmation"] = {
+        results["Volume_Participation"] = {
             "pass": volume_pass,
             "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.0x",
             "weight": 0
         }
     except Exception as e:
         volume_pass = True
-        results["Volume_Confirmation"] = {"pass": True, "detail": f"Skipped volume check (Error: {e})", "weight": 0}
+        results["Volume_Participation"] = {"pass": True, "detail": f"Skipped volume check (Error: {e})", "weight": 0}
 
     # ======= CHECK 5: Bollinger Band Edge Guard (Weight: 2) =======
     weight_bb = 2
@@ -3043,7 +3051,7 @@ def get_all_bybit_positions():
     res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
     if res.get("retCode") == 0:
         return res.get("result", {}).get("list", [])
-    return []
+    return None
 
 def get_bybit_entry_order_qty(symbol, side):
     """Query Bybit order history for the symbol to find the originally requested quantity of the entry order."""
@@ -3073,6 +3081,9 @@ def sync_active_positions_from_bybit():
     
     try:
         pos_list = get_all_bybit_positions()
+        if pos_list is None:
+            print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
+            return
         
         # Filter for positions with non-zero size
         open_positions = {}
@@ -3101,6 +3112,7 @@ def sync_active_positions_from_bybit():
                 seen_symbols_in_tf.add(symbol)
                 if symbol in open_positions:
                     pos = open_positions[symbol]
+                    t["bybit_closed"] = False
                     
                     # Side Mismatch Guard: verify Bybit position side aligns with trade direction
                     pos_side = pos.get("side") # "Buy" or "Sell"
@@ -3142,7 +3154,23 @@ def sync_active_positions_from_bybit():
                     
                     pos_val = float(pos.get("positionValue", 0.0))
                     t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
-                    t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
+                    
+                    # Proportional Unrealized PnL calculation
+                    try:
+                        same_symbol_trades = []
+                        for tf_check in ["1h", "2h", "4h", "6h"]:
+                            for t_item in bot_state.get(f"active_trade_{tf_check}", []):
+                                if t_item.get("symbol") == symbol:
+                                    same_symbol_trades.append(t_item)
+                        total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
+                        position_pnl = float(pos.get("unrealisedPnl", 0.0))
+                        if total_lev_size > 0:
+                            this_lev_size = float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
+                            t["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
+                        else:
+                            t["bybit_unrealized_pnl"] = position_pnl
+                    except Exception:
+                        t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
                     
                     # Sanitize ATR, TP, and SL for active trades to prevent invalid/stuck parameters
                     avg_price = t["entry_price"]
@@ -3163,7 +3191,7 @@ def sync_active_positions_from_bybit():
                         else:
                             t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
                         if TRADE_MODE != "simulation":
-                            update_bybit_take_profit(symbol, t["take_profit"])
+                            update_bybit_take_profit(symbol, t["take_profit"], t)
                             
                     # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
                     sl_val = t.get("stop_loss", 0.0)
@@ -3184,7 +3212,7 @@ def sync_active_positions_from_bybit():
                             sl_updated = True
                             
                     if sl_updated and TRADE_MODE != "simulation":
-                        update_bybit_stop_loss(symbol, sl_val)
+                        update_bybit_stop_loss(symbol, sl_val, t)
                     
                     # Dynamically reconstruct original size for recovered trades
                     if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
@@ -3200,6 +3228,7 @@ def sync_active_positions_from_bybit():
                     matched_symbols.add(symbol)
                 else:
                     # Keep it so the exit checker can process its closure and fetch closed PnL
+                    t["bybit_closed"] = True
                     updated_trades.append(t)
             
             bot_state[f"active_trade_{tf_key}"] = updated_trades
@@ -3287,6 +3316,7 @@ def sync_active_positions_from_bybit():
                     "leverage": leverage_val,
                     "confidence": 0.0,
                     "qty": qty_val,
+                    "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
                     "liq_price": liq_price,
                     "mark_price": mark_price,
                     "recovered": True
@@ -3426,81 +3456,14 @@ def main():
                 bybit_realized_pnl = None
                 
                 if TRADE_MODE != "simulation":
-                    pos = get_bybit_position(active_symbol)
-                    if pos:
-                        qty_str = pos.get("size", "0")
-                        qty_val = float(qty_str)
-                        if qty_val == 0:
-                            bybit_closed = True
-                        else:
-                            # Calculate proportional unrealized PnL if multiple active trades for this symbol exist
-                            try:
-                                same_symbol_trades = []
-                                for tf_key in ["1h", "2h", "4h", "6h"]:
-                                    for t_item in bot_state.get(f"active_trade_{tf_key}", []):
-                                        if t_item.get("symbol") == active_symbol:
-                                            same_symbol_trades.append(t_item)
-                                
-                                total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
-                                position_pnl = float(pos.get("unrealisedPnl", 0.0))
-                                
-                                if total_lev_size > 0:
-                                    this_lev_size = float(active_trade.get("position_size_usd", 0.0)) * float(active_trade.get("leverage", 1.0))
-                                    active_trade["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
-                                else:
-                                    active_trade["bybit_unrealized_pnl"] = position_pnl
-                            except Exception:
-                                try:
-                                    active_trade["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
-                                except Exception:
-                                    pass
-                            # Map real-time position metrics from Bybit
-                            try:
-                                bybit_avg_price = float(pos.get("avgPrice", "0"))
-                                if bybit_avg_price > 0:
-                                    active_trade["entry_price"] = bybit_avg_price
-                                bybit_liq_price = pos.get("liqPrice", "")
-                                active_trade["liq_price"] = float(bybit_liq_price) if bybit_liq_price else 0.0
-                                bybit_mark_price = pos.get("markPrice", "")
-                                active_trade["mark_price"] = float(bybit_mark_price) if bybit_mark_price else 0.0
-                            except Exception:
-                                pass
-                            # Detect scale-out fill
-                            original_qty = active_trade.get("qty", 0.0)
-                            if original_qty > 0 and qty_val <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
-                                bybit_scaled_out = True
-                    else:
+                    if active_trade.get("bybit_closed", False):
                         bybit_closed = True
-                        
-                    if bybit_closed:
-                        # Retrieve exact settled PnL from closed-pnl endpoint (includes funding fees)
-                        closed_pnl_record = get_bybit_closed_pnl(active_symbol)
-                        if closed_pnl_record:
-                            record_time_ms = int(closed_pnl_record.get("updatedTime", 0))
-                            current_time_ms = int(time.time() * 1000)
-                            if abs(current_time_ms - record_time_ms) <= 300000:
-                                bybit_realized_pnl = float(closed_pnl_record.get("closedPnl", 0.0))
-                                bybit_exit_price = float(closed_pnl_record.get("avgExitPrice", current_price))
-                                # Correct database position size to match actual filled size on Bybit
-                                entry_val = float(closed_pnl_record.get("cumEntryValue", 0.0))
-                                if entry_val > 0:
-                                    lev = float(active_trade.get("leverage", 1.0))
-                                    actual_margin = round(entry_val / lev, 2)
-                                    active_trade["position_size_usd"] = actual_margin
-                            else:
-                                print(f"[Bybit API] Stale closed PnL record ignored (Age: {int((current_time_ms - record_time_ms)/1000)}s).")
-                                closed_pnl_record = None
-                                
-                        if not closed_pnl_record:
-                            # Fallback to execution log
-                            exec_log = get_bybit_last_execution(active_symbol)
-                            if exec_log:
-                                exec_time_ms = int(exec_log.get("execTime", 0))
-                                current_time_ms = int(time.time() * 1000)
-                                if abs(current_time_ms - exec_time_ms) <= 300000:
-                                    bybit_exit_price = float(exec_log.get("execPrice", current_price))
-                                else:
-                                    print(f"[Bybit API] Stale execution log ignored (Age: {int((current_time_ms - exec_time_ms)/1000)}s).")
+                    else:
+                        # Detect scale-out fill from cached and stored qty values
+                        original_qty = active_trade.get("original_qty", active_trade.get("qty", 0.0))
+                        current_qty = active_trade.get("qty", 0.0)
+                        if original_qty > 0 and current_qty <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
+                            bybit_scaled_out = True
 
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
@@ -3535,7 +3498,7 @@ def main():
                             active_trades_updated = True
                             print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
                             if TRADE_MODE != "simulation":
-                                update_bybit_stop_loss(active_symbol, stop_loss)
+                                update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
                     
                     # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
@@ -3546,7 +3509,7 @@ def main():
                         active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, stop_loss)
+                            update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
                 else:
                     if current_price < lowest_price:
                         lowest_price = current_price
@@ -3559,7 +3522,7 @@ def main():
                             active_trades_updated = True
                             print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
                             if TRADE_MODE != "simulation":
-                                update_bybit_stop_loss(active_symbol, stop_loss)
+                                update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
                             
                     # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
@@ -3570,9 +3533,9 @@ def main():
                         active_trades_updated = True
                         print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, stop_loss)
+                            update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
 
-                # Scale-Out (50% partial profit taking at 0.6 * ATR)
+                # Scale-Out (50% partial profit taking at 1.0 * ATR)
                 half_closed = active_trade.get("half_closed", False)
                 trigger_scale_out = False
                 if not half_closed:
@@ -3623,8 +3586,8 @@ def main():
                         
                         print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, entry_price)
-                            update_bybit_take_profit(active_symbol, take_profit)
+                            update_bybit_stop_loss(active_symbol, entry_price, active_trade)
+                            update_bybit_take_profit(active_symbol, take_profit, active_trade)
                         
                     elif direction == "Bearish":
                         # Scale-Out Triggered for Short
@@ -3664,13 +3627,11 @@ def main():
                         
                         print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, entry_price)
-                            update_bybit_take_profit(active_symbol, take_profit)
+                            update_bybit_stop_loss(active_symbol, entry_price, active_trade)
+                            update_bybit_take_profit(active_symbol, take_profit, active_trade)
 
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)
-                countdown_str = f"{mins:02d}m {secs:02d}s"
-
                 print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 exit_reason = None
@@ -3707,6 +3668,10 @@ def main():
                         lookahead = 10
                         exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
 
+                remaining_seconds = max(0, int(end_time - current_time))
+                mins, secs = divmod(remaining_seconds, 60)
+                countdown_str = f"{mins:02d}m {secs:02d}s"
+                print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 if exit_reason is not None:
                     # Maker vs Taker execution logic
@@ -4459,6 +4424,7 @@ def main():
                                                 "leverage": float(leverage_val),
                                                 "confidence": float(calibrated_confidence),
                                                 "qty": float(actual_qty),
+                                                "original_qty": float(actual_qty),
                                                 "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
                                             }
                                             active_trades_list.append(active_trade)
