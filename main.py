@@ -3244,18 +3244,23 @@ def sync_active_positions_from_bybit():
                             sl_val = avg_price - 0.75 * current_atr
                             if liq_price > 0.0 and sl_val <= liq_price:
                                 sl_val = liq_price + 0.2 * current_atr
-                            t["stop_loss"] = sl_val
                             sl_updated = True
                     else:
                         if sl_val <= 0.0 or (liq_price > 0.0 and sl_val >= liq_price) or sl_val > avg_price + 3.0 * current_atr:
                             sl_val = avg_price + 0.75 * current_atr
                             if liq_price > 0.0 and sl_val >= liq_price:
                                 sl_val = liq_price - 0.2 * current_atr
-                            t["stop_loss"] = sl_val
                             sl_updated = True
                             
-                    if sl_updated and TRADE_MODE != "simulation":
-                        update_bybit_stop_loss(symbol, sl_val, t)
+                    if sl_updated:
+                        if TRADE_MODE != "simulation":
+                            success = update_bybit_stop_loss(symbol, sl_val, t)
+                            if success:
+                                t["stop_loss"] = sl_val
+                            else:
+                                t["stop_loss"] = bybit_sl
+                        else:
+                            t["stop_loss"] = sl_val
                     
                     # Dynamically reconstruct original size for recovered trades
                     if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
@@ -3332,7 +3337,9 @@ def sync_active_positions_from_bybit():
                 # Push the recovered/sanitized TP & SL to Bybit
                 if TRADE_MODE != "simulation":
                     update_bybit_take_profit(symbol, tp_price)
-                    update_bybit_stop_loss(symbol, sl_price)
+                    success = update_bybit_stop_loss(symbol, sl_price)
+                    if not success:
+                        sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
  
                 recovered_trade = {
                     "trade_id": f"{symbol}_{trade_uuid}_recovered",
@@ -3544,50 +3551,80 @@ def main():
                     if current_price > highest_price:
                         highest_price = current_price
                         active_trade["highest_price"] = highest_price
-                        # Trailing Stop: SL trails highest price by dynamic multiplier
+                        # Trailing Stop: Trails highest price by dynamic multiplier
                         potential_sl = highest_price - trailing_multiplier * atr_dollars
                         if potential_sl > stop_loss:
-                            stop_loss = potential_sl
-                            active_trade["stop_loss"] = stop_loss
-                            active_trades_updated = True
-                            print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
                             if TRADE_MODE != "simulation":
-                                update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
+                                success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
+                                if success:
+                                    stop_loss = potential_sl
+                                    active_trade["stop_loss"] = stop_loss
+                                    active_trades_updated = True
+                                    print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                            else:
+                                stop_loss = potential_sl
+                                active_trade["stop_loss"] = stop_loss
+                                active_trades_updated = True
+                                print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
                     
                     # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
-                        break_even_triggered = True
-                        active_trade["break_even_triggered"] = True
-                        stop_loss = max(stop_loss, entry_price)
-                        active_trade["stop_loss"] = stop_loss
-                        active_trades_updated = True
-                        print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                        target_sl = max(stop_loss, entry_price)
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
+                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                            if success:
+                                break_even_triggered = True
+                                active_trade["break_even_triggered"] = True
+                                stop_loss = target_sl
+                                active_trade["stop_loss"] = stop_loss
+                                active_trades_updated = True
+                                print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                        else:
+                            break_even_triggered = True
+                            active_trade["break_even_triggered"] = True
+                            stop_loss = target_sl
+                            active_trade["stop_loss"] = stop_loss
+                            active_trades_updated = True
+                            print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
                 else:
                     if current_price < lowest_price:
                         lowest_price = current_price
                         active_trade["lowest_price"] = lowest_price
-                        # Trailing Stop: SL trails lowest price by dynamic multiplier
+                        # Trailing Stop: Trails lowest price by dynamic multiplier
                         potential_sl = lowest_price + trailing_multiplier * atr_dollars
                         if potential_sl < stop_loss:
-                            stop_loss = potential_sl
-                            active_trade["stop_loss"] = stop_loss
-                            active_trades_updated = True
-                            print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
                             if TRADE_MODE != "simulation":
-                                update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
+                                success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
+                                if success:
+                                    stop_loss = potential_sl
+                                    active_trade["stop_loss"] = stop_loss
+                                    active_trades_updated = True
+                                    print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                            else:
+                                stop_loss = potential_sl
+                                active_trade["stop_loss"] = stop_loss
+                                active_trades_updated = True
+                                print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
                             
                     # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
                     if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
-                        break_even_triggered = True
-                        active_trade["break_even_triggered"] = True
-                        stop_loss = min(stop_loss, entry_price)
-                        active_trade["stop_loss"] = stop_loss
-                        active_trades_updated = True
-                        print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                        target_sl = min(stop_loss, entry_price)
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
+                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                            if success:
+                                break_even_triggered = True
+                                active_trade["break_even_triggered"] = True
+                                stop_loss = target_sl
+                                active_trade["stop_loss"] = stop_loss
+                                active_trades_updated = True
+                                print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                        else:
+                            break_even_triggered = True
+                            active_trade["break_even_triggered"] = True
+                            stop_loss = target_sl
+                            active_trade["stop_loss"] = stop_loss
+                            active_trades_updated = True
+                            print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
 
                 # Scale-Out (50% partial profit taking at 1.0 * ATR)
                 half_closed = active_trade.get("half_closed", False)
@@ -3633,15 +3670,24 @@ def main():
                         active_trade["position_size_usd"] = remaining_size
                         
                         # Move stop loss to entry price (break-even)
-                        stop_loss = entry_price
-                        active_trade["stop_loss"] = entry_price
-                        active_trade["break_even_triggered"] = True
-                        active_trades_updated = True
-                        
-                        print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                        target_sl = entry_price
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, entry_price, active_trade)
-                            update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                            if success:
+                                stop_loss = target_sl
+                                active_trade["stop_loss"] = target_sl
+                                active_trade["break_even_triggered"] = True
+                                active_trades_updated = True
+                                print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                                update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                            else:
+                                print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to entry on Bybit. SL remains at {stop_loss:.2f}")
+                        else:
+                            stop_loss = target_sl
+                            active_trade["stop_loss"] = target_sl
+                            active_trade["break_even_triggered"] = True
+                            active_trades_updated = True
+                            print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                         
                     elif direction == "Bearish":
                         # Scale-Out Triggered for Short
@@ -3673,21 +3719,27 @@ def main():
                         position_size_usd = remaining_size
                         active_trade["position_size_usd"] = remaining_size
                         
-                        # Move stop loss to entry price + fee offset (fee-free break-even)
+                        # Move stop loss to entry price - fee offset (fee-free break-even)
                         fee_buffer = entry_price * 0.0005
-                        if direction == "Bullish":
-                            stop_loss = entry_price + fee_buffer
-                        else:
-                            stop_loss = entry_price - fee_buffer
-                            
-                        active_trade["stop_loss"] = stop_loss
-                        active_trade["break_even_triggered"] = True
-                        active_trades_updated = True
+                        target_sl = entry_price - fee_buffer
                         
-                        print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
-                            update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                            if success:
+                                stop_loss = target_sl
+                                active_trade["stop_loss"] = target_sl
+                                active_trade["break_even_triggered"] = True
+                                active_trades_updated = True
+                                print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
+                                update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                            else:
+                                print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to fee-adjusted entry on Bybit. SL remains at {stop_loss:.2f}")
+                        else:
+                            stop_loss = target_sl
+                            active_trade["stop_loss"] = target_sl
+                            active_trade["break_even_triggered"] = True
+                            active_trades_updated = True
+                            print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
 
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)
