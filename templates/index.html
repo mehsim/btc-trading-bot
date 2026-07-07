@@ -2008,11 +2008,10 @@
                             realBalVal.style.fontSize = "36px";
                             realBalVal.style.color = "var(--accent-green)";
                             
-                            // Calculate cumulative Mainnet PnL
+                            // Calculate cumulative Mainnet PnL from actual realized values
                             let cumulativeMainnetPnL = 0;
                             allTrades.forEach(t => {
-                                const mObj = calculateMainnetPnL(t, null);
-                                cumulativeMainnetPnL += mObj.pnlVal;
+                                cumulativeMainnetPnL += (t.pnl_usd || 0);
                             });
                             const sign = cumulativeMainnetPnL >= 0 ? "+" : "";
                             const colorClass = cumulativeMainnetPnL >= 0 ? "color-bullish" : "color-bearish";
