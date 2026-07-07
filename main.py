@@ -586,6 +586,46 @@ def get_bybit_closed_pnl(symbol, limit=1):
             return pnl_list[0]
     return None
 
+def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms):
+    """Retrieve all closed PnL records for a symbol from entry_time_ms to now and sum them up."""
+    res = bybit_get_request("/v5/position/closed-pnl", {"category": "linear", "symbol": symbol, "limit": "50"})
+    if res.get("retCode") == 0:
+        pnl_list = res.get("result", {}).get("list", [])
+        total_pnl = 0.0
+        exit_prices = []
+        exit_quantities = []
+        entry_values = []
+        
+        for item in pnl_list:
+            updated_time = int(item.get("updatedTime", 0))
+            if updated_time >= entry_time_ms:
+                pnl_val = float(item.get("closedPnl", 0.0))
+                total_pnl += pnl_val
+                
+                ep = float(item.get("avgExitPrice", 0.0))
+                eq = float(item.get("closedSize", 0.0))
+                ev = float(item.get("cumEntryValue", 0.0))
+                if ep > 0 and eq > 0:
+                    exit_prices.append(ep)
+                    exit_quantities.append(eq)
+                if ev > 0:
+                    entry_values.append(ev)
+                    
+        avg_exit_price = None
+        if exit_prices and exit_quantities:
+            total_qty = sum(exit_quantities)
+            if total_qty > 0:
+                avg_exit_price = sum(p * q for p, q in zip(exit_prices, exit_quantities)) / total_qty
+                
+        total_entry_val = sum(entry_values)
+        
+        return {
+            "total_pnl": total_pnl,
+            "avg_exit_price": avg_exit_price,
+            "total_entry_value": total_entry_val if total_entry_val > 0 else None
+        }
+    return None
+
 def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
     if active_trade:
         qty_val = float(active_trade.get("qty", 0.0))
@@ -3302,6 +3342,7 @@ def sync_active_positions_from_bybit():
                     "take_profit": tp_price,
                     "direction": direction,
                     "end_time": float(time.time() + 3600 * 10),
+                    "entry_time": int(time.time() * 1000),
                     "atr_dollars": calc_atr,
                     "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
                     "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
@@ -3463,7 +3504,17 @@ def main():
                         original_qty = active_trade.get("original_qty", active_trade.get("qty", 0.0))
                         current_qty = active_trade.get("qty", 0.0)
                         if original_qty > 0 and current_qty <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
-                            bybit_scaled_out = True
+                            # Verify fill status of the scale-out limit order to prevent premature/false triggers
+                            scale_out_order_id = active_trade.get("bybit_scale_out_order_id")
+                            if scale_out_order_id:
+                                order_details = get_bybit_order_details(active_symbol, scale_out_order_id)
+                                if order_details and order_details.get("orderStatus") == "Filled":
+                                    bybit_scaled_out = True
+                                else:
+                                    status_msg = order_details.get("orderStatus") if order_details else "Unknown"
+                                    print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
+                            else:
+                                bybit_scaled_out = True
 
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
@@ -3674,6 +3725,24 @@ def main():
                 print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 if exit_reason is not None:
+                    # Query accumulated closed PnL transactions on Testnet/Live
+                    bybit_pnl_data = None
+                    if TRADE_MODE != "simulation":
+                        entry_time_ms = active_trade.get("entry_time")
+                        if not entry_time_ms:
+                            entry_time_ms = int((end_time - (int(iv) * 60)) * 1000)
+                        
+                        bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms)
+                        if bybit_pnl_data:
+                            bybit_realized_pnl = bybit_pnl_data["total_pnl"]
+                            if bybit_pnl_data["avg_exit_price"] is not None:
+                                bybit_exit_price = bybit_pnl_data["avg_exit_price"]
+                            if bybit_pnl_data["total_entry_value"] is not None:
+                                lev = float(active_trade.get("leverage", 1.0))
+                                actual_margin = round(bybit_pnl_data["total_entry_value"] / lev, 2)
+                                active_trade["position_size_usd"] = actual_margin
+                                position_size_usd = actual_margin
+
                     # Maker vs Taker execution logic
                     is_stop_loss = "STOP LOSS" in str(exit_reason).upper()
                     
@@ -3702,10 +3771,7 @@ def main():
                     taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker per side on leveraged size
                     realized_pnl = gross_pnl - taker_fee_cost
                     net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
-                    if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
-                        realized_pnl = bybit_realized_pnl
-                        net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
-                        
+                    
                     if realized_pnl < -position_size_usd:
                         realized_pnl = -position_size_usd
                         net_return_pct = -100.0
@@ -3713,8 +3779,15 @@ def main():
                     # Aggregate PnL and size for trade history logging if scaled out
                     original_size = float(active_trade.get("original_size", position_size_usd))
                     scaled_out_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
-                    total_pnl = round(realized_pnl + scaled_out_pnl, 2)
-                    total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
+                    
+                    if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
+                        total_pnl = round(bybit_realized_pnl, 2)
+                        realized_pnl = round(total_pnl - scaled_out_pnl, 2)
+                        net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
+                        total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
+                    else:
+                        total_pnl = round(realized_pnl + scaled_out_pnl, 2)
+                        total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
                     
                     # Update simulated balance (only in simulation)
                     if TRADE_MODE == "simulation":
@@ -4412,6 +4485,7 @@ def main():
                                                 "take_profit": float(take_profit_price),
                                                 "direction": str(ml_trend),
                                                 "end_time": float(time.time() + duration_seconds),
+                                                "entry_time": int(time.time() * 1000),
                                                 "atr_dollars": float(atr_dollars),
                                                 "highest_price": float(entry_price),
                                                 "lowest_price": float(entry_price),
