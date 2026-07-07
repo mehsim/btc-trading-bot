@@ -3041,6 +3041,27 @@ def get_all_bybit_positions():
         return res.get("result", {}).get("list", [])
     return []
 
+def get_bybit_entry_order_qty(symbol, side):
+    """Query Bybit order history for the symbol to find the originally requested quantity of the entry order."""
+    try:
+        params = {
+            "category": "linear",
+            "symbol": symbol,
+            "limit": 20
+        }
+        res = bybit_get_request("/v5/order/history", params)
+        if res.get("retCode") == 0:
+            orders = res.get("result", {}).get("list", [])
+            for o in orders:
+                o_side = o.get("side")
+                o_cum = float(o.get("cumExecQty", 0.0))
+                o_qty = float(o.get("qty", 0.0))
+                if o_side == side and o_cum > 0.0:
+                    return o_qty, o_cum
+    except Exception as e:
+        print(f"[Entry Order Query Warning] Error for {symbol} {side}: {e}")
+    return None, None
+
 def sync_active_positions_from_bybit():
     """Real-time Sync: Sync all active trades from Bybit to keep bot_state completely aligned with testnet/live."""
     if TRADE_MODE == "simulation":
@@ -3161,6 +3182,16 @@ def sync_active_positions_from_bybit():
                     if sl_updated and TRADE_MODE != "simulation":
                         update_bybit_stop_loss(symbol, sl_val)
                     
+                    # Dynamically reconstruct original size for recovered trades
+                    if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
+                        orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, pos_side)
+                        if orig_qty is not None and orig_qty > 0.0:
+                            t["original_size"] = (orig_qty * avg_price) / t["leverage"] if t["leverage"] > 0 else (orig_qty * avg_price)
+                            t["fill_pct"] = round((filled_qty / orig_qty) * 100.0, 2)
+                            t["original_size_reconstructed"] = True
+                            print(f"[Crash Recovery Sync] Reconstructed original size for {symbol}: target={t['original_size']:.2f}, filled={t['position_size_usd']:.2f} ({t['fill_pct']}%)")
+                            save_history()
+                    
                     updated_trades.append(t)
                     matched_symbols.add(symbol)
                 else:
@@ -3184,6 +3215,18 @@ def sync_active_positions_from_bybit():
                 position_value = float(pos.get("positionValue", "0"))
                 position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
                 qty_val = float(pos.get("size", "0"))
+                
+                # Retrieve the original target qty of the entry order
+                orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, side_str)
+                if orig_qty is not None and orig_qty > 0.0:
+                    original_size = (orig_qty * avg_price) / leverage_val if leverage_val > 0 else (orig_qty * avg_price)
+                    fill_pct = round((filled_qty / orig_qty) * 100.0, 2)
+                    original_size_reconstructed = True
+                    print(f"[Crash Recovery] Discovered target size for {symbol}: target={original_size:.2f}, filled={position_size_usd:.2f} ({fill_pct}%)")
+                else:
+                    original_size = position_size_usd
+                    fill_pct = 100.0
+                    original_size_reconstructed = False
                 
                 import uuid
                 trade_uuid = str(uuid.uuid4())[:8]
@@ -3214,7 +3257,7 @@ def sync_active_positions_from_bybit():
                 if TRADE_MODE != "simulation":
                     update_bybit_take_profit(symbol, tp_price)
                     update_bybit_stop_loss(symbol, sl_price)
-
+ 
                 recovered_trade = {
                     "trade_id": f"{symbol}_{trade_uuid}_recovered",
                     "bybit_order_id": None,
@@ -3231,8 +3274,10 @@ def sync_active_positions_from_bybit():
                     "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
                     "break_even_triggered": False,
                     "half_closed": False,
-                    "original_size": position_size_usd,
+                    "original_size": original_size,
                     "position_size_usd": position_size_usd,
+                    "fill_pct": fill_pct,
+                    "original_size_reconstructed": original_size_reconstructed,
                     "scaled_out_pnl": 0.0,
                     "kelly_fraction": 0.0,
                     "leverage": leverage_val,

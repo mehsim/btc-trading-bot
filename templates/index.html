@@ -1696,9 +1696,10 @@
                     const tfLabel = t.interval === '60' ? '1H' : t.interval === '120' ? '2H' : t.interval === '240' ? '4H' : t.interval === '360' ? '6H' : (t.interval ? `${t.interval}M` : '1H');
 
                     const posSize = t.position_size_usd !== undefined ? t.position_size_usd : 100.00;
+                    const originalSize = t.original_size !== undefined ? t.original_size : posSize;
                     const leverage = t.leverage || 1.0;
-                    const investedVal = posSize.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    const leveragedVal = (posSize * leverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const investedVal = originalSize.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const leveragedVal = (originalSize * leverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     const leverageStr = leverage.toFixed(1) + 'x';
                     const rawPnL = t.pnl_usd !== undefined ? t.pnl_usd : (t.change_pct / 100 * posSize);
                     const pnlSign = rawPnL >= 0 ? '+' : '';
@@ -1720,7 +1721,8 @@
                             <td>$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 600;">
                                 <div>$${investedVal}</div>
-                                <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged Size: $${leveragedVal}</div>
+                                <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged: $${leveragedVal}</div>
+                                <div style="font-size: 9px; color: var(--accent-purple); font-weight: normal; margin-top: 1px;">Filled Margin: $${posSize.toFixed(2)}</div>
                             </td>
                             <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 600;">${leverageStr}</td>
                             <td style="font-weight: 800; color: ${fillPctColor}; font-family: 'Outfit', sans-serif;">${fillPctStr}</td>
@@ -1857,8 +1859,9 @@
                 const confidencePctStr = !isNaN(confidencePctVal) ? (confidencePctVal * 100).toFixed(1) + '%' : '—';
 
                 const tradePosSize = parseFloat(trade.position_size_usd) || 0.00;
+                const originalSize = parseFloat(trade.original_size) || tradePosSize;
                 const tradeLeverage = parseFloat(trade.leverage) || 1.0;
-                const tradeLeveragedVal = (tradePosSize * tradeLeverage).toFixed(2);
+                const tradeLeveragedVal = (originalSize * tradeLeverage).toFixed(2);
                 
                 const initialFilled = trade.half_closed ? (tradePosSize * 2.0) : tradePosSize;
                 const fillPct = trade.fill_pct !== undefined ? trade.fill_pct : (initialFilled > 0 && parseFloat(trade.original_size) > 0 ? Math.min(100.0, (initialFilled / parseFloat(trade.original_size)) * 100.0) : 100.0);
@@ -1874,8 +1877,9 @@
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${tradeLeverage.toFixed(1)}x</td>
                         <td style="font-weight: 800; color: ${fillPctColor}; font-family: 'Outfit', sans-serif;">${fillPctStr}</td>
                         <td class="hide-mobile" style="font-weight: 700; color: var(--accent-blue);">
-                            <div>$${tradePosSize.toFixed(2)}</div>
-                            <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged Size: $${tradeLeveragedVal}</div>
+                            <div>$${originalSize.toFixed(2)}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged: $${tradeLeveragedVal}</div>
+                            <div style="font-size: 9px; color: var(--accent-purple); font-weight: normal; margin-top: 1px;">Filled Margin: $${tradePosSize.toFixed(2)}</div>
                         </td>
                         <td style="font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         <td class="hide-mobile" style="font-weight: 600; color: var(--text-primary);">${currentPriceVal ? '$' + currentPriceVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
@@ -2379,8 +2383,9 @@
             const tfLabel = t.interval === '60' ? '1H' : t.interval === '120' ? '2H' : t.interval === '240' ? '4H' : t.interval === '360' ? '6H' : (t.interval ? `${t.interval}M` : '1H');
 
             const posSize = t.position_size_usd !== undefined ? t.position_size_usd : 100.00;
+            const originalSize = t.original_size !== undefined ? t.original_size : posSize;
             const leverage = t.leverage || 1.0;
-            const leveragedVal = posSize * leverage;
+            const leveragedVal = originalSize * leverage;
             const rawPnL = t.pnl_usd !== undefined ? t.pnl_usd : (t.change_pct / 100 * posSize);
             const displayPnLPct = posSize > 0 ? (rawPnL / posSize * 100) : 0;
             const displayPnLSign = displayPnLPct >= 0 ? '+' : '';
@@ -2478,15 +2483,19 @@
                     <span style="font-weight:700; color:var(--text-primary);">$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
-                    <span style="opacity:0.6;">Leveraged Position Size (USD)</span>
-                    <span style="font-weight:700; color:var(--accent-orange);">$${leveragedVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
-                    <span style="opacity:0.6;">Leverage</span>
+                    <span style="opacity:0.6;">Target Leverage</span>
                     <span style="font-weight:700; color:var(--accent-purple);">${leverage.toFixed(1)}x</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
-                    <span style="opacity:0.6;">Actual Investment (USD)</span>
+                    <span style="opacity:0.6;">Intended Target Investment</span>
+                    <span style="font-weight:700; color:var(--accent-orange);">$${originalSize.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">Intended Leveraged Size</span>
+                    <span style="font-weight:700; color:var(--accent-orange);">$${leveragedVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
+                    <span style="opacity:0.6;">Actual Filled Margin (USD)</span>
                     <span style="font-weight:700; color:var(--accent-blue);">$${posSize.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
