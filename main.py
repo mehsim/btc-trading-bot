@@ -3103,7 +3103,13 @@ def sync_active_positions_from_bybit():
                     bybit_sl = float(pos.get("stopLoss", 0.0)) if pos.get("stopLoss") else 0.0
                     bybit_tp = float(pos.get("takeProfit", 0.0)) if pos.get("takeProfit") else 0.0
                     if bybit_sl > 0.0:
-                        t["stop_loss"] = bybit_sl
+                        if t.get("break_even_triggered", False):
+                            if t.get("direction") == "Bullish":
+                                t["stop_loss"] = max(bybit_sl, t["entry_price"])
+                            else:
+                                t["stop_loss"] = min(bybit_sl, t["entry_price"])
+                        else:
+                            t["stop_loss"] = bybit_sl
                     if bybit_tp > 0.0:
                         t["take_profit"] = bybit_tp
                     
