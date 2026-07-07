@@ -3683,6 +3683,7 @@ def main():
 
                 remaining_seconds = max(0, int(end_time - current_time))
                 mins, secs = divmod(remaining_seconds, 60)
+                countdown_str = f"{mins:02d}m {secs:02d}s"
                 print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 exit_reason = None
@@ -3718,11 +3719,6 @@ def main():
                     if current_time >= end_time and not half_closed:
                         lookahead = 10
                         exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
-
-                remaining_seconds = max(0, int(end_time - current_time))
-                mins, secs = divmod(remaining_seconds, 60)
-                countdown_str = f"{mins:02d}m {secs:02d}s"
-                print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
 
                 if exit_reason is not None:
                     # Query accumulated closed PnL transactions on Testnet/Live
