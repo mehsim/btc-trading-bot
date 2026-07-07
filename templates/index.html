@@ -1708,7 +1708,7 @@
                     
                     const isScaleOutCompleted = t.half_closed || (t.reason && t.reason.includes("Scale-Out"));
                     const initialFilled = isScaleOutCompleted ? (posSize * 2.0) : posSize;
-                    const fillPct = (initialFilled > 0 && originalSize > 0) ? Math.min(100.0, (initialFilled / originalSize) * 100.0) : 100.0;
+                    const fillPct = (t.original_size !== undefined && originalSize > 0) ? Math.min(100.0, (initialFilled / originalSize) * 100.0) : (t.fill_pct !== undefined ? t.fill_pct : 100.0);
                     const fillPctStr = fillPct.toFixed(1) + '%';
                     const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
@@ -1864,7 +1864,7 @@
                 const tradeLeveragedVal = (originalSize * tradeLeverage).toFixed(2);
                 
                 const initialFilled = trade.half_closed ? (tradePosSize * 2.0) : tradePosSize;
-                const fillPct = (initialFilled > 0 && originalSize > 0) ? Math.min(100.0, (initialFilled / originalSize) * 100.0) : 100.0;
+                const fillPct = (trade.original_size !== undefined && originalSize > 0) ? Math.min(100.0, (initialFilled / originalSize) * 100.0) : (trade.fill_pct !== undefined ? trade.fill_pct : 100.0);
                 const fillPctStr = fillPct.toFixed(1) + '%';
                 const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
