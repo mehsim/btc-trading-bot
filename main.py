@@ -3673,15 +3673,20 @@ def main():
                         position_size_usd = remaining_size
                         active_trade["position_size_usd"] = remaining_size
                         
-                        # Move stop loss to entry price (break-even)
-                        stop_loss = entry_price
-                        active_trade["stop_loss"] = entry_price
+                        # Move stop loss to entry price + fee offset (fee-free break-even)
+                        fee_buffer = entry_price * 0.0005
+                        if direction == "Bullish":
+                            stop_loss = entry_price + fee_buffer
+                        else:
+                            stop_loss = entry_price - fee_buffer
+                            
+                        active_trade["stop_loss"] = stop_loss
                         active_trade["break_even_triggered"] = True
                         active_trades_updated = True
                         
-                        print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                        print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
                         if TRADE_MODE != "simulation":
-                            update_bybit_stop_loss(active_symbol, entry_price, active_trade)
+                            update_bybit_stop_loss(active_symbol, stop_loss, active_trade)
                             update_bybit_take_profit(active_symbol, take_profit, active_trade)
 
                 remaining_seconds = max(0, int(end_time - current_time))
@@ -4294,10 +4299,16 @@ def main():
                                     tp_multiplier = round(base_tp * vol_factor, 2)
                                     print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
-                                    # Align stop loss and take profit multipliers dynamically based on ADX regime
+                                    # Align stop loss and take profit multipliers dynamically based on ADX regime strength
                                     sl_multiplier = 1.50
-                                    tp_multiplier_adjusted = 3.00 if latest_candle["ADX"] >= 20.0 else 2.00
-                                    print(f"[{iv}m Target Alignment] Aligned multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
+                                    adx_val = latest_candle.get("ADX", 0.0)
+                                    if adx_val >= 35.0:
+                                        tp_multiplier_adjusted = 4.00  # Strong Trend: boost R:R to 1:2.67
+                                    elif adx_val >= 20.0:
+                                        tp_multiplier_adjusted = 3.00  # Normal Trend: 1:2 R:R
+                                    else:
+                                        tp_multiplier_adjusted = 2.00  # Ranging Market: 1:1.33 R:R
+                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Aligned multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
                                     
                                     # Maker execution: zero entry slippage for limit orders
                                     slippage_pct = 0.0
