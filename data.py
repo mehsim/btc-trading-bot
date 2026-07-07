@@ -2,6 +2,8 @@ import os
 import time
 import requests
 import pandas as pd
+import threading
+import numpy as np
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -353,6 +355,20 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     return df_history.iloc[-target_count:].reset_index(drop=True)
 
 def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_{interval}_oi.csv")
+    
+    # 1. Load cache if it exists
+    df_cache = None
+    if os.path.exists(cache_file):
+        try:
+            df_cache = pd.read_csv(cache_file)
+            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
+            df_cache = df_cache.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        except Exception as e:
+            print(f"[OI Cache Load Error] {e}")
+            df_cache = None
+
     url = f"{BYBIT_BASE_URL}/v5/market/open-interest"
     interval_time = "1h"
     if str(interval) == "5":
@@ -363,10 +379,14 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         interval_time = "1h"
     elif str(interval) in ["240", "360"]:
         interval_time = "4h"
-        
+
     oi_data = []
     cursor = None
-    for page in range(100):
+    
+    cache_max_ts = float(df_cache["timestamp"].max()) if df_cache is not None and len(df_cache) > 0 else None
+    stop_fetching = False
+    
+    for page in range(50):
         params = {
             "category": "linear",
             "symbol": symbol,
@@ -383,12 +403,18 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
             res = resp.json()
             if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
                 batch = res["result"]["list"]
-                oi_data.extend(batch)
                 
-                oldest_ts = int(batch[-1]["timestamp"])
-                if start_ts_ms and oldest_ts < int(start_ts_ms):
+                # Check for overlap with cache
+                for item in batch:
+                    ts = float(item["timestamp"])
+                    if cache_max_ts is not None and ts <= cache_max_ts:
+                        stop_fetching = True
+                        break
+                    oi_data.append(item)
+                    
+                if stop_fetching:
                     break
-                
+                    
                 cursor = res["result"].get("nextPageCursor")
                 if not cursor:
                     break
@@ -398,20 +424,62 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         except Exception as e:
             print(f"Error fetching OI history: {e}")
             break
-            
-    if not oi_data:
-        return pd.DataFrame(columns=["timestamp", "open_interest"])
+
+    # Parse and merge
+    df_new = pd.DataFrame()
+    if oi_data:
+        df_new = pd.DataFrame(oi_data)
+        df_new["timestamp"] = df_new["timestamp"].astype(float)
+        df_new["open_interest"] = df_new["openInterest"].astype(float)
+        df_new = df_new[["timestamp", "open_interest"]]
         
-    df_oi = pd.DataFrame(oi_data)
-    df_oi["timestamp"] = df_oi["timestamp"].astype(float)
-    df_oi["open_interest"] = df_oi["openInterest"].astype(float)
-    df_oi = df_oi[["timestamp", "open_interest"]].sort_values("timestamp").reset_index(drop=True)
-    return df_oi
+    if df_cache is not None:
+        if not df_new.empty:
+            df_history = pd.concat([df_cache, df_new], ignore_index=True)
+        else:
+            df_history = df_cache
+    else:
+        df_history = df_new
+
+    if not df_history.empty:
+        df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        
+        # Save cache
+        try:
+            df_history.to_csv(cache_file, index=False)
+        except Exception as e:
+            print(f"[OI Cache Write Error] {e}")
+
+    # Slice for start/end if requested
+    if start_ts_ms:
+        df_history = df_history[df_history["timestamp"] >= float(start_ts_ms)]
+    if end_ts_ms:
+        df_history = df_history[df_history["timestamp"] <= float(end_ts_ms)]
+        
+    return df_history.reset_index(drop=True)
 
 def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_funding.csv")
+    
+    # 1. Load cache if it exists
+    df_cache = None
+    if os.path.exists(cache_file):
+        try:
+            df_cache = pd.read_csv(cache_file)
+            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
+            df_cache = df_cache.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        except Exception as e:
+            print(f"[Funding Cache Load Error] {e}")
+            df_cache = None
+
     url = f"{BYBIT_BASE_URL}/v5/market/funding/history"
     funding_data = []
+    
+    cache_max_ts = float(df_cache["timestamp"].max()) if df_cache is not None and len(df_cache) > 0 else None
     current_end = int(end_ts_ms) if end_ts_ms else int(time.time() * 1000)
+    stop_fetching = False
+    
     for page in range(50):
         params = {
             "category": "linear",
@@ -426,8 +494,18 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
             res = resp.json()
             if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
                 batch = res["result"]["list"]
-                funding_data.extend(batch)
                 
+                # Check for overlap with cache
+                for item in batch:
+                    ts = float(item["fundingRateTimestamp"])
+                    if cache_max_ts is not None and ts <= cache_max_ts:
+                        stop_fetching = True
+                        break
+                    funding_data.append(item)
+                    
+                if stop_fetching:
+                    break
+                    
                 oldest_ts = int(batch[-1]["fundingRateTimestamp"])
                 if start_ts_ms and oldest_ts < int(start_ts_ms):
                     break
@@ -439,47 +517,73 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
         except Exception as e:
             print(f"Error fetching Funding history: {e}")
             break
-            
-    if not funding_data:
-        return pd.DataFrame(columns=["timestamp", "funding_rate"])
+
+    # Parse and merge
+    df_new = pd.DataFrame()
+    if funding_data:
+        df_new = pd.DataFrame(funding_data)
+        df_new["timestamp"] = df_new["fundingRateTimestamp"].astype(float)
+        df_new["funding_rate"] = df_new["fundingRate"].astype(float)
+        df_new = df_new[["timestamp", "funding_rate"]]
         
-    df_funding = pd.DataFrame(funding_data)
-    df_funding["timestamp"] = df_funding["fundingRateTimestamp"].astype(float)
-    df_funding["funding_rate"] = df_funding["fundingRate"].astype(float)
-    df_funding = df_funding[["timestamp", "funding_rate"]].sort_values("timestamp").reset_index(drop=True)
-    return df_funding
+    if df_cache is not None:
+        if not df_new.empty:
+            df_history = pd.concat([df_cache, df_new], ignore_index=True)
+        else:
+            df_history = df_cache
+    else:
+        df_history = df_new
+
+    if not df_history.empty:
+        df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        
+        # Save cache
+        try:
+            df_history.to_csv(cache_file, index=False)
+        except Exception as e:
+            print(f"[Funding Cache Write Error] {e}")
+
+    # Slice for start/end if requested
+    if start_ts_ms:
+        df_history = df_history[df_history["timestamp"] >= float(start_ts_ms)]
+    if end_ts_ms:
+        df_history = df_history[df_history["timestamp"] <= float(end_ts_ms)]
+        
+    return df_history.reset_index(drop=True)
 
 fng_cache = None
+fng_lock = threading.Lock()
 fng_cache_time = 0.0
 
 def get_fear_and_greed_history():
     global fng_cache, fng_cache_time
-    # Cache for 4 hours (14400 seconds)
-    if fng_cache is not None and (time.time() - fng_cache_time) < 14400:
-        return fng_cache
-        
-    url = "https://api.alternative.me/fng/?limit=0&format=json"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            res = resp.json()
-            if "data" in res and len(res["data"]) > 0:
-                fng_data = []
-                for item in res["data"]:
-                    fng_data.append({
-                        "timestamp": float(item["timestamp"]) * 1000,
-                        "fear_greed": float(item["value"])
-                    })
-                df_fng = pd.DataFrame(fng_data)
-                df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
-                fng_cache = df_fng
-                fng_cache_time = time.time()
-                return df_fng
-    except Exception as e:
-        print(f"Error fetching Fear & Greed history: {e}")
-        if fng_cache is not None:
+    with fng_lock:
+        # Cache for 4 hours (14400 seconds)
+        if fng_cache is not None and (time.time() - fng_cache_time) < 14400:
             return fng_cache
-    return pd.DataFrame(columns=["timestamp", "fear_greed"])
+            
+        url = "https://api.alternative.me/fng/?limit=0&format=json"
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.status_code == 200:
+                res = resp.json()
+                if "data" in res and len(res["data"]) > 0:
+                    fng_data = []
+                    for item in res["data"]:
+                        fng_data.append({
+                            "timestamp": float(item["timestamp"]) * 1000,
+                            "fear_greed": float(item["value"])
+                        })
+                    df_fng = pd.DataFrame(fng_data)
+                    df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
+                    fng_cache = df_fng
+                    fng_cache_time = time.time()
+                    return df_fng
+        except Exception as e:
+            print(f"Error fetching Fear & Greed history: {e}")
+            if fng_cache is not None:
+                return fng_cache
+        return pd.DataFrame(columns=["timestamp", "fear_greed"])
 
 def merge_derivatives_sentiment_features(df, symbol, interval):
     if df.empty:
@@ -517,9 +621,9 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     else:
         df["fear_greed"] = 50.0
         
-    # Calculate OI momentum
-    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).fillna(0.0)
-    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).fillna(0.0)
+    # Calculate OI momentum and sanitize inf values
+    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).replace([np.inf, -np.inf], np.nan).fillna(0.0)
     
     # Merge BTCUSDT Correlation Features
     if symbol != "BTCUSDT":

@@ -39,6 +39,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 bot_logs = []
 logs_lock = threading.Lock()
 retraining_lock = threading.Lock()
+active_trades_lock = threading.Lock()
 
 bot_state = {
     "live_price": None,
@@ -830,14 +831,23 @@ def run_bybit_balance_updater():
 @app.route("/api/status")
 def get_status():
     # Thread-safe dictionary copy with fallback
-    for _ in range(5):
-        try:
-            state_copy = bot_state.copy()
-            break
-        except RuntimeError:
-            time.sleep(0.01)
-    else:
-        state_copy = {k: v for k, v in list(bot_state.items())}
+    with active_trades_lock:
+        for _ in range(5):
+            try:
+                state_copy = bot_state.copy()
+                for tf in ["1h", "2h", "4h", "6h"]:
+                    tf_key = f"active_trade_{tf}"
+                    if tf_key in state_copy and isinstance(state_copy[tf_key], list):
+                        state_copy[tf_key] = list(state_copy[tf_key])
+                break
+            except RuntimeError:
+                time.sleep(0.01)
+        else:
+            state_copy = {k: v for k, v in list(bot_state.items())}
+            for tf in ["1h", "2h", "4h", "6h"]:
+                tf_key = f"active_trade_{tf}"
+                if tf_key in state_copy and isinstance(state_copy[tf_key], list):
+                    state_copy[tf_key] = list(state_copy[tf_key])
 
     with logs_lock:
         state_copy["logs"] = list(bot_logs)
@@ -875,10 +885,12 @@ def force_close_trade():
         return jsonify({"status": "error", "message": "Invalid interval specified."}), 400
         
     active_trade_key = f"active_trade_{tf}"
-    active_trades_list = bot_state.get(active_trade_key, [])
-    if not isinstance(active_trades_list, list):
-        active_trades_list = [] if active_trades_list is None else [active_trades_list]
-        bot_state[active_trade_key] = active_trades_list
+    with active_trades_lock:
+        active_trades_list = bot_state.get(active_trade_key, [])
+        if not isinstance(active_trades_list, list):
+            active_trades_list = [] if active_trades_list is None else [active_trades_list]
+            bot_state[active_trade_key] = active_trades_list
+        active_trades_list = list(active_trades_list)
 
     # Find the trade for the specified symbol or trade_id
     trade_id = data.get("trade_id")
@@ -1052,11 +1064,15 @@ def force_close_trade():
     save_history()
     
     # Remove from active trades
-    if trade_id:
-        active_trades_list = [t for t in active_trades_list if t.get("trade_id") != trade_id]
-    else:
-        active_trades_list = [t for t in active_trades_list if not (t.get("symbol", "").upper() == symbol)]
-    bot_state[active_trade_key] = active_trades_list
+    with active_trades_lock:
+        current_list = bot_state.get(active_trade_key, [])
+        if not isinstance(current_list, list):
+            current_list = []
+        if trade_id:
+            current_list = [t for t in current_list if t.get("trade_id") != trade_id]
+        else:
+            current_list = [t for t in current_list if not (t.get("symbol", "").upper() == symbol)]
+        bot_state[active_trade_key] = current_list
     
     # Sync positions immediately to make UI responsive
     sync_active_positions_from_bybit()
@@ -1110,91 +1126,92 @@ def close_all_trades_internal(exit_reason):
             print(f"[Panic Close All Exception] Error: {e}")
             
     # 2. Iterate and clear all local active trades from bot_state
-    for tf_key in ["1h", "2h", "4h", "6h"]:
-        active_trade_key = f"active_trade_{tf_key}"
-        active_trades = bot_state.get(active_trade_key, [])
-        if not isinstance(active_trades, list):
-            active_trades = [] if active_trades is None else [active_trades]
-            
-        for t in list(active_trades):
-            symbol = t.get("symbol", "BTCUSDT").upper()
-            direction = t.get("direction", "Bullish")
-            entry_price = t.get("entry_price", 0.0)
-            position_size_usd = t.get("position_size_usd", 100.0)
-            original_size = t.get("original_size", position_size_usd)
-            
-            interval = "60"
-            for k, v in tf_map_local.items():
-                if v == tf_key:
-                    interval = k
-                    break
-                    
-            live_symbol_price = get_fallback_price(symbol)
-            if live_symbol_price is None:
-                live_symbol_price = bot_state.get(f"live_price_{symbol}")
-            actual_price = live_symbol_price if live_symbol_price is not None else entry_price
-            
-            actual_change = actual_price - entry_price
-            actual_change_pct = (actual_change / entry_price) * 100 if entry_price > 0 else 0.0
-            raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
-            leverage = t.get("leverage", 1.0)
-            gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
-            taker_fee_cost = position_size_usd * leverage * 0.00055 * 2
-            realized_pnl = gross_pnl - taker_fee_cost
-            net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
-            
-            if realized_pnl < -position_size_usd:
-                realized_pnl = -position_size_usd
-                net_return_pct = -100.0
+    with active_trades_lock:
+        for tf_key in ["1h", "2h", "4h", "6h"]:
+            active_trade_key = f"active_trade_{tf_key}"
+            active_trades = bot_state.get(active_trade_key, [])
+            if not isinstance(active_trades, list):
+                active_trades = [] if active_trades is None else [active_trades]
                 
-            if TRADE_MODE == "simulation":
-                old_bal = bot_state.get("simulated_balance", 80.0)
-                new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
-                bot_state["simulated_balance"] = new_bal
-                closed_count += 1
-            else:
-                new_bal = bot_state.get("simulated_balance", 0.0)
+            for t in list(active_trades):
+                symbol = t.get("symbol", "BTCUSDT").upper()
+                direction = t.get("direction", "Bullish")
+                entry_price = t.get("entry_price", 0.0)
+                position_size_usd = t.get("position_size_usd", 100.0)
+                original_size = t.get("original_size", position_size_usd)
                 
-            actual_trend = "Bullish" if actual_change > 0 else "Bearish"
-            signal_correct = (actual_trend == direction)
-            trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
-            
-            print("\n==================================================")
-            print(f"[{symbol} {tf_key.upper()} MANUAL EXIT ALL]: {exit_reason}")
-            print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
-            print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
-            print(f"PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
-            print("==================================================\n")
-            
-            bot_state["trade_history"].append({
-                "symbol": symbol,
-                "exit_time": float(time.time()),
-                "interval": interval,
-                "direction": direction,
-                "entry_price": float(entry_price),
-                "exit_price": float(actual_price),
-                "change_pct": float(net_return_pct),
-                "success": bool(signal_correct),
-                "reason": exit_reason,
-                "position_size_usd": float(position_size_usd),
-                "original_size": float(original_size),
-                "pnl_usd": float(realized_pnl),
-                "balance": float(new_bal),
-                "leverage": float(leverage)
-            })
-            
-            for p in bot_state["prediction_history"]:
-                if p.get("interval") == interval and p.get("symbol") == symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
-                    p["evaluation"] = {
-                        "evaluated": True,
-                        "exit_price": float(actual_price),
-                        "change": float(actual_change if direction == "Bullish" else -actual_change),
-                        "change_pct": float(raw_return_pct),
-                        "success": bool(signal_correct)
-                    }
-                    break
+                interval = "60"
+                for k, v in tf_map_local.items():
+                    if v == tf_key:
+                        interval = k
+                        break
+                        
+                live_symbol_price = get_fallback_price(symbol)
+                if live_symbol_price is None:
+                    live_symbol_price = bot_state.get(f"live_price_{symbol}")
+                actual_price = live_symbol_price if live_symbol_price is not None else entry_price
+                
+                actual_change = actual_price - entry_price
+                actual_change_pct = (actual_change / entry_price) * 100 if entry_price > 0 else 0.0
+                raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
+                leverage = t.get("leverage", 1.0)
+                gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
+                taker_fee_cost = position_size_usd * leverage * 0.00055 * 2
+                realized_pnl = gross_pnl - taker_fee_cost
+                net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
+                
+                if realized_pnl < -position_size_usd:
+                    realized_pnl = -position_size_usd
+                    net_return_pct = -100.0
                     
-        bot_state[active_trade_key] = []
+                if TRADE_MODE == "simulation":
+                    old_bal = bot_state.get("simulated_balance", 80.0)
+                    new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
+                    bot_state["simulated_balance"] = new_bal
+                    closed_count += 1
+                else:
+                    new_bal = bot_state.get("simulated_balance", 0.0)
+                    
+                actual_trend = "Bullish" if actual_change > 0 else "Bearish"
+                signal_correct = (actual_trend == direction)
+                trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
+                
+                print("\n==================================================")
+                print(f"[{symbol} {tf_key.upper()} MANUAL EXIT ALL]: {exit_reason}")
+                print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
+                print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
+                print(f"PnL: ${realized_pnl:+.2f} | New Balance: ${new_bal:.2f}")
+                print("==================================================\n")
+                
+                bot_state["trade_history"].append({
+                    "symbol": symbol,
+                    "exit_time": float(time.time()),
+                    "interval": interval,
+                    "direction": direction,
+                    "entry_price": float(entry_price),
+                    "exit_price": float(actual_price),
+                    "change_pct": float(net_return_pct),
+                    "success": bool(signal_correct),
+                    "reason": exit_reason,
+                    "position_size_usd": float(position_size_usd),
+                    "original_size": float(original_size),
+                    "pnl_usd": float(realized_pnl),
+                    "balance": float(new_bal),
+                    "leverage": float(leverage)
+                })
+                
+                for p in bot_state["prediction_history"]:
+                    if p.get("interval") == interval and p.get("symbol") == symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
+                        p["evaluation"] = {
+                            "evaluated": True,
+                            "exit_price": float(actual_price),
+                            "change": float(actual_change if direction == "Bullish" else -actual_change),
+                            "change_pct": float(raw_return_pct),
+                            "success": bool(signal_correct)
+                        }
+                        break
+                        
+            bot_state[active_trade_key] = []
         
     if closed_count > 0:
         save_history()
@@ -1733,6 +1750,16 @@ def on_open(ws):
             "op": "subscribe",
             "args": chunk
         }))
+        
+    # Heartbeat Daemon Thread to send custom text pings every 20 seconds
+    def send_heartbeat():
+        while ws_connected:
+            try:
+                ws.send(json.dumps({"op": "ping"}))
+            except Exception:
+                break
+            time.sleep(20)
+    threading.Thread(target=send_heartbeat, daemon=True).start()
 
 def on_close(ws, close_status_code, close_msg):
     global ws_connected
@@ -1960,7 +1987,7 @@ def add_features(df):
         df[f"fear_greed_lag{lag}"] = df["fear_greed"].shift(lag)
         
     # Derivatives momentum
-    df["open_interest_pct_change"] = df["open_interest"].pct_change(1).fillna(0.0)
+    df["open_interest_pct_change"] = df["open_interest"].pct_change(1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df["funding_rate_diff"] = df["funding_rate"].diff(1).fillna(0.0)
     
     # High-fidelity Delta Volume / CVD Proxy
@@ -3136,254 +3163,255 @@ def sync_active_positions_from_bybit():
                 open_positions[pos.get("symbol")] = pos
 
         # Re-sync bot_state active trades
-        matched_symbols = set()
-        
-        for tf_key in ["1h", "2h", "4h", "6h"]:
-            current_trades = bot_state.get(f"active_trade_{tf_key}", [])
-            if not isinstance(current_trades, list):
-                current_trades = []
+        with active_trades_lock:
+            matched_symbols = set()
             
-            seen_symbols_in_tf = set()
-            updated_trades = []
-            for t in current_trades:
-                symbol = t.get("symbol")
-                if not symbol:
-                    continue
-                if symbol in seen_symbols_in_tf:
-                    print(f"[De-duplication] Discarded duplicate active trade for {symbol} in timeframe {tf_key}.")
-                    continue
-                seen_symbols_in_tf.add(symbol)
-                if symbol in open_positions:
-                    pos = open_positions[symbol]
-                    t["bybit_closed"] = False
-                    
-                    # Side Mismatch Guard: verify Bybit position side aligns with trade direction
-                    pos_side = pos.get("side") # "Buy" or "Sell"
-                    trade_direction = t.get("direction") # "Bullish" or "Bearish"
-                    mismatch = False
-                    if trade_direction == "Bullish" and pos_side != "Buy":
-                        mismatch = True
-                    elif trade_direction == "Bearish" and pos_side != "Sell":
-                        mismatch = True
-                        
-                    if mismatch:
-                        print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
-                        if TRADE_MODE != "simulation":
-                            close_side = "Sell" if pos_side == "Buy" else "Buy"
-                            place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])))
-                            if t.get("bybit_scale_out_order_id"):
-                                cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
+            for tf_key in ["1h", "2h", "4h", "6h"]:
+                current_trades = bot_state.get(f"active_trade_{tf_key}", [])
+                if not isinstance(current_trades, list):
+                    current_trades = []
+                
+                seen_symbols_in_tf = set()
+                updated_trades = []
+                for t in current_trades:
+                    symbol = t.get("symbol")
+                    if not symbol:
                         continue
-
-                    t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
-                    t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
-                    t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
-                    t["qty"] = float(pos.get("size", t["qty"]))
-                    t["leverage"] = float(pos.get("leverage", t["leverage"]))
-                    
-                    # Sync TP/SL from Bybit exchange if they exist and are non-zero
-                    bybit_sl = float(pos.get("stopLoss", 0.0)) if pos.get("stopLoss") else 0.0
-                    bybit_tp = float(pos.get("takeProfit", 0.0)) if pos.get("takeProfit") else 0.0
-                    if bybit_sl > 0.0:
-                        if t.get("break_even_triggered", False):
-                            if t.get("direction") == "Bullish":
-                                t["stop_loss"] = max(bybit_sl, t["entry_price"])
-                            else:
-                                t["stop_loss"] = min(bybit_sl, t["entry_price"])
-                        else:
-                            t["stop_loss"] = bybit_sl
-                    if bybit_tp > 0.0:
-                        t["take_profit"] = bybit_tp
-                    
-                    pos_val = float(pos.get("positionValue", 0.0))
-                    t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
-                    
-                    # Proportional Unrealized PnL calculation
-                    try:
-                        same_symbol_trades = []
-                        for tf_check in ["1h", "2h", "4h", "6h"]:
-                            for t_item in bot_state.get(f"active_trade_{tf_check}", []):
-                                if t_item.get("symbol") == symbol:
-                                    same_symbol_trades.append(t_item)
-                        total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
-                        position_pnl = float(pos.get("unrealisedPnl", 0.0))
-                        if total_lev_size > 0:
-                            this_lev_size = float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
-                            t["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
-                        else:
-                            t["bybit_unrealized_pnl"] = position_pnl
-                    except Exception:
-                        t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
-                    
-                    # Sanitize ATR, TP, and SL for active trades to prevent invalid/stuck parameters
-                    avg_price = t["entry_price"]
-                    mark_price = t["mark_price"]
-                    liq_price = t["liq_price"]
-                    direction = t.get("direction", "Bullish")
-                    
-                    # Fix ATR if it's unreasonably large or unset
-                    current_atr = t.get("atr_dollars", 0.0)
-                    if current_atr <= 0 or current_atr > 0.05 * avg_price:
-                        current_atr = 0.015 * avg_price
-                        t["atr_dollars"] = current_atr
+                    if symbol in seen_symbols_in_tf:
+                        print(f"[De-duplication] Discarded duplicate active trade for {symbol} in timeframe {tf_key}.")
+                        continue
+                    seen_symbols_in_tf.add(symbol)
+                    if symbol in open_positions:
+                        pos = open_positions[symbol]
+                        t["bybit_closed"] = False
                         
-                    # Fix Take Profit if it is unset (0.0)
-                    if t.get("take_profit", 0.0) == 0.0:
-                        if direction == "Bullish":
-                            t["take_profit"] = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
-                        else:
-                            t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
-                        if TRADE_MODE != "simulation":
-                            update_bybit_take_profit(symbol, t["take_profit"], t)
+                        # Side Mismatch Guard: verify Bybit position side aligns with trade direction
+                        pos_side = pos.get("side") # "Buy" or "Sell"
+                        trade_direction = t.get("direction") # "Bullish" or "Bearish"
+                        mismatch = False
+                        if trade_direction == "Bullish" and pos_side != "Buy":
+                            mismatch = True
+                        elif trade_direction == "Bearish" and pos_side != "Sell":
+                            mismatch = True
                             
-                    # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
-                    sl_val = t.get("stop_loss", 0.0)
-                    sl_updated = False
-                    if direction == "Bullish":
-                        if sl_val <= 0.0 or (liq_price > 0.0 and sl_val <= liq_price) or sl_val < avg_price - 3.0 * current_atr:
-                            sl_val = avg_price - 0.75 * current_atr
-                            if liq_price > 0.0 and sl_val <= liq_price:
-                                sl_val = liq_price + 0.2 * current_atr
-                            sl_updated = True
-                    else:
-                        if sl_val <= 0.0 or (liq_price > 0.0 and sl_val >= liq_price) or sl_val > avg_price + 3.0 * current_atr:
-                            sl_val = avg_price + 0.75 * current_atr
-                            if liq_price > 0.0 and sl_val >= liq_price:
-                                sl_val = liq_price - 0.2 * current_atr
-                            sl_updated = True
-                            
-                    if sl_updated:
-                        if TRADE_MODE != "simulation":
-                            success = update_bybit_stop_loss(symbol, sl_val, t)
-                            if success:
-                                t["stop_loss"] = sl_val
+                        if mismatch:
+                            print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
+                            if TRADE_MODE != "simulation":
+                                close_side = "Sell" if pos_side == "Buy" else "Buy"
+                                place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])))
+                                if t.get("bybit_scale_out_order_id"):
+                                    cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
+                            continue
+    
+                        t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
+                        t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
+                        t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
+                        t["qty"] = float(pos.get("size", t["qty"]))
+                        t["leverage"] = float(pos.get("leverage", t["leverage"]))
+                        
+                        # Sync TP/SL from Bybit exchange if they exist and are non-zero
+                        bybit_sl = float(pos.get("stopLoss", 0.0)) if pos.get("stopLoss") else 0.0
+                        bybit_tp = float(pos.get("takeProfit", 0.0)) if pos.get("takeProfit") else 0.0
+                        if bybit_sl > 0.0:
+                            if t.get("break_even_triggered", False):
+                                if t.get("direction") == "Bullish":
+                                    t["stop_loss"] = max(bybit_sl, t["entry_price"])
+                                else:
+                                    t["stop_loss"] = min(bybit_sl, t["entry_price"])
                             else:
                                 t["stop_loss"] = bybit_sl
-                        else:
-                            t["stop_loss"] = sl_val
-                    
-                    # Dynamically reconstruct original size for recovered trades
-                    if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
-                        orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, pos_side)
-                        if orig_qty is not None and orig_qty > 0.0:
-                            t["original_size"] = (orig_qty * avg_price) / t["leverage"] if t["leverage"] > 0 else (orig_qty * avg_price)
-                            t["fill_pct"] = round((filled_qty / orig_qty) * 100.0, 2)
-                            t["original_size_reconstructed"] = True
-                            print(f"[Crash Recovery Sync] Reconstructed original size for {symbol}: target={t['original_size']:.2f}, filled={t['position_size_usd']:.2f} ({t['fill_pct']}%)")
-                            save_history()
-                    
-                    updated_trades.append(t)
-                    matched_symbols.add(symbol)
-                else:
-                    # Keep it so the exit checker can process its closure and fetch closed PnL
-                    t["bybit_closed"] = True
-                    updated_trades.append(t)
-            
-            bot_state[f"active_trade_{tf_key}"] = updated_trades
-
-        # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
-        recovered = 0
-        for symbol, pos in open_positions.items():
-            if symbol not in matched_symbols and symbol in SUPPORTED_SYMBOLS:
-                avg_price = float(pos.get("avgPrice", "0"))
-                liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
-                mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
-                leverage_val = float(pos.get("leverage", "1"))
-                side_str = pos.get("side", "Buy")
-                direction = "Bullish" if side_str == "Buy" else "Bearish"
-                sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
-                tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
-                position_value = float(pos.get("positionValue", "0"))
-                position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
-                qty_val = float(pos.get("size", "0"))
-                
-                # Retrieve the original target qty of the entry order
-                orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, side_str)
-                if orig_qty is not None and orig_qty > 0.0:
-                    original_size = (orig_qty * avg_price) / leverage_val if leverage_val > 0 else (orig_qty * avg_price)
-                    fill_pct = round((filled_qty / orig_qty) * 100.0, 2)
-                    original_size_reconstructed = True
-                    print(f"[Crash Recovery] Discovered target size for {symbol}: target={original_size:.2f}, filled={position_size_usd:.2f} ({fill_pct}%)")
-                else:
-                    original_size = position_size_usd
-                    fill_pct = 100.0
-                    original_size_reconstructed = False
-                
-                import uuid
-                trade_uuid = str(uuid.uuid4())[:8]
-                
-                # Calculate proper ATR on recovery
-                calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
-                if calc_atr > 0.05 * avg_price or calc_atr == 0:
-                    calc_atr = 0.015 * avg_price
-                
-                # Sanitize TP and SL on recovery
-                if tp_price == 0.0:
-                    if direction == "Bullish":
-                        tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
-                    else:
-                        tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
+                        if bybit_tp > 0.0:
+                            t["take_profit"] = bybit_tp
                         
-                if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
-                    if direction == "Bullish":
-                        sl_price = avg_price - 0.75 * calc_atr
-                        if liq_price > 0.0 and sl_price <= liq_price:
-                            sl_price = liq_price + 0.2 * calc_atr
-                    else:
-                        sl_price = avg_price + 0.75 * calc_atr
-                        if liq_price > 0.0 and sl_price >= liq_price:
-                            sl_price = liq_price - 0.2 * calc_atr
+                        pos_val = float(pos.get("positionValue", 0.0))
+                        t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
+                        
+                        # Proportional Unrealized PnL calculation
+                        try:
+                            same_symbol_trades = []
+                            for tf_check in ["1h", "2h", "4h", "6h"]:
+                                for t_item in bot_state.get(f"active_trade_{tf_check}", []):
+                                    if t_item.get("symbol") == symbol:
+                                        same_symbol_trades.append(t_item)
+                            total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
+                            position_pnl = float(pos.get("unrealisedPnl", 0.0))
+                            if total_lev_size > 0:
+                                this_lev_size = float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
+                                t["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
+                            else:
+                                t["bybit_unrealized_pnl"] = position_pnl
+                        except Exception:
+                            t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
+                        
+                        # Sanitize ATR, TP, and SL for active trades to prevent invalid/stuck parameters
+                        avg_price = t["entry_price"]
+                        mark_price = t["mark_price"]
+                        liq_price = t["liq_price"]
+                        direction = t.get("direction", "Bullish")
+                        
+                        # Fix ATR if it's unreasonably large or unset
+                        current_atr = t.get("atr_dollars", 0.0)
+                        if current_atr <= 0 or current_atr > 0.05 * avg_price:
+                            current_atr = 0.015 * avg_price
+                            t["atr_dollars"] = current_atr
                             
-                # Push the recovered/sanitized TP & SL to Bybit
-                if TRADE_MODE != "simulation":
-                    update_bybit_take_profit(symbol, tp_price)
-                    success = update_bybit_stop_loss(symbol, sl_price)
-                    if not success:
-                        sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
- 
-                recovered_trade = {
-                    "trade_id": f"{symbol}_{trade_uuid}_recovered",
-                    "bybit_order_id": None,
-                    "bybit_scale_out_order_id": None,
-                    "symbol": symbol,
-                    "entry_price": avg_price,
-                    "predicted_price": avg_price,
-                    "stop_loss": sl_price,
-                    "take_profit": tp_price,
-                    "direction": direction,
-                    "end_time": float(time.time() + 3600 * 10),
-                    "entry_time": int(time.time() * 1000),
-                    "atr_dollars": calc_atr,
-                    "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
-                    "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
-                    "break_even_triggered": False,
-                    "half_closed": False,
-                    "original_size": original_size,
-                    "position_size_usd": position_size_usd,
-                    "fill_pct": fill_pct,
-                    "original_size_reconstructed": original_size_reconstructed,
-                    "scaled_out_pnl": 0.0,
-                    "kelly_fraction": 0.0,
-                    "leverage": leverage_val,
-                    "confidence": 0.0,
-                    "qty": qty_val,
-                    "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
-                    "liq_price": liq_price,
-                    "mark_price": mark_price,
-                    "recovered": True
-                }
+                        # Fix Take Profit if it is unset (0.0)
+                        if t.get("take_profit", 0.0) == 0.0:
+                            if direction == "Bullish":
+                                t["take_profit"] = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
+                            else:
+                                t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
+                            if TRADE_MODE != "simulation":
+                                update_bybit_take_profit(symbol, t["take_profit"], t)
+                                
+                        # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
+                        sl_val = t.get("stop_loss", 0.0)
+                        sl_updated = False
+                        if direction == "Bullish":
+                            if sl_val <= 0.0 or (liq_price > 0.0 and sl_val <= liq_price) or sl_val < avg_price - 3.0 * current_atr:
+                                sl_val = avg_price - 0.75 * current_atr
+                                if liq_price > 0.0 and sl_val <= liq_price:
+                                    sl_val = liq_price + 0.2 * current_atr
+                                sl_updated = True
+                        else:
+                            if sl_val <= 0.0 or (liq_price > 0.0 and sl_val >= liq_price) or sl_val > avg_price + 3.0 * current_atr:
+                                sl_val = avg_price + 0.75 * current_atr
+                                if liq_price > 0.0 and sl_val >= liq_price:
+                                    sl_val = liq_price - 0.2 * current_atr
+                                sl_updated = True
+                                
+                        if sl_updated:
+                            if TRADE_MODE != "simulation":
+                                success = update_bybit_stop_loss(symbol, sl_val, t)
+                                if success:
+                                    t["stop_loss"] = sl_val
+                                else:
+                                    t["stop_loss"] = bybit_sl
+                            else:
+                                t["stop_loss"] = sl_val
+                        
+                        # Dynamically reconstruct original size for recovered trades
+                        if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
+                            orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, pos_side)
+                            if orig_qty is not None and orig_qty > 0.0:
+                                t["original_size"] = (orig_qty * avg_price) / t["leverage"] if t["leverage"] > 0 else (orig_qty * avg_price)
+                                t["fill_pct"] = round((filled_qty / orig_qty) * 100.0, 2)
+                                t["original_size_reconstructed"] = True
+                                print(f"[Crash Recovery Sync] Reconstructed original size for {symbol}: target={t['original_size']:.2f}, filled={t['position_size_usd']:.2f} ({t['fill_pct']}%)")
+                                save_history()
+                        
+                        updated_trades.append(t)
+                        matched_symbols.add(symbol)
+                    else:
+                        # Keep it so the exit checker can process its closure and fetch closed PnL
+                        t["bybit_closed"] = True
+                        updated_trades.append(t)
                 
-                tf_key = "1h"
-                active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
-                if not isinstance(active_trades_list, list):
-                    active_trades_list = []
-                active_trades_list.append(recovered_trade)
-                bot_state[f"active_trade_{tf_key}"] = active_trades_list
-                recovered += 1
-                print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
-                
-        if recovered > 0:
-            save_history()
+                bot_state[f"active_trade_{tf_key}"] = updated_trades
+    
+            # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
+            recovered = 0
+            for symbol, pos in open_positions.items():
+                if symbol not in matched_symbols and symbol in SUPPORTED_SYMBOLS:
+                    avg_price = float(pos.get("avgPrice", "0"))
+                    liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
+                    mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
+                    leverage_val = float(pos.get("leverage", "1"))
+                    side_str = pos.get("side", "Buy")
+                    direction = "Bullish" if side_str == "Buy" else "Bearish"
+                    sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+                    tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
+                    position_value = float(pos.get("positionValue", "0"))
+                    position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
+                    qty_val = float(pos.get("size", "0"))
+                    
+                    # Retrieve the original target qty of the entry order
+                    orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, side_str)
+                    if orig_qty is not None and orig_qty > 0.0:
+                        original_size = (orig_qty * avg_price) / leverage_val if leverage_val > 0 else (orig_qty * avg_price)
+                        fill_pct = round((filled_qty / orig_qty) * 100.0, 2)
+                        original_size_reconstructed = True
+                        print(f"[Crash Recovery] Discovered target size for {symbol}: target={original_size:.2f}, filled={position_size_usd:.2f} ({fill_pct}%)")
+                    else:
+                        original_size = position_size_usd
+                        fill_pct = 100.0
+                        original_size_reconstructed = False
+                    
+                    import uuid
+                    trade_uuid = str(uuid.uuid4())[:8]
+                    
+                    # Calculate proper ATR on recovery
+                    calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
+                    if calc_atr > 0.05 * avg_price or calc_atr == 0:
+                        calc_atr = 0.015 * avg_price
+                    
+                    # Sanitize TP and SL on recovery
+                    if tp_price == 0.0:
+                        if direction == "Bullish":
+                            tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
+                        else:
+                            tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
+                            
+                    if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
+                        if direction == "Bullish":
+                            sl_price = avg_price - 0.75 * calc_atr
+                            if liq_price > 0.0 and sl_price <= liq_price:
+                                sl_price = liq_price + 0.2 * calc_atr
+                        else:
+                            sl_price = avg_price + 0.75 * calc_atr
+                            if liq_price > 0.0 and sl_price >= liq_price:
+                                sl_price = liq_price - 0.2 * calc_atr
+                                
+                    # Push the recovered/sanitized TP & SL to Bybit
+                    if TRADE_MODE != "simulation":
+                        update_bybit_take_profit(symbol, tp_price)
+                        success = update_bybit_stop_loss(symbol, sl_price)
+                        if not success:
+                            sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+     
+                    recovered_trade = {
+                        "trade_id": f"{symbol}_{trade_uuid}_recovered",
+                        "bybit_order_id": None,
+                        "bybit_scale_out_order_id": None,
+                        "symbol": symbol,
+                        "entry_price": avg_price,
+                        "predicted_price": avg_price,
+                        "stop_loss": sl_price,
+                        "take_profit": tp_price,
+                        "direction": direction,
+                        "end_time": float(time.time() + 3600 * 10),
+                        "entry_time": int(time.time() * 1000),
+                        "atr_dollars": calc_atr,
+                        "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
+                        "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
+                        "break_even_triggered": False,
+                        "half_closed": False,
+                        "original_size": original_size,
+                        "position_size_usd": position_size_usd,
+                        "fill_pct": fill_pct,
+                        "original_size_reconstructed": original_size_reconstructed,
+                        "scaled_out_pnl": 0.0,
+                        "kelly_fraction": 0.0,
+                        "leverage": leverage_val,
+                        "confidence": 0.0,
+                        "qty": qty_val,
+                        "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
+                        "liq_price": liq_price,
+                        "mark_price": mark_price,
+                        "recovered": True
+                    }
+                    
+                    tf_key = "1h"
+                    active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
+                    if not isinstance(active_trades_list, list):
+                        active_trades_list = []
+                    active_trades_list.append(recovered_trade)
+                    bot_state[f"active_trade_{tf_key}"] = active_trades_list
+                    recovered += 1
+                    print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
+                    
+            if recovered > 0:
+                save_history()
     except Exception as e:
         print(f"[Crash Recovery] Error checking Bybit: {e}")
 
@@ -3474,509 +3502,510 @@ def main():
         # 2. Check Exits for each timeframe if a trade is active
         tf_map = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
         active_trades_updated = False
-        for iv in ["60", "120", "240", "360"]:
-            tf = tf_map[iv]
-            active_trade_key = f"active_trade_{tf}"
-            active_trades_list = bot_state.get(active_trade_key, [])
-            if not isinstance(active_trades_list, list):
-                active_trades_list = [] if active_trades_list is None else [active_trades_list]
-                bot_state[active_trade_key] = active_trades_list
-            
-            updated_trades = []
-            for active_trade in active_trades_list:
-                active_symbol = active_trade.get("symbol", "BTCUSDT")
-                symbol_price = bot_state.get(f"live_price_{active_symbol}")
-                if symbol_price is None:
-                    symbol_price = get_fallback_price(active_symbol)
-                if symbol_price is None:
-                    updated_trades.append(active_trade)
-                    continue
-                current_price = symbol_price
+        with active_trades_lock:
+            for iv in ["60", "120", "240", "360"]:
+                tf = tf_map[iv]
+                active_trade_key = f"active_trade_{tf}"
+                active_trades_list = bot_state.get(active_trade_key, [])
+                if not isinstance(active_trades_list, list):
+                    active_trades_list = [] if active_trades_list is None else [active_trades_list]
+                    bot_state[active_trade_key] = active_trades_list
                 
-                stop_loss = active_trade["stop_loss"]
-                take_profit = active_trade["take_profit"]
-                direction = active_trade["direction"]
-                end_time = active_trade["end_time"]
-                entry_price = active_trade["entry_price"]
-                predicted_price = active_trade["predicted_price"]
-
-                # Bybit Live position query and state tracking
-                bybit_closed = False
-                bybit_scaled_out = False
-                bybit_exit_price = None
-                bybit_realized_pnl = None
-                
-                if TRADE_MODE != "simulation":
-                    if active_trade.get("bybit_closed", False):
-                        bybit_closed = True
-                    else:
-                        # Detect scale-out fill from cached and stored qty values
-                        original_qty = active_trade.get("original_qty", active_trade.get("qty", 0.0))
-                        current_qty = active_trade.get("qty", 0.0)
-                        if original_qty > 0 and current_qty <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
-                            # Verify fill status of the scale-out limit order to prevent premature/false triggers
-                            scale_out_order_id = active_trade.get("bybit_scale_out_order_id")
-                            if scale_out_order_id:
-                                order_details = get_bybit_order_details(active_symbol, scale_out_order_id)
-                                if order_details and order_details.get("orderStatus") == "Filled":
-                                    bybit_scaled_out = True
+                updated_trades = []
+                for active_trade in active_trades_list:
+                    active_symbol = active_trade.get("symbol", "BTCUSDT")
+                    symbol_price = bot_state.get(f"live_price_{active_symbol}")
+                    if symbol_price is None:
+                        symbol_price = get_fallback_price(active_symbol)
+                    if symbol_price is None:
+                        updated_trades.append(active_trade)
+                        continue
+                    current_price = symbol_price
+                    
+                    stop_loss = active_trade["stop_loss"]
+                    take_profit = active_trade["take_profit"]
+                    direction = active_trade["direction"]
+                    end_time = active_trade["end_time"]
+                    entry_price = active_trade["entry_price"]
+                    predicted_price = active_trade["predicted_price"]
+    
+                    # Bybit Live position query and state tracking
+                    bybit_closed = False
+                    bybit_scaled_out = False
+                    bybit_exit_price = None
+                    bybit_realized_pnl = None
+                    
+                    if TRADE_MODE != "simulation":
+                        if active_trade.get("bybit_closed", False):
+                            bybit_closed = True
+                        else:
+                            # Detect scale-out fill from cached and stored qty values
+                            original_qty = active_trade.get("original_qty", active_trade.get("qty", 0.0))
+                            current_qty = active_trade.get("qty", 0.0)
+                            if original_qty > 0 and current_qty <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
+                                # Verify fill status of the scale-out limit order to prevent premature/false triggers
+                                scale_out_order_id = active_trade.get("bybit_scale_out_order_id")
+                                if scale_out_order_id:
+                                    order_details = get_bybit_order_details(active_symbol, scale_out_order_id)
+                                    if order_details and order_details.get("orderStatus") == "Filled":
+                                        bybit_scaled_out = True
+                                    else:
+                                        status_msg = order_details.get("orderStatus") if order_details else "Unknown"
+                                        print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
                                 else:
-                                    status_msg = order_details.get("orderStatus") if order_details else "Unknown"
-                                    print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
-                            else:
-                                bybit_scaled_out = True
-
-                # Trailing stop and break-even variables
-                atr_dollars = active_trade.get("atr_dollars", 50.0)
-                highest_price = active_trade.get("highest_price", entry_price)
-                lowest_price = active_trade.get("lowest_price", entry_price)
-                break_even_triggered = active_trade.get("break_even_triggered", False)
-                position_size_usd = active_trade.get("position_size_usd", 100.0)
-
-                # Volatility-Scaled Trailing Stops: multiplier is dynamic based on current ADX
-                # If the position has scaled out (half closed), we use a tighter trailing stop of 1.0 * ATR
-                if active_trade.get("half_closed", False):
-                    trailing_multiplier = 1.0
-                else:
-                    current_adx = bot_state.get(f"adx_{tf}", 20.0)
-                    if current_adx >= 25.0:
-                        trailing_multiplier = 1.50
-                    elif current_adx < 18.0:
-                        trailing_multiplier = 0.90
+                                    bybit_scaled_out = True
+    
+                    # Trailing stop and break-even variables
+                    atr_dollars = active_trade.get("atr_dollars", 50.0)
+                    highest_price = active_trade.get("highest_price", entry_price)
+                    lowest_price = active_trade.get("lowest_price", entry_price)
+                    break_even_triggered = active_trade.get("break_even_triggered", False)
+                    position_size_usd = active_trade.get("position_size_usd", 100.0)
+    
+                    # Volatility-Scaled Trailing Stops: multiplier is dynamic based on current ADX
+                    # If the position has scaled out (half closed), we use a tighter trailing stop of 1.0 * ATR
+                    if active_trade.get("half_closed", False):
+                        trailing_multiplier = 1.0
                     else:
-                        trailing_multiplier = 1.25
-
-                # Update trailing stop peak prices
-                if direction == "Bullish":
-                    if current_price > highest_price:
-                        highest_price = current_price
-                        active_trade["highest_price"] = highest_price
-                        # Trailing Stop: Trails highest price by dynamic multiplier
-                        potential_sl = highest_price - trailing_multiplier * atr_dollars
-                        if potential_sl > stop_loss:
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
-                                if success:
+                        current_adx = bot_state.get(f"adx_{tf}", 20.0)
+                        if current_adx >= 25.0:
+                            trailing_multiplier = 1.50
+                        elif current_adx < 18.0:
+                            trailing_multiplier = 0.90
+                        else:
+                            trailing_multiplier = 1.25
+    
+                    # Update trailing stop peak prices
+                    if direction == "Bullish":
+                        if current_price > highest_price:
+                            highest_price = current_price
+                            active_trade["highest_price"] = highest_price
+                            # Trailing Stop: Trails highest price by dynamic multiplier
+                            potential_sl = highest_price - trailing_multiplier * atr_dollars
+                            if potential_sl > stop_loss:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
+                                    if success:
+                                        stop_loss = potential_sl
+                                        active_trade["stop_loss"] = stop_loss
+                                        active_trades_updated = True
+                                        print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                else:
                                     stop_loss = potential_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
                                     print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                        
+                        # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
+                        if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
+                            target_sl = max(stop_loss, entry_price)
+                            if TRADE_MODE != "simulation":
+                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                                if success:
+                                    break_even_triggered = True
+                                    active_trade["break_even_triggered"] = True
+                                    stop_loss = target_sl
+                                    active_trade["stop_loss"] = stop_loss
+                                    active_trades_updated = True
+                                    print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
                             else:
-                                stop_loss = potential_sl
-                                active_trade["stop_loss"] = stop_loss
-                                active_trades_updated = True
-                                print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
-                    
-                    # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
-                    if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
-                        target_sl = max(stop_loss, entry_price)
-                        if TRADE_MODE != "simulation":
-                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                            if success:
                                 break_even_triggered = True
                                 active_trade["break_even_triggered"] = True
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = stop_loss
                                 active_trades_updated = True
                                 print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
-                        else:
-                            break_even_triggered = True
-                            active_trade["break_even_triggered"] = True
-                            stop_loss = target_sl
-                            active_trade["stop_loss"] = stop_loss
-                            active_trades_updated = True
-                            print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
-                else:
-                    if current_price < lowest_price:
-                        lowest_price = current_price
-                        active_trade["lowest_price"] = lowest_price
-                        # Trailing Stop: Trails lowest price by dynamic multiplier
-                        potential_sl = lowest_price + trailing_multiplier * atr_dollars
-                        if potential_sl < stop_loss:
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
-                                if success:
+                    else:
+                        if current_price < lowest_price:
+                            lowest_price = current_price
+                            active_trade["lowest_price"] = lowest_price
+                            # Trailing Stop: Trails lowest price by dynamic multiplier
+                            potential_sl = lowest_price + trailing_multiplier * atr_dollars
+                            if potential_sl < stop_loss:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
+                                    if success:
+                                        stop_loss = potential_sl
+                                        active_trade["stop_loss"] = stop_loss
+                                        active_trades_updated = True
+                                        print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                else:
                                     stop_loss = potential_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
                                     print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                
+                        # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
+                        if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
+                            target_sl = min(stop_loss, entry_price)
+                            if TRADE_MODE != "simulation":
+                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                                if success:
+                                    break_even_triggered = True
+                                    active_trade["break_even_triggered"] = True
+                                    stop_loss = target_sl
+                                    active_trade["stop_loss"] = stop_loss
+                                    active_trades_updated = True
+                                    print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
                             else:
-                                stop_loss = potential_sl
-                                active_trade["stop_loss"] = stop_loss
-                                active_trades_updated = True
-                                print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
-                            
-                    # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
-                    if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
-                        target_sl = min(stop_loss, entry_price)
-                        if TRADE_MODE != "simulation":
-                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                            if success:
                                 break_even_triggered = True
                                 active_trade["break_even_triggered"] = True
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = stop_loss
                                 active_trades_updated = True
                                 print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
-                        else:
-                            break_even_triggered = True
-                            active_trade["break_even_triggered"] = True
-                            stop_loss = target_sl
-                            active_trade["stop_loss"] = stop_loss
-                            active_trades_updated = True
-                            print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
-
-                # Scale-Out (50% partial profit taking at 1.0 * ATR)
-                half_closed = active_trade.get("half_closed", False)
-                trigger_scale_out = False
-                if not half_closed:
-                    if TRADE_MODE != "simulation":
-                        trigger_scale_out = bybit_scaled_out
-                    else:
-                        if direction == "Bullish" and current_price >= entry_price + 1.0 * atr_dollars:
-                            trigger_scale_out = True
-                        elif direction == "Bearish" and current_price <= entry_price - 1.0 * atr_dollars:
-                            trigger_scale_out = True
-
-                if trigger_scale_out and not half_closed:
-                    if direction == "Bullish":
-                        # Scale-Out Triggered for Long
-                        half_closed = True
-                        active_trade["half_closed"] = True
-                        
-                        # Close 50% of the position
-                        closed_size = round(position_size_usd * 0.5, 2)
-                        remaining_size = round(position_size_usd - closed_size, 2)
-                        
-                        # Calculate profit on closed half (correct taker fee on leveraged size)
-                        raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
-                        lev = active_trade.get("leverage", 1.0)
-                        gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
-                        taker_fee_cost = closed_size * lev * 0.00055  # exit side only
-                        pnl_usd = round(gross_pnl - taker_fee_cost, 2)
-                        if pnl_usd < -closed_size:
-                            pnl_usd = -closed_size
-                            net_return_pct = -100.0
-                        
-                        # Save scaled out pnl
-                        active_trade["scaled_out_pnl"] = pnl_usd
-                        
-                        # Refund closed size + PnL to wallet balance (only in simulation)
-                        if TRADE_MODE == "simulation":
-                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
-                        
-                        # Update position details
-                        position_size_usd = remaining_size
-                        active_trade["position_size_usd"] = remaining_size
-                        
-                        # Move stop loss to entry price (break-even)
-                        target_sl = entry_price
+    
+                    # Scale-Out (50% partial profit taking at 1.0 * ATR)
+                    half_closed = active_trade.get("half_closed", False)
+                    trigger_scale_out = False
+                    if not half_closed:
                         if TRADE_MODE != "simulation":
-                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                            if success:
+                            trigger_scale_out = bybit_scaled_out
+                        else:
+                            if direction == "Bullish" and current_price >= entry_price + 1.0 * atr_dollars:
+                                trigger_scale_out = True
+                            elif direction == "Bearish" and current_price <= entry_price - 1.0 * atr_dollars:
+                                trigger_scale_out = True
+    
+                    if trigger_scale_out and not half_closed:
+                        if direction == "Bullish":
+                            # Scale-Out Triggered for Long
+                            half_closed = True
+                            active_trade["half_closed"] = True
+                            
+                            # Close 50% of the position
+                            closed_size = round(position_size_usd * 0.5, 2)
+                            remaining_size = round(position_size_usd - closed_size, 2)
+                            
+                            # Calculate profit on closed half (correct taker fee on leveraged size)
+                            raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
+                            lev = active_trade.get("leverage", 1.0)
+                            gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
+                            taker_fee_cost = closed_size * lev * 0.00055  # exit side only
+                            pnl_usd = round(gross_pnl - taker_fee_cost, 2)
+                            if pnl_usd < -closed_size:
+                                pnl_usd = -closed_size
+                                net_return_pct = -100.0
+                            
+                            # Save scaled out pnl
+                            active_trade["scaled_out_pnl"] = pnl_usd
+                            
+                            # Refund closed size + PnL to wallet balance (only in simulation)
+                            if TRADE_MODE == "simulation":
+                                bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
+                            
+                            # Update position details
+                            position_size_usd = remaining_size
+                            active_trade["position_size_usd"] = remaining_size
+                            
+                            # Move stop loss to entry price (break-even)
+                            target_sl = entry_price
+                            if TRADE_MODE != "simulation":
+                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                                if success:
+                                    stop_loss = target_sl
+                                    active_trade["stop_loss"] = target_sl
+                                    active_trade["break_even_triggered"] = True
+                                    active_trades_updated = True
+                                    print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                                    update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                                else:
+                                    print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to entry on Bybit. SL remains at {stop_loss:.2f}")
+                            else:
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = target_sl
                                 active_trade["break_even_triggered"] = True
                                 active_trades_updated = True
                                 print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
-                                update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                            
+                        elif direction == "Bearish":
+                            # Scale-Out Triggered for Short
+                            half_closed = True
+                            active_trade["half_closed"] = True
+                            
+                            # Close 50% of the position
+                            closed_size = round(position_size_usd * 0.5, 2)
+                            remaining_size = round(position_size_usd - closed_size, 2)
+                            
+                            # Calculate profit on closed half (correct taker fee on leveraged size)
+                            raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
+                            lev = active_trade.get("leverage", 1.0)
+                            gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
+                            taker_fee_cost = closed_size * lev * 0.00055  # exit side only
+                            pnl_usd = round(gross_pnl - taker_fee_cost, 2)
+                            if pnl_usd < -closed_size:
+                                pnl_usd = -closed_size
+                                net_return_pct = -100.0
+                            
+                            # Save scaled out pnl
+                            active_trade["scaled_out_pnl"] = pnl_usd
+                            
+                            # Refund closed size + PnL to wallet balance (only in simulation)
+                            if TRADE_MODE == "simulation":
+                                bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
+                            
+                            # Update position details
+                            position_size_usd = remaining_size
+                            active_trade["position_size_usd"] = remaining_size
+                            
+                            # Move stop loss to entry price - fee offset (fee-free break-even)
+                            fee_buffer = entry_price * 0.0005
+                            target_sl = entry_price - fee_buffer
+                            
+                            if TRADE_MODE != "simulation":
+                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
+                                if success:
+                                    stop_loss = target_sl
+                                    active_trade["stop_loss"] = target_sl
+                                    active_trade["break_even_triggered"] = True
+                                    active_trades_updated = True
+                                    print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
+                                    update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                                else:
+                                    print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to fee-adjusted entry on Bybit. SL remains at {stop_loss:.2f}")
                             else:
-                                print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to entry on Bybit. SL remains at {stop_loss:.2f}")
-                        else:
-                            stop_loss = target_sl
-                            active_trade["stop_loss"] = target_sl
-                            active_trade["break_even_triggered"] = True
-                            active_trades_updated = True
-                            print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
-                        
-                    elif direction == "Bearish":
-                        # Scale-Out Triggered for Short
-                        half_closed = True
-                        active_trade["half_closed"] = True
-                        
-                        # Close 50% of the position
-                        closed_size = round(position_size_usd * 0.5, 2)
-                        remaining_size = round(position_size_usd - closed_size, 2)
-                        
-                        # Calculate profit on closed half (correct taker fee on leveraged size)
-                        raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
-                        lev = active_trade.get("leverage", 1.0)
-                        gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
-                        taker_fee_cost = closed_size * lev * 0.00055  # exit side only
-                        pnl_usd = round(gross_pnl - taker_fee_cost, 2)
-                        if pnl_usd < -closed_size:
-                            pnl_usd = -closed_size
-                            net_return_pct = -100.0
-                        
-                        # Save scaled out pnl
-                        active_trade["scaled_out_pnl"] = pnl_usd
-                        
-                        # Refund closed size + PnL to wallet balance (only in simulation)
-                        if TRADE_MODE == "simulation":
-                            bot_state["simulated_balance"] = round(bot_state["simulated_balance"] + closed_size + pnl_usd, 2)
-                        
-                        # Update position details
-                        position_size_usd = remaining_size
-                        active_trade["position_size_usd"] = remaining_size
-                        
-                        # Move stop loss to entry price - fee offset (fee-free break-even)
-                        fee_buffer = entry_price * 0.0005
-                        target_sl = entry_price - fee_buffer
-                        
-                        if TRADE_MODE != "simulation":
-                            success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                            if success:
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = target_sl
                                 active_trade["break_even_triggered"] = True
                                 active_trades_updated = True
                                 print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
-                                update_bybit_take_profit(active_symbol, take_profit, active_trade)
-                            else:
-                                print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to fee-adjusted entry on Bybit. SL remains at {stop_loss:.2f}")
-                        else:
-                            stop_loss = target_sl
-                            active_trade["stop_loss"] = target_sl
-                            active_trade["break_even_triggered"] = True
-                            active_trades_updated = True
-                            print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
-
-                remaining_seconds = max(0, int(end_time - current_time))
-                mins, secs = divmod(remaining_seconds, 60)
-                countdown_str = f"{mins:02d}m {secs:02d}s"
-                print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
-
-                exit_reason = None
-                half_closed = active_trade.get("half_closed", False)
-                if TRADE_MODE != "simulation":
-                    if bybit_closed:
-                        if bybit_realized_pnl is not None:
-                            if bybit_realized_pnl >= 0:
-                                exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
-                            else:
-                                exit_reason = "STOP LOSS HIT [FAIL]"
-                        else:
-                            # Fallback: determine based on price change direction
-                            actual_exit_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                            actual_change = actual_exit_price - entry_price
-                            is_profit = actual_change > 0 if direction == "Bullish" else actual_change < 0
-                            if is_profit:
-                                exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
-                            else:
-                                exit_reason = "STOP LOSS HIT [FAIL]"
-                else:
-                    if direction == "Bullish":
-                        if current_price <= stop_loss:
-                            exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
-                        elif current_price >= take_profit and not half_closed:
-                            exit_reason = "TAKE PROFIT HIT [SUCCESS]"
-                    else:
-                        if current_price >= stop_loss:
-                            exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
-                        elif current_price <= take_profit and not half_closed:
-                            exit_reason = "TAKE PROFIT HIT [SUCCESS]"
-
-                    if current_time >= end_time and not half_closed:
-                        lookahead = 10
-                        exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
-
-                if exit_reason is not None:
-                    # Query accumulated closed PnL transactions on Testnet/Live
-                    bybit_pnl_data = None
+    
+                    remaining_seconds = max(0, int(end_time - current_time))
+                    mins, secs = divmod(remaining_seconds, 60)
+                    countdown_str = f"{mins:02d}m {secs:02d}s"
+                    print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
+    
+                    exit_reason = None
+                    half_closed = active_trade.get("half_closed", False)
                     if TRADE_MODE != "simulation":
-                        entry_time_ms = active_trade.get("entry_time")
-                        if not entry_time_ms:
-                            entry_time_ms = int((end_time - (int(iv) * 60)) * 1000)
-                        
-                        bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms)
-                        if bybit_pnl_data:
-                            bybit_realized_pnl = bybit_pnl_data["total_pnl"]
-                            if bybit_pnl_data["avg_exit_price"] is not None:
-                                bybit_exit_price = bybit_pnl_data["avg_exit_price"]
-                            if bybit_pnl_data["total_entry_value"] is not None:
-                                lev = float(active_trade.get("leverage", 1.0))
-                                actual_margin = round(bybit_pnl_data["total_entry_value"] / lev, 2)
-                                active_trade["position_size_usd"] = actual_margin
-                                position_size_usd = actual_margin
-
-                    # Maker vs Taker execution logic
-                    is_stop_loss = "STOP LOSS" in str(exit_reason).upper()
-                    
-                    if is_stop_loss:
-                        # Maker limit execution for Stop Loss exit (Post-Only model)
-                        slippage_pct = 0.0
-                        actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                        fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
-                        exit_reason = str(exit_reason) + " [Limit order Maker close]"
+                        if bybit_closed:
+                            if bybit_realized_pnl is not None:
+                                if bybit_realized_pnl >= 0:
+                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                                else:
+                                    exit_reason = "STOP LOSS HIT [FAIL]"
+                            else:
+                                # Fallback: determine based on price change direction
+                                actual_exit_price = bybit_exit_price if bybit_exit_price is not None else current_price
+                                actual_change = actual_exit_price - entry_price
+                                is_profit = actual_change > 0 if direction == "Bullish" else actual_change < 0
+                                if is_profit:
+                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                                else:
+                                    exit_reason = "STOP LOSS HIT [FAIL]"
                     else:
-                        # Maker execution for Take Profit, Timer, etc.
-                        slippage_pct = 0.0
-                        actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                        fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
-
-                    price_diff = actual_price - predicted_price
-                    price_diff_pct = (price_diff / predicted_price) * 100
-                    price_accuracy = max(0.0, 100.0 - abs((actual_price - predicted_price) / actual_price * 100))
-                    actual_change = actual_price - entry_price
-                    actual_change_pct = (actual_change / entry_price) * 100
-                    
-                    # Calculate PnL (long vs short) with correct taker fees on leveraged size
-                    raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
-                    leverage = active_trade.get("leverage", 1.0)
-                    gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
-                    taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker per side on leveraged size
-                    realized_pnl = gross_pnl - taker_fee_cost
-                    net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
-                    
-                    if realized_pnl < -position_size_usd:
-                        realized_pnl = -position_size_usd
-                        net_return_pct = -100.0
-                    
-                    # Aggregate PnL and size for trade history logging if scaled out
-                    original_size = float(active_trade.get("original_size", position_size_usd))
-                    scaled_out_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
-                    
-                    if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
-                        total_pnl = round(bybit_realized_pnl, 2)
-                        realized_pnl = round(total_pnl - scaled_out_pnl, 2)
+                        if direction == "Bullish":
+                            if current_price <= stop_loss:
+                                exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
+                            elif current_price >= take_profit and not half_closed:
+                                exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                        else:
+                            if current_price >= stop_loss:
+                                exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
+                            elif current_price <= take_profit and not half_closed:
+                                exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+    
+                        if current_time >= end_time and not half_closed:
+                            lookahead = 10
+                            exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
+    
+                    if exit_reason is not None:
+                        # Query accumulated closed PnL transactions on Testnet/Live
+                        bybit_pnl_data = None
+                        if TRADE_MODE != "simulation":
+                            entry_time_ms = active_trade.get("entry_time")
+                            if not entry_time_ms:
+                                entry_time_ms = int((end_time - (int(iv) * 60)) * 1000)
+                            
+                            bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms)
+                            if bybit_pnl_data:
+                                bybit_realized_pnl = bybit_pnl_data["total_pnl"]
+                                if bybit_pnl_data["avg_exit_price"] is not None:
+                                    bybit_exit_price = bybit_pnl_data["avg_exit_price"]
+                                if bybit_pnl_data["total_entry_value"] is not None:
+                                    lev = float(active_trade.get("leverage", 1.0))
+                                    actual_margin = round(bybit_pnl_data["total_entry_value"] / lev, 2)
+                                    active_trade["position_size_usd"] = actual_margin
+                                    position_size_usd = actual_margin
+    
+                        # Maker vs Taker execution logic
+                        is_stop_loss = "STOP LOSS" in str(exit_reason).upper()
+                        
+                        if is_stop_loss:
+                            # Maker limit execution for Stop Loss exit (Post-Only model)
+                            slippage_pct = 0.0
+                            actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
+                            fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
+                            exit_reason = str(exit_reason) + " [Limit order Maker close]"
+                        else:
+                            # Maker execution for Take Profit, Timer, etc.
+                            slippage_pct = 0.0
+                            actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
+                            fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
+    
+                        price_diff = actual_price - predicted_price
+                        price_diff_pct = (price_diff / predicted_price) * 100
+                        price_accuracy = max(0.0, 100.0 - abs((actual_price - predicted_price) / actual_price * 100))
+                        actual_change = actual_price - entry_price
+                        actual_change_pct = (actual_change / entry_price) * 100
+                        
+                        # Calculate PnL (long vs short) with correct taker fees on leveraged size
+                        raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
+                        leverage = active_trade.get("leverage", 1.0)
+                        gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
+                        taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker per side on leveraged size
+                        realized_pnl = gross_pnl - taker_fee_cost
                         net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
-                        total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
-                    else:
-                        total_pnl = round(realized_pnl + scaled_out_pnl, 2)
-                        total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
-                    
-                    # Update simulated balance (only in simulation)
-                    if TRADE_MODE == "simulation":
-                        old_bal = bot_state.get("simulated_balance", 80.0)
-                        new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
-                        bot_state["simulated_balance"] = new_bal
-                    else:
-                        new_bal = bot_state.get("simulated_balance", 0.0)
-                    
-                    actual_trend = "Bullish" if actual_change > 0 else "Bearish"
-                    signal_correct = (actual_trend == direction)
-                    trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
-                    
-                    print("\n==================================================")
-                    print(f"[{active_symbol} {iv}m TRADE EXITED]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
-                    print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
-                    print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
-                    if active_trade.get("half_closed", False):
-                        print(f"Total Size: ${original_size:.2f} (Scaled-Out) | Net Return: {total_net_return_pct:+.4f}% (weighted)")
-                        print(f"Scaled-Out PnL: ${scaled_out_pnl:+.2f} | Remaining PnL: ${realized_pnl:+.2f} | Total PnL: ${total_pnl:+.2f}")
-                    else:
-                        print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
-                        print(f"Realized PnL: ${realized_pnl:+.2f}")
-                    print(f"New Balance: ${new_bal:.2f} | Predicted Signal: {direction} ({trend_status})")
-                    print("==================================================\n")
-                    
-                    # Update Completed Trade History in global state
-                    bot_state["trade_history"].append({
-                        "symbol": active_symbol,
-                        "exit_time": float(time.time()),
-                        "interval": str(iv),
-                        "direction": str(direction),
-                        "entry_price": float(entry_price),
-                        "exit_price": float(actual_price),
-                        "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
-                        "success": bool(signal_correct),
-                        "reason": str(exit_reason) + (" (Scale-Out)" if active_trade.get("half_closed", False) else ""),
-                        "position_size_usd": float(position_size_usd),
-                        "original_size": float(original_size),
-                        "pnl_usd": float(total_pnl),
-                        "balance": float(new_bal),
-                        "leverage": float(leverage),
-                        "confidence": float(active_trade.get("confidence", 0.0)),
-                        "take_profit": float(active_trade.get("take_profit", 0.0)),
-                        "stop_loss": float(active_trade.get("stop_loss", 0.0)),
-                        "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
-                        "fill_pct": float(active_trade.get("fill_pct", 100.0))
-                    })
-                    
-                    # Send email alert on any profitable trade exit
-                    if total_pnl > 0:
-                        subject = f"🚀 [UBOTE Profit Target] {active_symbol} {iv}m Closed with Profit!"
-                        invested_margin_usd = original_size
-                        leveraged_position_usd = original_size * leverage if leverage > 0 else original_size
                         
-                        # Dynamic header based on exit reason
-                        exit_title = "🎉 Take Profit Hit!" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 Trailing Stop Hit (Profitable Close)!" if "TRAILING" in str(exit_reason).upper() else "✅ Trade Closed with Profit!"
+                        if realized_pnl < -position_size_usd:
+                            realized_pnl = -position_size_usd
+                            net_return_pct = -100.0
                         
-                        body = f"""
-                        <html>
-                        <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
-                            <h2 style="color: #00b0ff; margin-bottom: 20px;">{exit_title}</h2>
-                            <div style="background-color: #161a22; padding: 15px; border-radius: 6px; border-left: 4px solid #00c853;">
-                                <table style="width: 100%; border-collapse: collapse;">
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3; width: 140px;"><b>Symbol:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace; font-size: 14px;">{active_symbol}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Timeframe:</b></td>
-                                        <td style="padding: 6px 0;">{iv}m</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Direction:</b></td>
-                                        <td style="padding: 6px 0; color: {'#00c853' if direction == 'Bullish' else '#ff3d00'}; font-weight: bold;">{direction}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Entry Price:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">${entry_price:.4f}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Exit Price:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">${actual_price:.4f}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Profit/Loss:</b></td>
-                                        <td style="padding: 6px 0; color: #00c853; font-weight: bold; font-family: monospace;">+{total_pnl:+.2f} USD ({total_net_return_pct:+.4f}%)</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Exit Reason:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">{exit_reason}</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Leveraged Position Size (USD):</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">${leveraged_position_usd:.2f} USD</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Leverage:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">{leverage}x</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Actual Investment (USD):</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace;">${invested_margin_usd:.2f} USD</td>
-                                    </tr>
-                                    <tr>
-                                        <td style="padding: 6px 0; color: #8f9bb3;"><b>Account Balance:</b></td>
-                                        <td style="padding: 6px 0; font-family: monospace; font-weight: bold;">${new_bal:.2f} USD</td>
-                                    </tr>
-                                </table>
-                            </div>
-                            <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
-                        </body>
-                        </html>
-                        """
-                        threading.Thread(target=send_email_notification, args=(subject, body), daemon=True).start()
-                    
-                    for p in bot_state["prediction_history"]:
-                        if p.get("interval") == str(iv) and p.get("symbol") == active_symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
-                            p["evaluation"] = {
-                                "evaluated": True,
-                                "exit_price": float(actual_price),
-                                "change": float(actual_change if direction == "Bullish" else -actual_change),
-                                "change_pct": float(raw_return_pct),
-                                "success": bool(signal_correct)
-                            }
-                            break
-                    save_history()
-                else:
-                    updated_trades.append(active_trade)
-            bot_state[active_trade_key] = updated_trades
-        
-        if active_trades_updated:
-            save_history()
+                        # Aggregate PnL and size for trade history logging if scaled out
+                        original_size = float(active_trade.get("original_size", position_size_usd))
+                        scaled_out_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
+                        
+                        if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
+                            total_pnl = round(bybit_realized_pnl, 2)
+                            realized_pnl = round(total_pnl - scaled_out_pnl, 2)
+                            net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
+                            total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
+                        else:
+                            total_pnl = round(realized_pnl + scaled_out_pnl, 2)
+                            total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
+                        
+                        # Update simulated balance (only in simulation)
+                        if TRADE_MODE == "simulation":
+                            old_bal = bot_state.get("simulated_balance", 80.0)
+                            new_bal = round(old_bal + position_size_usd + realized_pnl, 2)
+                            bot_state["simulated_balance"] = new_bal
+                        else:
+                            new_bal = bot_state.get("simulated_balance", 0.0)
+                        
+                        actual_trend = "Bullish" if actual_change > 0 else "Bearish"
+                        signal_correct = (actual_trend == direction)
+                        trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
+                        
+                        print("\n==================================================")
+                        print(f"[{active_symbol} {iv}m TRADE EXITED]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
+                        print(f"Start Price: {entry_price:.2f} | Exit Price: {actual_price:.2f}")
+                        print(f"Actual Change: {actual_change:+.2f} ({actual_change_pct:+.4f}%)")
+                        if active_trade.get("half_closed", False):
+                            print(f"Total Size: ${original_size:.2f} (Scaled-Out) | Net Return: {total_net_return_pct:+.4f}% (weighted)")
+                            print(f"Scaled-Out PnL: ${scaled_out_pnl:+.2f} | Remaining PnL: ${realized_pnl:+.2f} | Total PnL: ${total_pnl:+.2f}")
+                        else:
+                            print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
+                            print(f"Realized PnL: ${realized_pnl:+.2f}")
+                        print(f"New Balance: ${new_bal:.2f} | Predicted Signal: {direction} ({trend_status})")
+                        print("==================================================\n")
+                        
+                        # Update Completed Trade History in global state
+                        bot_state["trade_history"].append({
+                            "symbol": active_symbol,
+                            "exit_time": float(time.time()),
+                            "interval": str(iv),
+                            "direction": str(direction),
+                            "entry_price": float(entry_price),
+                            "exit_price": float(actual_price),
+                            "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
+                            "success": bool(signal_correct),
+                            "reason": str(exit_reason) + (" (Scale-Out)" if active_trade.get("half_closed", False) else ""),
+                            "position_size_usd": float(position_size_usd),
+                            "original_size": float(original_size),
+                            "pnl_usd": float(total_pnl),
+                            "balance": float(new_bal),
+                            "leverage": float(leverage),
+                            "confidence": float(active_trade.get("confidence", 0.0)),
+                            "take_profit": float(active_trade.get("take_profit", 0.0)),
+                            "stop_loss": float(active_trade.get("stop_loss", 0.0)),
+                            "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
+                            "fill_pct": float(active_trade.get("fill_pct", 100.0))
+                        })
+                        
+                        # Send email alert on any profitable trade exit
+                        if total_pnl > 0:
+                            subject = f"🚀 [UBOTE Profit Target] {active_symbol} {iv}m Closed with Profit!"
+                            invested_margin_usd = original_size
+                            leveraged_position_usd = original_size * leverage if leverage > 0 else original_size
+                            
+                            # Dynamic header based on exit reason
+                            exit_title = "🎉 Take Profit Hit!" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 Trailing Stop Hit (Profitable Close)!" if "TRAILING" in str(exit_reason).upper() else "✅ Trade Closed with Profit!"
+                            
+                            body = f"""
+                            <html>
+                            <body style="font-family: Arial, sans-serif; background-color: #0b0e14; color: #f0f3fa; padding: 20px; border-radius: 8px;">
+                                <h2 style="color: #00b0ff; margin-bottom: 20px;">{exit_title}</h2>
+                                <div style="background-color: #161a22; padding: 15px; border-radius: 6px; border-left: 4px solid #00c853;">
+                                    <table style="width: 100%; border-collapse: collapse;">
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3; width: 140px;"><b>Symbol:</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace; font-size: 14px;">{active_symbol}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Timeframe:</b></td>
+                                            <td style="padding: 6px 0;">{iv}m</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Direction:</b></td>
+                                            <td style="padding: 6px 0; color: {'#00c853' if direction == 'Bullish' else '#ff3d00'}; font-weight: bold;">{direction}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Entry Price:</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace;">${entry_price:.4f}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Exit Price:</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace;">${actual_price:.4f}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Profit/Loss:</b></td>
+                                            <td style="padding: 6px 0; color: #00c853; font-weight: bold; font-family: monospace;">+{total_pnl:+.2f} USD ({total_net_return_pct:+.4f}%)</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Exit Reason:</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace;">{exit_reason}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Leveraged Position Size (USD):</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace;">${leveraged_position_usd:.2f} USD</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Leverage:</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace;">{leverage}x</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Actual Investment (USD):</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace;">${invested_margin_usd:.2f} USD</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="padding: 6px 0; color: #8f9bb3;"><b>Account Balance:</b></td>
+                                            <td style="padding: 6px 0; font-family: monospace; font-weight: bold;">${new_bal:.2f} USD</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                                <p style="font-size: 11px; color: #8f9bb3; margin-top: 20px;">Sent automatically by UBOTE Trading System.</p>
+                            </body>
+                            </html>
+                            """
+                            threading.Thread(target=send_email_notification, args=(subject, body), daemon=True).start()
+                        
+                        for p in bot_state["prediction_history"]:
+                            if p.get("interval") == str(iv) and p.get("symbol") == active_symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
+                                p["evaluation"] = {
+                                    "evaluated": True,
+                                    "exit_price": float(actual_price),
+                                    "change": float(actual_change if direction == "Bullish" else -actual_change),
+                                    "change_pct": float(raw_return_pct),
+                                    "success": bool(signal_correct)
+                                }
+                                break
+                        save_history()
+                    else:
+                        updated_trades.append(active_trade)
+                bot_state[active_trade_key] = updated_trades
+            
+            if active_trades_updated:
+                save_history()
 
         # 3. Check for completed candle closes to search for a new signal
 
@@ -4128,10 +4157,12 @@ def main():
         for symbol, iv in check_queue:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
-            active_trades_list = bot_state.get(active_trade_key, [])
-            if not isinstance(active_trades_list, list):
-                active_trades_list = [] if active_trades_list is None else [active_trades_list]
-                bot_state[active_trade_key] = active_trades_list
+            with active_trades_lock:
+                active_trades_list = bot_state.get(active_trade_key, [])
+                if not isinstance(active_trades_list, list):
+                    active_trades_list = [] if active_trades_list is None else [active_trades_list]
+                    bot_state[active_trade_key] = active_trades_list
+                active_trades_list = list(active_trades_list)
                 
             if (symbol, iv) not in fetched_data:
                 continue
@@ -4583,8 +4614,13 @@ def main():
                                                 "original_qty": float(actual_qty),
                                                 "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
                                             }
-                                            active_trades_list.append(active_trade)
-                                            bot_state[active_trade_key] = active_trades_list
+                                            with active_trades_lock:
+                                                current_trades = bot_state.get(active_trade_key, [])
+                                                if not isinstance(current_trades, list):
+                                                    current_trades = []
+                                                current_trades = list(current_trades)
+                                                current_trades.append(active_trade)
+                                                bot_state[active_trade_key] = current_trades
                                             
                                             # Sync positions immediately to load live Bybit state parameters
                                             if TRADE_MODE != "simulation":
