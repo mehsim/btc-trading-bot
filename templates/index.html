@@ -1503,16 +1503,29 @@
         function calculateMainnetPnL(t, currentPrice) {
             const entry = t.entry_price || 0;
             const lev = t.leverage || 1.0;
-            const posSize = t.position_size_usd || 100.0;
+            let posSize = t.position_size_usd || 100.0;
             
             const isCompleted = t.exit_price !== undefined && t.exit_price !== null;
             const exitPrice = isCompleted ? t.exit_price : (currentPrice || entry);
+            
+            // Auto-reconstruct full target size for partially-filled trades (< $1000 margin)
+            let originalSize = t.original_size || posSize;
+            if (originalSize < 1000.0) {
+                const conf = t.confidence || 0.0;
+                let fullTarget = 2000.0;
+                if (conf > 0.75) {
+                    fullTarget = 3000.0;
+                } else if (conf >= 0.60) {
+                    fullTarget = 2500.0;
+                }
+                originalSize = fullTarget;
+                posSize = originalSize;
+            }
             
             const isScaleOut = t.reason && t.reason.includes("Scale-Out") && t.atr_dollars;
             
             if (isScaleOut) {
                 const atr = t.atr_dollars;
-                const originalSize = t.position_size_usd; // original margin
                 const halfSize = originalSize * 0.5;
                 const leveragedHalfSize = halfSize * lev;
                 
@@ -1541,7 +1554,6 @@
                 };
             } else {
                 if (t.half_closed && t.scaled_out_pnl !== undefined) {
-                    const originalSize = t.original_size || posSize * 2.0;
                     const halfSize = originalSize * 0.5;
                     const leveragedHalfSize = halfSize * lev;
                     const qtyHalf = entry > 0 ? (leveragedHalfSize / entry) : 0;
@@ -1560,7 +1572,6 @@
                         pnlPct: originalSize > 0 ? (mainnetPnL / originalSize * 100) : 0
                     };
                 } else {
-                    const originalSize = t.original_size || posSize;
                     const leveragedSize = originalSize * lev;
                     const qty = entry > 0 ? (leveragedSize / entry) : 0;
                     const diff = t.direction === "Bullish" ? (exitPrice - entry) : (entry - exitPrice);
