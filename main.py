@@ -486,6 +486,27 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None):
     res = bybit_post_request("/v5/order/create", payload)
     return res
 
+def get_bybit_order_details(symbol, order_id):
+    params = {
+        "category": "linear",
+        "symbol": symbol,
+        "orderId": order_id
+    }
+    res = bybit_get_request("/v5/order/history", params)
+    if res.get("retCode") == 0:
+        orders = res.get("result", {}).get("list", [])
+        if orders:
+            return orders[0]
+    return None
+
+def cancel_bybit_order(symbol, order_id):
+    cancel_payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "orderId": order_id
+    }
+    return bybit_post_request("/v5/order/cancel", cancel_payload)
+
 def bybit_get_request(endpoint, query_params):
     import time
     import hmac
@@ -3037,6 +3058,25 @@ def sync_active_positions_from_bybit():
                 seen_symbols_in_tf.add(symbol)
                 if symbol in open_positions:
                     pos = open_positions[symbol]
+                    
+                    # Side Mismatch Guard: verify Bybit position side aligns with trade direction
+                    pos_side = pos.get("side") # "Buy" or "Sell"
+                    trade_direction = t.get("direction") # "Bullish" or "Bearish"
+                    mismatch = False
+                    if trade_direction == "Bullish" and pos_side != "Buy":
+                        mismatch = True
+                    elif trade_direction == "Bearish" and pos_side != "Sell":
+                        mismatch = True
+                        
+                    if mismatch:
+                        print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
+                        if TRADE_MODE != "simulation":
+                            close_side = "Sell" if pos_side == "Buy" else "Buy"
+                            place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])))
+                            if t.get("bybit_scale_out_order_id"):
+                                cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
+                        continue
+
                     t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
                     t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
                     t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
@@ -4275,20 +4315,31 @@ def main():
                                                 if order_res.get("retCode") == 0:
                                                     bybit_order_id = order_res.get("result", {}).get("orderId")
                                                     print(f"[{symbol} {iv}m API] Success! Bybit Order Placed. Order ID: {bybit_order_id}")
-                                                    
-                                                    # Query actual fill price from execution log
+                                                    actual_qty = raw_qty
+                                                    # Query actual fill price and filled quantity from order details
                                                     time.sleep(0.5)  # Brief delay for fill to register
-                                                    fill_exec = get_bybit_last_execution(symbol)
-                                                    if fill_exec:
-                                                        actual_fill_price = float(fill_exec.get("execPrice", entry_price))
+                                                    order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                    if order_details:
+                                                        actual_fill_price = float(order_details.get("avgPrice", entry_price))
+                                                        actual_filled_qty = float(order_details.get("cumExecQty", 0.0))
                                                         if actual_fill_price > 0:
                                                             entry_price = actual_fill_price
                                                             print(f"[{symbol} {iv}m API] Actual fill price: ${entry_price:.4f}")
-
+                                                        if actual_filled_qty > 0:
+                                                            actual_qty = actual_filled_qty
+                                                            print(f"[{symbol} {iv}m API] Actual filled quantity: {actual_qty}")
+                                                    else:
+                                                        fill_exec = get_bybit_last_execution(symbol)
+                                                        if fill_exec:
+                                                            actual_fill_price = float(fill_exec.get("execPrice", entry_price))
+                                                            if actual_fill_price > 0:
+                                                                entry_price = actual_fill_price
+                                                                print(f"[{symbol} {iv}m API] Fallback actual fill price: ${entry_price:.4f}")
+                                                    
                                                     # Place scale-out limit order on Bybit immediately
                                                     limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
                                                     limit_price = entry_price + 1.0 * atr_dollars if ml_trend == "Bullish" else entry_price - 1.0 * atr_dollars
-                                                    limit_qty_str = format_bybit_qty(symbol, raw_qty * 0.5)
+                                                    limit_qty_str = format_bybit_qty(symbol, actual_qty * 0.5)
                                                     
                                                     print(f"[{symbol} {iv}m API] Placing scale-out limit order for {limit_qty_str} at ${limit_price:.4f}...")
                                                     limit_res = place_bybit_limit_order(symbol, limit_side, limit_qty_str, limit_price)
@@ -4307,6 +4358,7 @@ def main():
                                                 status_msg = "Skipped (Bybit Leverage Error)"
 
                                         if bybit_success:
+                                            actual_size_usd = float(position_size_usd) * (actual_qty / raw_qty) if raw_qty > 0 else float(position_size_usd)
                                             active_trade = {
                                                 "trade_id": f"{symbol}_{trade_uuid}",
                                                 "bybit_order_id": bybit_order_id,
@@ -4323,13 +4375,13 @@ def main():
                                                 "lowest_price": float(entry_price),
                                                 "break_even_triggered": False,
                                                 "half_closed": False,
-                                                "original_size": float(position_size_usd),
-                                                "position_size_usd": float(position_size_usd),
+                                                "original_size": actual_size_usd,
+                                                "position_size_usd": actual_size_usd,
                                                 "scaled_out_pnl": 0.0,
                                                 "kelly_fraction": float(kelly_fraction),
                                                 "leverage": float(leverage_val),
                                                 "confidence": float(calibrated_confidence),
-                                                "qty": qty_val
+                                                "qty": float(actual_qty)
                                             }
                                             active_trades_list.append(active_trade)
                                             bot_state[active_trade_key] = active_trades_list
