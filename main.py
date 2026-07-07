@@ -4240,10 +4240,11 @@ def main():
                             print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
 
                         if status_msg == "Pending":
-                            # Check news window proximity status for logging purposes
+                            # Check news window proximity status for logging/blocking purposes
                             in_news_window, news_event = is_high_impact_news_window()
                             if in_news_window:
-                                print(f"[{iv}m WARNING] High-impact event window active ({news_event}). Proceeding since ML models incorporate news proximity features.")
+                                print(f"[{iv}m News Block] Trade skipped: high-impact news event window active ({news_event}).")
+                                status_msg = "Skipped (News Block)"
                                 
                             with news_sentiment_lock:
                                 news_sentiment = cached_news_sentiment
@@ -4345,6 +4346,15 @@ def main():
                                     kelly_b = float(tp_multiplier_adjusted / sl_multiplier) if sl_multiplier > 0 else 1.5
                                     kelly_fraction = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
 
+                                    # Apply Half-Kelly sizing adjustment
+                                    half_kelly_mult = 0.5 * kelly_fraction
+                                    half_kelly_mult = min(1.0, half_kelly_mult)  # Cap multiplier at 1.0
+                                    if half_kelly_mult > 0:
+                                        position_size_usd = position_size_usd * half_kelly_mult
+                                        print(f"[{iv}m Half-Kelly Sizing] Kelly Fraction: {kelly_fraction:.4f} -> Multiplier: {half_kelly_mult:.4f}x -> Adjusted Position Size: ${position_size_usd:.2f}")
+                                    else:
+                                        print(f"[{iv}m Half-Kelly Sizing] Kelly Fraction is 0 or negative. Trade sizing unchanged.")
+
                                     # Ensure total size of active trades does not exceed the wallet balance
                                     min_bal_limit = 10.0
                                     min_size_limit = 10.0
@@ -4377,6 +4387,16 @@ def main():
                                         # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
                                         stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
                                         max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
+                                        
+                                        # Volatility-based leverage scaling cap
+                                        atr_pct_of_price = (atr_dollars / entry_price) * 100.0
+                                        if atr_pct_of_price > 3.0:
+                                            vol_lev_cap = 2.0 if symbol in ["BTCUSDT", "ETHUSDT"] else 1.0
+                                            lev_cap = min(lev_cap, vol_lev_cap)
+                                            print(f"[{symbol} {iv}m Volatility-Scaled Leverage] Extreme Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Capped leverage to {lev_cap}x.")
+                                        elif atr_pct_of_price > 1.5:
+                                            lev_cap = min(lev_cap, lev_cap * 0.5)
+                                            print(f"[{symbol} {iv}m Volatility-Scaled Leverage] High Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Halved leverage cap to {lev_cap}x.")
                                         
                                         if symbol == "BTCUSDT":
                                             lev_cap = 30.0

@@ -517,9 +517,54 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     else:
         df["fear_greed"] = 50.0
         
+    # Calculate OI momentum
+    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).fillna(0.0)
+    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).fillna(0.0)
+    
+    # Merge BTCUSDT Correlation Features
+    if symbol != "BTCUSDT":
+        try:
+            df_btc = get_history(symbol="BTCUSDT", interval=str(interval), limit=len(df) + 100)
+            if not df_btc.empty:
+                df_btc = df_btc.sort_values("timestamp").reset_index(drop=True)
+                delta = df_btc["close"].diff()
+                gain = (delta.where(delta > 0, 0.0)).rolling(window=14, min_periods=1).mean()
+                loss = (-delta.where(delta < 0, 0.0)).rolling(window=14, min_periods=1).mean()
+                rs = gain / (loss + 1e-9)
+                df_btc["btc_rsi"] = 100.0 - (100.0 / (1.0 + rs))
+                df_btc["btc_rsi"] = df_btc["btc_rsi"].fillna(50.0)
+                
+                df_btc_features = df_btc[["timestamp", "close", "volume", "btc_rsi"]].rename(
+                    columns={"close": "btc_close", "volume": "btc_volume"}
+                )
+                df = pd.merge_asof(df, df_btc_features, on="timestamp", direction="backward")
+            else:
+                df["btc_close"] = df["close"]
+                df["btc_volume"] = df["volume"]
+                df["btc_rsi"] = 50.0
+        except Exception as e:
+            print(f"[BTC Correlation] Error merging BTC features: {e}")
+            df["btc_close"] = df["close"]
+            df["btc_volume"] = df["volume"]
+            df["btc_rsi"] = 50.0
+    else:
+        df["btc_close"] = df["close"]
+        df["btc_volume"] = df["volume"]
+        delta = df["close"].diff()
+        gain = (delta.where(delta > 0, 0.0)).rolling(window=14, min_periods=1).mean()
+        loss = (-delta.where(delta < 0, 0.0)).rolling(window=14, min_periods=1).mean()
+        rs = gain / (loss + 1e-9)
+        df["btc_rsi"] = 100.0 - (100.0 / (1.0 + rs))
+        df["btc_rsi"] = df["btc_rsi"].fillna(50.0)
+
     # Clean up NaNs
     df["open_interest"] = df["open_interest"].ffill().bfill().fillna(0.0)
     df["funding_rate"] = df["funding_rate"].ffill().bfill().fillna(0.0)
     df["fear_greed"] = df["fear_greed"].ffill().bfill().fillna(50.0)
+    df["oi_change_1h"] = df["oi_change_1h"].ffill().bfill().fillna(0.0)
+    df["oi_change_4h"] = df["oi_change_4h"].ffill().bfill().fillna(0.0)
+    df["btc_close"] = df["btc_close"].ffill().bfill().fillna(df["close"])
+    df["btc_volume"] = df["btc_volume"].ffill().bfill().fillna(df["volume"])
+    df["btc_rsi"] = df["btc_rsi"].ffill().bfill().fillna(50.0)
     
     return df
