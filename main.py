@@ -469,7 +469,10 @@ def format_bybit_qty(symbol, qty):
         "LTCUSDT": 1,
         "ADAUSDT": 0,
         "XRPUSDT": 0,
-        "DOGEUSDT": 0
+        "DOGEUSDT": 0,
+        "DOTUSDT": 0,
+        "SUIUSDT": 0,
+        "APTUSDT": 1
     }
     p = precisions.get(symbol, 1)
     if p == 0:
