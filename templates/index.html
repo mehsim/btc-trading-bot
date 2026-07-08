@@ -1859,7 +1859,6 @@
                 const tradeLeverage = parseFloat(trade.leverage) || 1.0;
                 const tradeLeveragedVal = (originalSize * tradeLeverage).toFixed(2);
                 
-                const entryPrice = parseFloat(trade.entry_price) || 0.0;
                 const originalQty = parseFloat(trade.original_qty) || parseFloat(trade.qty) || 0.0;
                 const initialFilledMargin = tradeLeverage > 0 ? (originalQty * entryPrice) / tradeLeverage : (originalQty * entryPrice);
 
