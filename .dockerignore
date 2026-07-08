@@ -9,5 +9,8 @@ __pycache__
 catboost_info/
 kline_cache/
 *.log
-*.txt
 *.pkl
+# Do not ignore requirements.txt
+!requirements.txt
+# Ignore other txt files
+*.txt
