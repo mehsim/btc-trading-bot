@@ -3139,10 +3139,27 @@ def get_bybit_entry_order_qty(symbol, side):
                 o_cum = float(o.get("cumExecQty", 0.0))
                 o_qty = float(o.get("qty", 0.0))
                 if o_side == side and o_cum > 0.0:
-                    return o_qty, o_cum
+                    return o_qty, o_cum, o.get("orderId")
     except Exception as e:
         print(f"[Entry Order Query Warning] Error for {symbol} {side}: {e}")
-    return None, None
+    return None, None, None
+
+def get_bybit_active_limit_order_id(symbol, side):
+    """Query Bybit active open orders to find if there is an active limit order on the specified side."""
+    try:
+        params = {
+            "category": "linear",
+            "symbol": symbol
+        }
+        res = bybit_get_request("/v5/order/realtime", params)
+        if res.get("retCode") == 0:
+            orders = res.get("result", {}).get("list", [])
+            for o in orders:
+                if o.get("orderType") == "Limit" and o.get("side") == side and o.get("orderStatus") in ["New", "PartiallyFilled"]:
+                    return o.get("orderId")
+    except Exception as e:
+        print(f"[Active Limit Order Query Warning] Error for {symbol} {side}: {e}")
+    return None
 
 def sync_active_positions_from_bybit():
     """Real-time Sync: Sync all active trades from Bybit to keep bot_state completely aligned with testnet/live."""
@@ -3292,13 +3309,30 @@ def sync_active_positions_from_bybit():
                         
                         # Dynamically reconstruct original size for recovered trades
                         if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
-                            orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, pos_side)
+                            orig_qty, filled_qty, entry_ord_id = get_bybit_entry_order_qty(symbol, pos_side)
                             if orig_qty is not None and orig_qty > 0.0:
                                 t["original_size"] = (orig_qty * avg_price) / t["leverage"] if t["leverage"] > 0 else (orig_qty * avg_price)
                                 t["fill_pct"] = round((filled_qty / orig_qty) * 100.0, 2)
                                 t["original_size_reconstructed"] = True
+                                if entry_ord_id and not t.get("bybit_order_id"):
+                                    t["bybit_order_id"] = entry_ord_id
                                 print(f"[Crash Recovery Sync] Reconstructed original size for {symbol}: target={t['original_size']:.2f}, filled={t['position_size_usd']:.2f} ({t['fill_pct']}%)")
                                 save_history()
+
+                        # Recover missing/unset bybit_order_id
+                        if not t.get("bybit_order_id") or t.get("bybit_order_id") == "N/A":
+                            _, _, entry_ord_id = get_bybit_entry_order_qty(symbol, pos_side)
+                            if entry_ord_id:
+                                t["bybit_order_id"] = entry_ord_id
+                                print(f"[Sync] Recovered missing bybit_order_id {entry_ord_id} for {symbol}")
+
+                        # Recover missing/unset bybit_scale_out_order_id
+                        if not t.get("bybit_scale_out_order_id") or t.get("bybit_scale_out_order_id") == "N/A":
+                            limit_side = "Sell" if pos_side == "Buy" else "Buy"
+                            limit_ord_id = get_bybit_active_limit_order_id(symbol, limit_side)
+                            if limit_ord_id:
+                                t["bybit_scale_out_order_id"] = limit_ord_id
+                                print(f"[Sync] Recovered missing bybit_scale_out_order_id {limit_ord_id} for {symbol}")
                         
                         updated_trades.append(t)
                         matched_symbols.add(symbol)
@@ -3326,7 +3360,7 @@ def sync_active_positions_from_bybit():
                     qty_val = float(pos.get("size", "0"))
                     
                     # Retrieve the original target qty of the entry order
-                    orig_qty, filled_qty = get_bybit_entry_order_qty(symbol, side_str)
+                    orig_qty, filled_qty, entry_order_id = get_bybit_entry_order_qty(symbol, side_str)
                     if orig_qty is not None and orig_qty > 0.0:
                         original_size = (orig_qty * avg_price) / leverage_val if leverage_val > 0 else (orig_qty * avg_price)
                         fill_pct = round((filled_qty / orig_qty) * 100.0, 2)
@@ -3336,6 +3370,9 @@ def sync_active_positions_from_bybit():
                         original_size = position_size_usd
                         fill_pct = 100.0
                         original_size_reconstructed = False
+                    
+                    limit_side = "Sell" if side_str == "Buy" else "Buy"
+                    scale_out_order_id = get_bybit_active_limit_order_id(symbol, limit_side)
                     
                     import uuid
                     trade_uuid = str(uuid.uuid4())[:8]
@@ -3371,8 +3408,8 @@ def sync_active_positions_from_bybit():
      
                     recovered_trade = {
                         "trade_id": f"{symbol}_{trade_uuid}_recovered",
-                        "bybit_order_id": None,
-                        "bybit_scale_out_order_id": None,
+                        "bybit_order_id": entry_order_id,
+                        "bybit_scale_out_order_id": scale_out_order_id,
                         "symbol": symbol,
                         "entry_price": avg_price,
                         "predicted_price": avg_price,
