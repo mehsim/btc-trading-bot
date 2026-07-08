@@ -1,6 +1,10 @@
+print("[System Debug] main.py global execution started.")
 import os
+print("[System Debug] os imported.")
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+print("[System Debug] Thread env vars set.")
+
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -10,12 +14,16 @@ BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else
 BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/linear" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/linear"
 
 
+print("[System Debug] Importing websocket...")
 import websocket
+print("[System Debug] websocket imported.")
 import json
 import requests
+print("[System Debug] Importing pandas/numpy/joblib...")
 import pandas as pd
 import numpy as np
 import joblib
+print("[System Debug] pandas/numpy/joblib imported.")
 import threading
 import time
 from datetime import datetime, timedelta
@@ -23,12 +31,16 @@ from datetime import datetime, timedelta
 def get_pkt_time():
     return datetime.utcnow() + timedelta(hours=5)
 
+print("[System Debug] Importing ta...")
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import MFIIndicator
+print("[System Debug] ta imported.")
+print("[System Debug] Importing data.py...")
 from data import get_history, merge_derivatives_sentiment_features
 import xml.etree.ElementTree as ET
+print("[System Debug] Importing Flask...")
 from flask import Flask, jsonify, render_template, request
 
 # ==========================================
