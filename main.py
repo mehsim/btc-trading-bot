@@ -4532,6 +4532,12 @@ def main():
                                         stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
                                         max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
                                         
+                                        if symbol == "BTCUSDT":
+                                            lev_cap = 30.0
+                                        elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
+                                            lev_cap = 20.0
+                                        else:
+                                            lev_cap = 15.0
                                         # Volatility-based leverage scaling cap
                                         atr_pct_of_price = (atr_dollars / entry_price) * 100.0
                                         if atr_pct_of_price > 3.0:
@@ -4542,12 +4548,6 @@ def main():
                                             lev_cap = min(lev_cap, lev_cap * 0.5)
                                             print(f"[{symbol} {iv}m Volatility-Scaled Leverage] High Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Halved leverage cap to {lev_cap}x.")
                                         
-                                        if symbol == "BTCUSDT":
-                                            lev_cap = 30.0
-                                        elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
-                                            lev_cap = 20.0
-                                        else:
-                                            lev_cap = 15.0
                                             
                                         # Double leverage target and cap during Golden Hour (18:00 - 21:00 PKT)
                                         current_hour_pkt = get_pkt_time().hour
