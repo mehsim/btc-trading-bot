@@ -4,10 +4,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
-import lightgbm as lgb
 from xgboost import XGBClassifier, XGBRegressor
-from lightgbm import LGBMClassifier, LGBMRegressor
-from catboost import CatBoostClassifier, CatBoostRegressor
 
 class PurgedEmbargoTimeSeriesSplit:
     """
@@ -133,6 +130,10 @@ def load_ensemble_classifier(prefix, n_features=54):
         # Run extremely lightweight model footprint on HF spaces (no LightGBM/CatBoost to prevent OOM)
         return EnsembleClassifier(xgb, None, None)
         
+    import lightgbm as lgb
+    from lightgbm import LGBMClassifier
+    from catboost import CatBoostClassifier
+
     lgb_clf = LGBMClassifier(objective="multiclass", num_class=3)
     lgb_clf._Booster = lgb.Booster(model_file=f"{prefix}_lgb.txt")
     lgb_clf.fitted_ = True
@@ -164,6 +165,10 @@ def load_ensemble_regressor(prefix, n_features=54):
         # Run extremely lightweight model footprint on HF spaces (no LightGBM/CatBoost to prevent OOM)
         return EnsembleRegressor(xgb, None, None)
         
+    import lightgbm as lgb
+    from lightgbm import LGBMRegressor
+    from catboost import CatBoostRegressor
+
     lgb_reg = LGBMRegressor()
     lgb_reg._Booster = lgb.Booster(model_file=f"{prefix}_lgb.txt")
     lgb_reg.fitted_ = True
