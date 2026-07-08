@@ -1793,12 +1793,14 @@ def start_ws():
                 on_error=on_error,
                 on_close=on_close
             )
+            import ssl
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,
-                proxy_type=proxy_type_str
+                proxy_type=proxy_type_str,
+                sslopt={"cert_reqs": ssl.CERT_NONE}
             )
         except Exception as e:
             print(f"[WebSocket run_forever exception] {e}")
