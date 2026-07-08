@@ -1345,6 +1345,11 @@ def retrain_models_thread(is_manual=False):
     return True
 
 def run_rolling_retrain_scheduler():
+    import os
+    if os.environ.get("SPACE_ID"):
+        print("[Scheduler] Running in Hugging Face Space. Disabling automated rolling retraining scheduler to conserve resources and prevent OOM restarts.")
+        return
+
     """
     Background scheduler that runs indefinitely.
     Every 1 hour, it checks if the models on disk are older than 3 days (259,200 seconds).
@@ -1856,9 +1861,8 @@ for lag in [1, 2]:
 
 features.append("hours_to_news")
 
-# Initial load
-for iv in ["60", "120", "240", "360"]:
-    load_model_weights(iv)
+# Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
+
 
 try:
     from numba import jit
@@ -3454,6 +3458,9 @@ def sync_active_positions_from_bybit():
 
 def main():
     global live_price, last_ws_update_time
+    # Load model weights here (deferred from module level)
+    for iv in ["60", "120", "240", "360"]:
+        load_model_weights(iv)
     load_history()
     print(f"{SYMBOL} LIVE BOT RUNNING...")
     
@@ -4715,8 +4722,18 @@ def main():
 
         time.sleep(10)
 
+def safe_main():
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"CRITICAL ERROR in main loop: {e}")
+
 if __name__ == "__main__":
     import threading
+    # Start main bot loop in background thread
+    threading.Thread(target=safe_main, daemon=True).start()
     # Start background news sentiment updater thread
     threading.Thread(target=run_news_sentiment_updater, daemon=True).start()
     # Start background Bybit balance updater thread
@@ -4725,8 +4742,7 @@ if __name__ == "__main__":
     threading.Thread(target=start_ws, daemon=True).start()
     # Start Bybit REST API fallback price updater thread
     threading.Thread(target=run_fallback_price_updater, daemon=True).start()
-    # Start local web dashboard server in a background thread
-    threading.Thread(target=run_flask, daemon=True).start()
     # Start automated rolling retraining scheduler in a background thread
     threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
-    main()
+    # Run Flask on main thread so HF health check passes immediately
+    run_flask()
