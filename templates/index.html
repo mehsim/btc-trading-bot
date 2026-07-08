@@ -1686,9 +1686,7 @@
                     const formattedRealizedPnL = `${pnlSign}${rawPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                     const displayPnLPct = posSize > 0 ? (rawPnL / posSize * 100) : 0;
                     
-                    const isScaleOutCompleted = t.half_closed || (t.reason && t.reason.includes("Scale-Out"));
-                    const initialFilled = isScaleOutCompleted ? (posSize * 2.0) : posSize;
-                    const fillPct = (t.original_size !== undefined && originalSize > 0) ? Math.min(100.0, (initialFilled / originalSize) * 100.0) : (t.fill_pct !== undefined ? t.fill_pct : 100.0);
+                    const fillPct = (t.fill_pct !== undefined) ? t.fill_pct : 100.0;
                     const fillPctStr = fillPct.toFixed(1) + '%';
                     const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
@@ -1852,8 +1850,7 @@
                 const tradeLeverage = parseFloat(trade.leverage) || 1.0;
                 const tradeLeveragedVal = (originalSize * tradeLeverage).toFixed(2);
                 
-                const initialFilled = trade.half_closed ? (tradePosSize * 2.0) : tradePosSize;
-                const fillPct = (trade.original_size !== undefined && originalSize > 0) ? Math.min(100.0, (initialFilled / originalSize) * 100.0) : (trade.fill_pct !== undefined ? trade.fill_pct : 100.0);
+                const fillPct = (trade.fill_pct !== undefined) ? trade.fill_pct : 100.0;
                 const fillPctStr = fillPct.toFixed(1) + '%';
                 const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
