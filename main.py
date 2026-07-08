@@ -3246,6 +3246,7 @@ def sync_active_positions_from_bybit():
                         
                         pos_val = float(pos.get("positionValue", 0.0))
                         t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
+                        t["qty"] = abs(float(pos.get("size", 0.0)))
                         
                         # Proportional Unrealized PnL calculation
                         try:

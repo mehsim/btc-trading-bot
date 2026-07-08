@@ -1686,7 +1686,16 @@
                     const formattedRealizedPnL = `${pnlSign}${rawPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                     const displayPnLPct = posSize > 0 ? (rawPnL / posSize * 100) : 0;
                     
-                    const fillPct = (t.fill_pct !== undefined) ? t.fill_pct : 100.0;
+                    const entryPrice = parseFloat(t.entry_price) || 0.0;
+                    const originalQty = parseFloat(t.original_qty) || parseFloat(t.qty) || 0.0;
+                    const initialFilledMargin = leverage > 0 ? (originalQty * entryPrice) / leverage : (originalQty * entryPrice);
+
+                    let fillPct = 100.0;
+                    if (t.fill_pct !== undefined) {
+                        fillPct = t.fill_pct;
+                    } else if (originalSize > 0 && initialFilledMargin > 0) {
+                        fillPct = Math.min(100.0, (initialFilledMargin / originalSize) * 100.0);
+                    }
                     const fillPctStr = fillPct.toFixed(1) + '%';
                     const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
@@ -1850,7 +1859,16 @@
                 const tradeLeverage = parseFloat(trade.leverage) || 1.0;
                 const tradeLeveragedVal = (originalSize * tradeLeverage).toFixed(2);
                 
-                const fillPct = (trade.fill_pct !== undefined) ? trade.fill_pct : 100.0;
+                const entryPrice = parseFloat(trade.entry_price) || 0.0;
+                const originalQty = parseFloat(trade.original_qty) || parseFloat(trade.qty) || 0.0;
+                const initialFilledMargin = tradeLeverage > 0 ? (originalQty * entryPrice) / tradeLeverage : (originalQty * entryPrice);
+
+                let fillPct = 100.0;
+                if (trade.fill_pct !== undefined) {
+                    fillPct = trade.fill_pct;
+                } else if (originalSize > 0 && initialFilledMargin > 0) {
+                    fillPct = Math.min(100.0, (initialFilledMargin / originalSize) * 100.0);
+                }
                 const fillPctStr = fillPct.toFixed(1) + '%';
                 const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 

@@ -47,7 +47,7 @@ class EnsembleClassifier:
     """
     Blends XGBoost, LightGBM, and CatBoost classifiers using average probability voting.
     """
-    def __init__(self, xgb_model, lgb_model, cat_model):
+    def __init__(self, xgb_model, lgb_model=None, cat_model=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
@@ -55,13 +55,17 @@ class EnsembleClassifier:
     def fit(self, X, y, sample_weight=None):
         X_arr = np.asarray(X, dtype=float)
         self.xgb_model.fit(X_arr, y, sample_weight=sample_weight)
-        self.lgb_model.fit(X_arr, y, sample_weight=sample_weight)
-        self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
+        if self.lgb_model is not None:
+            self.lgb_model.fit(X_arr, y, sample_weight=sample_weight)
+        if self.cat_model is not None:
+            self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
         return self
 
     def predict_proba(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
         xgb_prob = self.xgb_model.predict_proba(X_arr)
+        if self.lgb_model is None or self.cat_model is None:
+            return xgb_prob
         lgb_prob = self.lgb_model.predict_proba(X_arr)
         cat_prob = self.cat_model.predict_proba(X_arr)
         if weights is None:
@@ -79,7 +83,7 @@ class EnsembleRegressor:
     """
     Blends XGBoost, LightGBM, and CatBoost regressors using simple averaging.
     """
-    def __init__(self, xgb_model, lgb_model, cat_model):
+    def __init__(self, xgb_model, lgb_model=None, cat_model=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
@@ -87,13 +91,17 @@ class EnsembleRegressor:
     def fit(self, X, y):
         X_arr = np.asarray(X, dtype=float)
         self.xgb_model.fit(X_arr, y)
-        self.lgb_model.fit(X_arr, y)
-        self.cat_model.fit(X_arr, y)
+        if self.lgb_model is not None:
+            self.lgb_model.fit(X_arr, y)
+        if self.cat_model is not None:
+            self.cat_model.fit(X_arr, y)
         return self
 
     def predict(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
         xgb_pred = self.xgb_model.predict(X_arr)
+        if self.lgb_model is None or self.cat_model is None:
+            return xgb_pred
         lgb_pred = self.lgb_model.predict(X_arr)
         cat_pred = self.cat_model.predict(X_arr)
         if weights is None:
@@ -121,6 +129,10 @@ def load_ensemble_classifier(prefix, n_features=54):
     xgb = XGBClassifier()
     xgb.load_model(f"{prefix}_xgb.json")
     
+    if os.environ.get("SPACE_ID"):
+        # Run extremely lightweight model footprint on HF spaces (no LightGBM/CatBoost to prevent OOM)
+        return EnsembleClassifier(xgb, None, None)
+        
     lgb_clf = LGBMClassifier(objective="multiclass", num_class=3)
     lgb_clf._Booster = lgb.Booster(model_file=f"{prefix}_lgb.txt")
     lgb_clf.fitted_ = True
@@ -148,6 +160,10 @@ def load_ensemble_regressor(prefix, n_features=54):
     xgb = XGBRegressor()
     xgb.load_model(f"{prefix}_xgb.json")
     
+    if os.environ.get("SPACE_ID"):
+        # Run extremely lightweight model footprint on HF spaces (no LightGBM/CatBoost to prevent OOM)
+        return EnsembleRegressor(xgb, None, None)
+        
     lgb_reg = LGBMRegressor()
     lgb_reg._Booster = lgb.Booster(model_file=f"{prefix}_lgb.txt")
     lgb_reg.fitted_ = True
