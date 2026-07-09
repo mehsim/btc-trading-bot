@@ -3361,13 +3361,13 @@ def get_bybit_active_limit_order_id(symbol, side):
 def sync_active_positions_from_bybit():
     """Real-time Sync: Sync all active trades from Bybit to keep bot_state completely aligned with testnet/live."""
     if TRADE_MODE == "simulation":
-        return
+        return True
     
     try:
         pos_list = get_all_bybit_positions()
         if pos_list is None:
             print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
-            return
+            return False
         
         # Filter for positions with non-zero size
         open_positions = {}
@@ -3657,8 +3657,10 @@ def sync_active_positions_from_bybit():
                     
             if recovered > 0:
                 save_history()
+            return True
     except Exception as e:
         print(f"[Crash Recovery] Error checking Bybit: {e}")
+        return False
 
 def main():
     global live_price, last_ws_update_time
@@ -3728,13 +3730,17 @@ def main():
         sync_interval = 30.0 if has_active_positions else 120.0
         
         if (current_time - last_position_sync_time >= sync_interval):
-            sync_active_positions_from_bybit()
-            last_position_sync_time = current_time
+            success = sync_active_positions_from_bybit()
+            if success:
+                last_position_sync_time = current_time
+            else:
+                # Retry in 5 seconds
+                last_position_sync_time = current_time - sync_interval + 5.0
         
         # 1. Health check & current price update (Adaptive to save proxy bandwidth)
         # Rely on background run_fallback_price_updater. Only query directly if live_price is None
         # or has not been updated in over 10 minutes (600s) as a fail-safe.
-        if live_price is None or (current_time - last_ws_update_time > 600.0):
+        if live_price is None or (current_time - last_ws_update_time > 30.0):
             fallback_price = get_fallback_price()
             if fallback_price is not None:
                 print(f"[{get_pkt_time().strftime('%H:%M:%S')}] WebSocket/Fallback price is stale or disconnected. Fetching price: {fallback_price:.2f}")
@@ -4027,7 +4033,8 @@ def main():
                     
                     # 1. Check timer programmatic exit (applies to both simulation and live)
                     if current_time >= end_time and not half_closed:
-                        lookahead = 10
+                        cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
+                        lookahead = cfg.get("lookahead", 10)
                         exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
                     
                     # 2. Check stagnation programmatic exit (applies to both simulation and live)
@@ -4135,8 +4142,11 @@ def main():
                         raw_return_pct = actual_change_pct if direction == "Bullish" else -actual_change_pct
                         leverage = active_trade.get("leverage", 1.0)
                         gross_pnl = position_size_usd * (raw_return_pct * leverage / 100.0)
-                        taker_fee_cost = position_size_usd * leverage * 0.00055 * 2  # 0.055% taker per side on leveraged size
-                        realized_pnl = gross_pnl - taker_fee_cost
+                        entry_fee_rate = 0.0002  # Assumed Maker entry
+                        exit_fee_rate = 0.0002 if not is_stop_loss else 0.00055  # Limit exit vs Stop Loss market close
+                        roundtrip_fee_rate = entry_fee_rate + exit_fee_rate
+                        fee_cost = position_size_usd * leverage * roundtrip_fee_rate
+                        realized_pnl = gross_pnl - fee_cost
                         net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
                         
                         if realized_pnl < -position_size_usd:
@@ -4803,7 +4813,8 @@ def main():
                                             
                                         leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
-                                        lookahead = 10
+                                        cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
+                                        lookahead = cfg.get("lookahead", 10)
                                         duration_seconds = int(iv) * 60.0 * lookahead
                                         import uuid
                                         trade_uuid = str(uuid.uuid4())[:8]
