@@ -4755,9 +4755,13 @@ def main():
                                     else:
                                         print(f"[{iv}m Half-Kelly Sizing] Kelly Fraction is 0 or negative. Trade sizing unchanged.")
 
+                                    # Enforce trade size before leverage to be between 2.0 and 3.0 USD
+                                    position_size_usd = max(2.0, min(3.0, position_size_usd))
+                                    print(f"[{iv}m Trade Size Boundary Check] Clipped size before leverage: ${position_size_usd:.2f}")
+
                                     # Ensure total size of active trades does not exceed the wallet balance
-                                    min_bal_limit = 10.0
-                                    min_size_limit = 10.0
+                                    min_bal_limit = 2.0
+                                    min_size_limit = 2.0
                                     
                                     wallet_exceeded = False
                                     if current_bal <= min_bal_limit:
