@@ -796,6 +796,9 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
     if res.get("retCode") == 0:
         print(f"[Bybit API] Successfully updated Stop Loss on Bybit to {sl_price:.4f} for {symbol}.")
         return True
+    elif "not modified" in str(res.get("retMsg", "")).lower() or res.get("retCode") == 130089:
+        print(f"[Bybit API] Stop Loss for {symbol} is already set to {sl_price:.4f} (not modified).")
+        return True
     else:
         print(f"[Bybit API Error] Failed to update Stop Loss for {symbol}: {res.get('retMsg')}")
         return False
@@ -840,6 +843,9 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
     res = bybit_post_request("/v5/position/trading-stop", payload)
     if res.get("retCode") == 0:
         print(f"[Bybit API] Successfully updated Take Profit on Bybit to {tp_price:.4f} for {symbol}.")
+        return True
+    elif "not modified" in str(res.get("retMsg", "")).lower() or res.get("retCode") == 130089:
+        print(f"[Bybit API] Take Profit for {symbol} is already set to {tp_price:.4f} (not modified).")
         return True
     else:
         print(f"[Bybit API Error] Failed to update Take Profit for {symbol}: {res.get('retMsg')}")
