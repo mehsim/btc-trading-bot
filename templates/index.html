@@ -1262,6 +1262,7 @@
                         <tr>
                             <th>Timeframe</th>
                             <th>Symbol</th>
+                            <th class="hide-mobile">Entry Time</th>
                             <th>Direction</th>
                             <th class="hide-mobile">Confidence</th>
                             <th class="hide-mobile">Leverage</th>
@@ -1279,7 +1280,7 @@
                     </thead>
                     <tbody id="active-open-trades-rows">
                         <tr>
-                            <td colspan="15" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                            <td colspan="16" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1767,7 +1768,7 @@
             if (allActive.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="14" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
+                        <td colspan="16" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No active open trades at the moment.</td>
                     </tr>
                 `;
                 if (totalPnLElem) {
@@ -1849,6 +1850,15 @@
                 const fillPctStr = fillPct.toFixed(1) + '%';
                 const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
+                // Format Entry Time
+                let entryTimeStr = '—';
+                if (trade.entry_time) {
+                    const entryDate = new Date(trade.entry_time);
+                    const timeStr = entryDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                    const dateStr = entryDate.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+                    entryTimeStr = `${dateStr} ${timeStr}`;
+                }
+
                 htmlRows += `
                     <tr>
                         <td style="font-weight: 800; color: var(--accent-purple);">${trade.intervalStr}</td>
@@ -1862,6 +1872,7 @@
                                 Scale-out: ${trade.bybit_scale_out_order_id}
                             </div>` : ''}
                         </td>
+                        <td class="hide-mobile" style="color: var(--text-secondary); font-weight: 500;">${entryTimeStr}</td>
                         <td><span class="badge ${trade.direction === "Bullish" ? "badge-success" : "badge-danger"}">${trade.direction.toUpperCase()}</span></td>
                         <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 700;">${confidencePctStr}</td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${tradeLeverage.toFixed(1)}x</td>
