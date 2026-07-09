@@ -685,24 +685,35 @@ def train_models(interval=INTERVAL, pages=PAGES):
     print(f"\n=== Combined Training Dataset: {len(df)} total rows across {len(dfs)} symbols ===")
 
     # ==========================================
-    # AUTOML FEATURE SELECTION (NOISE REDUCTION)
+    # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
     # ==========================================
     import json
+    from sklearn.feature_selection import RFECV
     from xgboost import XGBClassifier
-    print("Running preliminary feature selection via XGBoost...")
+    print("\nRunning advanced feature selection via RFECV with Purged CV...")
     X_prelim = df[features]
     y_prelim = df["target_trend"]
-    prelim_model = XGBClassifier(n_estimators=80, max_depth=5, random_state=42, n_jobs=1)
-    prelim_model.fit(X_prelim, y_prelim)
-    importances = prelim_model.feature_importances_
-    indices = np.argsort(importances)[::-1]
     
-    # Keep top 35 features
-    top_n = min(35, len(features))
-    selected_features = [features[idx] for idx in indices[:top_n]]
-    print(f"Feature selection complete: Selected top {top_n} features out of {len(features)}:")
+    # Use a small estimator and 3-fold Purged CV for rapid feature elimination
+    cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
+    estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
+    
+    selector = RFECV(
+        estimator=estimator,
+        step=2,
+        cv=cv_selector,
+        scoring="accuracy",
+        min_features_to_select=20,
+        n_jobs=1
+    )
+    
+    print("Fitting RFECV model (this may take a few seconds)...")
+    selector.fit(X_prelim, y_prelim)
+    
+    selected_features = [f for f, support in zip(features, selector.support_) if support]
+    print(f"RFECV complete: Selected optimal subset of {len(selected_features)} features (out of {len(features)}):")
     for rank, f_name in enumerate(selected_features, 1):
-        print(f"  {rank}. {f_name} (importance: {importances[features.index(f_name)]:.4f})")
+        print(f"  {rank}. {f_name}")
         
     # Save selected features list to file
     features_filename = f"selected_features_{interval}.json"

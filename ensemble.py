@@ -16,6 +16,9 @@ class PurgedEmbargoTimeSeriesSplit:
         self.lookahead = lookahead
         self.embargo_pct = embargo_pct
 
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return self.n_splits
+
     def split(self, X, y=None, groups=None):
         n_samples = len(X)
         indices = np.arange(n_samples)
