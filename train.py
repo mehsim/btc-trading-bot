@@ -678,7 +678,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     print("Running preliminary feature selection via XGBoost...")
     X_prelim = df[features]
     y_prelim = df["target_trend"]
-    prelim_model = XGBClassifier(n_estimators=80, max_depth=5, random_state=42, n_jobs=-1)
+    prelim_model = XGBClassifier(n_estimators=80, max_depth=5, random_state=42, n_jobs=1)
     prelim_model.fit(X_prelim, y_prelim)
     importances = prelim_model.feature_importances_
     indices = np.argsort(importances)[::-1]

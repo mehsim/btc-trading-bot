@@ -13,4 +13,5 @@ torch
 optuna
 lightgbm
 catboost
-PySocks
+PySocks
+aiohttp

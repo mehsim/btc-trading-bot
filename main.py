@@ -47,6 +47,36 @@ import websocket
 print("[System Debug] websocket imported.")
 import json
 import requests
+import asyncio
+import aiohttp
+import threading
+import time
+
+# Dedicated background thread and loop for async HTTP calls
+_async_loop = None
+_aiohttp_session = None
+
+def _start_async_loop():
+    global _async_loop
+    _async_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_async_loop)
+    _async_loop.run_forever()
+
+_async_thread = threading.Thread(target=_start_async_loop, daemon=True)
+_async_thread.start()
+
+# Wait for loop thread to start
+while _async_loop is None or not _async_loop.is_running():
+    time.sleep(0.01)
+
+# Initialize ClientSession inside the loop thread to make it thread-safe
+async def _init_session():
+    global _aiohttp_session
+    connector = aiohttp.TCPConnector(ssl=False, limit=100, keepalive_timeout=30)
+    _aiohttp_session = aiohttp.ClientSession(connector=connector)
+
+asyncio.run_coroutine_threadsafe(_init_session(), _async_loop).result()
+
 print("[System Debug] Importing pandas/numpy/joblib...")
 import pandas as pd
 import numpy as np
@@ -412,13 +442,23 @@ def get_bybit_time_offset():
         if _cached_time_offset is not None:
             return _cached_time_offset
             
-    session = get_shared_session()
     import time
+    
+    async def do_time_sync():
+        proxy_dict = get_bybit_proxies()
+        proxy_url = proxy_dict.get("https") or proxy_dict.get("http") if proxy_dict else None
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with _aiohttp_session.get(f"{BYBIT_BASE_URL}/v5/market/time", proxy=proxy_url, timeout=timeout) as resp:
+            status = resp.status
+            data = await resp.json()
+            return status, data
+
     for attempt in range(3):
         try:
-            resp = session.get(f"{BYBIT_BASE_URL}/v5/market/time", timeout=5)
-            if resp.status_code == 200:
-                server_time = int(resp.json()["result"]["timeNano"]) // 1000000
+            future = asyncio.run_coroutine_threadsafe(do_time_sync(), _async_loop)
+            status, res = future.result(timeout=7)
+            if status == 200:
+                server_time = int(res["result"]["timeNano"]) // 1000000
                 local_time = int(time.time() * 1000)
                 offset = server_time - local_time
                 print(f"[Bybit API] Successfully synced time offset: {offset}ms")
@@ -435,7 +475,6 @@ def bybit_post_request(endpoint, payload):
     import time
     import hmac
     import hashlib
-    session = get_shared_session()
     
     api_key = os.getenv("BYBIT_API_KEY", "").strip()
     api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
@@ -465,17 +504,31 @@ def bybit_post_request(endpoint, payload):
     
     url = f"{BYBIT_BASE_URL}{endpoint}"
     
+    async def do_post(url, headers, json_data):
+        proxy_dict = get_bybit_proxies()
+        proxy_url = proxy_dict.get("https") or proxy_dict.get("http") if proxy_dict else None
+        timeout = aiohttp.ClientTimeout(total=8)
+        async with _aiohttp_session.post(url, headers=headers, json=json_data, proxy=proxy_url, timeout=timeout) as resp:
+            status = resp.status
+            try:
+                data = await resp.json()
+            except Exception:
+                text = await resp.text()
+                data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
+            return status, data
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            resp = session.post(url, headers=headers, json=payload, timeout=8)
-            if resp.status_code == 200:
-                return resp.json()
+            future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
+            status, res = future.result(timeout=10)
+            if status == 200:
+                return res
             else:
-                if resp.status_code in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
+                if status in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
                     time.sleep(1 + attempt * 1.5)
                     continue
-                return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
+                return res if isinstance(res, dict) else {"retCode": status, "retMsg": str(res)}
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1 + attempt * 1.5)
@@ -584,7 +637,6 @@ def bybit_get_request(endpoint, query_params):
     import hmac
     import hashlib
     import urllib.parse
-    session = get_shared_session()
     
     api_key = os.getenv("BYBIT_API_KEY", "").strip()
     api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
@@ -615,17 +667,31 @@ def bybit_get_request(endpoint, query_params):
     
     url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
     
+    async def do_get(url, headers):
+        proxy_dict = get_bybit_proxies()
+        proxy_url = proxy_dict.get("https") or proxy_dict.get("http") if proxy_dict else None
+        timeout = aiohttp.ClientTimeout(total=8)
+        async with _aiohttp_session.get(url, headers=headers, proxy=proxy_url, timeout=timeout) as resp:
+            status = resp.status
+            try:
+                data = await resp.json()
+            except Exception:
+                text = await resp.text()
+                data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
+            return status, data
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            resp = session.get(url, headers=headers, timeout=8)
-            if resp.status_code == 200:
-                return resp.json()
+            future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
+            status, res = future.result(timeout=10)
+            if status == 200:
+                return res
             else:
-                if resp.status_code in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
+                if status in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
                     time.sleep(1 + attempt * 1.5)
                     continue
-                return {"retCode": resp.status_code, "retMsg": f"HTTP Error: {resp.text}"}
+                return res if isinstance(res, dict) else {"retCode": status, "retMsg": str(res)}
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1 + attempt * 1.5)
@@ -792,6 +858,18 @@ def place_bybit_limit_order(symbol, side, qty, price):
     }
     res = bybit_post_request("/v5/order/create", payload)
     return res
+
+def get_bybit_bid_ask(symbol):
+    res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
+    if res.get("retCode") == 0:
+        lst = res.get("result", {}).get("list", [])
+        if lst:
+            tick = lst[0]
+            bid = float(tick.get("bid1Price", 0.0))
+            ask = float(tick.get("ask1Price", 0.0))
+            last = float(tick.get("lastPrice", 0.0))
+            return bid, ask, last
+    return None, None, None
 
 def get_bybit_last_execution(symbol):
     res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "limit": 1})
@@ -1385,14 +1463,28 @@ def retrain_models_thread(is_manual=False):
             bot_state["retraining_status"] = "Optimizing..."
             print(f"[Retraining] Starting {'manual ' if is_manual else 'scheduled '}rolling retraining of models for 1h, 2h, 4h, and 6h intervals...")
             
-            # Import train_models dynamically to avoid circular import issues
-            from train import train_models
+            import sys
+            import subprocess
             
-            # Retrain for all intervals
+            # Configure environment variables to restrict multi-threading inside the child process
+            env = os.environ.copy()
+            env["OMP_NUM_THREADS"] = "1"
+            env["MKL_NUM_THREADS"] = "1"
+            env["OPENBLAS_NUM_THREADS"] = "1"
+            env["VECLIB_MAXIMUM_THREADS"] = "1"
+            env["NUMEXPR_NUM_THREADS"] = "1"
+            
+            # Retrain for all intervals sequentially using nice -n 19 to yield CPU to active trading bot
             for iv in ["60", "120", "240", "360"]:
-                print(f"[Retraining] Retraining models for interval {iv}m...")
-                train_models(interval=iv, pages=5)
-                
+                print(f"[Retraining] Spawning throttled subprocess for interval {iv}m...")
+                cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "5"]
+                p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stdout, stderr = p.communicate()
+                if p.returncode == 0:
+                    print(f"[Retraining] Retraining for interval {iv}m finished successfully.")
+                else:
+                    print(f"[Retraining Error] Retraining for interval {iv}m failed: {stderr}")
+                    
             print("[Retraining] Rolling retraining completed successfully. Model files updated on disk.")
         except Exception as e:
             print(f"[Retraining] Error during retraining process: {e}")
@@ -4680,36 +4772,69 @@ def main():
                                             leverage_ok = set_bybit_leverage(symbol, leverage_val)
                                             if leverage_ok:
                                                 side = "Buy" if ml_trend == "Bullish" else "Sell"
-                                                # 2. Place entry order on Bybit (without pre-fill SL/TP to prevent slippage mismatch)
-                                                order_res = place_bybit_order(
-                                                    symbol=symbol,
-                                                    side=side,
-                                                    qty=qty_str
-                                                )
-                                                if order_res.get("retCode") == 0:
-                                                    bybit_order_id = order_res.get("result", {}).get("orderId")
-                                                    print(f"[{symbol} {iv}m API] Success! Bybit Order Placed. Order ID: {bybit_order_id}")
-                                                    actual_qty = raw_qty
-                                                    # Query actual fill price and filled quantity from order details
-                                                    time.sleep(0.5)  # Brief delay for fill to register
-                                                    order_details = get_bybit_order_details(symbol, bybit_order_id)
-                                                    if order_details:
-                                                        actual_fill_price = float(order_details.get("avgPrice", entry_price))
-                                                        actual_filled_qty = float(order_details.get("cumExecQty", 0.0))
-                                                        if actual_fill_price > 0:
-                                                            entry_price = actual_fill_price
-                                                            print(f"[{symbol} {iv}m API] Actual fill price: ${entry_price:.4f}")
-                                                        if actual_filled_qty > 0:
-                                                            actual_qty = actual_filled_qty
-                                                            print(f"[{symbol} {iv}m API] Actual filled quantity: {actual_qty}")
+                                                
+                                                # 2. Place Limit Maker entry order with dynamic price chasing to ensure zero slippage
+                                                bybit_success = False
+                                                bybit_order_id = None
+                                                actual_qty = raw_qty
+                                                
+                                                # Try up to 5 chases (12s each = 60s max)
+                                                for chase in range(5):
+                                                    bid, ask, last = get_bybit_bid_ask(symbol)
+                                                    if bid is None or ask is None:
+                                                        bid, ask = entry_price, entry_price
+                                                    
+                                                    # Maker execution price selection
+                                                    limit_price = bid if side == "Buy" else ask
+                                                    print(f"[{symbol} {iv}m API] Placing Limit Maker order at ${limit_price:.4f} (Chase {chase+1}/5)...")
+                                                    order_res = place_bybit_limit_order(symbol, side, qty_str, limit_price)
+                                                    
+                                                    if order_res.get("retCode") == 0:
+                                                        bybit_order_id = order_res.get("result", {}).get("orderId")
+                                                        # Wait for fill (poll status every 3s for 12s)
+                                                        filled = False
+                                                        for _ in range(4):
+                                                            time.sleep(3)
+                                                            order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                            if order_details:
+                                                                status = order_details.get("orderStatus")
+                                                                if status == "Filled":
+                                                                    entry_price = float(order_details.get("avgPrice", limit_price))
+                                                                    actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                                    filled = True
+                                                                    bybit_success = True
+                                                                    break
+                                                                elif status in ["Cancelled", "Rejected"]:
+                                                                    break
+                                                        if filled:
+                                                            print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled at ${entry_price:.4f}.")
+                                                            break
+                                                        else:
+                                                            print(f"[{symbol} {iv}m API] Order unfilled after 12s. Cancelling and re-quoting...")
+                                                            cancel_bybit_order(symbol, bybit_order_id)
                                                     else:
-                                                        fill_exec = get_bybit_last_execution(symbol)
-                                                        if fill_exec:
-                                                            actual_fill_price = float(fill_exec.get("execPrice", entry_price))
-                                                            if actual_fill_price > 0:
-                                                                entry_price = actual_fill_price
-                                                                print(f"[{symbol} {iv}m API] Fallback actual fill price: ${entry_price:.4f}")
-                                                                
+                                                        print(f"[{symbol} {iv}m API WARNING] Limit order placement failed: {order_res.get('retMsg')} (waiting 2s before retry)")
+                                                        time.sleep(2)
+                                                        
+                                                # Fallback to Market order if all limit order chases failed to ensure we don't miss the entry
+                                                if not bybit_success:
+                                                    print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
+                                                    order_res = place_bybit_order(symbol, side, qty_str)
+                                                    if order_res.get("retCode") == 0:
+                                                        bybit_order_id = order_res.get("result", {}).get("orderId")
+                                                        bybit_success = True
+                                                        time.sleep(0.5)
+                                                        order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                        if order_details:
+                                                            entry_price = float(order_details.get("avgPrice", entry_price))
+                                                            actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                        else:
+                                                            fill_exec = get_bybit_last_execution(symbol)
+                                                            if fill_exec:
+                                                                entry_price = float(fill_exec.get("execPrice", entry_price))
+                                                            actual_qty = raw_qty
+                                                            
+                                                if bybit_success:
                                                     # 3. Recalculate SL/TP targets based on actual entry_price
                                                     if ml_trend == "Bullish":
                                                         stop_loss_price = entry_price - sl_multiplier * atr_dollars
