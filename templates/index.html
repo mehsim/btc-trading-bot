@@ -1850,13 +1850,21 @@
                 const fillPctStr = fillPct.toFixed(1) + '%';
                 const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
 
-                // Format Entry Time
+                // Format Entry Time in Pakistan Standard Time (PKT)
                 let entryTimeStr = '—';
                 if (trade.entry_time) {
                     const entryDate = new Date(trade.entry_time);
-                    const timeStr = entryDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-                    const dateStr = entryDate.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
-                    entryTimeStr = `${dateStr} ${timeStr}`;
+                    const options = {
+                        timeZone: 'Asia/Karachi',
+                        year: 'numeric',
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: true
+                    };
+                    entryTimeStr = entryDate.toLocaleString('en-US', options).replace(',', '');
                 }
 
                 htmlRows += `
