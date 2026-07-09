@@ -592,7 +592,29 @@ def format_bybit_qty(symbol, qty):
         "SUIUSDT": 0,
         "APTUSDT": 1
     }
+    min_limits = {
+        "BTCUSDT": 0.001,
+        "ETHUSDT": 0.01,
+        "SOLUSDT": 0.1,
+        "BNBUSDT": 0.1,
+        "AVAXUSDT": 0.1,
+        "NEARUSDT": 0.1,
+        "LINKUSDT": 0.1,
+        "LTCUSDT": 0.1,
+        "ADAUSDT": 1.0,
+        "XRPUSDT": 1.0,
+        "DOGEUSDT": 1.0,
+        "DOTUSDT": 1.0,
+        "SUIUSDT": 1.0,
+        "APTUSDT": 0.1
+    }
     p = precisions.get(symbol, 1)
+    min_val = min_limits.get(symbol, 0.1)
+    
+    # Enforce minimum order quantity limits
+    if qty < min_val:
+        qty = min_val
+        
     if p == 0:
         return str(int(round(qty)))
     return str(round(qty, p))
