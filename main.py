@@ -177,55 +177,59 @@ economic_calendar_cache = None
 last_calendar_fetch = 0.0
 economic_calendar_lock = threading.Lock()
 
+# Re-entrant lock for thread-safe access to bot_state and file IO
+bot_state_lock = threading.RLock()
+
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
 
 def save_history():
-    # Cap prediction history at 500 entries
-    if len(bot_state["prediction_history"]) > 500:
-        bot_state["prediction_history"] = bot_state["prediction_history"][-500:]
-    # Recompute win rate by TF from trade history
-    for tf_key in ["60", "120", "240", "360"]:
-        tf_trades = [t for t in bot_state["trade_history"] if str(t.get("interval")) == tf_key]
-        if tf_trades:
-            wins = sum(1 for t in tf_trades if t.get("success"))
-            bot_state["win_rate_by_tf"][tf_key] = round(wins / len(tf_trades) * 100, 1)
-        else:
-            bot_state["win_rate_by_tf"][tf_key] = None
-    data = {
-        "simulated_balance": bot_state["simulated_balance"],
-        "trade_history": bot_state["trade_history"],
-        "prediction_history": bot_state["prediction_history"],
-        "active_trade_1h": bot_state.get("active_trade_1h", []),
-        "active_trade_2h": bot_state.get("active_trade_2h", []),
-        "active_trade_4h": bot_state.get("active_trade_4h", []),
-        "active_trade_6h": bot_state.get("active_trade_6h", []),
-        "bot_running": bot_state.get("bot_running", True),
-        "fresh_reset_v3": bot_state.get("fresh_reset_v3", False)
-    }
-    try:
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(data, f)
-            
-        # If running on Hugging Face and write token is available, backup to HF Dataset
-        token = os.environ.get("HF_TOKEN") or os.environ.get("token")
-        space_id = os.environ.get("SPACE_ID")
-        if token and space_id:
-            try:
-                from huggingface_hub import HfApi
-                api = HfApi()
-                dataset_id = f"{space_id}-history"
-                api.create_repo(repo_id=dataset_id, repo_type="dataset", exist_ok=True, token=token)
-                api.upload_file(
-                    path_or_fileobj=HISTORY_FILE,
-                    path_in_repo="dashboard_history.json",
-                    repo_id=dataset_id,
-                    repo_type="dataset",
-                    token=token
-                )
-            except Exception as hf_err:
-                print(f"HF Space Sync: Failed to backup history to Dataset: {hf_err}")
-    except Exception as e:
-        print(f"Error saving history to disk: {e}")
+    with bot_state_lock:
+        # Cap prediction history at 500 entries
+        if len(bot_state["prediction_history"]) > 500:
+            bot_state["prediction_history"] = bot_state["prediction_history"][-500:]
+        # Recompute win rate by TF from trade history
+        for tf_key in ["60", "120", "240", "360"]:
+            tf_trades = [t for t in bot_state["trade_history"] if str(t.get("interval")) == tf_key]
+            if tf_trades:
+                wins = sum(1 for t in tf_trades if t.get("success"))
+                bot_state["win_rate_by_tf"][tf_key] = round(wins / len(tf_trades) * 100, 1)
+            else:
+                bot_state["win_rate_by_tf"][tf_key] = None
+        data = {
+            "simulated_balance": bot_state["simulated_balance"],
+            "trade_history": bot_state["trade_history"],
+            "prediction_history": bot_state["prediction_history"],
+            "active_trade_1h": bot_state.get("active_trade_1h", []),
+            "active_trade_2h": bot_state.get("active_trade_2h", []),
+            "active_trade_4h": bot_state.get("active_trade_4h", []),
+            "active_trade_6h": bot_state.get("active_trade_6h", []),
+            "bot_running": bot_state.get("bot_running", True),
+            "fresh_reset_v3": bot_state.get("fresh_reset_v3", False)
+        }
+        try:
+            with open(HISTORY_FILE, "w") as f:
+                json.dump(data, f)
+                
+            # If running on Hugging Face and write token is available, backup to HF Dataset
+            token = os.environ.get("HF_TOKEN") or os.environ.get("token")
+            space_id = os.environ.get("SPACE_ID")
+            if token and space_id:
+                try:
+                    from huggingface_hub import HfApi
+                    api = HfApi()
+                    dataset_id = f"{space_id}-history"
+                    api.create_repo(repo_id=dataset_id, repo_type="dataset", exist_ok=True, token=token)
+                    api.upload_file(
+                        path_or_fileobj=HISTORY_FILE,
+                        path_in_repo="dashboard_history.json",
+                        repo_id=dataset_id,
+                        repo_type="dataset",
+                        token=token
+                    )
+                except Exception as hf_err:
+                    print(f"HF Space Sync: Failed to backup history to Dataset: {hf_err}")
+        except Exception as e:
+            print(f"Error saving history to disk: {e}")
 
 def migrate_active_trades(active_trades_list):
     if not isinstance(active_trades_list, list):
@@ -4832,21 +4836,25 @@ def main():
                                                         
                                                 # Fallback to Market order if all limit order chases failed to ensure we don't miss the entry
                                                 if not bybit_success:
-                                                    print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
-                                                    order_res = place_bybit_order(symbol, side, qty_str)
-                                                    if order_res.get("retCode") == 0:
-                                                        bybit_order_id = order_res.get("result", {}).get("orderId")
-                                                        bybit_success = True
-                                                        time.sleep(0.5)
-                                                        order_details = get_bybit_order_details(symbol, bybit_order_id)
-                                                        if order_details:
-                                                            entry_price = float(order_details.get("avgPrice", entry_price))
-                                                            actual_qty = float(order_details.get("cumExecQty", raw_qty))
-                                                        else:
-                                                            fill_exec = get_bybit_last_execution(symbol)
-                                                            if fill_exec:
-                                                                entry_price = float(fill_exec.get("execPrice", entry_price))
-                                                            actual_qty = raw_qty
+                                                    atr_norm = float(latest_candle.get("ATR_norm", 0.0))
+                                                    if atr_norm >= 0.015:
+                                                        print(f"[{symbol} {iv}m API BLOCK] Limit chases failed. Market fallback blocked due to extreme volatility (ATR_norm: {atr_norm:.4f} >= 0.015).")
+                                                    else:
+                                                        print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
+                                                        order_res = place_bybit_order(symbol, side, qty_str)
+                                                        if order_res.get("retCode") == 0:
+                                                            bybit_order_id = order_res.get("result", {}).get("orderId")
+                                                            bybit_success = True
+                                                            time.sleep(0.5)
+                                                            order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                            if order_details:
+                                                                entry_price = float(order_details.get("avgPrice", entry_price))
+                                                                actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                            else:
+                                                                fill_exec = get_bybit_last_execution(symbol)
+                                                                if fill_exec:
+                                                                    entry_price = float(fill_exec.get("execPrice", entry_price))
+                                                                actual_qty = raw_qty
                                                             
                                                 if bybit_success:
                                                     # 3. Recalculate SL/TP targets based on actual entry_price
