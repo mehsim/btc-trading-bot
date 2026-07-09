@@ -11,7 +11,45 @@ load_dotenv()
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.db")
+
+def init_db():
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kline_data (
+            symbol TEXT,
+            interval TEXT,
+            timestamp REAL,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume REAL,
+            turnover REAL,
+            UNIQUE(symbol, interval, timestamp) ON CONFLICT REPLACE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS oi_data (
+            symbol TEXT,
+            interval TEXT,
+            timestamp REAL,
+            open_interest REAL,
+            UNIQUE(symbol, interval, timestamp) ON CONFLICT REPLACE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS funding_data (
+            symbol TEXT,
+            timestamp REAL,
+            funding_rate REAL,
+            UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 def get_bybit_proxies():
     # If running on Hugging Face and no explicit BYBIT_PROXY is set, bypass internal HF proxy
@@ -66,21 +104,27 @@ def bybit_public_get(url, params=None, headers=None, max_retries=3):
             raise e
 
 def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_file = os.path.join(CACHE_DIR, f"{symbol}_{interval}.csv")
-    
+    init_db()
     target_count = limit * pages
     
     # 1. Load cache if it exists
     df_cache = None
-    if os.path.exists(cache_file):
-        try:
-            df_cache = pd.read_csv(cache_file)
-            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
-            df_cache = df_cache.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-        except Exception as e:
-            print(f"[Cache Load Error] {e}. Rebuilding cache for {symbol} {interval}.")
-            df_cache = None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT timestamp, open, high, low, close, volume, turnover FROM kline_data WHERE symbol=? AND interval=? ORDER BY timestamp ASC",
+            (symbol, str(interval))
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if rows:
+            df_cache = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+    except Exception as e:
+        print(f"[Cache Load Error] {e}. Rebuilding cache for {symbol} {interval}.")
+        df_cache = None
 
     url = f"{BYBIT_BASE_URL}/v5/market/kline"
     headers = {
@@ -363,26 +407,40 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             df_combined = df_combined.iloc[-30000:]
             
         try:
-            df_combined.to_csv(cache_file, index=False)
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.executemany(
+                "INSERT OR REPLACE INTO kline_data (symbol, interval, timestamp, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(symbol, str(interval), float(row["timestamp"]), float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row["volume"]), float(row["turnover"])) for _, row in df_combined.iterrows()]
+            )
+            conn.commit()
+            conn.close()
         except Exception as e:
             print(f"[Cache Write Error] {e}")
 
     return df_history.iloc[-target_count:].reset_index(drop=True)
 
 def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_file = os.path.join(CACHE_DIR, f"{symbol}_{interval}_oi.csv")
-    
+    init_db()
     # 1. Load cache if it exists
     df_cache = None
-    if os.path.exists(cache_file):
-        try:
-            df_cache = pd.read_csv(cache_file)
-            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
-            df_cache = df_cache.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-        except Exception as e:
-            print(f"[OI Cache Load Error] {e}")
-            df_cache = None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT timestamp, open_interest FROM oi_data WHERE symbol=? AND interval=? ORDER BY timestamp ASC",
+            (symbol, str(interval))
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if rows:
+            df_cache = pd.DataFrame(rows, columns=["timestamp", "open_interest"])
+    except Exception as e:
+        print(f"[OI Cache Load Error] {e}")
+        df_cache = None
 
     url = f"{BYBIT_BASE_URL}/v5/market/open-interest"
     interval_time = "1h"
@@ -461,7 +519,15 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         
         # Save cache
         try:
-            df_history.to_csv(cache_file, index=False)
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.executemany(
+                "INSERT OR REPLACE INTO oi_data (symbol, interval, timestamp, open_interest) VALUES (?, ?, ?, ?)",
+                [(symbol, str(interval), float(row["timestamp"]), float(row["open_interest"])) for _, row in df_history.iterrows()]
+            )
+            conn.commit()
+            conn.close()
         except Exception as e:
             print(f"[OI Cache Write Error] {e}")
 
@@ -480,19 +546,25 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
         return _get_bybit_funding_history_impl(symbol, start_ts_ms, end_ts_ms)
 
 def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_file = os.path.join(CACHE_DIR, f"{symbol}_funding.csv")
-    
+    init_db()
     # 1. Load cache if it exists
     df_cache = None
-    if os.path.exists(cache_file):
-        try:
-            df_cache = pd.read_csv(cache_file)
-            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
-            df_cache = df_cache.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-        except Exception as e:
-            print(f"[Funding Cache Load Error] {e}")
-            df_cache = None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT timestamp, funding_rate FROM funding_data WHERE symbol=? ORDER BY timestamp ASC",
+            (symbol,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if rows:
+            df_cache = pd.DataFrame(rows, columns=["timestamp", "funding_rate"])
+    except Exception as e:
+        print(f"[Funding Cache Load Error] {e}")
+        df_cache = None
 
     url = f"{BYBIT_BASE_URL}/v5/market/funding/history"
     funding_data = []
@@ -560,7 +632,15 @@ def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_m
         
         # Save cache
         try:
-            df_history.to_csv(cache_file, index=False)
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.executemany(
+                "INSERT OR REPLACE INTO funding_data (symbol, timestamp, funding_rate) VALUES (?, ?, ?)",
+                [(symbol, float(row["timestamp"]), float(row["funding_rate"])) for _, row in df_history.iterrows()]
+            )
+            conn.commit()
+            conn.close()
         except Exception as e:
             print(f"[Funding Cache Write Error] {e}")
 

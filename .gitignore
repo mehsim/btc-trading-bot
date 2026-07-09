@@ -25,3 +25,7 @@ catboost_info/
 
 # Local candle cache
 kline_cache/
+kline_cache.db
+kline_cache.db-journal
+kline_cache.db-wal
+kline_cache.db-shm

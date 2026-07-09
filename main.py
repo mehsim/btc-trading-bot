@@ -12,6 +12,9 @@ load_dotenv()
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/linear" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/linear"
+BYBIT_PRIVATE_WS_URL = "wss://stream-testnet.bybit.com/v5/private" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/private"
+private_ws_connected = False
+private_ws_retry_delay = 5
 
 # ==========================================
 # TIMING & API/PROXY HIT INTERVALS
@@ -2136,6 +2139,112 @@ def start_ws():
         ws_retry_delay = min(ws_retry_delay * 2, 60)  # Backoff up to 60s
 
 # WebSocket thread is started inside if __name__ == "__main__" block at the bottom
+
+def on_private_open(ws):
+    global private_ws_connected
+    private_ws_connected = True
+    print("[WebSocket Private] Connected. Authenticating...")
+    api_key = os.getenv("BYBIT_API_KEY", "").strip()
+    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+    if not api_key or not api_secret:
+        print("[WebSocket Private] API Key or Secret missing. Cannot authenticate.")
+        ws.close()
+        return
+    import time
+    import hmac
+    import hashlib
+    import json
+    expires = int((time.time() + 10) * 1000)
+    signature_raw = f"GET/realtime{expires}"
+    signature = hmac.new(
+        api_secret.encode("utf-8"),
+        signature_raw.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    auth_payload = {
+        "op": "auth",
+        "args": [api_key, expires, signature]
+    }
+    ws.send(json.dumps(auth_payload))
+
+def on_private_message(ws, message):
+    import json
+    import time
+    try:
+        data = json.loads(message)
+        op = data.get("op")
+        topic = data.get("topic")
+        if op == "auth":
+            if data.get("success") is True:
+                print("[WebSocket Private] Authentication successful. Subscribing to topics...")
+                sub_payload = {
+                    "op": "subscribe",
+                    "args": ["position", "wallet", "order"]
+                }
+                ws.send(json.dumps(sub_payload))
+            else:
+                print(f"[WebSocket Private] Authentication failed: {data.get('ret_msg')}")
+                ws.close()
+        elif topic == "wallet":
+            wallet_data = data.get("data", [])
+            if wallet_data:
+                total_equity = wallet_data[0].get("totalEquity") or wallet_data[0].get("totalWalletBalance")
+                if total_equity:
+                    val = float(total_equity)
+                    with _balance_lock:
+                        global _cached_balance, _last_balance_fetch
+                        _cached_balance = val
+                        _last_balance_fetch = time.time()
+                    if TRADE_MODE != "simulation":
+                        bot_state["simulated_balance"] = val
+                    print(f"[WebSocket Private] Balance updated dynamically from wallet stream: {val}")
+        elif topic in ["position", "order"]:
+            print(f"[WebSocket Private] {topic.capitalize()} update event received. Triggering background position sync...")
+            import threading
+            threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
+    except Exception as e:
+        print(f"[WebSocket Private Message Error] {e}")
+
+def on_private_error(ws, error):
+    print(f"[WebSocket Private Error] {error}")
+
+def on_private_close(ws, close_status_code, close_msg):
+    global private_ws_connected
+    private_ws_connected = False
+    print(f"[WebSocket Private Closed] code={close_status_code}, msg={close_msg}")
+
+def start_private_ws():
+    global private_ws_connected, private_ws_retry_delay
+    url = BYBIT_PRIVATE_WS_URL
+    print(f"[WebSocket Private Connecting] url={url}")
+    proxy_host, proxy_port, proxy_auth, proxy_type_str = None, None, None, None
+    proxy_url = os.environ.get("BYBIT_PROXY")
+    if proxy_url:
+        proxy_host, proxy_port, proxy_auth, proxy_type_str = parse_proxy_url(proxy_url)
+    while True:
+        try:
+            ws = websocket.WebSocketApp(
+                url,
+                on_open=on_private_open,
+                on_message=on_private_message,
+                on_error=on_private_error,
+                on_close=on_private_close
+            )
+            import ssl
+            ws.run_forever(
+                ping_interval=20, ping_timeout=10,
+                http_proxy_host=proxy_host,
+                http_proxy_port=proxy_port,
+                http_proxy_auth=proxy_auth,
+                proxy_type=proxy_type_str,
+                sslopt={"cert_reqs": ssl.CERT_NONE}
+            )
+        except Exception as e:
+            print(f"[WebSocket Private run_forever exception] {e}")
+        private_ws_connected = False
+        print(f"[WebSocket Private] Reconnecting in {private_ws_retry_delay}s...")
+        time.sleep(private_ws_retry_delay)
+        private_ws_retry_delay = min(private_ws_retry_delay * 2, 60)
 
 
 # =========================
@@ -5310,6 +5419,8 @@ if __name__ == "__main__":
     threading.Thread(target=run_bybit_balance_updater, daemon=True).start()
     # Start Bybit WebSocket feed in a background thread
     threading.Thread(target=start_ws, daemon=True).start()
+    # Start Bybit Private WebSocket feed in a background thread
+    threading.Thread(target=start_private_ws, daemon=True).start()
     # Start Bybit REST API fallback price updater thread
     threading.Thread(target=run_fallback_price_updater, daemon=True).start()
     # Start automated rolling retraining scheduler in a background thread
