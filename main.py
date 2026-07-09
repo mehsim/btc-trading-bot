@@ -101,6 +101,35 @@ from datetime import datetime, timedelta
 def get_pkt_time():
     return datetime.utcnow() + timedelta(hours=5)
 
+def send_telegram_alert(message: str):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    proxies = None
+    tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+    if tg_proxy:
+        if "://" not in tg_proxy:
+            tg_proxy = "http://" + tg_proxy
+        proxies = {
+            "http": tg_proxy,
+            "https": tg_proxy
+        }
+    def _post():
+        try:
+            resp = requests.post(url, json=payload, proxies=proxies, timeout=10)
+            if resp.status_code != 200:
+                print(f"[Telegram Alert Error] Code {resp.status_code}: {resp.text}")
+        except Exception as err:
+            print(f"[Telegram Alert Exception] {err}")
+    threading.Thread(target=_post, daemon=True).start()
+
 print("[System Debug] Importing ta...")
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, ADXIndicator
@@ -1364,6 +1393,16 @@ def force_close_trade():
         "bybit_scale_out_order_id": trade_to_close.get("bybit_scale_out_order_id")
     })
     
+    send_telegram_alert(
+        f"🔴 *POSITION CLOSED (MANUAL)* 🔴\n"
+        f"• *Asset*: {symbol}\n"
+        f"• *Interval*: {interval}m\n"
+        f"• *Direction*: {direction}\n"
+        f"• *Exit Price*: ${actual_price:.2f}\n"
+        f"• *Realized PnL*: ${realized_pnl:+.2f} ({net_return_pct:+.2f}%)\n"
+        f"• *New Balance*: ${new_bal:.2f}"
+    )
+    
     for p in bot_state["prediction_history"]:
         if p.get("interval") == interval and p.get("symbol") == symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
             p["evaluation"] = {
@@ -1517,6 +1556,16 @@ def close_all_trades_internal(exit_reason):
                     "bybit_scale_out_order_id": t.get("bybit_scale_out_order_id")
                 })
                 
+                send_telegram_alert(
+                    f"🔴 *POSITION CLOSED (FORCE ALL)* 🔴\n"
+                    f"• *Asset*: {symbol}\n"
+                    f"• *Interval*: {interval}m\n"
+                    f"• *Direction*: {direction}\n"
+                    f"• *Exit Price*: ${actual_price:.2f}\n"
+                    f"• *Realized PnL*: ${realized_pnl:+.2f} ({net_return_pct:+.2f}%)\n"
+                    f"• *New Balance*: ${new_bal:.2f}"
+                )
+                
                 for p in bot_state["prediction_history"]:
                     if p.get("interval") == interval and p.get("symbol") == symbol and p.get("status") == "Traded" and (not p.get("evaluation") or not p["evaluation"].get("evaluated")):
                         p["evaluation"] = {
@@ -1665,6 +1714,7 @@ def retrain_models_thread(is_manual=False):
                     print(f"[Retraining Error] Retraining for interval {iv}m failed: {stderr}")
                     
             print("[Retraining] Rolling retraining completed successfully. Model files updated on disk.")
+            send_telegram_alert("🔄 *MODEL RETRAINING COMPLETE* 🔄\n• Rolling model retraining finished successfully.\n• Ensemble and meta-classifiers updated and re-loaded on disk.")
         except Exception as e:
             print(f"[Retraining] Error during retraining process: {e}")
         finally:
@@ -4486,7 +4536,7 @@ def main():
                             print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
                             print(f"Realized PnL: ${realized_pnl:+.2f}")
                         print(f"New Balance: ${new_bal:.2f} | Predicted Signal: {direction} ({trend_status})")
-                        print("==================================================\n")
+                        print("==================================================")
                         
                         # Update Completed Trade History in global state
                         bot_state["trade_history"].append({
@@ -4512,6 +4562,19 @@ def main():
                             "bybit_order_id": active_trade.get("bybit_order_id"),
                             "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
                         })
+                        
+                        send_telegram_alert(
+                            f"🔴 *POSITION CLOSED (AUTO)* 🔴\n"
+                            f"• *Asset*: {active_symbol}\n"
+                            f"• *Interval*: {iv}m\n"
+                            f"• *Direction*: {direction}\n"
+                            f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
+                            f"• *Entry Price*: ${entry_price:.2f}\n"
+                            f"• *Exit Price*: ${actual_price:.2f}\n"
+                            f"• *Realized PnL*: ${total_pnl:+.2f} (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
+                            f"• *New Balance*: ${new_bal:.2f}"
+                        )
+                        
                         
                         # Send email alert on any profitable trade exit
                         if total_pnl > 0:
@@ -4615,12 +4678,15 @@ def main():
             daily_profit = curr_bal - start_bal
             # Enable Daily Drawdown Circuit Breaker at 10%
             if daily_dd_pct >= 10.0:
+                if not bot_state.get("circuit_breaker_active", False):
+                    send_telegram_alert(f"⚠️ *DAILY DRAWDOWN CIRCUIT BREAKER* ⚠️\n• Start Balance: ${start_bal:.2f}\n• Current Balance: ${curr_bal:.2f}\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (>= 10%)\n• *Trading Halted* until reset.")
                 bot_state["circuit_breaker_active"] = True
                 print(f"[Circuit Breaker] TRIGGERED — Daily drawdown is {daily_dd_pct:.2f}% (>= 10.0%). Trading halted.")
             else:
                 bot_state["circuit_breaker_active"] = False
             if daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
                 bot_state["daily_goal_reached"] = True
+                send_telegram_alert(f"🎉 *DAILY PROFIT GOAL REACHED* 🎉\n• Daily Profit: *${daily_profit:.2f}* (Goal: $1,000)\n• Current Account Value: ${curr_bal:.2f}\n• Continuing trading to maximize gains.")
                 print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
             elif daily_profit < 1000.0:
                 bot_state["daily_goal_reached"] = False
@@ -5413,6 +5479,7 @@ if __name__ == "__main__":
     import threading
     # Start main bot loop in background thread
     threading.Thread(target=safe_main, daemon=True).start()
+    send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")
     # Start background news sentiment updater thread
     threading.Thread(target=run_news_sentiment_updater, daemon=True).start()
     # Start background Bybit balance updater thread
