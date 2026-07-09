@@ -4022,26 +4022,29 @@ def main():
                     mins, secs = divmod(remaining_seconds, 60)
                     countdown_str = f"{mins:02d}m {secs:02d}s"
                     print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
-    
                     exit_reason = None
                     half_closed = active_trade.get("half_closed", False)
-                    if TRADE_MODE != "simulation":
-                        if bybit_closed:
-                            if bybit_realized_pnl is not None:
-                                if bybit_realized_pnl >= 0:
-                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
-                                else:
-                                    exit_reason = "STOP LOSS HIT [FAIL]"
-                            else:
-                                # Fallback: determine based on price change direction
-                                actual_exit_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                                actual_change = actual_exit_price - entry_price
-                                is_profit = actual_change > 0 if direction == "Bullish" else actual_change < 0
-                                if is_profit:
-                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
-                                else:
-                                    exit_reason = "STOP LOSS HIT [FAIL]"
-                    else:
+                    
+                    # 1. Check timer programmatic exit (applies to both simulation and live)
+                    if current_time >= end_time and not half_closed:
+                        lookahead = 10
+                        exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
+                    
+                    # 2. Check stagnation programmatic exit (applies to both simulation and live)
+                    if not exit_reason and not half_closed:
+                        entry_time_ms = active_trade.get("entry_time")
+                        if entry_time_ms:
+                            trade_age_hours = (time.time() - (entry_time_ms / 1000.0)) / 3600.0
+                            if trade_age_hours >= 6.0:
+                                current_change_pct = ((current_price - entry_price) / entry_price) * 100.0
+                                current_raw_return = current_change_pct if direction == "Bullish" else -current_change_pct
+                                current_leverage = active_trade.get("leverage", 1.0)
+                                current_net_return_pct = (current_raw_return * current_leverage) - (current_leverage * 0.0011 * 100.0)
+                                if current_net_return_pct < 0.8:
+                                    exit_reason = f"STAGNATION TIMEOUT (Age: {trade_age_hours:.1f}h, Net: {current_net_return_pct:+.2f}%)"
+                    
+                    # 3. Simulation mode SL/TP price checks
+                    if TRADE_MODE == "simulation" and not exit_reason:
                         if direction == "Bullish":
                             if current_price <= stop_loss:
                                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
@@ -4052,10 +4055,41 @@ def main():
                                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
                             elif current_price <= take_profit and not half_closed:
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
-    
-                        if current_time >= end_time and not half_closed:
-                            lookahead = 10
-                            exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
+                    
+                    if TRADE_MODE != "simulation":
+                        if bybit_closed:
+                            if bybit_realized_pnl is not None:
+                                if bybit_realized_pnl >= 0:
+                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                                else:
+                                    exit_reason = "STOP LOSS HIT [FAIL]"
+                            else:
+                                actual_exit_price = bybit_exit_price if bybit_exit_price is not None else current_price
+                                actual_change = actual_exit_price - entry_price
+                                is_profit = actual_change > 0 if direction == "Bullish" else actual_change < 0
+                                if is_profit:
+                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
+                                else:
+                                    exit_reason = "STOP LOSS HIT [FAIL]"
+                        elif exit_reason is not None:
+                            # Cancel scale-out limit order if it exists
+                            scale_out_id = active_trade.get("bybit_scale_out_order_id")
+                            if scale_out_id:
+                                cancel_payload = {"category": "linear", "symbol": active_symbol, "orderId": scale_out_id}
+                                bybit_post_request("/v5/order/cancel", cancel_payload)
+                                print(f"[Bybit API] Canceled scale-out limit order {scale_out_id} due to programmatic exit.")
+                            
+                            # Place market close order
+                            pos = get_bybit_position(active_symbol)
+                            if pos:
+                                qty_str = pos.get("size", "0")
+                                if float(qty_str) > 0:
+                                    close_side = "Sell" if direction == "Bullish" else "Buy"
+                                    print(f"[Bybit API] Placing Market close order for {qty_str} {active_symbol} due to programmatic exit...")
+                                    close_res = place_bybit_order(symbol=active_symbol, side=close_side, qty=qty_str)
+                                    if close_res.get("retCode") == 0:
+                                        bybit_closed = True
+                                        time.sleep(0.5)
     
                     if exit_reason is not None:
                         # Query accumulated closed PnL transactions on Testnet/Live
