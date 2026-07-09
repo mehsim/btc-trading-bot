@@ -184,6 +184,23 @@ HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.
 
 def save_history():
     with bot_state_lock:
+        # Deduplicate completed trades
+        seen = set()
+        deduped = []
+        for t in bot_state.get("trade_history", []):
+            key = (
+                t.get("symbol"),
+                str(t.get("interval")),
+                t.get("direction"),
+                round(float(t.get("exit_time", 0.0)), 2),
+                round(float(t.get("entry_price", 0.0)), 4),
+                round(float(t.get("exit_price", 0.0)), 4)
+            )
+            if key not in seen:
+                seen.add(key)
+                deduped.append(t)
+        bot_state["trade_history"] = deduped
+
         # Cap prediction history at 500 entries
         if len(bot_state["prediction_history"]) > 500:
             bot_state["prediction_history"] = bot_state["prediction_history"][-500:]
@@ -276,6 +293,27 @@ def heal_completed_trades_bybit_order_ids():
 
     if healed_count > 0:
         print(f"[Heal] Successfully recovered missing bybit_order_id for {healed_count} completed trades.")
+        save_history()
+
+def deduplicate_completed_trades():
+    seen = set()
+    deduped = []
+    for t in bot_state.get("trade_history", []):
+        key = (
+            t.get("symbol"),
+            str(t.get("interval")),
+            t.get("direction"),
+            round(float(t.get("exit_time", 0.0)), 2),
+            round(float(t.get("entry_price", 0.0)), 4),
+            round(float(t.get("exit_price", 0.0)), 4)
+        )
+        if key not in seen:
+            seen.add(key)
+            deduped.append(t)
+    
+    if len(deduped) != len(bot_state.get("trade_history", [])):
+        print(f"[Heal] Deduplicated trade history: removed {len(bot_state.get('trade_history', [])) - len(deduped)} duplicate records.")
+        bot_state["trade_history"] = deduped
         save_history()
 
 def load_history():
@@ -396,6 +434,7 @@ def load_history():
         bot_state["fresh_reset_v3"] = True
         save_history()
         
+    deduplicate_completed_trades()
     heal_completed_trades_bybit_order_ids()
         
     bot_state["retraining_status"] = "Idle"
