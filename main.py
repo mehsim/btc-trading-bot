@@ -245,6 +245,39 @@ def migrate_active_trades(active_trades_list):
             else:
                 t["confidence"] = 0.585
 
+def heal_completed_trades_bybit_order_ids():
+    predictions_by_key = {}
+    for p in bot_state.get("prediction_history", []):
+        if p.get("status") == "Traded" and p.get("bybit_order_id"):
+            key = (p.get("symbol"), str(p.get("interval", "60")), p.get("direction"))
+            predictions_by_key.setdefault(key, []).append(p)
+
+    healed_count = 0
+    for t in bot_state.get("trade_history", []):
+        if not t.get("bybit_order_id") or t.get("bybit_order_id") == "N/A":
+            key = (t.get("symbol"), str(t.get("interval", "60")), t.get("direction"))
+            candidates = predictions_by_key.get(key, [])
+            if candidates:
+                best_p = None
+                min_diff = float("inf")
+                exit_ts = t.get("exit_time", 0.0)
+                for p in candidates:
+                    pred_ts = p.get("timestamp", 0.0)
+                    if pred_ts < exit_ts:
+                        diff = exit_ts - pred_ts
+                        if diff < min_diff:
+                            min_diff = diff
+                            best_p = p
+                if best_p and min_diff < 86400 * 5:
+                    t["bybit_order_id"] = best_p["bybit_order_id"]
+                    if best_p.get("bybit_scale_out_order_id"):
+                        t["bybit_scale_out_order_id"] = best_p["bybit_scale_out_order_id"]
+                    healed_count += 1
+
+    if healed_count > 0:
+        print(f"[Heal] Successfully recovered missing bybit_order_id for {healed_count} completed trades.")
+        save_history()
+
 def load_history():
     token = os.environ.get("HF_TOKEN") or os.environ.get("token")
     space_id = os.environ.get("SPACE_ID")
@@ -362,6 +395,8 @@ def load_history():
         bot_state["active_trade_6h"] = []
         bot_state["fresh_reset_v3"] = True
         save_history()
+        
+    heal_completed_trades_bybit_order_ids()
         
     bot_state["retraining_status"] = "Idle"
 
@@ -1217,7 +1252,9 @@ def force_close_trade():
         "pnl_usd": float(realized_pnl),
         "balance": float(new_bal),
         "leverage": float(leverage),
-        "fill_pct": float(trade_to_close.get("fill_pct", 100.0))
+        "fill_pct": float(trade_to_close.get("fill_pct", 100.0)),
+        "bybit_order_id": trade_to_close.get("bybit_order_id"),
+        "bybit_scale_out_order_id": trade_to_close.get("bybit_scale_out_order_id")
     })
     
     for p in bot_state["prediction_history"]:
@@ -1367,7 +1404,9 @@ def close_all_trades_internal(exit_reason):
                     "original_size": float(original_size),
                     "pnl_usd": float(realized_pnl),
                     "balance": float(new_bal),
-                    "leverage": float(leverage)
+                    "leverage": float(leverage),
+                    "bybit_order_id": t.get("bybit_order_id"),
+                    "bybit_scale_out_order_id": t.get("bybit_scale_out_order_id")
                 })
                 
                 for p in bot_state["prediction_history"]:
@@ -4252,7 +4291,9 @@ def main():
                             "take_profit": float(active_trade.get("take_profit", 0.0)),
                             "stop_loss": float(active_trade.get("stop_loss", 0.0)),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
-                            "fill_pct": float(active_trade.get("fill_pct", 100.0))
+                            "fill_pct": float(active_trade.get("fill_pct", 100.0)),
+                            "bybit_order_id": active_trade.get("bybit_order_id"),
+                            "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
                         })
                         
                         # Send email alert on any profitable trade exit
