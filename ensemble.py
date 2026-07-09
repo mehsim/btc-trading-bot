@@ -139,8 +139,10 @@ def load_ensemble_classifier(prefix, n_features=54):
     lgb_clf.fitted_ = True
     lgb_clf._n_classes = 3
     lgb_clf._classes = np.array([0, 1, 2])
+    lgb_clf.classes_ = np.array([0, 1, 2])
     lgb_clf._n_features = n_features
     lgb_clf._n_features_in = n_features
+    lgb_clf.n_features_in_ = n_features
     
     cat = CatBoostClassifier()
     cat.load_model(f"{prefix}_cat.json", format="json")
@@ -174,6 +176,7 @@ def load_ensemble_regressor(prefix, n_features=54):
     lgb_reg.fitted_ = True
     lgb_reg._n_features = n_features
     lgb_reg._n_features_in = n_features
+    lgb_reg.n_features_in_ = n_features
     
     cat = CatBoostRegressor()
     cat.load_model(f"{prefix}_cat.json", format="json")

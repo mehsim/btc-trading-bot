@@ -27,7 +27,14 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     peak_equity = 100.0
     max_drawdown = 0.0
     
-    X_matrix = df[features].values
+    import json
+    selected_features_filename = f"selected_features_{INTERVAL}.json"
+    if os.path.exists(selected_features_filename):
+        with open(selected_features_filename, "r") as f:
+            selected_features = json.load(f)
+    else:
+        selected_features = features
+    X_matrix = df[selected_features].values
 
     i = 3
     total_candles = len(df)
@@ -234,15 +241,15 @@ def run_backtest():
             "trend": XGBClassifier(),
             "price": XGBRegressor()
         }
-        models_trending["trend"].load_model("xgb_trending_trend.json")
-        models_trending["price"].load_model("xgb_trending_price.json")
+        models_trending["trend"].load_model(f"ensemble_trending_trend_{INTERVAL}_xgb.json")
+        models_trending["price"].load_model(f"ensemble_trending_price_{INTERVAL}_xgb.json")
 
         models_ranging = {
             "trend": XGBClassifier(),
             "price": XGBRegressor()
         }
-        models_ranging["trend"].load_model("xgb_ranging_trend.json")
-        models_ranging["price"].load_model("xgb_ranging_price.json")
+        models_ranging["trend"].load_model(f"ensemble_ranging_trend_{INTERVAL}_xgb.json")
+        models_ranging["price"].load_model(f"ensemble_ranging_price_{INTERVAL}_xgb.json")
         print("Models loaded successfully.")
     except Exception as e:
         print(f"Error loading models: {e}. Please run 'train.py' first.")

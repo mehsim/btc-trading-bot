@@ -57,15 +57,15 @@ try:
         "trend": XGBClassifier(),
         "price": XGBRegressor()
     }
-    models_trending["trend"].load_model("xgb_trending_trend.json")
-    models_trending["price"].load_model("xgb_trending_price.json")
+    models_trending["trend"].load_model(f"ensemble_trending_trend_{INTERVAL}_xgb.json")
+    models_trending["price"].load_model(f"ensemble_trending_price_{INTERVAL}_xgb.json")
 
     models_ranging = {
         "trend": XGBClassifier(),
         "price": XGBRegressor()
     }
-    models_ranging["trend"].load_model("xgb_ranging_trend.json")
-    models_ranging["price"].load_model("xgb_ranging_price.json")
+    models_ranging["trend"].load_model(f"ensemble_ranging_trend_{INTERVAL}_xgb.json")
+    models_ranging["price"].load_model(f"ensemble_ranging_price_{INTERVAL}_xgb.json")
     print("Models loaded successfully.")
 except Exception as e:
     print(f"Error loading models: {e}. Please run 'train.py' first.")
@@ -99,7 +99,14 @@ except Exception as e:
 # 4. Generate Predictions
 print("\n[Step 3] Generating Machine Learning Predictions...")
 latest_candle = df.iloc[-1]
-X_live = latest_candle[features].values.reshape(1, -1)
+import json
+selected_features_filename = f"selected_features_{INTERVAL}.json"
+if os.path.exists(selected_features_filename):
+    with open(selected_features_filename, "r") as f:
+        selected_features = json.load(f)
+else:
+    selected_features = features
+X_live = latest_candle[selected_features].values.reshape(1, -1)
 
 # Dynamic Regime Routing based on ADX
 adx_regime = latest_candle["ADX"]

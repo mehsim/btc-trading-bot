@@ -1653,8 +1653,9 @@ def load_model_weights(iv):
             n_features = len(selected_features_list)
             print(f"Loaded {n_features} selected features for interval {iv}")
         else:
+            print(f"[Model Load Warning] {selected_features_filename} is missing! Disabling model loading for interval {iv} to prevent shape mismatch crashes.")
             models_by_interval[iv]["selected_features"] = None
-            n_features = len(features)
+            return
         
         if os.path.exists(f"{prefixes['trending_trend']}_xgb.json"):
             models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features)
@@ -2043,6 +2044,15 @@ for lag in [1, 2]:
     features.append(f"lower_wick_volume_ratio_lag{lag}")
 
 features.append("hours_to_news")
+
+# New Correlation and OI momentum features
+features.extend(["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi"])
+for lag in [1, 2]:
+    features.append(f"oi_change_1h_lag{lag}")
+    features.append(f"oi_change_4h_lag{lag}")
+    features.append(f"btc_close_lag{lag}")
+    features.append(f"btc_volume_lag{lag}")
+    features.append(f"btc_rsi_lag{lag}")
 
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 
@@ -2705,7 +2715,16 @@ def calculate_historical_thresholds(model_trend, interval):
                 df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
                 df = add_features(df)
                 
-                selected_features_list = models_by_interval[interval].get("selected_features")
+                selected_features_list = None
+                if interval in models_by_interval:
+                    selected_features_list = models_by_interval[interval].get("selected_features")
+                if selected_features_list is None:
+                    import json
+                    selected_features_filename = f"selected_features_{interval}.json"
+                    if os.path.exists(selected_features_filename):
+                        with open(selected_features_filename, "r") as f:
+                            selected_features_list = json.load(f)
+                            
                 if selected_features_list is not None:
                     X_hist = df[selected_features_list].values
                 else:
@@ -4522,6 +4541,10 @@ def main():
                             active_model_price = models_tf["ranging"]["price"]
                             active_model_trend = models_tf["ranging"]["trend"]
                             regime_name = "Ranging (ADX < 20)"
+                            
+                        if active_model_price is None or active_model_trend is None:
+                            print(f"[{symbol} {iv}m Warning] Models are not loaded (None). Skipping signal evaluation.")
+                            continue
 
                         # Refined regime switching voting weights (Trending: CatBoost dominant; Ranging: LightGBM dominant)
                         ensemble_weights = [0.3, 0.2, 0.5] if adx_regime >= 20.0 else [0.3, 0.5, 0.2]

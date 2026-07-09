@@ -473,7 +473,13 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         
     return df_history.reset_index(drop=True)
 
+funding_cache_lock = threading.Lock()
+
 def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
+    with funding_cache_lock:
+        return _get_bybit_funding_history_impl(symbol, start_ts_ms, end_ts_ms)
+
+def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_file = os.path.join(CACHE_DIR, f"{symbol}_funding.csv")
     
