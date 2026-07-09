@@ -713,7 +713,26 @@ def format_bybit_qty(symbol, qty):
         return str(int(round(qty)))
     return str(round(qty, p))
 
-def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None):
+def get_bybit_min_qty_step(symbol):
+    min_limits = {
+        "BTCUSDT": 0.001,
+        "ETHUSDT": 0.01,
+        "SOLUSDT": 0.1,
+        "BNBUSDT": 0.1,
+        "AVAXUSDT": 0.1,
+        "NEARUSDT": 0.1,
+        "LINKUSDT": 0.1,
+        "LTCUSDT": 0.1,
+        "ADAUSDT": 1.0,
+        "XRPUSDT": 1.0,
+        "DOGEUSDT": 1.0,
+        "DOTUSDT": 1.0,
+        "SUIUSDT": 1.0,
+        "APTUSDT": 0.1
+    }
+    return min_limits.get(symbol, 0.1)
+
+def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False):
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -723,6 +742,8 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None):
         "timeInForce": "GTC",
         "positionIdx": 0
     }
+    if reduce_only:
+        payload["reduceOnly"] = True
     if sl:
         payload["stopLoss"] = format_bybit_price(symbol, sl)
     if tp:
@@ -971,7 +992,7 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         print(f"[Bybit API Error] Failed to update Take Profit for {symbol}: {res.get('retMsg')}")
         return False
 
-def place_bybit_limit_order(symbol, side, qty, price):
+def place_bybit_limit_order(symbol, side, qty, price, reduce_only=False):
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -982,6 +1003,8 @@ def place_bybit_limit_order(symbol, side, qty, price):
         "timeInForce": "GTC",
         "positionIdx": 0
     }
+    if reduce_only:
+        payload["reduceOnly"] = True
     res = bybit_post_request("/v5/order/create", payload)
     return res
 
@@ -1216,7 +1239,8 @@ def force_close_trade():
                 close_res = place_bybit_order(
                     symbol=symbol,
                     side=side,
-                    qty=qty_str
+                    qty=qty_str,
+                    reduce_only=True
                 )
                 if close_res.get("retCode") == 0:
                     print(f"[Bybit API] Successfully closed position for {symbol} on Bybit.")
@@ -1381,7 +1405,8 @@ def close_all_trades_internal(exit_reason):
                     close_res = place_bybit_order(
                         symbol=symbol,
                         side=close_side,
-                        qty=qty_str
+                        qty=qty_str,
+                        reduce_only=True
                     )
                     if close_res.get("retCode") == 0:
                         print(f"[Panic Close All] Successfully closed {symbol} on Bybit.")
@@ -3551,7 +3576,7 @@ def sync_active_positions_from_bybit():
                             print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
                             if TRADE_MODE != "simulation":
                                 close_side = "Sell" if pos_side == "Buy" else "Buy"
-                                place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])))
+                                place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])), reduce_only=True)
                                 if t.get("bybit_scale_out_order_id"):
                                     cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
                             continue
@@ -4232,7 +4257,7 @@ def main():
                                 if float(qty_str) > 0:
                                     close_side = "Sell" if direction == "Bullish" else "Buy"
                                     print(f"[Bybit API] Placing Market close order for {qty_str} {active_symbol} due to programmatic exit...")
-                                    close_res = place_bybit_order(symbol=active_symbol, side=close_side, qty=qty_str)
+                                    close_res = place_bybit_order(symbol=active_symbol, side=close_side, qty=qty_str, reduce_only=True)
                                     if close_res.get("retCode") == 0:
                                         bybit_closed = True
                                         time.sleep(0.5)
@@ -4972,6 +4997,19 @@ def main():
                                         raw_qty = leveraged_size / entry_price
                                         qty_str = format_bybit_qty(symbol, raw_qty)
                                         qty_val = float(qty_str)
+                                        
+                                        # Enforce minimum order value of 5.0 USDT (using 5.1 USDT as buffer)
+                                        min_order_value = 5.1
+                                        if qty_val * entry_price < min_order_value:
+                                            step = get_bybit_min_qty_step(symbol)
+                                            required_qty = min_order_value / entry_price
+                                            import math
+                                            if step > 0:
+                                                qty_val = math.ceil(required_qty / step) * step
+                                                qty_str = format_bybit_qty(symbol, qty_val)
+                                                qty_val = float(qty_str)
+                                                raw_qty = qty_val
+                                                print(f"[{symbol} {iv}m API] Enforced minimum order value. Adjusted quantity to {qty_str} (Value: ${qty_val * entry_price:.2f})")
 
                                         # Balance Guard: if required margin exceeds 90% of available balance, dynamically scale up leverage
                                         required_margin = (qty_val * entry_price) / leverage_val
@@ -5077,15 +5115,20 @@ def main():
                                                     limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
                                                     limit_price = entry_price + 1.0 * atr_dollars if ml_trend == "Bullish" else entry_price - 1.0 * atr_dollars
                                                     limit_qty_str = format_bybit_qty(symbol, actual_qty * 0.5)
+                                                    limit_qty_val = float(limit_qty_str)
+                                                    scale_out_val = limit_qty_val * limit_price
                                                     
-                                                    print(f"[{symbol} {iv}m API] Placing scale-out limit order for {limit_qty_str} at ${limit_price:.4f}...")
-                                                    limit_res = place_bybit_limit_order(symbol, limit_side, limit_qty_str, limit_price)
                                                     bybit_scale_out_order_id = None
-                                                    if limit_res.get("retCode") == 0:
-                                                        bybit_scale_out_order_id = limit_res.get("result", {}).get("orderId")
-                                                        print(f"[{symbol} {iv}m API] Scale-out limit order placed successfully. Order ID: {bybit_scale_out_order_id}")
+                                                    if scale_out_val < 5.0:
+                                                        print(f"[{symbol} {iv}m API] Scale-out limit order skipped: calculated value (${scale_out_val:.2f}) is below minimum 5.0 USDT.")
                                                     else:
-                                                        print(f"[{symbol} {iv}m API WARNING] Failed to place scale-out limit order: {limit_res.get('retMsg')} (but keeping trade open)")
+                                                        print(f"[{symbol} {iv}m API] Placing scale-out limit order for {limit_qty_str} at ${limit_price:.4f}...")
+                                                        limit_res = place_bybit_limit_order(symbol, limit_side, limit_qty_str, limit_price, reduce_only=True)
+                                                        if limit_res.get("retCode") == 0:
+                                                            bybit_scale_out_order_id = limit_res.get("result", {}).get("orderId")
+                                                            print(f"[{symbol} {iv}m API] Scale-out limit order placed successfully. Order ID: {bybit_scale_out_order_id}")
+                                                        else:
+                                                            print(f"[{symbol} {iv}m API WARNING] Failed to place scale-out limit order: {limit_res.get('retMsg')} (but keeping trade open)")
                                                 else:
                                                     bybit_success = False
                                                     status_msg = "Skipped (Bybit Order Error)"
