@@ -13,6 +13,34 @@ TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/linear" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/linear"
 
+# Centralized timeframe parameters for training labels and live execution alignment
+TIMEFRAME_CONFIG = {
+    "60": {   # 1H Timeframe
+        "lookahead": 10,
+        "sl_mult": 0.8,
+        "tp_mult_ranging": 1.5,
+        "tp_mult_trending": 2.5
+    },
+    "120": {  # 2H Timeframe
+        "lookahead": 12,
+        "sl_mult": 0.75,
+        "tp_mult_ranging": 1.4,
+        "tp_mult_trending": 2.2
+    },
+    "240": {  # 4H Timeframe
+        "lookahead": 12,
+        "sl_mult": 0.7,
+        "tp_mult_ranging": 1.3,
+        "tp_mult_trending": 2.0
+    },
+    "360": {  # 6H Timeframe
+        "lookahead": 16,
+        "sl_mult": 0.65,
+        "tp_mult_ranging": 1.2,
+        "tp_mult_trending": 1.8
+    }
+}
+
 
 print("[System Debug] Importing websocket...")
 import websocket
@@ -116,6 +144,7 @@ cached_news_titles = []
 news_sentiment_lock = threading.Lock()
 
 economic_calendar_cache = None
+last_calendar_fetch = 0.0
 economic_calendar_lock = threading.Lock()
 
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
@@ -207,8 +236,14 @@ def load_history():
     # 2. Sync from Hugging Face Space if running locally (not in Space environment itself)
     elif not space_id:
         try:
-            print("Syncing: Attempting to pull latest history from Hugging Face Space API...")
-            resp = requests.get("https://mehsimleo-btc-trading-bot.hf.space/api/status", timeout=5)
+            target_space = os.environ.get("TARGET_HF_SPACE") or "mehsimleo/btc-trading-bot"
+            if "/" in target_space:
+                username, space_name = target_space.split("/")
+                space_url = f"https://{username}-{space_name.replace('_', '-')}.hf.space/api/status"
+            else:
+                space_url = f"https://{target_space.replace('_', '-')}.hf.space/api/status"
+            print(f"Syncing: Attempting to pull latest history from Hugging Face Space API ({space_url})...")
+            resp = requests.get(space_url, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 hf_trades = data.get("trade_history", [])
@@ -338,6 +373,20 @@ def get_bybit_proxies():
         }
     return None
 
+_session = None
+_session_lock = threading.Lock()
+
+def get_shared_session():
+    global _session
+    if _session is None:
+        with _session_lock:
+            if _session is None:
+                _session = requests.Session()
+                proxies = get_bybit_proxies()
+                if proxies:
+                    _session.proxies.update(proxies)
+    return _session
+
 def parse_proxy_url(proxy_url):
     """Parse proxy URL into components for websocket-client."""
     from urllib.parse import urlparse
@@ -363,11 +412,11 @@ def get_bybit_time_offset():
         if _cached_time_offset is not None:
             return _cached_time_offset
             
-    import requests
+    session = get_shared_session()
     import time
     for attempt in range(3):
         try:
-            resp = requests.get(f"{BYBIT_BASE_URL}/v5/market/time", proxies=get_bybit_proxies(), timeout=5)
+            resp = session.get(f"{BYBIT_BASE_URL}/v5/market/time", timeout=5)
             if resp.status_code == 200:
                 server_time = int(resp.json()["result"]["timeNano"]) // 1000000
                 local_time = int(time.time() * 1000)
@@ -386,8 +435,7 @@ def bybit_post_request(endpoint, payload):
     import time
     import hmac
     import hashlib
-    import json
-    import requests
+    session = get_shared_session()
     
     api_key = os.getenv("BYBIT_API_KEY", "").strip()
     api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
@@ -420,7 +468,7 @@ def bybit_post_request(endpoint, payload):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            resp = requests.post(url, headers=headers, json=payload, proxies=get_bybit_proxies(), timeout=8)
+            resp = session.post(url, headers=headers, json=payload, timeout=8)
             if resp.status_code == 200:
                 return resp.json()
             else:
@@ -536,7 +584,7 @@ def bybit_get_request(endpoint, query_params):
     import hmac
     import hashlib
     import urllib.parse
-    import requests
+    session = get_shared_session()
     
     api_key = os.getenv("BYBIT_API_KEY", "").strip()
     api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
@@ -570,7 +618,7 @@ def bybit_get_request(endpoint, query_params):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            resp = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=8)
+            resp = session.get(url, headers=headers, timeout=8)
             if resp.status_code == 200:
                 return resp.json()
             else:
@@ -1115,7 +1163,7 @@ def close_all_trades_internal(exit_reason):
             
             print("[Panic Close All] Querying all active positions on Bybit to close them...")
             bybit_positions = get_all_bybit_positions()
-            for pos in bybit_positions:
+            for pos in (bybit_positions or []):
                 symbol = pos.get("symbol")
                 qty_str = pos.get("size", "0")
                 qty_val = float(qty_str)
@@ -1585,16 +1633,13 @@ def run_fallback_price_updater():
             ws_active = ws_connected and (now - last_ws_update_time < 30)
             has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
 
-            # Adaptive interval: 20s if WS down with trades, 60s if WS down idle, 60s if WS up with trades, 300s if WS up idle
+            # Adaptive interval: 20s if WS down with trades, 60s if WS down idle, 900s if WS up
             if not ws_active:
                 poll_interval = 20 if has_active_trades else 60
                 binance_interval = 60 if has_active_trades else 180
-            elif has_active_trades:
-                poll_interval = 60
-                binance_interval = 300
             else:
-                poll_interval = 300
-                binance_interval = 300
+                poll_interval = 900  # Throttle to 15 minutes to minimize proxy bandwidth
+                binance_interval = 900
 
             if now - last_fallback_run >= poll_interval:
                 last_fallback_run = now
@@ -2102,7 +2147,8 @@ def evaluate_predictions(df_completed, interval, symbol):
             
         if pred.get("interval") == interval and pred.get("symbol", "BTCUSDT") == symbol and not eval_dict.get("evaluated"):
             interval_mins = int(interval)
-            lookahead = 10
+            cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10})
+            lookahead = cfg.get("lookahead", 10)
             target_ts = int(pred["candle_timestamp"]) + (interval_mins * 60 * 1000 * lookahead)
             if target_ts in ts_map:
                 exit_price = ts_map[target_ts]
@@ -2356,9 +2402,10 @@ def run_news_sentiment_updater():
             print(f"[News/Sentiment] Error in background news sentiment update: {e}")
 
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
-    global economic_calendar_cache
+    global economic_calendar_cache, last_calendar_fetch
+    now_ts = time.time()
     with economic_calendar_lock:
-        if economic_calendar_cache is not None:
+        if economic_calendar_cache is not None and (now_ts - last_calendar_fetch < 86400):
             return economic_calendar_cache
             
         try:
@@ -2379,7 +2426,8 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
             to_str = to_dt.strftime("%Y-%m-%d")
             
             print(f"[News/Sentiment] Fetching economic calendar from {from_str} to {to_str}...")
-            resp = requests.get(
+            session = get_shared_session()
+            resp = session.get(
                 "https://finnhub.io/api/v1/calendar/economic",
                 params={"token": finnhub_token, "from": from_str, "to": to_str},
                 timeout=10
@@ -2397,12 +2445,14 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
                         except Exception:
                             pass
                 economic_calendar_cache = sorted(filtered_events)
+                last_calendar_fetch = now_ts
                 print(f"[News/Sentiment] Cached {len(economic_calendar_cache)} high-impact calendar events.")
                 return economic_calendar_cache
         except Exception as e:
             print(f"[News/Sentiment] Error caching economic calendar: {e}")
         
         economic_calendar_cache = []
+        last_calendar_fetch = now_ts
         return economic_calendar_cache
 
 def add_news_proximity_feature(df):
@@ -2916,8 +2966,15 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # ======= CHECK 12: Expected Price Change Threshold (Weight: 2) =======
     weight_exp = 2
-    min_pct_map = {"5": 0.10, "15": 0.15, "60": 0.25}
-    req_pct = min_pct_map.get(str(interval), 0.15)
+    min_pct_map = {
+        "5": 0.10,
+        "15": 0.15,
+        "60": 0.25,   # 1h requires >= 0.25% change
+        "120": 0.35,  # 2h requires >= 0.35% change
+        "240": 0.50,  # 4h requires >= 0.50% change
+        "360": 0.65   # 6h requires >= 0.65% change
+    }
+    req_pct = min_pct_map.get(str(interval), 0.25)
     change_pass = (expected_pct_change >= req_pct)
     results["Expected_Change"] = {
         "pass": change_pass,
@@ -3457,7 +3514,17 @@ def sync_active_positions_from_bybit():
                         "recovered": True
                     }
                     
-                    tf_key = "1h"
+                    # Dynamic timeframe resolution from prediction history matching symbol and entry time
+                    matched_tf = "1h"  # fallback default
+                    entry_time_sec = time.time()
+                    for p in reversed(bot_state.get("prediction_history", [])):
+                        if p.get("symbol") == symbol and abs(p.get("timestamp", 0) - entry_time_sec) < 3600:
+                            matched_tf_interval = p.get("interval", "60")
+                            tf_map_inv = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                            matched_tf = tf_map_inv.get(matched_tf_interval, "1h")
+                            break
+                            
+                    tf_key = matched_tf
                     active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
                     if not isinstance(active_trades_list, list):
                         active_trades_list = []
@@ -4134,14 +4201,15 @@ def main():
 
         check_and_hot_reload_models()
         current_time_pkt = get_pkt_time()
-        # Trigger check once at the boundary (minute 0, second between 5 and 55) or on startup
-        is_boundary_time = (current_time_pkt.minute == 0) and (5 <= current_time_pkt.second <= 55)
+        # Trigger check once at the boundary hour transition or on startup
+        is_new_hour = (current_time_pkt.hour != last_check_hour)
         
-        if (is_boundary_time and current_time_pkt.hour != last_check_hour) or (not startup_check_done):
+        if is_new_hour or (not startup_check_done):
             if not startup_check_done:
                 print("[Startup] Executing fast initial candle check for BTCUSDT to update cards instantly...")
                 check_queue = [("BTCUSDT", iv) for iv in ["60", "120", "240", "360"]]
                 startup_check_done = True
+                last_check_hour = current_time_pkt.hour
             else:
                 last_check_hour = current_time_pkt.hour
                 check_queue = []
@@ -4441,16 +4509,20 @@ def main():
                                     tp_multiplier = round(base_tp * vol_factor, 2)
                                     print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
-                                    # Align stop loss and take profit multipliers dynamically based on ADX regime strength
-                                    sl_multiplier = 1.50
+                                    # Align stop loss and take profit multipliers dynamically from TIMEFRAME_CONFIG
+                                    cfg = TIMEFRAME_CONFIG.get(str(iv), {
+                                        "lookahead": 10,
+                                        "sl_mult": 0.8,
+                                        "tp_mult_ranging": 1.5,
+                                        "tp_mult_trending": 2.5
+                                    })
+                                    sl_multiplier = cfg["sl_mult"]
                                     adx_val = latest_candle.get("ADX", 0.0)
-                                    if adx_val >= 35.0:
-                                        tp_multiplier_adjusted = 4.00  # Strong Trend: boost R:R to 1:2.67
-                                    elif adx_val >= 20.0:
-                                        tp_multiplier_adjusted = 3.00  # Normal Trend: 1:2 R:R
+                                    if adx_val >= 20.0:
+                                        tp_multiplier_adjusted = cfg["tp_mult_trending"]
                                     else:
-                                        tp_multiplier_adjusted = 2.00  # Ranging Market: 1:1.33 R:R
-                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Aligned multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
+                                        tp_multiplier_adjusted = cfg["tp_mult_ranging"]
+                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Aligned multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x (from TIMEFRAME_CONFIG)")
                                     
                                     # Maker execution: zero entry slippage for limit orders
                                     slippage_pct = 0.0
@@ -4478,24 +4550,23 @@ def main():
                                             current_bal = real_bal
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
                                     
-                                    if is_golden_hour:
-                                        # Option A: Split total account value (balance + active positions) into 5 slots to allow up to 5 concurrent positions (doubled for Golden Hour)
-                                        account_value = current_bal + total_active_size
-                                        golden_target = (account_value / 5.0) * 2.0
-                                        # Clamp between $4000 and $6000 for Golden Hour
-                                        position_size_usd = max(4000.0, min(6000.0, golden_target))
-                                        position_size_usd = max(4000.0, min(6000.0, position_size_usd * cov_multiplier))
-                                        print(f"[{iv}m Golden Hour Sizing] Target: ${position_size_usd:.2f} (Split-slot sizing of total ${account_value:.2f} account value - Doubled)")
+                                    # Base size relative to balance (before leverage, e.g., 1/35th to 1/25th)
+                                    if c_prob < 0.60:
+                                        base_size = current_bal / 35.0
+                                    elif c_prob <= 0.75:
+                                        base_size = current_bal / 30.0
                                     else:
-                                        # Regular Hours Sizing ($2000 - $3000)
-                                        if c_prob < 0.60:
-                                            position_size_usd = 2000.0
-                                        elif c_prob <= 0.75:
-                                            position_size_usd = 2500.0
-                                        else:
-                                            position_size_usd = 3000.0
-                                        position_size_usd = max(2000.0, min(3000.0, position_size_usd * cov_multiplier))
-                                        print(f"[{iv}m Calibrated Sizing] Calibrated Conf: {calibrated_confidence*100:.1f}% -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                        base_size = current_bal / 25.0
+                                        
+                                    if is_golden_hour:
+                                        # Golden Hour: Double the target slot allocation size
+                                        position_size_usd = base_size * 2.0
+                                        position_size_usd = position_size_usd * cov_multiplier
+                                        print(f"[{iv}m Golden Hour Sizing] Base Size: ${base_size:.2f} -> Golden Target (Doubled): ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                    else:
+                                        # Regular Hours Sizing
+                                        position_size_usd = base_size * cov_multiplier
+                                        print(f"[{iv}m Calibrated Sizing] Base Size: ${base_size:.2f} (Conf: {calibrated_confidence*100:.1f}%) -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
                                     # Calculate Kelly parameters for logs and metadata
                                     kelly_p = float(calibrated_confidence)
@@ -4531,14 +4602,13 @@ def main():
                                             wallet_exceeded = True
 
                                     if not wallet_exceeded:
-                                        # Dynamic Leverage Scaling: scale between 10x-15x (at 70% confidence) and 30x-50x (at 85%+)
+                                        # Continuous Leverage Scaling: scale smoothly from 1x (at dynamic threshold) to 50x (at 100% confidence)
                                         c = float(calibrated_confidence)
-                                        if c >= 0.85:
-                                            leverage_val = 35.0 + (c - 0.85) / 0.15 * 15.0
+                                        min_conf = dynamic_conf_threshold
+                                        if c >= min_conf:
+                                            leverage_val = 1.0 + (c - min_conf) / (1.0 - min_conf) * 49.0
                                         else:
-                                            leverage_val = 10.0 + (c - 0.70) / 0.15 * 25.0
-                                            if leverage_val < 1.0:
-                                                leverage_val = 1.0
+                                            leverage_val = 1.0
                                         
                                         # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
                                         stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
@@ -4591,13 +4661,11 @@ def main():
                                             leverage_ok = set_bybit_leverage(symbol, leverage_val)
                                             if leverage_ok:
                                                 side = "Buy" if ml_trend == "Bullish" else "Sell"
-                                                # 2. Place entry order on Bybit with SL/TP
+                                                # 2. Place entry order on Bybit (without pre-fill SL/TP to prevent slippage mismatch)
                                                 order_res = place_bybit_order(
                                                     symbol=symbol,
                                                     side=side,
-                                                    qty=qty_str,
-                                                    sl=stop_loss_price,
-                                                    tp=take_profit_price
+                                                    qty=qty_str
                                                 )
                                                 if order_res.get("retCode") == 0:
                                                     bybit_order_id = order_res.get("result", {}).get("orderId")
@@ -4622,6 +4690,19 @@ def main():
                                                             if actual_fill_price > 0:
                                                                 entry_price = actual_fill_price
                                                                 print(f"[{symbol} {iv}m API] Fallback actual fill price: ${entry_price:.4f}")
+                                                                
+                                                    # 3. Recalculate SL/TP targets based on actual entry_price
+                                                    if ml_trend == "Bullish":
+                                                        stop_loss_price = entry_price - sl_multiplier * atr_dollars
+                                                        take_profit_price = entry_price + tp_multiplier_adjusted * atr_dollars
+                                                    else:
+                                                        stop_loss_price = entry_price + sl_multiplier * atr_dollars
+                                                        take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
+                                                        
+                                                    # 4. Set SL/TP on active position on Bybit
+                                                    temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
+                                                    update_bybit_stop_loss(symbol, stop_loss_price, active_trade=temp_trade)
+                                                    update_bybit_take_profit(symbol, take_profit_price, active_trade=temp_trade)
                                                     
                                                     # Place scale-out limit order on Bybit immediately
                                                     limit_side = "Sell" if ml_trend == "Bullish" else "Buy"

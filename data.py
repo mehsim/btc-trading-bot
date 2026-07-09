@@ -34,10 +34,25 @@ def get_bybit_proxies():
         }
     return None
 
+_session = None
+_session_lock = threading.Lock()
+
+def get_shared_session():
+    global _session
+    if _session is None:
+        with _session_lock:
+            if _session is None:
+                _session = requests.Session()
+                proxies = get_bybit_proxies()
+                if proxies:
+                    _session.proxies.update(proxies)
+    return _session
+
 def bybit_public_get(url, params=None, headers=None, max_retries=3):
+    session = get_shared_session()
     for attempt in range(max_retries):
         try:
-            resp = requests.get(url, params=params, headers=headers, proxies=get_bybit_proxies(), timeout=10)
+            resp = session.get(url, params=params, headers=headers, timeout=10)
             if resp.status_code == 200:
                 return resp
             elif resp.status_code in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:

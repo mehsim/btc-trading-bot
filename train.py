@@ -26,6 +26,34 @@ from datetime import datetime, timedelta
 economic_calendar_cache = None
 economic_calendar_lock = threading.Lock()
 
+# Centralized timeframe parameters for training labels and live execution alignment
+TIMEFRAME_CONFIG = {
+    "60": {   # 1H Timeframe
+        "lookahead": 10,
+        "sl_mult": 0.8,
+        "tp_mult_ranging": 1.5,
+        "tp_mult_trending": 2.5
+    },
+    "120": {  # 2H Timeframe
+        "lookahead": 12,
+        "sl_mult": 0.75,
+        "tp_mult_ranging": 1.4,
+        "tp_mult_trending": 2.2
+    },
+    "240": {  # 4H Timeframe
+        "lookahead": 12,
+        "sl_mult": 0.7,
+        "tp_mult_ranging": 1.3,
+        "tp_mult_trending": 2.0
+    },
+    "360": {  # 6H Timeframe
+        "lookahead": 16,
+        "sl_mult": 0.65,
+        "tp_mult_ranging": 1.2,
+        "tp_mult_trending": 1.8
+    }
+}
+
 # =========================
 # CONFIGURATION
 # =========================
@@ -362,56 +390,64 @@ def add_features(df):
     return df
 
 def add_triple_barrier_labels(df, interval):
-    # Dynamic SL & TP targets based on ATR: TP = 1.5/2.5 * ATR, SL = 0.8 * ATR
     atr = df["ATR_norm"] * df["close"]
-    
-    lookahead = 10
+    atr_vals = atr.values
     closes = df["close"].values
     highs = df["high"].values
     lows = df["low"].values
-    atr_vals = atr.values
     adxs = df["ADX"].values
-    
     n_samples = len(df)
-    labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral/Expiration
+    labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral
     
+    cfg = TIMEFRAME_CONFIG.get(str(interval), {
+        "lookahead": 10,
+        "sl_mult": 0.8,
+        "tp_mult_ranging": 1.5,
+        "tp_mult_trending": 2.5
+    })
+    
+    lookahead = cfg["lookahead"]
+    sl_mult = cfg["sl_mult"]
+    tp_mult_trending = cfg["tp_mult_trending"]
+    tp_mult_ranging = cfg["tp_mult_ranging"]
+        
     for i in range(n_samples):
         p_t = closes[i]
         atr_t = atr_vals[i]
         adx_t = adxs[i]
-        
-        # Fallback if ATR is 0
         if atr_t <= 0:
             atr_t = p_t * 0.001
             
-        tp_mult = 2.5 if adx_t >= 20.0 else 1.5
+        tp_mult = tp_mult_trending if adx_t >= 20.0 else tp_mult_ranging
+        
+        # Symmetric threshold modeling
         upper_barrier = p_t + tp_mult * atr_t
-        lower_barrier = p_t - 0.8 * atr_t
+        lower_barrier = p_t - tp_mult * atr_t
+        
+        upper_stop = p_t + sl_mult * atr_t
+        lower_stop = p_t - sl_mult * atr_t
         
         for step in range(1, lookahead + 1):
             if i + step >= n_samples:
                 break
-            
             h = highs[i + step]
             l = lows[i + step]
             
-            hit_upper = h >= upper_barrier
-            hit_lower = l <= lower_barrier
+            # Symmetric checking (hit target before stop)
+            hit_bullish = h >= upper_barrier and l > lower_stop
+            hit_bearish = l <= lower_barrier and h < upper_stop
             
-            if hit_upper and hit_lower:
-                c = closes[i + step]
-                if c >= upper_barrier:
-                    labels[i] = 2  # Bullish
-                elif c <= lower_barrier:
-                    labels[i] = 0  # Bearish
-                else:
-                    labels[i] = 1
-                break
-            elif hit_upper:
+            if hit_bullish and not hit_bearish:
                 labels[i] = 2  # Bullish
                 break
-            elif hit_lower:
+            elif hit_bearish and not hit_bullish:
                 labels[i] = 0  # Bearish
+                break
+            elif l <= lower_stop: # Long hit SL
+                labels[i] = 0
+                break
+            elif h >= upper_stop: # Short hit SL
+                labels[i] = 2
                 break
                 
     df["target_trend"] = labels

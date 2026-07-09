@@ -1510,19 +1510,7 @@
             const isCompleted = t.exit_price !== undefined && t.exit_price !== null;
             const exitPrice = isCompleted ? t.exit_price : (currentPrice || entry);
             
-            // Auto-reconstruct full target size for partially-filled trades (< $1000 margin)
-            let originalSize = t.original_size || posSize;
-            if (originalSize < 1000.0) {
-                const conf = t.confidence || 0.0;
-                let fullTarget = 2000.0;
-                if (conf > 0.75) {
-                    fullTarget = 3000.0;
-                } else if (conf >= 0.60) {
-                    fullTarget = 2500.0;
-                }
-                originalSize = fullTarget;
-                posSize = originalSize;
-            }
+            const originalSize = t.original_size !== undefined ? t.original_size : posSize;
             
             const isScaleOut = ((t.reason && t.reason.includes("Scale-Out")) || t.half_closed) && t.atr_dollars;
             
@@ -2369,9 +2357,21 @@
             }
         }
 
-        // Run immediately, then poll every 1.5 seconds
+        // Run immediately, then poll every 10 seconds (adaptive visibility-throttled)
         updateDashboard();
-        setInterval(updateDashboard, 1500);
+        let updateInterval = setInterval(updateDashboard, 10000);
+
+        document.addEventListener("visibilitychange", () => {
+            clearInterval(updateInterval);
+            if (document.hidden) {
+                // Tab is in background: poll once per minute to minimize bandwidth
+                updateInterval = setInterval(updateDashboard, 60000);
+            } else {
+                // Tab is active: resume normal 10s polling
+                updateDashboard();
+                updateInterval = setInterval(updateDashboard, 10000);
+            }
+        });
 
         function showTradeDetails(index) {
             const t = allTrades[index];
