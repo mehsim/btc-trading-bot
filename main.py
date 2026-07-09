@@ -2069,6 +2069,18 @@ def add_features(df):
     df["upper_wick_volume_ratio"] = upper_wick_vol / (upper_wick_vol.rolling(20).mean() + 1e-8)
     df["lower_wick_volume_ratio"] = lower_wick_vol / (lower_wick_vol.rolling(20).mean() + 1e-8)
     
+    # Ensure source correlation features exist
+    for col in ["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi"]:
+        if col not in df.columns:
+            if "rsi" in col:
+                df[col] = 50.0
+            elif "close" in col:
+                df[col] = df["close"]
+            elif "volume" in col:
+                df[col] = df["volume"]
+            else:
+                df[col] = 0.0
+                
     # Lag new features
     for lag in [1, 2]:
         df[f"open_interest_pct_change_lag{lag}"] = df["open_interest_pct_change"].shift(lag)
@@ -2077,6 +2089,13 @@ def add_features(df):
         df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
         df[f"upper_wick_volume_ratio_lag{lag}"] = df["upper_wick_volume_ratio"].shift(lag)
         df[f"lower_wick_volume_ratio_lag{lag}"] = df["lower_wick_volume_ratio"].shift(lag)
+        
+        # Lag correlation features
+        df[f"oi_change_1h_lag{lag}"] = df["oi_change_1h"].shift(lag).fillna(0.0)
+        df[f"oi_change_4h_lag{lag}"] = df["oi_change_4h"].shift(lag).fillna(0.0)
+        df[f"btc_close_lag{lag}"] = df["btc_close"].shift(lag).ffill().bfill().fillna(0.0)
+        df[f"btc_volume_lag{lag}"] = df["btc_volume"].shift(lag).ffill().bfill().fillna(0.0)
+        df[f"btc_rsi_lag{lag}"] = df["btc_rsi"].shift(lag).ffill().bfill().fillna(50.0)
         
     # Cyclical time features
     datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
