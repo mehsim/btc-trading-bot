@@ -185,21 +185,29 @@ HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.
 def save_history():
     with bot_state_lock:
         # Deduplicate completed trades
-        seen = set()
-        deduped = []
-        for t in bot_state.get("trade_history", []):
-            key = (
-                t.get("symbol"),
-                str(t.get("interval")),
-                t.get("direction"),
-                round(float(t.get("exit_time", 0.0)), 2),
-                round(float(t.get("entry_price", 0.0)), 4),
-                round(float(t.get("exit_price", 0.0)), 4)
-            )
-            if key not in seen:
-                seen.add(key)
-                deduped.append(t)
-        bot_state["trade_history"] = deduped
+        trades = bot_state.get("trade_history", [])
+        if trades:
+            sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0)))
+            deduped = []
+            for t in sorted_trades:
+                duplicate = False
+                t_exit = float(t.get("exit_time", 0.0))
+                t_entry_p = round(float(t.get("entry_price", 0.0)), 4)
+                t_exit_p = round(float(t.get("exit_price", 0.0)), 4)
+                t_sym = t.get("symbol")
+                t_iv = str(t.get("interval"))
+                t_dir = t.get("direction")
+                for existing in deduped:
+                    if (t_sym == existing.get("symbol") and str(t_iv) == str(existing.get("interval")) and 
+                        t_dir == existing.get("direction") and 
+                        abs(t_entry_p - round(float(existing.get("entry_price", 0.0)), 4)) < 1e-4 and 
+                        abs(t_exit_p - round(float(existing.get("exit_price", 0.0)), 4)) < 1e-4 and 
+                        abs(t_exit - float(existing.get("exit_time", 0.0))) < 43200):
+                        duplicate = True
+                        break
+                if not duplicate:
+                    deduped.append(t)
+            bot_state["trade_history"] = deduped
 
         # Cap prediction history at 500 entries
         if len(bot_state["prediction_history"]) > 500:
@@ -296,23 +304,35 @@ def heal_completed_trades_bybit_order_ids():
         save_history()
 
 def deduplicate_completed_trades():
-    seen = set()
+    trades = bot_state.get("trade_history", [])
+    if not trades:
+        return
+        
+    sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0)))
     deduped = []
-    for t in bot_state.get("trade_history", []):
-        key = (
-            t.get("symbol"),
-            str(t.get("interval")),
-            t.get("direction"),
-            round(float(t.get("exit_time", 0.0)), 2),
-            round(float(t.get("entry_price", 0.0)), 4),
-            round(float(t.get("exit_price", 0.0)), 4)
-        )
-        if key not in seen:
-            seen.add(key)
+    for t in sorted_trades:
+        duplicate = False
+        t_exit = float(t.get("exit_time", 0.0))
+        t_entry_p = round(float(t.get("entry_price", 0.0)), 4)
+        t_exit_p = round(float(t.get("exit_price", 0.0)), 4)
+        t_sym = t.get("symbol")
+        t_iv = str(t.get("interval"))
+        t_dir = t.get("direction")
+        
+        for existing in deduped:
+            if (t_sym == existing.get("symbol") and str(t_iv) == str(existing.get("interval")) and 
+                t_dir == existing.get("direction") and 
+                abs(t_entry_p - round(float(existing.get("entry_price", 0.0)), 4)) < 1e-4 and 
+                abs(t_exit_p - round(float(existing.get("exit_price", 0.0)), 4)) < 1e-4 and 
+                abs(t_exit - float(existing.get("exit_time", 0.0))) < 43200):
+                duplicate = True
+                break
+                
+        if not duplicate:
             deduped.append(t)
-    
-    if len(deduped) != len(bot_state.get("trade_history", [])):
-        print(f"[Heal] Deduplicated trade history: removed {len(bot_state.get('trade_history', [])) - len(deduped)} duplicate records.")
+            
+    if len(deduped) != len(trades):
+        print(f"[Heal] Deduplicated trade history: removed {len(trades) - len(deduped)} duplicate records within 12h window.")
         bot_state["trade_history"] = deduped
         save_history()
 

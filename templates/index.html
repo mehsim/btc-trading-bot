@@ -1684,9 +1684,10 @@
                             <td class="hide-mobile">${exitTimeStr}</td>
                             <td class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">
                                 <div>${(t.symbol || 'BTCUSDT').replace('USDT', '')} ${t.direction.toUpperCase()}</div>
+                                ${t.bybit_order_id && t.bybit_order_id !== 'N/A' ? `
                                 <div style="font-size: 8px; color: var(--text-secondary); font-weight: normal; margin-top: 2px; font-family: monospace;">
-                                    Entry ID: ${t.bybit_order_id || 'N/A'}
-                                </div>
+                                    Entry ID: ${t.bybit_order_id}
+                                </div>` : ''}
                                 ${t.bybit_scale_out_order_id ? `
                                 <div style="font-size: 8px; color: var(--accent-orange); font-weight: normal; font-family: monospace; margin-top: 1px;">
                                     Scale ID: ${t.bybit_scale_out_order_id}
@@ -1852,9 +1853,10 @@
                         <td style="font-weight: 800; color: var(--accent-purple);">${trade.intervalStr}</td>
                         <td style="font-weight: 700; color: var(--text-primary);">
                             <div>${symbol.replace("USDT", "")}</div>
+                            ${trade.bybit_order_id && trade.bybit_order_id !== 'N/A' ? `
                             <div style="font-size: 9px; color: var(--text-secondary); font-weight: normal; margin-top: 2px; font-family: monospace;">
-                                Entry: ${trade.bybit_order_id || 'N/A'}
-                            </div>
+                                Entry: ${trade.bybit_order_id}
+                            </div>` : ''}
                             ${trade.bybit_scale_out_order_id ? `
                             <div style="font-size: 9px; color: var(--accent-orange); font-weight: normal; font-family: monospace; margin-top: 1px;">
                                 Scale-out: ${trade.bybit_scale_out_order_id}
