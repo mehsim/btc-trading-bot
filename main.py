@@ -13,6 +13,15 @@ TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/linear" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/linear"
 
+# ==========================================
+# TIMING & API/PROXY HIT INTERVALS
+# ==========================================
+CANDLE_CHECK_WINDOW_MINS = int(os.environ.get("CANDLE_CHECK_WINDOW_MINS", "5"))
+CANDLE_CHECK_INTERVAL_SECS = int(os.environ.get("CANDLE_CHECK_INTERVAL_SECS", "20"))
+BALANCE_UPDATE_INTERVAL_SECS = int(os.environ.get("BALANCE_UPDATE_INTERVAL_SECS", "120"))
+POSITION_SYNC_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_INTERVAL_SECS", "30.0"))
+POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTERVAL_SECS", "120.0"))
+
 # Centralized timeframe parameters for training labels and live execution alignment
 TIMEFRAME_CONFIG = {
     "60": {   # 1H Timeframe
@@ -1084,7 +1093,19 @@ def get_real_bybit_balance():
         return "GEO_BLOCKED"
     return 0.0
 
-def get_real_bybit_balance_cached():
+def get_real_bybit_balance_cached(force=False):
+    global _cached_balance, _last_balance_fetch
+    now = time.time()
+    if force or (now - _last_balance_fetch > BALANCE_UPDATE_INTERVAL_SECS):
+        try:
+            val = get_real_bybit_balance()
+            with _balance_lock:
+                _cached_balance = val
+                _last_balance_fetch = now
+            if TRADE_MODE != "simulation" and isinstance(val, (int, float)) and val > 0:
+                bot_state["simulated_balance"] = val
+        except Exception as e:
+            print(f"[Bybit Balance] Error in balance update (forced={force}): {e}")
     with _balance_lock:
         return _cached_balance
 
@@ -1104,7 +1125,7 @@ def run_bybit_balance_updater():
         print(f"[Bybit Balance] Startup background update error: {e}")
         
     while True:
-        time.sleep(300)  # Query Bybit balance every 5 minutes to conserve proxy bandwidth
+        time.sleep(BALANCE_UPDATE_INTERVAL_SECS)  # Query Bybit balance periodically based on configuration
         try:
             val = get_real_bybit_balance()
             with _balance_lock:
@@ -3885,13 +3906,16 @@ def main():
     startup_check_done = False
     last_check_hour = -1
     last_position_sync_time = 0.0
+    completed_this_hour = set()
+    hour_check_complete = False
+    last_candle_check_time = 0.0
 
     while True:
         current_time = time.time()
         
         # Sync active positions from Bybit periodically to save proxy bandwidth
         has_active_positions = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
-        sync_interval = 30.0 if has_active_positions else 120.0
+        sync_interval = POSITION_SYNC_INTERVAL_SECS if has_active_positions else POSITION_SYNC_IDLE_INTERVAL_SECS
         
         if (current_time - last_position_sync_time >= sync_interval):
             success = sync_active_positions_from_bybit()
@@ -4536,30 +4560,57 @@ def main():
             return False, 0
 
         check_and_hot_reload_models()
-        current_time_pkt = get_pkt_time()
-        # Trigger check once at the boundary hour transition or on startup
-        is_new_hour = (current_time_pkt.hour != last_check_hour)
         
-        if is_new_hour or (not startup_check_done):
-            if not startup_check_done:
-                print("[Startup] Executing fast initial candle check for BTCUSDT to update cards instantly...")
-                check_queue = [("BTCUSDT", iv) for iv in ["60", "120", "240", "360"]]
-                startup_check_done = True
-                last_check_hour = current_time_pkt.hour
-            else:
-                last_check_hour = current_time_pkt.hour
-                check_queue = []
-                # Use UTC hours to check intervals since Bybit candle closes are aligned to UTC
-                from datetime import datetime as dt
-                utc_hour = dt.utcnow().hour
-                for iv_q in ["60", "120", "240", "360"]:
-                    iv_hours = int(iv_q) // 60
-                    if utc_hour % iv_hours == 0:
-                        for symbol_q in SUPPORTED_SYMBOLS:
-                            check_queue.append((symbol_q, iv_q))
-        else:
-            check_queue = []
+        # --- Intelligent Boundary Window Candle Polling ---
+        current_time_utc = datetime.utcnow()
+        current_utc_hour = current_time_utc.hour
+        current_utc_minute = current_time_utc.minute
+        
+        # 1. Reset hourly state variables at a new UTC hour transition
+        if current_utc_hour != last_check_hour:
+            last_check_hour = current_utc_hour
+            hour_check_complete = False
+            completed_this_hour.clear()
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] New UTC hour detected ({current_utc_hour}). Resetting boundary check status.")
             
+        # 2. Determine if we are within the candle check window or if we are executing the startup check
+        is_in_check_window = (current_utc_minute < CANDLE_CHECK_WINDOW_MINS) or (not startup_check_done)
+        
+        check_queue = []
+        is_startup = not startup_check_done
+        
+        if is_in_check_window and not hour_check_complete:
+            # Throttle requests to CANDLE_CHECK_INTERVAL_SECS (e.g. 20s)
+            if current_time - last_candle_check_time >= CANDLE_CHECK_INTERVAL_SECS:
+                last_candle_check_time = current_time
+                
+                if is_startup:
+                    # Startup initial check: query all supported symbols for all intervals in parallel
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Startup initial fast check: checking all {len(SUPPORTED_SYMBOLS)} symbols across all timeframes...")
+                    check_queue = [(symbol, iv) for iv in ["60", "120", "240", "360"] for symbol in SUPPORTED_SYMBOLS]
+                    startup_check_done = True
+                else:
+                    # Regular hour transition checks: check active intervals
+                    active_intervals = []
+                    for iv_q in ["60", "120", "240", "360"]:
+                        iv_hours = int(iv_q) // 60
+                        if current_utc_hour % iv_hours == 0:
+                            active_intervals.append(iv_q)
+                    
+                    # We check how many of the currently expected ones are completed
+                    expected_pairs = [(symbol, iv) for iv in active_intervals for symbol in SUPPORTED_SYMBOLS]
+                    missing_pairs = [pair for pair in expected_pairs if pair not in completed_this_hour]
+                    
+                    if not missing_pairs:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] All active candle checks for UTC hour {current_utc_hour} completed successfully. Polling stopped.")
+                        hour_check_complete = True
+                    else:
+                        check_queue = missing_pairs
+        
+        # Calculate expected timestamp boundary
+        current_hour_dt = datetime(current_time_utc.year, current_time_utc.month, current_time_utc.day, current_time_utc.hour)
+        current_hour_ts = int(current_hour_dt.timestamp() * 1000)
+        
         htf_cache = {}
         fetched_data = {}
         if check_queue:
@@ -4603,7 +4654,7 @@ def main():
                 df_feat_val = add_features(df_target_val)
                 
                 return sym, interval_val, df_raw_val, df_feat_val
-
+ 
             print(f"[Parallel Fetch] Querying {len(check_queue)} candle combinations in parallel...")
             t_start = time.time()
             with ThreadPoolExecutor(max_workers=16) as executor:
@@ -4616,7 +4667,7 @@ def main():
                     except Exception as e:
                         print(f"[Parallel Fetch] Error fetching {sym} {iv}: {e}")
             print(f"[Parallel Fetch] Completed in {time.time() - t_start:.2f} seconds.")
-
+ 
         for symbol, iv in check_queue:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
@@ -4636,12 +4687,23 @@ def main():
             try:
                 df_completed = df_raw.iloc[:-1].copy()
                 latest_completed_ts = int(df_completed.iloc[-1]["timestamp"])
-
+ 
                 last_ts_key = f"last_processed_{symbol}_{iv}_ts"
                 if last_processed_timestamps.get(last_ts_key) is None:
                     last_processed_timestamps[last_ts_key] = 0
                     print(f"Initialized completed candle timestamp tracking for {symbol} on {iv}m: {get_local_time_str(latest_completed_ts/1000)}")
-
+ 
+                # Validate if candle is up to date based on expected window boundary
+                interval_ms = int(iv) * 60 * 1000
+                expected_start_ms = current_hour_ts - interval_ms
+                is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_startup
+                
+                if not is_up_to_date:
+                    # Candle is stale, wait for exchange to finalize the new candle
+                    continue
+                    
+                completed_this_hour.add((symbol, iv))
+                
                 if latest_completed_ts != last_processed_timestamps[last_ts_key]:
                     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {symbol} {iv}-minute candle detected (TS: {latest_completed_ts})")
                     
@@ -4888,7 +4950,7 @@ def main():
                                     total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
                                     current_bal = bot_state.get("simulated_balance", 80.0)
                                     if TRADE_MODE != "simulation":
-                                        real_bal = get_real_bybit_balance_cached()
+                                        real_bal = get_real_bybit_balance_cached(force=True)
                                         if isinstance(real_bal, (int, float)) and real_bal > 0:
                                             current_bal = real_bal
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
