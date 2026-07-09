@@ -468,6 +468,9 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 10.0, log=True),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
             'objective': 'multi:softprob',
             'num_class': 3,
             'eval_metric': 'mlogloss',
@@ -479,7 +482,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=30)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -497,6 +500,9 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 10.0, log=True),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
             'objective': 'multiclass',
             'num_class': 3,
             'verbose': -1,
@@ -508,7 +514,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=30)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -524,6 +530,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'iterations': trial.suggest_int('iterations', 50, 150),
             'depth': trial.suggest_int('depth', depth_min, depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
+            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1.0, 10.0),
             'loss_function': 'MultiClass',
             'verbose': 0,
             'random_seed': 42
@@ -533,7 +540,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=30)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -551,6 +558,9 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 10.0, log=True),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
             'random_state': 42,
             'n_jobs': 1
         }
@@ -559,7 +569,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=30)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -577,6 +587,9 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 10.0, log=True),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
             'verbose': -1,
             'random_state': 42,
             'n_jobs': 1
@@ -586,7 +599,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=30)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -602,6 +615,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
             'iterations': trial.suggest_int('iterations', 50, 150),
             'depth': trial.suggest_int('depth', depth_min, depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
+            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1.0, 10.0),
             'verbose': 0,
             'random_seed': 42
         }
@@ -610,7 +624,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=30)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):

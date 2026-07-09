@@ -4260,8 +4260,12 @@ def main():
             curr_bal = bot_state.get("simulated_balance", start_bal)
             daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
             daily_profit = curr_bal - start_bal
-            # Circuit breaker is deactivated for now
-            bot_state["circuit_breaker_active"] = False
+            # Enable Daily Drawdown Circuit Breaker at 10%
+            if daily_dd_pct >= 10.0:
+                bot_state["circuit_breaker_active"] = True
+                print(f"[Circuit Breaker] TRIGGERED — Daily drawdown is {daily_dd_pct:.2f}% (>= 10.0%). Trading halted.")
+            else:
+                bot_state["circuit_breaker_active"] = False
             if daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
                 bot_state["daily_goal_reached"] = True
                 print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
@@ -4553,6 +4557,9 @@ def main():
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
+                        elif bot_state.get("circuit_breaker_active", False):
+                            status_msg = "Skipped (Circuit Breaker)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
                         elif already_active:
                             status_msg = "Skipped (Already Active)"
                             print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
