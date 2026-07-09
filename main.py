@@ -2323,36 +2323,37 @@ def get_reddit_posts():
 
 def get_cryptopanic_posts():
     """
-    Fetches aggregated cryptocurrency news and social posts from CryptoPanic.
-    Requires a free CryptoPanic developer API token in .env.
+    Fetches the top live crypto news from RSS feeds of Cointelegraph, CoinDesk, and Decrypt.
+    Replaces the discontinued CryptoPanic developer API. No API key is needed.
     """
-    token = os.environ.get("CRYPTOPANIC_API_TOKEN")
-    if not token:
-        return []
+    import xml.etree.ElementTree as ET
+    feeds = [
+        "https://cointelegraph.com/rss",
+        "https://www.coindesk.com/arc/outboundfeed/rss/",
+        "https://decrypt.co/feed"
+    ]
+    posts = []
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
     
-    url = "https://cryptopanic.com/api/v1/posts/"
-    params = {
-        "auth_token": token,
-        "public": "true",
-        "filter": "hot",
-        "regions": "en"
-    }
-    try:
-        res = requests.get(url, params=params, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            posts = []
-            for item in data.get("results", []):
-                title = item.get("title")
-                if title:
-                    posts.append(title.strip())
-            print(f"[News/Sentiment] Fetched {len(posts[:10])} posts from CryptoPanic API.")
-            return posts[:10]
-        else:
-            print(f"[News/Sentiment] CryptoPanic API returned status code {res.status_code}")
-    except Exception as e:
-        print(f"[News/Sentiment] Exception fetching CryptoPanic API: {e}")
-    return []
+    for url in feeds:
+        try:
+            res = requests.get(url, headers=headers, timeout=8)
+            if res.status_code == 200:
+                xml_content = res.content
+                root = ET.fromstring(xml_content)
+                feed_posts = []
+                for item in root.findall(".//item"):
+                    title_elem = item.find("title")
+                    if title_elem is not None and title_elem.text:
+                        feed_posts.append(title_elem.text.strip())
+                posts.extend(feed_posts[:4])
+                print(f"[News/Sentiment] Fetched {len(feed_posts[:4])} articles from RSS: {url}")
+            else:
+                print(f"[News/Sentiment] RSS feed {url} returned status code {res.status_code}")
+        except Exception as e:
+            print(f"[News/Sentiment] Exception fetching RSS feed {url}: {e}")
+            
+    return posts[:12]
 
 def get_x_tweets():
     """
