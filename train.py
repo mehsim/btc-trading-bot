@@ -24,6 +24,62 @@ import requests
 import features
 from datetime import datetime, timedelta
 
+# Dynamic GPU training hardware auto-detection
+GPU_XGB = False
+GPU_LGB = False
+GPU_CAT = False
+
+def check_gpu_support():
+    global GPU_XGB, GPU_LGB, GPU_CAT
+    import numpy as np
+    
+    # Check XGBoost CUDA GPU
+    try:
+        from xgboost import XGBClassifier
+        clf = XGBClassifier(tree_method='hist', device='cuda', n_estimators=1)
+        clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
+        GPU_XGB = True
+        print("[GPU Detection] XGBoost CUDA GPU support detected.")
+    except Exception:
+        GPU_XGB = False
+        
+    # Check LightGBM GPU
+    try:
+        from lightgbm import LGBMClassifier
+        clf = LGBMClassifier(device='gpu', n_estimators=1, verbose=-1)
+        clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
+        GPU_LGB = True
+        print("[GPU Detection] LightGBM GPU support detected.")
+    except Exception:
+        GPU_LGB = False
+
+    # Check CatBoost GPU
+    try:
+        from catboost import CatBoostClassifier
+        clf = CatBoostClassifier(task_type='GPU', iterations=1, verbose=0)
+        clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
+        GPU_CAT = True
+        print("[GPU Detection] CatBoost GPU support detected.")
+    except Exception:
+        GPU_CAT = False
+
+check_gpu_support()
+
+def create_model(model_class, params):
+    params = dict(params)
+    name = model_class.__name__
+    if "XGB" in name:
+        if GPU_XGB:
+            params['device'] = 'cuda'
+            params['tree_method'] = 'hist'
+    elif "LGBM" in name:
+        if GPU_LGB:
+            params['device'] = 'gpu'
+    elif "CatBoost" in name:
+        if GPU_CAT:
+            params['task_type'] = 'GPU'
+    return model_class(**params)
+
 economic_calendar_cache = None
 economic_calendar_lock = threading.Lock()
 
@@ -261,7 +317,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'random_state': 42,
             'n_jobs': 1
         }
-        model = XGBClassifier(**params)
+        model = create_model(XGBClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
@@ -293,7 +349,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'random_state': 42,
             'n_jobs': 1
         }
-        model = LGBMClassifier(**params)
+        model = create_model(LGBMClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
@@ -319,7 +375,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'verbose': 0,
             'random_seed': 42
         }
-        model = CatBoostClassifier(**params)
+        model = create_model(CatBoostClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
@@ -348,7 +404,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
             'random_state': 42,
             'n_jobs': 1
         }
-        model = XGBRegressor(**params)
+        model = create_model(XGBRegressor, params)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
@@ -378,7 +434,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
             'random_state': 42,
             'n_jobs': 1
         }
-        model = LGBMRegressor(**params)
+        model = create_model(LGBMRegressor, params)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
@@ -403,7 +459,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
             'verbose': 0,
             'random_seed': 42
         }
-        model = CatBoostRegressor(**params)
+        model = create_model(CatBoostRegressor, params)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
@@ -560,14 +616,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 first_fold = False
             
             # Instantiate models with best parameters
-            xgb_t = XGBClassifier(**best_params_xgb_t)
-            lgb_t = LGBMClassifier(**best_params_lgb_t)
-            cat_t = CatBoostClassifier(**best_params_cat_t)
+            xgb_t = create_model(XGBClassifier, best_params_xgb_t)
+            lgb_t = create_model(LGBMClassifier, best_params_lgb_t)
+            cat_t = create_model(CatBoostClassifier, best_params_cat_t)
             ensemble_t = EnsembleClassifier(xgb_t, lgb_t, cat_t)
             
-            xgb_p = XGBRegressor(**best_params_xgb_p)
-            lgb_p = LGBMRegressor(**best_params_lgb_p)
-            cat_p = CatBoostRegressor(**best_params_cat_p)
+            xgb_p = create_model(XGBRegressor, best_params_xgb_p)
+            lgb_p = create_model(LGBMRegressor, best_params_lgb_p)
+            cat_p = create_model(CatBoostRegressor, best_params_cat_p)
             ensemble_p = EnsembleRegressor(xgb_p, lgb_p, cat_p)
             
             # Train on this fold
@@ -692,14 +748,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
         if best_params_cat_p is None:
             best_params_cat_p = {'iterations': 100, 'depth': 4, 'learning_rate': 0.05}
 
-        final_xgb_t = XGBClassifier(**best_params_xgb_t)
-        final_lgb_t = LGBMClassifier(**best_params_lgb_t)
-        final_cat_t = CatBoostClassifier(**best_params_cat_t)
+        final_xgb_t = create_model(XGBClassifier, best_params_xgb_t)
+        final_lgb_t = create_model(LGBMClassifier, best_params_lgb_t)
+        final_cat_t = create_model(CatBoostClassifier, best_params_cat_t)
         final_ensemble_t = EnsembleClassifier(final_xgb_t, final_lgb_t, final_cat_t)
         
-        final_xgb_p = XGBRegressor(**best_params_xgb_p)
-        final_lgb_p = LGBMRegressor(**best_params_lgb_p)
-        final_cat_p = CatBoostRegressor(**best_params_cat_p)
+        final_xgb_p = create_model(XGBRegressor, best_params_xgb_p)
+        final_lgb_p = create_model(LGBMRegressor, best_params_lgb_p)
+        final_cat_p = create_model(CatBoostRegressor, best_params_cat_p)
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
         sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)

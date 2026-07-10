@@ -18,6 +18,10 @@ BYBIT_PRIVATE_WS_URL = "wss://stream-testnet.bybit.com/v5/private" if TRADE_MODE
 private_ws_connected = False
 private_ws_retry_delay = 5
 
+active_public_ws = None
+active_private_ws = None
+last_private_ws_update_time = 0.0
+
 # ==========================================
 # TIMING & API/PROXY HIT INTERVALS
 # ==========================================
@@ -2129,6 +2133,7 @@ def send_email_notification(subject, body):
 
 def on_message(ws, message):
     global live_price, last_ws_update_time
+    last_ws_update_time = time.time()
     try:
         data = json.loads(message)
         if "data" in data and isinstance(data["data"], dict):
@@ -2140,14 +2145,15 @@ def on_message(ws, message):
                 if sym == "BTCUSDT":
                     live_price = val
                     bot_state["live_price"] = val
-                    last_ws_update_time = time.time()
                     bot_state["last_update"] = last_ws_update_time
     except Exception as e:
         print(f"[WebSocket msg exception] {e}")
 
 def on_open(ws):
-    global ws_connected, ws_retry_delay
+    global ws_connected, ws_retry_delay, active_public_ws, last_ws_update_time
     ws_connected = True
+    active_public_ws = ws
+    last_ws_update_time = time.time()
     ws_retry_delay = 3  # Reset backoff on successful connection
     print("Connected to Bybit WebSocket for multi-asset prices")
     # Bybit public websocket ticker subscription allows at most 10 arguments per subscription message
@@ -2171,16 +2177,17 @@ def on_open(ws):
     threading.Thread(target=send_heartbeat, daemon=True).start()
 
 def on_close(ws, close_status_code, close_msg):
-    global ws_connected
+    global ws_connected, active_public_ws
     ws_connected = False
+    active_public_ws = None
     print(f"[WebSocket Closed] code={close_status_code}, msg={close_msg}")
 
 def on_error(ws, error):
     print(f"[WebSocket Error] {error}")
 
 def start_ws():
-    global ws_connected, ws_retry_delay
-    url = BYBIT_WS_URL
+    global ws_connected, ws_retry_delay, active_public_ws
+    url = BYBYIT_WS_URL if 'BYBYIT_WS_URL' in globals() else BYBIT_WS_URL
     print(f"[WebSocket Connecting] url={url}")
     # Parse proxy settings from BYBIT_PROXY env var
     proxy_host, proxy_port, proxy_auth, proxy_type_str = None, None, None, None
@@ -2197,6 +2204,7 @@ def start_ws():
                 on_error=on_error,
                 on_close=on_close
             )
+            active_public_ws = ws
             import ssl
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
@@ -2209,6 +2217,7 @@ def start_ws():
         except Exception as e:
             print(f"[WebSocket run_forever exception] {e}")
         ws_connected = False
+        active_public_ws = None
         print(f"[WebSocket] Reconnecting in {ws_retry_delay}s...")
         time.sleep(ws_retry_delay)
         ws_retry_delay = min(ws_retry_delay * 2, 60)  # Backoff up to 60s
@@ -2216,8 +2225,10 @@ def start_ws():
 # WebSocket thread is started inside if __name__ == "__main__" block at the bottom
 
 def on_private_open(ws):
-    global private_ws_connected
+    global private_ws_connected, active_private_ws, last_private_ws_update_time
     private_ws_connected = True
+    active_private_ws = ws
+    last_private_ws_update_time = time.time()
     print("[WebSocket Private] Connected. Authenticating...")
     api_key = os.getenv("BYBIT_API_KEY", "").strip()
     api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
@@ -2225,11 +2236,11 @@ def on_private_open(ws):
         print("[WebSocket Private] API Key or Secret missing. Cannot authenticate.")
         ws.close()
         return
-    import time
+    import time as t_module
     import hmac
     import hashlib
     import json
-    expires = int((time.time() + 10) * 1000)
+    expires = int((t_module.time() + 10) * 1000)
     signature_raw = f"GET/realtime{expires}"
     signature = hmac.new(
         api_secret.encode("utf-8"),
@@ -2241,6 +2252,18 @@ def on_private_open(ws):
         "args": [api_key, expires, signature]
     }
     ws.send(json.dumps(auth_payload))
+    
+    # Heartbeat Daemon Thread for private WebSocket to send custom text pings every 20 seconds
+    def send_private_heartbeat():
+        import json as j_module
+        import time as t_module
+        while private_ws_connected:
+            try:
+                ws.send(j_module.dumps({"op": "ping"}))
+            except Exception:
+                break
+            t_module.sleep(20)
+    threading.Thread(target=send_private_heartbeat, daemon=True).start()
 
 _ws_filled_orders = {}
 _ws_filled_orders_lock = threading.Lock()
@@ -2248,6 +2271,8 @@ _ws_filled_orders_lock = threading.Lock()
 def on_private_message(ws, message):
     import json
     import time
+    global last_private_ws_update_time
+    last_private_ws_update_time = time.time()
     try:
         data = json.loads(message)
         op = data.get("op")
@@ -2296,12 +2321,13 @@ def on_private_error(ws, error):
     print(f"[WebSocket Private Error] {error}")
 
 def on_private_close(ws, close_status_code, close_msg):
-    global private_ws_connected
+    global private_ws_connected, active_private_ws
     private_ws_connected = False
+    active_private_ws = None
     print(f"[WebSocket Private Closed] code={close_status_code}, msg={close_msg}")
 
 def start_private_ws():
-    global private_ws_connected, private_ws_retry_delay
+    global private_ws_connected, private_ws_retry_delay, active_private_ws
     url = BYBIT_PRIVATE_WS_URL
     print(f"[WebSocket Private Connecting] url={url}")
     proxy_host, proxy_port, proxy_auth, proxy_type_str = None, None, None, None
@@ -2317,6 +2343,7 @@ def start_private_ws():
                 on_error=on_private_error,
                 on_close=on_private_close
             )
+            active_private_ws = ws
             import ssl
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
@@ -2329,9 +2356,43 @@ def start_private_ws():
         except Exception as e:
             print(f"[WebSocket Private run_forever exception] {e}")
         private_ws_connected = False
+        active_private_ws = None
         print(f"[WebSocket Private] Reconnecting in {private_ws_retry_delay}s...")
         time.sleep(private_ws_retry_delay)
         private_ws_retry_delay = min(private_ws_retry_delay * 2, 60)
+
+def run_websocket_watchdog():
+    global last_ws_update_time, last_private_ws_update_time
+    global active_public_ws, active_private_ws
+    global ws_connected, private_ws_connected
+    
+    print("[WebSocket Watchdog] Active keep-alive thread started.")
+    last_ws_update_time = time.time()
+    last_private_ws_update_time = time.time()
+    
+    while True:
+        time.sleep(15)
+        now = time.time()
+        
+        # Check Public WebSocket (Ticker/Prices)
+        if ws_connected and active_public_ws:
+            silent_duration = now - last_ws_update_time
+            if silent_duration > 60:
+                print(f"[WebSocket Watchdog] Public WebSocket silent for {silent_duration:.1f}s (>60s). Force closing to trigger reconnect...")
+                try:
+                    active_public_ws.close()
+                except Exception as e:
+                    print(f"[WebSocket Watchdog] Error closing public ws: {e}")
+                    
+        # Check Private WebSocket (Position/Orders/Wallet)
+        if private_ws_connected and active_private_ws:
+            silent_duration = now - last_private_ws_update_time
+            if silent_duration > 60:
+                print(f"[WebSocket Watchdog] Private WebSocket silent for {silent_duration:.1f}s (>60s). Force closing to trigger reconnect...")
+                try:
+                    active_private_ws.close()
+                except Exception as e:
+                    print(f"[WebSocket Watchdog] Error closing private ws: {e}")
 
 
 # =========================
@@ -5455,6 +5516,8 @@ if __name__ == "__main__":
     threading.Thread(target=start_ws, daemon=True).start()
     # Start Bybit Private WebSocket feed in a background thread
     threading.Thread(target=start_private_ws, daemon=True).start()
+    # Start WebSocket keep-alive watchdog thread in a background thread
+    threading.Thread(target=run_websocket_watchdog, daemon=True).start()
     # Start Bybit REST API fallback price updater thread
     threading.Thread(target=run_fallback_price_updater, daemon=True).start()
     # Start automated rolling retraining scheduler in a background thread
