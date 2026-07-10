@@ -358,8 +358,11 @@ def save_history():
             "fresh_reset_v3": bot_state.get("fresh_reset_v3", False)
         }
         try:
-            with open(HISTORY_FILE, "w") as f:
+            dir_name = os.path.dirname(HISTORY_FILE)
+            temp_file = os.path.join(dir_name, "dashboard_history_temp.json") if dir_name else "dashboard_history_temp.json"
+            with open(temp_file, "w") as f:
                 json.dump(data, f)
+            os.replace(temp_file, HISTORY_FILE)
                 
             # If running on Hugging Face and write token is available, backup to HF Dataset
             token = os.environ.get("HF_TOKEN") or os.environ.get("token")
@@ -658,12 +661,13 @@ def parse_proxy_url(proxy_url):
     return host, port, auth, proxy_type
 
 _cached_time_offset = None
+_last_time_sync = 0.0
 _time_offset_lock = threading.Lock()
 
 def get_bybit_time_offset():
-    global _cached_time_offset
+    global _cached_time_offset, _last_time_sync
     with _time_offset_lock:
-        if _cached_time_offset is not None:
+        if _cached_time_offset is not None and (time.time() - _last_time_sync) < 7200:
             return _cached_time_offset
             
     import time
@@ -688,6 +692,7 @@ def get_bybit_time_offset():
                 print(f"[Bybit API] Successfully synced time offset: {offset}ms")
                 with _time_offset_lock:
                     _cached_time_offset = offset
+                    _last_time_sync = time.time()
                 return offset
         except Exception as e:
             if attempt == 2:
@@ -1255,24 +1260,13 @@ def run_bybit_balance_updater():
 
 @app.route("/api/status")
 def get_status():
-    # Thread-safe dictionary copy with fallback
-    with active_trades_lock:
-        for _ in range(5):
-            try:
-                state_copy = bot_state.copy()
-                for tf in ["1h", "2h", "4h", "6h"]:
-                    tf_key = f"active_trade_{tf}"
-                    if tf_key in state_copy and isinstance(state_copy[tf_key], list):
-                        state_copy[tf_key] = list(state_copy[tf_key])
-                break
-            except RuntimeError:
-                time.sleep(0.01)
-        else:
-            state_copy = {k: v for k, v in list(bot_state.items())}
-            for tf in ["1h", "2h", "4h", "6h"]:
-                tf_key = f"active_trade_{tf}"
-                if tf_key in state_copy and isinstance(state_copy[tf_key], list):
-                    state_copy[tf_key] = list(state_copy[tf_key])
+    # Thread-safe dictionary copy using the global bot_state_lock
+    with bot_state_lock:
+        state_copy = bot_state.copy()
+        for tf in ["1h", "2h", "4h", "6h"]:
+            tf_key = f"active_trade_{tf}"
+            if tf_key in state_copy and isinstance(state_copy[tf_key], list):
+                state_copy[tf_key] = list(state_copy[tf_key])
 
     with logs_lock:
         state_copy["logs"] = list(bot_logs)
@@ -5437,6 +5431,16 @@ def main():
                                                         else:
                                                             print(f"[{symbol} {iv}m API] Order unfilled after 12s. Cancelling and re-quoting...")
                                                             cancel_bybit_order(symbol, bybit_order_id)
+                                                            # Race condition safety check: query order status one final time
+                                                            time.sleep(0.5)
+                                                            final_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                            if final_details and final_details.get("orderStatus") == "Filled":
+                                                                entry_price = float(final_details.get("avgPrice", limit_price))
+                                                                actual_qty = float(final_details.get("cumExecQty", raw_qty))
+                                                                filled = True
+                                                                bybit_success = True
+                                                                print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled during cancel request at ${entry_price:.4f}.")
+                                                                break
                                                     else:
                                                         print(f"[{symbol} {iv}m API WARNING] Limit order placement failed: {order_res.get('retMsg')} (waiting 2s before retry)")
                                                         time.sleep(2)
