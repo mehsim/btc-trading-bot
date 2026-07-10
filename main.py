@@ -171,7 +171,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_REQUIRED
             
-            ssl_sock = context.wrap_socket(s, server_hostname=None)
+            ssl_sock = context.wrap_socket(s, server_hostname="api.telegram.org")
 
             body = json.dumps(payload).encode('utf-8')
             path = f"/bot{token}/{method}"
@@ -1844,7 +1844,7 @@ def test_telegram_endpoint():
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_REQUIRED
-            ssl_sock = context.wrap_socket(s, server_hostname=None)
+            ssl_sock = context.wrap_socket(s, server_hostname="api.telegram.org")
 
             body = json.dumps({}).encode('utf-8')
             path = f"/bot{token}/getMe"
