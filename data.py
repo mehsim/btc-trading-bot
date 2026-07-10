@@ -48,6 +48,12 @@ def init_db():
             UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fng_data (
+            timestamp REAL PRIMARY KEY,
+            fear_greed REAL
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -659,10 +665,27 @@ fng_cache_time = 0.0
 def get_fear_and_greed_history():
     global fng_cache, fng_cache_time
     with fng_lock:
-        # Cache for 4 hours (14400 seconds)
+        # Cache for 4 hours (14400 seconds) in memory
         if fng_cache is not None and (time.time() - fng_cache_time) < 14400:
             return fng_cache
             
+        # Try loading from local sqlite database first
+        df_cache = None
+        try:
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            cursor = conn.cursor()
+            cursor.execute("SELECT timestamp, fear_greed FROM fng_data ORDER BY timestamp ASC;")
+            rows = cursor.fetchall()
+            conn.close()
+            if rows:
+                df_cache = pd.DataFrame(rows, columns=["timestamp", "fear_greed"])
+        except Exception as e:
+            print(f"[FnG Cache Load Error] {e}")
+            df_cache = None
+
+        # Fetch fresh data from API
         url = "https://api.alternative.me/fng/?limit=0&format=json"
         try:
             resp = requests.get(url, timeout=15)
@@ -675,15 +698,42 @@ def get_fear_and_greed_history():
                             "timestamp": float(item["timestamp"]) * 1000,
                             "fear_greed": float(item["value"])
                         })
-                    df_fng = pd.DataFrame(fng_data)
-                    df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
-                    fng_cache = df_fng
+                    df_new = pd.DataFrame(fng_data)
+                    
+                    if df_cache is not None:
+                        df_history = pd.concat([df_cache, df_new], ignore_index=True)
+                    else:
+                        df_history = df_new
+                        
+                    df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                    
+                    # Write to database cache
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                        conn.execute("PRAGMA journal_mode=WAL;")
+                        conn.executemany(
+                            "INSERT OR REPLACE INTO fng_data (timestamp, fear_greed) VALUES (?, ?);",
+                            [(float(row["timestamp"]), float(row["fear_greed"])) for _, row in df_history.iterrows()]
+                        )
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        print(f"[FnG Cache Write Error] {e}")
+                        
+                    fng_cache = df_history
                     fng_cache_time = time.time()
-                    return df_fng
+                    return df_history
         except Exception as e:
             print(f"Error fetching Fear & Greed history: {e}")
-            if fng_cache is not None:
-                return fng_cache
+            
+        if df_cache is not None and not df_cache.empty:
+            fng_cache = df_cache
+            fng_cache_time = time.time()
+            return df_cache
+            
+        if fng_cache is not None:
+            return fng_cache
+            
         return pd.DataFrame(columns=["timestamp", "fear_greed"])
 
 def merge_derivatives_sentiment_features(df, symbol, interval):

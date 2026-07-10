@@ -5069,41 +5069,36 @@ def main():
                                             current_bal = real_bal
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
                                     
-                                    # Base size relative to balance (before leverage, e.g., 1/35th to 1/25th)
-                                    if c_prob < 0.60:
-                                        base_size = current_bal / 35.0
-                                    elif c_prob <= 0.75:
-                                        base_size = current_bal / 30.0
-                                    else:
-                                        base_size = current_bal / 25.0
-                                        
-                                    if is_golden_hour:
-                                        # Golden Hour: Double the target slot allocation size
-                                        position_size_usd = base_size * 2.0
-                                        position_size_usd = position_size_usd * cov_multiplier
-                                        print(f"[{iv}m Golden Hour Sizing] Base Size: ${base_size:.2f} -> Golden Target (Doubled): ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
-                                    else:
-                                        # Regular Hours Sizing
-                                        position_size_usd = base_size * cov_multiplier
-                                        print(f"[{iv}m Calibrated Sizing] Base Size: ${base_size:.2f} (Conf: {calibrated_confidence*100:.1f}%) -> Final Position Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
-
-                                    # Calculate Kelly parameters for logs and metadata
+                                    # Base size dynamic calculation using Quarter-Kelly Criterion
                                     kelly_p = float(calibrated_confidence)
                                     kelly_b = float(tp_multiplier_adjusted / sl_multiplier) if sl_multiplier > 0 else 1.5
-                                    kelly_fraction = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
-
-                                    # Apply Half-Kelly sizing adjustment
-                                    half_kelly_mult = 0.5 * kelly_fraction
-                                    half_kelly_mult = min(1.0, half_kelly_mult)  # Cap multiplier at 1.0
-                                    if half_kelly_mult > 0:
-                                        position_size_usd = position_size_usd * half_kelly_mult
-                                        print(f"[{iv}m Half-Kelly Sizing] Kelly Fraction: {kelly_fraction:.4f} -> Multiplier: {half_kelly_mult:.4f}x -> Adjusted Position Size: ${position_size_usd:.2f}")
+                                    raw_kelly = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
+                                    
+                                    # Quarter-Kelly scaling for safety and drawdown control
+                                    scaled_kelly = 0.25 * raw_kelly
+                                    
+                                    # Enforce bounds on balance fraction (Min 2%, Max 15% per trade)
+                                    f_clamped = max(0.02, min(0.15, scaled_kelly))
+                                    
+                                    # Sizing before leverage
+                                    position_size_usd = current_bal * f_clamped
+                                    
+                                    # Covariance multiplier to account for existing correlations
+                                    position_size_usd = position_size_usd * cov_multiplier
+                                    
+                                    if is_golden_hour:
+                                        # Golden Hour: Double the target slot allocation size
+                                        position_size_usd = position_size_usd * 2.0
+                                        print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {raw_kelly:.4f} -> Scaled: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Golden Target: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                     else:
-                                        print(f"[{iv}m Half-Kelly Sizing] Kelly Fraction is 0 or negative. Trade sizing unchanged.")
+                                        print(f"[{iv}m Kelly Sizing] Kelly Fraction: {raw_kelly:.4f} -> Scaled: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Final Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                        
+                                    # Clip to minimum Bybit order requirement (e.g. $2.0)
+                                    position_size_usd = max(2.0, position_size_usd)
+                                    print(f"[{iv}m Trade Size Boundary Check] Final size before leverage: ${position_size_usd:.2f}")
 
-                                    # Enforce trade size before leverage to be between 2.0 and 3.0 USD
-                                    position_size_usd = max(2.0, min(3.0, position_size_usd))
-                                    print(f"[{iv}m Trade Size Boundary Check] Clipped size before leverage: ${position_size_usd:.2f}")
+                                    # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
+                                    kelly_fraction = raw_kelly
 
                                     # Ensure total size of active trades does not exceed the wallet balance
                                     min_bal_limit = 2.0

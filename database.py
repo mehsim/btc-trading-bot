@@ -76,6 +76,25 @@ def init_db():
             );
         """)
         
+        # 6. Create Derivatives Cache Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS derivatives_cache (
+                timestamp INTEGER,
+                symbol TEXT,
+                open_interest REAL,
+                funding_rate REAL,
+                PRIMARY KEY (timestamp, symbol)
+            );
+        """)
+        
+        # 7. Create Sentiment Cache Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sentiment_cache (
+                timestamp INTEGER PRIMARY KEY,
+                fear_and_greed_val INTEGER
+            );
+        """)
+        
         conn.commit()
         
         # 5. Check if migration from JSON is needed
@@ -255,5 +274,83 @@ def set_setting(key, value):
             conn.commit()
         except Exception as e:
             print(f"[Database Error] Failed to save setting {key}: {e}")
+        finally:
+            conn.close()
+
+def save_cached_derivatives(symbol, records):
+    """
+    records is a list of dicts: [{'timestamp': int_ms, 'open_interest': float, 'funding_rate': float}]
+    """
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            for r in records:
+                conn.execute("""
+                    INSERT OR REPLACE INTO derivatives_cache (timestamp, symbol, open_interest, funding_rate)
+                    VALUES (?, ?, ?, ?);
+                """, (r['timestamp'], symbol, r.get('open_interest'), r.get('funding_rate')))
+            conn.commit()
+        except Exception as e:
+            print(f"[Database Error] Failed to save cached derivatives for {symbol}: {e}")
+        finally:
+            conn.close()
+
+def get_cached_derivatives(symbol, since_ts):
+    """
+    Returns list of dicts containing cached data since since_ts (timestamp in ms)
+    """
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT timestamp, open_interest, funding_rate FROM derivatives_cache
+                WHERE symbol = ? AND timestamp >= ?
+                ORDER BY timestamp ASC;
+            """, (symbol, since_ts))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"[Database Error] Failed to fetch cached derivatives for {symbol}: {e}")
+            return []
+        finally:
+            conn.close()
+
+def save_cached_sentiment(records):
+    """
+    records is a list of dicts: [{'timestamp': int_ms, 'fear_and_greed_val': int}]
+    """
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            for r in records:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sentiment_cache (timestamp, fear_and_greed_val)
+                    VALUES (?, ?);
+                """, (r['timestamp'], r.get('fear_and_greed_val')))
+            conn.commit()
+        except Exception as e:
+            print(f"[Database Error] Failed to save cached sentiment: {e}")
+        finally:
+            conn.close()
+
+def get_cached_sentiment(since_ts):
+    """
+    Returns list of dicts since since_ts (timestamp in ms)
+    """
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT timestamp, fear_and_greed_val FROM sentiment_cache
+                WHERE timestamp >= ?
+                ORDER BY timestamp ASC;
+            """, (since_ts,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"[Database Error] Failed to fetch cached sentiment: {e}")
+            return []
         finally:
             conn.close()
