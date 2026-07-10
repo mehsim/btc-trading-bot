@@ -4917,7 +4917,21 @@ def main():
                         elif atr_norm_val < 0.003:
                             dynamic_conf_threshold = min(0.70, dynamic_conf_threshold + 0.02)
                             
-                        print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%)")
+                        # 3. Sentiment-Adaptive Adjustment
+                        with news_sentiment_lock:
+                            current_sentiment = cached_news_sentiment
+                        if current_sentiment == "Bullish":
+                            if ml_trend == "Bullish":
+                                dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.03)
+                            elif ml_trend == "Bearish":
+                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                        elif current_sentiment == "Bearish":
+                            if ml_trend == "Bearish":
+                                dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.03)
+                            elif ml_trend == "Bullish":
+                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                                
+                        print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
 
                         # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
                         meta_adjustment = 0.0
@@ -4941,6 +4955,39 @@ def main():
                                           (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
                         
                         is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
+                        
+                        # Hierarchical Confluence Check (Trend Alignment)
+                        confluence_blocked = False
+                        htf_trend = "Neutral"
+                        macro_tf = ""
+                        htf_mapping = {60: 240, 120: 360}
+                        if iv in htf_mapping:
+                            macro_iv = htf_mapping[iv]
+                            macro_tf = tf_map.get(str(macro_iv))
+                            if macro_tf:
+                                macro_pred = bot_state.get(f"latest_prediction_{macro_tf}")
+                                if macro_pred and isinstance(macro_pred, dict):
+                                    htf_trend = macro_pred.get("direction", "Neutral")
+                                    if htf_trend in ["Bullish", "Bearish"]:
+                                        if ml_trend == "Bullish" and htf_trend == "Bearish":
+                                            confluence_blocked = True
+                                        elif ml_trend == "Bearish" and htf_trend == "Bullish":
+                                            confluence_blocked = True
+
+                        # Funding Rate Carry Overlay
+                        funding_rate = get_funding_rate(symbol)
+                        funding_blocked = False
+                        if funding_rate > 0.0005 and ml_trend == "Bullish":
+                            dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                            print(f"[{symbol} {iv}m] Funding Carry Adjustment: Positive funding rate ({funding_rate*100:.3f}%) raised Long threshold to {dynamic_conf_threshold*100:.1f}%")
+                        elif funding_rate < -0.0005 and ml_trend == "Bearish":
+                            dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                            print(f"[{symbol} {iv}m] Funding Carry Adjustment: Negative funding rate ({funding_rate*100:.3f}%) raised Short threshold to {dynamic_conf_threshold*100:.1f}%")
+
+                        if ml_trend == "Bullish" and funding_rate > 0.001:
+                            funding_blocked = True
+                        elif ml_trend == "Bearish" and funding_rate < -0.001:
+                            funding_blocked = True
                         
                         status_msg = "Pending"
                         active_trade_key = f"active_trade_{tf}"
@@ -4967,6 +5014,12 @@ def main():
                         elif is_cooling:
                             status_msg = "Skipped (Cool-Off)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
+                        elif confluence_blocked:
+                            status_msg = "Skipped (HTF Trend Block)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: Counter-trend relative to macro timeframe ({macro_tf} trend: {htf_trend}).")
+                        elif funding_blocked:
+                            status_msg = "Skipped (Funding Block)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
                         elif ml_trend == "Neutral":
                             status_msg = "Skipped (Neutral)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
@@ -5049,12 +5102,24 @@ def main():
                                     raw_entry_price = float(latest_candle["close"])
                                     entry_price = raw_entry_price
 
+                                    # Enforce a minimum TP of 0.5%
+                                    min_tp_change = entry_price * 0.005
+                                    tp_change = max(min_tp_change, abs(pred_change))
+                                    
+                                    # Dynamically adjust Stop Loss multiplier based on prediction confidence
+                                    sl_multiplier_adjusted = sl_multiplier
+                                    if calibrated_confidence > dynamic_conf_threshold:
+                                        confidence_ratio = (calibrated_confidence - dynamic_conf_threshold) / (1.0 - dynamic_conf_threshold)
+                                        # Scale SL down by up to 30% for maximum confidence trades
+                                        sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
+                                        
                                     if ml_trend == "Bullish":
-                                        stop_loss_price = entry_price - sl_multiplier * atr_dollars
-                                        take_profit_price = entry_price + tp_multiplier_adjusted * atr_dollars
+                                        stop_loss_price = entry_price - sl_multiplier_adjusted * atr_dollars
+                                        take_profit_price = entry_price + tp_change
                                     else:
-                                        stop_loss_price = entry_price + sl_multiplier * atr_dollars
-                                        take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
+                                        stop_loss_price = entry_price + sl_multiplier_adjusted * atr_dollars
+                                        take_profit_price = entry_price - tp_change
+                                    print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
 
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
                                     c_prob = float(calibrated_confidence)
