@@ -4315,12 +4315,17 @@ def main():
                         entry_time_ms = active_trade.get("entry_time")
                         if entry_time_ms:
                             trade_age_hours = (time.time() - (entry_time_ms / 1000.0)) / 3600.0
-                            if trade_age_hours >= 6.0:
+                            cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
+                            lookahead = cfg.get("lookahead", 10)
+                            lookahead_duration_hours = (int(iv) * lookahead) / 60.0
+                            stagnation_age_hours = 0.6 * lookahead_duration_hours
+                            
+                            if trade_age_hours >= stagnation_age_hours:
                                 current_change_pct = ((current_price - entry_price) / entry_price) * 100.0
                                 current_raw_return = current_change_pct if direction == "Bullish" else -current_change_pct
                                 current_leverage = active_trade.get("leverage", 1.0)
                                 current_net_return_pct = (current_raw_return * current_leverage) - (current_leverage * 0.0011 * 100.0)
-                                if current_net_return_pct < 0.8:
+                                if -1.0 <= current_net_return_pct < 1.0:
                                     exit_reason = f"STAGNATION TIMEOUT (Age: {trade_age_hours:.1f}h, Net: {current_net_return_pct:+.2f}%)"
                     
                     # 3. Simulation mode SL/TP price checks
@@ -4989,6 +4994,15 @@ def main():
                             funding_blocked = True
                         elif ml_trend == "Bearish" and funding_rate < -0.001:
                             funding_blocked = True
+                            
+                        # Open Interest Momentum Guard
+                        try:
+                            oi_delta = df.iloc[-1].get("open_interest_pct_change", 0.0) * 100.0
+                            if oi_delta < 0.5:
+                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                                print(f"[{symbol} {iv}m] OI Momentum Guard: Low Open Interest Delta ({oi_delta:+.2f}%) raised threshold to {dynamic_conf_threshold*100:.1f}%")
+                        except Exception as e:
+                            print(f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
                         
                         status_msg = "Pending"
                         active_trade_key = f"active_trade_{tf}"
