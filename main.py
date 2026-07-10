@@ -4662,17 +4662,31 @@ def main():
                             "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
                         })
                         
-                        send_telegram_alert(
-                            f"🔴 *POSITION CLOSED (AUTO)* 🔴\n"
-                            f"• *Asset*: {active_symbol}\n"
-                            f"• *Interval*: {iv}m\n"
-                            f"• *Direction*: {direction}\n"
-                            f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
-                            f"• *Entry Price*: ${entry_price:.2f}\n"
-                            f"• *Exit Price*: ${actual_price:.2f}\n"
-                            f"• *Realized PnL*: ${total_pnl:+.2f} (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
-                            f"• *New Balance*: ${new_bal:.2f}"
-                        )
+                        if total_pnl > 0:
+                            exit_header = "🚀 *TAKE PROFIT HIT* 🚀" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 *TRAILING STOP HIT (PROFITABLE)* 📈" if "TRAILING" in str(exit_reason).upper() else "🎉 *TRADE CLOSED WITH PROFIT* 🎉"
+                            send_telegram_alert(
+                                f"{exit_header}\n"
+                                f"• *Asset*: {active_symbol}\n"
+                                f"• *Interval*: {iv}m\n"
+                                f"• *Direction*: {direction}\n"
+                                f"• *Entry Price*: ${entry_price:.2f}\n"
+                                f"• *Exit Price*: ${actual_price:.2f}\n"
+                                f"• *Realized PnL*: *${total_pnl:+.2f}* (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
+                                f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
+                                f"• *New Balance*: ${new_bal:.2f}"
+                            )
+                        else:
+                            send_telegram_alert(
+                                f"🔴 *POSITION CLOSED (AUTO)* 🔴\n"
+                                f"• *Asset*: {active_symbol}\n"
+                                f"• *Interval*: {iv}m\n"
+                                f"• *Direction*: {direction}\n"
+                                f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
+                                f"• *Entry Price*: ${entry_price:.2f}\n"
+                                f"• *Exit Price*: ${actual_price:.2f}\n"
+                                f"• *Realized PnL*: ${total_pnl:+.2f} (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
+                                f"• *New Balance*: ${new_bal:.2f}"
+                            )
                         
                         
                         # Send email alert on any profitable trade exit
@@ -5484,10 +5498,26 @@ def main():
                                                 else:
                                                     bybit_success = False
                                                     status_msg = "Skipped (Bybit Order Error)"
-                                                    print(f"[{symbol} {iv}m API ERROR] Failed to place order: {order_res.get('retMsg')} (code: {order_res.get('retCode')})")
+                                                    err_msg = order_res.get('retMsg') if order_res else "No response"
+                                                    err_code = order_res.get('retCode') if order_res else "N/A"
+                                                    print(f"[{symbol} {iv}m API ERROR] Failed to place order: {err_msg} (code: {err_code})")
+                                                    send_telegram_alert(
+                                                        f"🔴 *BYBIT API ORDER ERROR* 🔴\n"
+                                                        f"• *Asset*: {symbol}\n"
+                                                        f"• *Interval*: {iv}m\n"
+                                                        f"• *Direction*: {ml_trend}\n"
+                                                        f"• *Error Message*: {err_msg} (Code: {err_code})"
+                                                    )
                                             else:
                                                 bybit_success = False
                                                 status_msg = "Skipped (Bybit Leverage Error)"
+                                                send_telegram_alert(
+                                                    f"🔴 *BYBIT LEVERAGE SETTING ERROR* 🔴\n"
+                                                    f"• *Asset*: {symbol}\n"
+                                                    f"• *Interval*: {iv}m\n"
+                                                    f"• *Target Leverage*: {leverage_val}x\n"
+                                                    f"• *Detail*: Failed to configure leverage on Bybit."
+                                                )
 
                                         if bybit_success:
                                             actual_size_usd = float(position_size_usd) * (actual_qty / raw_qty) if raw_qty > 0 else float(position_size_usd)
@@ -5595,18 +5625,35 @@ def main():
                         last_processed_timestamps[last_ts_key] = latest_completed_ts
             except Exception as e:
                 import traceback
+                traceback_str = traceback.format_exc()
                 traceback.print_exc()
                 print(f"Error checking {iv}m candle close signals: {e}")
+                send_telegram_alert(
+                    f"⚠️ *ERROR IN CANDLE CHECK SIGNAL CHECK* ⚠️\n"
+                    f"• *Asset*: {symbol}\n"
+                    f"• *Interval*: {iv}m\n"
+                    f"• *Error*: {str(e)}\n"
+                    f"• *Detail*: Failed during signal processing cycle."
+                )
 
         time.sleep(10)
 
 def safe_main():
-    try:
-        main()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"CRITICAL ERROR in main loop: {e}")
+    while True:
+        try:
+            main()
+        except Exception as e:
+            import traceback
+            traceback_str = traceback.format_exc()
+            traceback.print_exc()
+            print(f"CRITICAL ERROR in main loop: {e}")
+            send_telegram_alert(
+                f"🔴 *CRITICAL RUNTIME ERROR* 🔴\n"
+                f"• *Error*: {str(e)}\n"
+                f"• *Action*: Restarting main bot loop...\n\n"
+                f"```\n{traceback_str[:300]}...\n```"
+            )
+            time.sleep(15)  # wait before restarting main
 
 if __name__ == "__main__":
     import threading
