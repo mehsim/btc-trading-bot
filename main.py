@@ -4955,6 +4955,7 @@ def main():
                                           (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
                         
                         is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
+                        news_event = ""
                         
                         # Hierarchical Confluence Check (Trend Alignment)
                         confluence_blocked = False
@@ -5499,6 +5500,47 @@ def main():
                                     print(f"Failed checks: {', '.join(failed_list)}")
                                     print("==================================================\n")
                         
+                        # Send Telegram alert for skipped prediction/trade signals
+                        if status_msg.startswith("Skipped (") and status_msg not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]:
+                            current_price = latest_candle.get("close", 0.0)
+                            detail_reason = ""
+                            if status_msg == "Skipped (Circuit Breaker)":
+                                detail_reason = "Daily drawdown circuit breaker active."
+                            elif status_msg == "Skipped (Already Active)":
+                                detail_reason = f"Trade already active on {active_on_tf} timeframe."
+                            elif status_msg == "Skipped (Cool-Off)":
+                                detail_reason = f"Consecutive loss cooling off period active ({remaining_mins} mins remaining)."
+                            elif status_msg == "Skipped (HTF Trend Block)":
+                                detail_reason = f"Macro trend alignment block. {macro_tf} trend is {htf_trend} (contradicts local {ml_trend} signal)."
+                            elif status_msg == "Skipped (Funding Block)":
+                                detail_reason = f"High funding fee risk (Current Funding: {funding_rate*100:.3f}%)."
+                            elif status_msg == "Skipped (Contradiction)":
+                                detail_reason = f"Trend classifier ({ml_trend}) contradicts Regressor predicted target ({pred_change:+.3f} [{pred_pct:.3f}%])."
+                            elif status_msg == "Skipped (Low Confidence)":
+                                detail_reason = f"Calibrated confidence ({calibrated_confidence*100:.2f}%) is below the dynamic threshold ({dynamic_conf_threshold*100:.2f}%)."
+                            elif status_msg == "Skipped (News Block)":
+                                detail_reason = f"High-impact news event window active ({news_event})."
+                            elif status_msg == "Skipped (Confluence Failed)":
+                                failed_list_clean = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
+                                detail_reason = f"Confluence score check failed. Unpassed checks: {', '.join(failed_list_clean)}"
+                            elif status_msg == "Skipped (Insufficient Balance)":
+                                detail_reason = f"Wallet balance (${current_bal:.2f}) must be greater than $2.00."
+                            elif status_msg == "Skipped (Exceeds Wallet)":
+                                detail_reason = "Insufficient wallet balance to maintain minimum $2.00 size."
+                            else:
+                                detail_reason = "Dynamic system verification block."
+
+                            send_telegram_alert(
+                                f"ℹ️ *TRADE FILTERED ({status_msg.replace('Skipped (', '').replace(')', '').upper()})* ℹ️\n"
+                                f"• *Asset*: {symbol}\n"
+                                f"• *Interval*: {iv}m\n"
+                                f"• *Signal*: {ml_trend}\n"
+                                f"• *Confidence*: {calibrated_confidence * 100:.2f}%\n"
+                                f"• *Threshold*: {dynamic_conf_threshold * 100:.2f}%\n"
+                                f"• *Price*: ${current_price:.2f}\n"
+                                f"• *Reason*: {detail_reason}"
+                            )
+
                         # Prevent duplicate predictions for the same candle timestamp
                         exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv and p.get("symbol") == symbol for p in bot_state["prediction_history"])
                         if not exists:
