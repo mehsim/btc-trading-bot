@@ -8,6 +8,8 @@ print("[System Debug] Thread env vars set.")
 
 from dotenv import load_dotenv
 load_dotenv()
+import features
+import state_manager
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
@@ -237,63 +239,7 @@ logs_lock = threading.Lock()
 retraining_lock = threading.Lock()
 active_trades_lock = threading.Lock()
 
-bot_state = {
-    "live_price": None,
-    "live_price_BTCUSDT": None,
-    "live_price_ETHUSDT": None,
-    "live_price_SOLUSDT": None,
-    "live_price_BNBUSDT": None,
-    "live_price_ADAUSDT": None,
-    "live_price_XRPUSDT": None,
-    "live_price_AVAXUSDT": None,
-    "live_price_NEARUSDT": None,
-    "live_price_LINKUSDT": None,
-    "live_price_LTCUSDT": None,
-    "live_price_DOGEUSDT": None,
-    "last_update": 0.0,
-    
-    "active_trade_1h": [],
-    "active_trade_2h": [],
-    "active_trade_4h": [],
-    "active_trade_6h": [],
-    
-    "latest_prediction_1h": None,
-    "latest_prediction_2h": None,
-    "latest_prediction_4h": None,
-    "latest_prediction_6h": None,
-    
-    "confluence_results_1h": None,
-    "confluence_results_2h": None,
-    "confluence_results_4h": None,
-    "confluence_results_6h": None,
-    
-    "regime_1h": "Unknown",
-    "regime_2h": "Unknown",
-    "regime_4h": "Unknown",
-    "regime_6h": "Unknown",
-    
-    "adx_1h": 0.0,
-    "adx_2h": 0.0,
-    "adx_4h": 0.0,
-    "adx_6h": 0.0,
-    
-    "status": "Initializing",
-    "retraining_status": "Idle",
-    
-    "calibration_1h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
-    "calibration_2h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
-    "calibration_4h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
-    "calibration_6h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
-    
-    "simulated_balance": 80.0,
-    "daily_drawdown_start_balance": 80.0,
-    "daily_drawdown_reset_day": -1,
-    "circuit_breaker_active": False,
-    "bot_running": True,
-    "trade_history": [],
-    "prediction_history": [],
-    "win_rate_by_tf": {"60": None, "120": None, "240": None, "360": None}
-}
+bot_state = state_manager.StateManager()
 
 cached_news_sentiment = "Neutral"
 cached_news_titles = []
@@ -2296,6 +2242,9 @@ def on_private_open(ws):
     }
     ws.send(json.dumps(auth_payload))
 
+_ws_filled_orders = {}
+_ws_filled_orders_lock = threading.Lock()
+
 def on_private_message(ws, message):
     import json
     import time
@@ -2327,8 +2276,17 @@ def on_private_message(ws, message):
                     if TRADE_MODE != "simulation":
                         bot_state["simulated_balance"] = val
                     print(f"[WebSocket Private] Balance updated dynamically from wallet stream: {val}")
-        elif topic in ["position", "order"]:
-            print(f"[WebSocket Private] {topic.capitalize()} update event received. Triggering background position sync...")
+        elif topic == "order":
+            order_list = data.get("data", [])
+            for ord in order_list:
+                status = ord.get("orderStatus")
+                ord_id = ord.get("orderId")
+                if ord_id and status == "Filled":
+                    with _ws_filled_orders_lock:
+                        _ws_filled_orders[ord_id] = ord
+            import threading
+            threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
+        elif topic == "position":
             import threading
             threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
     except Exception as e:
@@ -2439,193 +2397,8 @@ for lag in [1, 2]:
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 
 
-try:
-    from numba import jit
-    @jit(nopython=True, cache=True)
-    def _kalman_loop(prices, state_estimate, error_covariance, process_variance, measurement_variance):
-        n = len(prices)
-        for i in range(1, n):
-            pred_state = state_estimate[i-1]
-            pred_error = error_covariance[i-1] + process_variance
-            kalman_gain = pred_error / (pred_error + measurement_variance)
-            state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
-            error_covariance[i] = (1.0 - kalman_gain) * pred_error
-        return state_estimate
-except ImportError:
-    def _kalman_loop(prices, state_estimate, error_covariance, process_variance, measurement_variance):
-        n = len(prices)
-        for i in range(1, n):
-            pred_state = state_estimate[i-1]
-            pred_error = error_covariance[i-1] + process_variance
-            kalman_gain = pred_error / (pred_error + measurement_variance)
-            state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
-            error_covariance[i] = (1.0 - kalman_gain) * pred_error
-        return state_estimate
-
-def calculate_kalman_feature(prices):
-    n = len(prices)
-    if n == 0:
-        return np.zeros(0)
-    state_estimate = np.zeros(n)
-    error_covariance = np.zeros(n)
-    state_estimate[0] = prices[0]
-    error_covariance[0] = 1.0
-    
-    process_variance = 1e-4
-    measurement_variance = 1e-2
-    
-    state_estimate = _kalman_loop(prices, state_estimate, error_covariance, process_variance, measurement_variance)
-    return (prices / (state_estimate + 1e-8)) - 1.0
-
 def add_features(df):
-    df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
-    macd = MACD(df["close"])
-    df["MACD_diff"] = macd.macd_diff() / (df["close"] + 1e-8)
-    
-    df["EMA_9"] = EMAIndicator(df["close"], window=9).ema_indicator()
-    df["EMA_21"] = EMAIndicator(df["close"], window=21).ema_indicator()
-    df["EMA_50"] = EMAIndicator(df["close"], window=50).ema_indicator()
-    df["EMA_200"] = EMAIndicator(df["close"], window=200).ema_indicator()
-    
-    bb = BollingerBands(df["close"], window=20, window_dev=2)
-    df["BB_high"] = bb.bollinger_hband()
-    df["BB_low"] = bb.bollinger_lband()
-    df["BB_mid"] = bb.bollinger_mavg()
-    
-    df["MFI"] = MFIIndicator(df["high"], df["low"], df["close"], df["volume"], window=14).money_flow_index()
-    
-    # ATR Volatility normalized
-    atr_ind = AverageTrueRange(df["high"], df["low"], df["close"], window=14)
-    df["ATR_norm"] = atr_ind.average_true_range() / (df["close"] + 1e-8)
-    
-    # Normalized scale-invariant features
-    df["close_to_EMA9"] = df["close"] / df["EMA_9"] - 1.0
-    df["close_to_EMA21"] = df["close"] / df["EMA_21"] - 1.0
-    df["close_to_EMA50"] = df["close"] / df["EMA_50"] - 1.0
-    df["close_to_EMA200"] = df["close"] / df["EMA_200"] - 1.0
-    df["EMA9_to_EMA21"] = df["EMA_9"] / df["EMA_21"] - 1.0
-    df["BB_pct"] = (df["close"] - df["BB_low"]) / (df["BB_high"] - df["BB_low"] + 1e-8)
-    df["BB_width"] = (df["BB_high"] - df["BB_low"]) / df["BB_mid"]
-    
-    df["return_5m"] = df["close"].pct_change(1)
-    df["volatility_10m"] = df["return_5m"].rolling(10).std()
-    df["volume_ratio"] = df["volume"] / (df["volume"].rolling(20).mean() + 1e-8)
-    
-    # Additional engineered features
-    df["high_low_ratio"] = (df["high"] - df["low"]) / df["close"]
-    df["open_close_ratio"] = (df["close"] - df["open"]) / df["open"]
-    df["RSI_diff"] = df["RSI"].diff()
-    df["MACD_diff_diff"] = df["MACD_diff"].diff()
-    
-    # ADX Indicator
-    adx_ind = ADXIndicator(df["high"], df["low"], df["close"], window=14)
-    df["ADX"] = adx_ind.adx()
-    df["ADX_pos"] = adx_ind.adx_pos()
-    df["ADX_neg"] = adx_ind.adx_neg()
-
-    # Rolling z-score normalization for RSI and ADX (200-candle window)
-    for col in ["RSI", "ADX"]:
-        rolling_mean = df[col].rolling(200, min_periods=20).mean()
-        rolling_std = df[col].rolling(200, min_periods=20).std().replace(0, 1)
-        df[f"{col}_z"] = (df[col] - rolling_mean) / rolling_std
-
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    rolling_pv = (typical_price * df["volume"]).rolling(window=168, min_periods=1).sum()
-    rolling_v = df["volume"].rolling(window=168, min_periods=1).sum()
-    df["VWAP"] = rolling_pv / (rolling_v + 1e-8)
-    df["close_to_VWAP"] = df["close"] / df["VWAP"] - 1.0
-    
-    # Momentum (Rate of Change)
-    df["ROC_5"] = df["close"].pct_change(5)
-    df["ROC_10"] = df["close"].pct_change(10)
-    
-    # BTC correlation return and lags
-    df["btc_return_5m"] = df["close_btc"].pct_change(1)
-    for lag in [1, 2, 3]:
-        df[f"btc_return_5m_lag{lag}"] = df["btc_return_5m"].shift(lag)
-        
-    # Autoregressive target coin lags
-    for lag in [1, 2, 3, 4, 5]:
-        df[f"return_5m_lag{lag}"] = df["return_5m"].shift(lag)
-    for lag in [1, 2, 3]:
-        df[f"volume_ratio_lag{lag}"] = df["volume_ratio"].shift(lag)
-    for lag in [1, 2]:
-        df[f"RSI_lag{lag}"] = df["RSI"].shift(lag)
-        df[f"MACD_diff_lag{lag}"] = df["MACD_diff"].shift(lag)
-        df[f"BB_pct_lag{lag}"] = df["BB_pct"].shift(lag)
-        
-    # Macro-technical indicators
-    df["RSI_24"] = RSIIndicator(df["close"], window=24).rsi()
-    df["ROC_24"] = df["close"].pct_change(24)
-    df["volatility_24h"] = df["return_5m"].rolling(24).std()
-    
-    # Derivatives & sentiment lags
-    for lag in [1, 2]:
-        df[f"open_interest_lag{lag}"] = df["open_interest"].shift(lag)
-        df[f"funding_rate_lag{lag}"] = df["funding_rate"].shift(lag)
-        df[f"fear_greed_lag{lag}"] = df["fear_greed"].shift(lag)
-        
-    # Derivatives momentum
-    df["open_interest_pct_change"] = df["open_interest"].pct_change(1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df["funding_rate_diff"] = df["funding_rate"].diff(1).fillna(0.0)
-    
-    # High-fidelity Delta Volume / CVD Proxy
-    high_low_range = df["high"] - df["low"] + 1e-8
-    delta_volume = df["volume"] * (2 * (df["close"] - df["low"]) / high_low_range - 1.0)
-    df["CVD_rolling_1h"] = delta_volume.rolling(window=4, min_periods=1).sum()
-    df["CVD_rolling_4h"] = delta_volume.rolling(window=16, min_periods=1).sum()
-    
-    # Wick Volume (Liquidation & Stop-Loss Sweep Proxies)
-    upper_wick = df["high"] - df[["open", "close"]].max(axis=1)
-    lower_wick = df[["open", "close"]].min(axis=1) - df["low"]
-    
-    upper_wick_vol = df["volume"] * (upper_wick / high_low_range)
-    lower_wick_vol = df["volume"] * (lower_wick / high_low_range)
-    
-    df["upper_wick_volume_ratio"] = upper_wick_vol / (upper_wick_vol.rolling(20).mean() + 1e-8)
-    df["lower_wick_volume_ratio"] = lower_wick_vol / (lower_wick_vol.rolling(20).mean() + 1e-8)
-    
-    # Ensure source correlation features exist
-    for col in ["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi"]:
-        if col not in df.columns:
-            if "rsi" in col:
-                df[col] = 50.0
-            elif "close" in col:
-                df[col] = df["close"]
-            elif "volume" in col:
-                df[col] = df["volume"]
-            else:
-                df[col] = 0.0
-                
-    # Lag new features
-    for lag in [1, 2]:
-        df[f"open_interest_pct_change_lag{lag}"] = df["open_interest_pct_change"].shift(lag)
-        df[f"funding_rate_diff_lag{lag}"] = df["funding_rate_diff"].shift(lag)
-        df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
-        df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
-        df[f"upper_wick_volume_ratio_lag{lag}"] = df["upper_wick_volume_ratio"].shift(lag)
-        df[f"lower_wick_volume_ratio_lag{lag}"] = df["lower_wick_volume_ratio"].shift(lag)
-        
-        # Lag correlation features
-        df[f"oi_change_1h_lag{lag}"] = df["oi_change_1h"].shift(lag).fillna(0.0)
-        df[f"oi_change_4h_lag{lag}"] = df["oi_change_4h"].shift(lag).fillna(0.0)
-        df[f"btc_close_lag{lag}"] = df["btc_close"].shift(lag).ffill().bfill().fillna(0.0)
-        df[f"btc_volume_lag{lag}"] = df["btc_volume"].shift(lag).ffill().bfill().fillna(0.0)
-        df[f"btc_rsi_lag{lag}"] = df["btc_rsi"].shift(lag).ffill().bfill().fillna(50.0)
-        
-    # Cyclical time features
-    datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-    df["hour_sin"] = np.sin(2 * np.pi * datetime_series.dt.hour / 24.0)
-    df["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
-    df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
-    df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
-
-    # 1D Kalman Filter trend feature
-    df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values)
-
-    df = add_news_proximity_feature(df)
-    df.dropna(inplace=True)
-    return df
+    return features.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
 
 def build_df(current_price):
     try:
@@ -5410,21 +5183,31 @@ def main():
                                                     
                                                     if order_res.get("retCode") == 0:
                                                         bybit_order_id = order_res.get("result", {}).get("orderId")
-                                                        # Wait for fill (poll status every 3s for 12s)
+                                                        # Wait for fill (checks WebSocket cache every 500ms, falls back to HTTP polling every 3s)
                                                         filled = False
-                                                        for _ in range(4):
-                                                            time.sleep(3)
-                                                            order_details = get_bybit_order_details(symbol, bybit_order_id)
-                                                            if order_details:
-                                                                status = order_details.get("orderStatus")
-                                                                if status == "Filled":
-                                                                    entry_price = float(order_details.get("avgPrice", limit_price))
-                                                                    actual_qty = float(order_details.get("cumExecQty", raw_qty))
-                                                                    filled = True
-                                                                    bybit_success = True
-                                                                    break
-                                                                elif status in ["Cancelled", "Rejected"]:
-                                                                    break
+                                                        for idx in range(24):
+                                                            time.sleep(0.5)
+                                                            with _ws_filled_orders_lock:
+                                                                ws_details = _ws_filled_orders.get(bybit_order_id)
+                                                            if ws_details:
+                                                                entry_price = float(ws_details.get("avgPrice", limit_price))
+                                                                actual_qty = float(ws_details.get("cumExecQty", raw_qty))
+                                                                filled = True
+                                                                bybit_success = True
+                                                                print(f"[{symbol} {iv}m API] Order fill detected via WebSocket in {idx*0.5:.1f}s.")
+                                                                break
+                                                            if idx > 0 and idx % 6 == 0:
+                                                                order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                                if order_details:
+                                                                    status = order_details.get("orderStatus")
+                                                                    if status == "Filled":
+                                                                        entry_price = float(order_details.get("avgPrice", limit_price))
+                                                                        actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                                        filled = True
+                                                                        bybit_success = True
+                                                                        break
+                                                                    elif status in ["Cancelled", "Rejected"]:
+                                                                        break
                                                         if filled:
                                                             print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled at ${entry_price:.4f}.")
                                                             break
