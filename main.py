@@ -8,7 +8,7 @@ print("[System Debug] Thread env vars set.")
 
 from dotenv import load_dotenv
 load_dotenv()
-import features
+import features as features_module
 import state_manager
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
@@ -619,8 +619,6 @@ def get_bybit_time_offset():
     with _time_offset_lock:
         if _cached_time_offset is not None and (time.time() - _last_time_sync) < 7200:
             return _cached_time_offset
-            
-    import time
     
     async def do_time_sync():
         proxy_dict = get_bybit_proxies()
@@ -2459,7 +2457,7 @@ for lag in [1, 2]:
 
 
 def add_features(df):
-    return features.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
+    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
 
 def build_df(current_price):
     try:
