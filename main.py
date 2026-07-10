@@ -106,28 +106,113 @@ def send_telegram_alert(message: str):
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    proxies = None
+    
     tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
-    if tg_proxy:
-        if "://" not in tg_proxy:
-            tg_proxy = "http://" + tg_proxy
-        proxies = {
-            "http": tg_proxy,
-            "https": tg_proxy
-        }
+    
     def _post():
         try:
-            resp = requests.post(url, json=payload, proxies=proxies, timeout=10)
-            if resp.status_code != 200:
-                print(f"[Telegram Alert Error] Code {resp.status_code}: {resp.text}")
+            if tg_proxy:
+                # Custom socket connection to bypass SNI blocking over HTTP proxy
+                import socket
+                import ssl
+                import urllib.parse
+                import json
+                import base64
+
+                proxy_str = tg_proxy
+                if "://" in proxy_str:
+                    parsed_proxy = urllib.parse.urlparse(proxy_str)
+                    proxy_host = parsed_proxy.hostname
+                    proxy_port = parsed_proxy.port or 80
+                    proxy_user = parsed_proxy.username
+                    proxy_pass = parsed_proxy.password
+                else:
+                    if "@" in proxy_str:
+                        auth_part, host_part = proxy_str.split("@", 1)
+                        proxy_user, proxy_pass = auth_part.split(":", 1)
+                    else:
+                        proxy_user, proxy_pass = None, None
+                        host_part = proxy_str
+                    
+                    if ":" in host_part:
+                        proxy_host, port_str = host_part.split(":", 1)
+                        proxy_port = int(port_str)
+                    else:
+                        proxy_host = host_part
+                        proxy_port = 80
+
+                auth_header = ""
+                if proxy_user and proxy_pass:
+                    cred = f"{proxy_user}:{proxy_pass}".encode('utf-8')
+                    auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
+
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(10)
+                s.connect((proxy_host, proxy_port))
+
+                connect_req = (
+                    f"CONNECT api.telegram.org:443 HTTP/1.1\r\n"
+                    f"Host: api.telegram.org:443\r\n"
+                    f"{auth_header}"
+                    f"Proxy-Connection: Keep-Alive\r\n\r\n"
+                ).encode('utf-8')
+                s.sendall(connect_req)
+
+                resp = s.recv(4096)
+                if b"200" not in resp:
+                    s.close()
+                    raise Exception(f"Proxy tunnel establishment failed: {resp.decode('utf-8', errors='ignore')}")
+
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_REQUIRED
+                
+                # server_hostname=None disables SNI
+                ssl_sock = context.wrap_socket(s, server_hostname=None)
+
+                payload = {
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown"
+                }
+                body = json.dumps(payload).encode('utf-8')
+                
+                path = f"/bot{token}/sendMessage"
+                http_req = (
+                    f"POST {path} HTTP/1.1\r\n"
+                    f"Host: api.telegram.org\r\n"
+                    f"Content-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    f"Connection: close\r\n\r\n"
+                ).encode('utf-8') + body
+
+                ssl_sock.sendall(http_req)
+
+                response_data = b""
+                while True:
+                    chunk = ssl_sock.read(4096)
+                    if not chunk:
+                        break
+                    response_data += chunk
+                
+                ssl_sock.close()
+                resp_str = response_data.decode('utf-8', errors='ignore')
+                if "HTTP/1.1 200" not in resp_str and "HTTP/1.0 200" not in resp_str:
+                    raise Exception(f"Telegram API returned non-200 status: {resp_str}")
+            else:
+                # Fallback to direct requests call when no proxy is used
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+                payload = {
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown"
+                }
+                resp = requests.post(url, json=payload, timeout=10)
+                if resp.status_code != 200:
+                    print(f"[Telegram Alert Error] Code {resp.status_code}: {resp.text}")
         except Exception as err:
             print(f"[Telegram Alert Exception] {err}")
+            
     threading.Thread(target=_post, daemon=True).start()
 
 print("[System Debug] Importing ta...")
