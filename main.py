@@ -113,7 +113,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
     if not token:
         return {}
         
-    tg_proxy = os.environ.get("TELEGRAM_PROXY")
+    tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
     
     try:
         if tg_proxy:
@@ -151,7 +151,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
                 auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
 
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(15)
+            s.settimeout(20)
             s.connect((proxy_host, proxy_port))
 
             connect_req = (
@@ -200,7 +200,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             return {}
         else:
             url = f"https://api.telegram.org/bot{token}/{method}"
-            resp = requests.post(url, json=payload, timeout=15)
+            resp = requests.post(url, json=payload, timeout=20)
             if resp.status_code == 200:
                 return resp.json()
             return {}
@@ -241,7 +241,7 @@ def start_telegram_command_listener():
         print(f"[Telegram Command Listener] Started polling background loop (initial offset={offset}).")
         while True:
             try:
-                updates_res = execute_telegram_api_call("getUpdates", {"offset": offset, "timeout": 20})
+                updates_res = execute_telegram_api_call("getUpdates", {"offset": offset, "timeout": 5})
                 if updates_res.get("ok") and updates_res.get("result"):
                     for update in updates_res["result"]:
                         offset = update["update_id"] + 1
