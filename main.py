@@ -2585,7 +2585,7 @@ def get_cryptopanic_posts():
     import xml.etree.ElementTree as ET
     feeds = [
         "https://cointelegraph.com/rss",
-        "https://www.coindesk.com/arc/outboundfeed/rss/",
+        "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
         "https://decrypt.co/feed"
     ]
     posts = []
@@ -2670,7 +2670,7 @@ def get_news_sentiment():
         print(f"[News/Sentiment] Error fetching Cointelegraph RSS: {e}")
 
     # 1b. Fetch from CoinDesk RSS
-    url_coindesk = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    url_coindesk = "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml"
     try:
         res = requests.get(url_coindesk, headers=headers, timeout=10)
         if res.status_code == 200:
