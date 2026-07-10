@@ -153,7 +153,7 @@ def send_telegram_alert(message: str):
                     auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
 
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(10)
+                s.settimeout(15)
                 s.connect((proxy_host, proxy_port))
 
                 connect_req = (
