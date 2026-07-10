@@ -3828,6 +3828,17 @@ def sync_active_positions_from_bybit():
                         pos = open_positions[symbol]
                         t["bybit_closed"] = False
                         
+                        # Restore confidence for recovered trades if it is currently 0
+                        if float(t.get("confidence", 0.0)) == 0.0:
+                            trade_dir = t.get("direction", "Bullish")
+                            for p in reversed(bot_state.get("prediction_history", [])):
+                                if p.get("symbol") == symbol and p.get("direction") == trade_dir:
+                                    if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
+                                        t["confidence"] = float(p.get("calibrated_confidence", 0.0))
+                                        print(f"[Sync Confidence Restore] Restored confidence for recovered {symbol} trade: {t['confidence']*100:.2f}%")
+                                        save_history()
+                                        break
+
                         # Side Mismatch Guard: verify Bybit position side aligns with trade direction
                         pos_side = pos.get("side") # "Buy" or "Sell"
                         trade_direction = t.get("direction") # "Bullish" or "Bearish"
@@ -4033,6 +4044,19 @@ def sync_active_positions_from_bybit():
                         if not success:
                             sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
      
+                    # Dynamic timeframe and confidence resolution from prediction history matching symbol and direction
+                    matched_tf = "1h"  # fallback default
+                    matched_confidence = 0.0
+                    for p in reversed(bot_state.get("prediction_history", [])):
+                        if p.get("symbol") == symbol and p.get("direction") == direction:
+                            # Verify if it was within the last 48 hours to avoid matching ancient predictions
+                            if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
+                                matched_tf_interval = p.get("interval", "60")
+                                tf_map_inv = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                                matched_tf = tf_map_inv.get(matched_tf_interval, "1h")
+                                matched_confidence = float(p.get("calibrated_confidence", 0.0))
+                                break
+
                     recovered_trade = {
                         "trade_id": f"{symbol}_{trade_uuid}_recovered",
                         "bybit_order_id": entry_order_id,
@@ -4057,7 +4081,7 @@ def sync_active_positions_from_bybit():
                         "scaled_out_pnl": 0.0,
                         "kelly_fraction": 0.0,
                         "leverage": leverage_val,
-                        "confidence": 0.0,
+                        "confidence": matched_confidence,
                         "qty": qty_val,
                         "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
                         "liq_price": liq_price,
@@ -4065,16 +4089,6 @@ def sync_active_positions_from_bybit():
                         "recovered": True
                     }
                     
-                    # Dynamic timeframe resolution from prediction history matching symbol and entry time
-                    matched_tf = "1h"  # fallback default
-                    entry_time_sec = time.time()
-                    for p in reversed(bot_state.get("prediction_history", [])):
-                        if p.get("symbol") == symbol and abs(p.get("timestamp", 0) - entry_time_sec) < 3600:
-                            matched_tf_interval = p.get("interval", "60")
-                            tf_map_inv = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-                            matched_tf = tf_map_inv.get(matched_tf_interval, "1h")
-                            break
-                            
                     tf_key = matched_tf
                     active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
                     if not isinstance(active_trades_list, list):
