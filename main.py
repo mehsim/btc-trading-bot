@@ -2572,7 +2572,8 @@ def get_reddit_posts():
                 posts.extend(sub_posts[:5])
                 print(f"[News/Sentiment] Fetched {len(sub_posts[:5])} posts from r/{sub} RSS.")
             else:
-                print(f"[News/Sentiment] Reddit r/{sub} feed returned status code {res.status_code}")
+                if res.status_code != 429:
+                    print(f"[News/Sentiment] Reddit r/{sub} feed returned status code {res.status_code}")
         except Exception as e:
             print(f"[News/Sentiment] Exception fetching Reddit r/{sub} feed: {e}")
     return posts
