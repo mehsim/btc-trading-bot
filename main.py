@@ -113,7 +113,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
     if not token:
         return {}
         
-    tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+    tg_proxy = os.environ.get("TELEGRAM_PROXY")
     
     try:
         if tg_proxy:
