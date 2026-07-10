@@ -2557,7 +2557,7 @@ def get_reddit_posts():
     for sub in subreddits:
         url = f"https://www.reddit.com/r/{sub}/hot/.rss"
         try:
-            res = requests.get(url, headers=headers, timeout=10)
+            res = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=10)
             if res.status_code == 200:
                 xml_content = res.content.decode("utf-8")
                 # Parse the Atom XML feed
@@ -2593,7 +2593,7 @@ def get_cryptopanic_posts():
     
     for url in feeds:
         try:
-            res = requests.get(url, headers=headers, timeout=8)
+            res = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=8)
             if res.status_code == 200:
                 xml_content = res.content
                 root = ET.fromstring(xml_content)
@@ -2655,7 +2655,7 @@ def get_news_sentiment():
     url = "https://cointelegraph.com/rss"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        res = requests.get(url, headers=headers, timeout=10)
+        res = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=10)
         if res.status_code == 200:
             xml_content = res.content.decode("utf-8")
             root = ET.fromstring(xml_content)
@@ -2672,7 +2672,7 @@ def get_news_sentiment():
     # 1b. Fetch from CoinDesk RSS
     url_coindesk = "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml"
     try:
-        res = requests.get(url_coindesk, headers=headers, timeout=10)
+        res = requests.get(url_coindesk, headers=headers, proxies=get_bybit_proxies(), timeout=10)
         if res.status_code == 200:
             xml_content = res.content.decode("utf-8")
             root = ET.fromstring(xml_content)
