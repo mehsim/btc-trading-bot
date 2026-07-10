@@ -1779,6 +1779,132 @@ def test_email_endpoint():
         else:
             return jsonify({"status": "error", "message": "SMTP connection failed. Hugging Face blocks outgoing SMTP ports (587/465). To fix this, register for a free account at Resend.com and add a RESEND_API_KEY secret to use firewall-resistant HTTPS emails instead."}), 500
 
+@app.route("/api/test_telegram", methods=["POST", "GET"])
+def test_telegram_endpoint():
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return jsonify({"status": "error", "message": "Telegram credentials not configured."}), 400
+
+    results = {}
+
+    # Method 1: Direct requests.post
+    try:
+        url = f"https://api.telegram.org/bot{token}/getMe"
+        resp = requests.post(url, timeout=10)
+        results["Method 1: Direct requests.post (getMe)"] = {
+            "status": "success",
+            "code": resp.status_code,
+            "body": resp.json()
+        }
+    except Exception as e:
+        results["Method 1: Direct requests.post (getMe)"] = {
+            "status": "failed",
+            "error": str(e)
+        }
+
+    # Method 2: Custom Socket Proxy Tunnel
+    try:
+        tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+        if tg_proxy:
+            import socket
+            import ssl
+            import urllib.parse
+            import json
+            import base64
+
+            parsed_proxy = urllib.parse.urlparse(tg_proxy)
+            proxy_host = parsed_proxy.hostname
+            proxy_port = parsed_proxy.port or 80
+            proxy_user = parsed_proxy.username
+            proxy_pass = parsed_proxy.password
+
+            auth_header = ""
+            if proxy_user and proxy_pass:
+                cred = f"{proxy_user}:{proxy_pass}".encode('utf-8')
+                auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
+
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
+            s.connect((proxy_host, proxy_port))
+
+            connect_req = (
+                f"CONNECT api.telegram.org:443 HTTP/1.1\r\n"
+                f"Host: api.telegram.org:443\r\n"
+                f"{auth_header}"
+                f"Proxy-Connection: Keep-Alive\r\n\r\n"
+            ).encode('utf-8')
+            s.sendall(connect_req)
+
+            resp_tunnel = s.recv(4096).decode('utf-8', errors='ignore')
+            if "200" not in resp_tunnel:
+                s.close()
+                raise Exception(f"Proxy tunnel CONNECT response non-200: {resp_tunnel}")
+
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_REQUIRED
+            ssl_sock = context.wrap_socket(s, server_hostname=None)
+
+            body = json.dumps({}).encode('utf-8')
+            path = f"/bot{token}/getMe"
+            http_req = (
+                f"POST {path} HTTP/1.1\r\n"
+                f"Host: api.telegram.org\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                f"Connection: close\r\n\r\n"
+            ).encode('utf-8') + body
+
+            ssl_sock.sendall(http_req)
+
+            response_data = b""
+            while True:
+                chunk = ssl_sock.read(4096)
+                if not chunk:
+                    break
+                response_data += chunk
+            ssl_sock.close()
+            resp_str = response_data.decode('utf-8', errors='ignore')
+            results["Method 2: Custom Socket Proxy Tunnel (getMe)"] = {
+                "status": "success",
+                "raw_response": resp_str
+            }
+        else:
+            results["Method 2: Custom Socket Proxy Tunnel (getMe)"] = {
+                "status": "skipped",
+                "reason": "No proxy configured in environment."
+            }
+    except Exception as e:
+        results["Method 2: Custom Socket Proxy Tunnel (getMe)"] = {
+            "status": "failed",
+            "error": str(e)
+        }
+
+    # Method 3: Requests post through proxy (proxies dict)
+    try:
+        tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+        if tg_proxy:
+            url = f"https://api.telegram.org/bot{token}/getMe"
+            resp = requests.post(url, proxies={"https": tg_proxy, "http": tg_proxy}, timeout=10)
+            results["Method 3: requests.post with proxies dict (getMe)"] = {
+                "status": "success",
+                "code": resp.status_code,
+                "body": resp.json()
+            }
+        else:
+            results["Method 3: requests.post with proxies dict (getMe)"] = {
+                "status": "skipped",
+                "reason": "No proxy configured in environment."
+            }
+    except Exception as e:
+        results["Method 3: requests.post with proxies dict (getMe)"] = {
+            "status": "failed",
+            "error": str(e)
+        }
+
+    return jsonify(results)
+
 @app.route("/")
 def index():
     return render_template("index.html")
