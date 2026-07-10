@@ -5115,10 +5115,10 @@ def main():
                         elif ml_trend == "Neutral":
                             status_msg = "Skipped (Neutral)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
-                        elif strong_conflict and TRADE_MODE == "simulation":
+                        elif strong_conflict:
                             status_msg = "Skipped (Contradiction)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
-                        elif calibrated_confidence < dynamic_conf_threshold and TRADE_MODE == "simulation":
+                        elif calibrated_confidence < dynamic_conf_threshold:
                             status_msg = "Skipped (Low Confidence)"
                             print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
 
@@ -5154,10 +5154,10 @@ def main():
                                     status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
                                     print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
                                 
-                                if all_pass or TRADE_MODE != "simulation":
+                                if all_pass:
                                     status_msg = "Traded"
                                     print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: APPROVED/FORCED (TRADE_MODE={TRADE_MODE.upper()})")
+                                    print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
                                     print("==================================================\n")
                                     
                                     atr_norm_val = latest_candle["ATR_norm"]
