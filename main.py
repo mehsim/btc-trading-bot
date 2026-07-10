@@ -107,119 +107,201 @@ from datetime import datetime, timedelta
 def get_pkt_time():
     return datetime.utcnow() + timedelta(hours=5)
 
+def execute_telegram_api_call(method: str, payload: dict) -> dict:
+    """Helper to send POST requests to Telegram API using proxy and custom SNI-bypass tunnel if configured."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return {}
+        
+    tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+    
+    try:
+        if tg_proxy:
+            import socket
+            import ssl
+            import urllib.parse
+            import json
+            import base64
+
+            proxy_str = tg_proxy
+            if "://" in proxy_str:
+                parsed_proxy = urllib.parse.urlparse(proxy_str)
+                proxy_host = parsed_proxy.hostname
+                proxy_port = parsed_proxy.port or 80
+                proxy_user = parsed_proxy.username
+                proxy_pass = parsed_proxy.password
+            else:
+                if "@" in proxy_str:
+                    auth_part, host_part = proxy_str.split("@", 1)
+                    proxy_user, proxy_pass = auth_part.split(":", 1)
+                else:
+                    proxy_user, proxy_pass = None, None
+                    host_part = proxy_str
+                
+                if ":" in host_part:
+                    proxy_host, port_str = host_part.split(":", 1)
+                    proxy_port = int(port_str)
+                else:
+                    proxy_host = host_part
+                    proxy_port = 80
+
+            auth_header = ""
+            if proxy_user and proxy_pass:
+                cred = f"{proxy_user}:{proxy_pass}".encode('utf-8')
+                auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
+
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(15)
+            s.connect((proxy_host, proxy_port))
+
+            connect_req = (
+                f"CONNECT api.telegram.org:443 HTTP/1.1\r\n"
+                f"Host: api.telegram.org:443\r\n"
+                f"{auth_header}"
+                f"Proxy-Connection: Keep-Alive\r\n\r\n"
+            ).encode('utf-8')
+            s.sendall(connect_req)
+
+            resp = s.recv(4096)
+            if b"200" not in resp:
+                s.close()
+                raise Exception(f"Proxy tunnel establishment failed: {resp.decode('utf-8', errors='ignore')}")
+
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_REQUIRED
+            
+            ssl_sock = context.wrap_socket(s, server_hostname=None)
+
+            body = json.dumps(payload).encode('utf-8')
+            path = f"/bot{token}/{method}"
+            http_req = (
+                f"POST {path} HTTP/1.1\r\n"
+                f"Host: api.telegram.org\r\n"
+                f"Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                f"Connection: close\r\n\r\n"
+            ).encode('utf-8') + body
+
+            ssl_sock.sendall(http_req)
+
+            response_data = b""
+            while True:
+                chunk = ssl_sock.read(4096)
+                if not chunk:
+                    break
+                response_data += chunk
+            
+            ssl_sock.close()
+            resp_str = response_data.decode('utf-8', errors='ignore')
+            if "\r\n\r\n" in resp_str:
+                json_part = resp_str.split("\r\n\r\n", 1)[1]
+                return json.loads(json_part)
+            return {}
+        else:
+            url = f"https://api.telegram.org/bot{token}/{method}"
+            resp = requests.post(url, json=payload, timeout=15)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+    except Exception as e:
+        print(f"[Telegram API Exception] method={method}: {e}")
+        return {}
+
 def send_telegram_alert(message: str):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return
-    
-    tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
-    
+        
     def _post():
-        try:
-            if tg_proxy:
-                # Custom socket connection to bypass SNI blocking over HTTP proxy
-                import socket
-                import ssl
-                import urllib.parse
-                import json
-                import base64
-
-                proxy_str = tg_proxy
-                if "://" in proxy_str:
-                    parsed_proxy = urllib.parse.urlparse(proxy_str)
-                    proxy_host = parsed_proxy.hostname
-                    proxy_port = parsed_proxy.port or 80
-                    proxy_user = parsed_proxy.username
-                    proxy_pass = parsed_proxy.password
-                else:
-                    if "@" in proxy_str:
-                        auth_part, host_part = proxy_str.split("@", 1)
-                        proxy_user, proxy_pass = auth_part.split(":", 1)
-                    else:
-                        proxy_user, proxy_pass = None, None
-                        host_part = proxy_str
-                    
-                    if ":" in host_part:
-                        proxy_host, port_str = host_part.split(":", 1)
-                        proxy_port = int(port_str)
-                    else:
-                        proxy_host = host_part
-                        proxy_port = 80
-
-                auth_header = ""
-                if proxy_user and proxy_pass:
-                    cred = f"{proxy_user}:{proxy_pass}".encode('utf-8')
-                    auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
-
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(15)
-                s.connect((proxy_host, proxy_port))
-
-                connect_req = (
-                    f"CONNECT api.telegram.org:443 HTTP/1.1\r\n"
-                    f"Host: api.telegram.org:443\r\n"
-                    f"{auth_header}"
-                    f"Proxy-Connection: Keep-Alive\r\n\r\n"
-                ).encode('utf-8')
-                s.sendall(connect_req)
-
-                resp = s.recv(4096)
-                if b"200" not in resp:
-                    s.close()
-                    raise Exception(f"Proxy tunnel establishment failed: {resp.decode('utf-8', errors='ignore')}")
-
-                context = ssl.create_default_context()
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_REQUIRED
-                
-                # server_hostname=None disables SNI
-                ssl_sock = context.wrap_socket(s, server_hostname=None)
-
-                payload = {
-                    "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
-                }
-                body = json.dumps(payload).encode('utf-8')
-                
-                path = f"/bot{token}/sendMessage"
-                http_req = (
-                    f"POST {path} HTTP/1.1\r\n"
-                    f"Host: api.telegram.org\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"Connection: close\r\n\r\n"
-                ).encode('utf-8') + body
-
-                ssl_sock.sendall(http_req)
-
-                response_data = b""
-                while True:
-                    chunk = ssl_sock.read(4096)
-                    if not chunk:
-                        break
-                    response_data += chunk
-                
-                ssl_sock.close()
-                resp_str = response_data.decode('utf-8', errors='ignore')
-                if "HTTP/1.1 200" not in resp_str and "HTTP/1.0 200" not in resp_str:
-                    raise Exception(f"Telegram API returned non-200 status: {resp_str}")
-            else:
-                # Fallback to direct requests call when no proxy is used
-                url = f"https://api.telegram.org/bot{token}/sendMessage"
-                payload = {
-                    "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
-                }
-                resp = requests.post(url, json=payload, timeout=10)
-                if resp.status_code != 200:
-                    print(f"[Telegram Alert Error] Code {resp.status_code}: {resp.text}")
-        except Exception as err:
-            print(f"[Telegram Alert Exception] {err}")
-            
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "Markdown"
+        }
+        execute_telegram_api_call("sendMessage", payload)
+        
     threading.Thread(target=_post, daemon=True).start()
+
+def start_telegram_command_listener():
+    """Starts the background thread to poll and handle incoming Telegram commands."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        print("[Telegram Command Listener] Unconfigured credentials. Listener skipped.")
+        return
+
+    def listener_loop():
+        offset = 0
+        init_res = execute_telegram_api_call("getUpdates", {"limit": 1})
+        if init_res.get("ok") and init_res.get("result"):
+            offset = init_res["result"][-1]["update_id"] + 1
+
+        print(f"[Telegram Command Listener] Started polling background loop (initial offset={offset}).")
+        while True:
+            try:
+                updates_res = execute_telegram_api_call("getUpdates", {"offset": offset, "timeout": 20})
+                if updates_res.get("ok") and updates_res.get("result"):
+                    for update in updates_res["result"]:
+                        offset = update["update_id"] + 1
+                        message_obj = update.get("message")
+                        if not message_obj:
+                            continue
+                        
+                        sender_chat_id = str(message_obj.get("chat", {}).get("id"))
+                        if sender_chat_id != str(chat_id):
+                            continue
+                            
+                        text = message_obj.get("text", "").strip()
+                        if text == "/active":
+                            active_trades_summary = []
+                            with active_trades_lock:
+                                for tf_key in ["1h", "2h", "4h", "6h"]:
+                                    trades = bot_state.get(f"active_trade_{tf_key}", [])
+                                    for t in trades:
+                                        symbol = t.get("symbol")
+                                        direction = t.get("direction")
+                                        entry_p = t.get("entry_price")
+                                        current_p = bot_state.get(f"live_price_{symbol}") or entry_p
+                                        stop_loss = t.get("stop_loss")
+                                        take_profit = t.get("take_profit")
+                                        confidence = t.get("confidence", 0.63)
+                                        leverage = t.get("leverage", 1.0)
+                                        size_usd = t.get("position_size_usd", 0.0)
+                                        
+                                        change_pct = ((current_p - entry_p) / entry_p) * 100.0 if entry_p > 0 else 0.0
+                                        raw_pnl = change_pct if direction == "Bullish" else -change_pct
+                                        pnl_pct = raw_pnl * leverage
+                                        pnl_usd = size_usd * (pnl_pct / 100.0)
+                                        
+                                        active_trades_summary.append(
+                                            f"💼 *{symbol} ({tf_key.upper()})*\n"
+                                            f"• *Signal*: {direction}\n"
+                                            f"• *Confidence*: {confidence * 100:.1f}%\n"
+                                            f"• *Leverage*: {leverage:.1f}x\n"
+                                            f"• *Investment*: ${size_usd:.2f} (Value: ${size_usd * leverage:.2f})\n"
+                                            f"• *Price*: ${current_p:.2f} (Entry: ${entry_p:.2f})\n"
+                                            f"• *TP / SL*: ${take_profit:.2f} / ${stop_loss:.2f}\n"
+                                            f"• *PnL*: {pnl_usd:+.2f} ({pnl_pct:+.2f}%)\n"
+                                        )
+                            
+                            if active_trades_summary:
+                                reply_text = "📊 *ACTIVE OPEN TRADES* 📊\n\n" + "\n".join(active_trades_summary)
+                            else:
+                                reply_text = "ℹ️ *No active trades currently open.*"
+                                
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                time.sleep(3)
+            except Exception as e:
+                print(f"[Telegram Command Listener Error] {e}")
+                time.sleep(10)
+
+    threading.Thread(target=listener_loop, daemon=True).start()
 
 print("[System Debug] Importing ta...")
 from ta.momentum import RSIIndicator
@@ -5626,6 +5708,8 @@ if __name__ == "__main__":
     import threading
     # Start main bot loop in background thread
     threading.Thread(target=safe_main, daemon=True).start()
+    # Start background Telegram command listener thread
+    start_telegram_command_listener()
     send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")
     # Start background news sentiment updater thread
     threading.Thread(target=run_news_sentiment_updater, daemon=True).start()
