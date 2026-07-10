@@ -5518,6 +5518,24 @@ def main():
                                                 "original_qty": float(actual_qty),
                                                 "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
                                             }
+                                            
+                                            # Send Telegram alert for successful prediction/trade entry
+                                            entry_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                            send_telegram_alert(
+                                                f"🟢 *POSITION OPENED (SUCCESSFUL SIGNAL)* 🟢\n"
+                                                f"• *Asset*: {symbol}\n"
+                                                f"• *Interval*: {iv}m\n"
+                                                f"• *Direction*: {ml_trend}\n"
+                                                f"• *Entry Price*: ${float(entry_price):.4f}\n"
+                                                f"• *Entry Time*: {entry_time_str}\n"
+                                                f"• *Take Profit*: ${float(take_profit_price):.4f}\n"
+                                                f"• *Stop Loss*: ${float(stop_loss_price):.4f}\n"
+                                                f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
+                                                f"• *Leverage*: {leverage_val:.1f}x\n"
+                                                f"• *Position Size*: ${actual_size_usd:.2f} (Value: ${actual_qty * entry_price:.2f})\n"
+                                                f"• *Execution Mode*: {TRADE_MODE.upper()}"
+                                            )
+                                            
                                             with active_trades_lock:
                                                 current_trades = bot_state.get(active_trade_key, [])
                                                 if not isinstance(current_trades, list):
