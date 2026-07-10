@@ -3661,7 +3661,7 @@ def sync_active_positions_from_bybit():
                             for p in reversed(bot_state.get("prediction_history", [])):
                                 if p.get("symbol") == symbol and p.get("direction") == trade_dir:
                                     if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
-                                        t["confidence"] = float(p.get("calibrated_confidence", 0.0))
+                                        t["confidence"] = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
                                         print(f"[Sync Confidence Restore] Restored confidence for recovered {symbol} trade: {t['confidence']*100:.2f}%")
                                         save_history()
                                         break
@@ -3878,10 +3878,11 @@ def sync_active_positions_from_bybit():
                         if p.get("symbol") == symbol and p.get("direction") == direction:
                             # Verify if it was within the last 48 hours to avoid matching ancient predictions
                             if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
+                                token_val_not_used = None
                                 matched_tf_interval = p.get("interval", "60")
                                 tf_map_inv = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
                                 matched_tf = tf_map_inv.get(matched_tf_interval, "1h")
-                                matched_confidence = float(p.get("calibrated_confidence", 0.0))
+                                matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
                                 break
 
                     recovered_trade = {
@@ -5568,6 +5569,9 @@ def main():
                                 "predicted_change": float(pred_change),
                                 "predicted_price": float(predicted_price),
                                 "status": str(status_msg),
+                                "calibrated_confidence": float(calibrated_confidence),
+                                "raw_confidence": float(ml_confidence),
+                                "dynamic_threshold": float(dynamic_conf_threshold),
                                 "evaluation": {
                                     "evaluated": False,
                                     "exit_price": None,
