@@ -5274,6 +5274,14 @@ def main():
                                         print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f} to open new trades.")
                                         status_msg = "Skipped (Insufficient Balance)"
                                         wallet_exceeded = True
+                                        send_telegram_alert(
+                                            f"⚠️ *SIGNAL PASSED (SKIPPED - LOW BALANCE)* ⚠️\n"
+                                            f"• *Asset*: {symbol}\n"
+                                            f"• *Interval*: {iv}m\n"
+                                            f"• *Direction*: {ml_trend}\n"
+                                            f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
+                                            f"• *Detail*: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f}."
+                                        )
                                     elif total_active_size + position_size_usd > current_bal:
                                         remaining_bal = current_bal - total_active_size
                                         if remaining_bal >= min_size_limit:
@@ -5283,6 +5291,14 @@ def main():
                                             print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum ${min_size_limit:.2f} trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
                                             status_msg = "Skipped (Exceeds Wallet)"
                                             wallet_exceeded = True
+                                            send_telegram_alert(
+                                                f"⚠️ *SIGNAL PASSED (SKIPPED - LOW BALANCE)* ⚠️\n"
+                                                f"• *Asset*: {symbol}\n"
+                                                f"• *Interval*: {iv}m\n"
+                                                f"• *Direction*: {ml_trend}\n"
+                                                f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
+                                                f"• *Detail*: Insufficient wallet balance to maintain minimum ${min_size_limit:.2f} size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f})."
+                                            )
 
                                     if not wallet_exceeded:
                                         # Continuous Leverage Scaling: scale smoothly from 1x (at dynamic threshold) to 50x (at 100% confidence)
