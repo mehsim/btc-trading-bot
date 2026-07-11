@@ -119,7 +119,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             if not custom_url.endswith("/"):
                 custom_url += "/"
             url = f"{custom_url}bot{token}/{method}"
-            resp = requests.post(url, json=payload, timeout=20)
+            resp = requests.post(url, json=payload, timeout=20, proxies={"http": "", "https": ""})
             if resp.status_code == 200:
                 return resp.json()
             return {}
