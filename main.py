@@ -1976,7 +1976,7 @@ def test_telegram_endpoint():
                 "error": str(e)
             }
 
-        # Test 2: Requests through proxy
+        # Test 2: Requests through proxy (POST request with timeout=30)
         try:
             url = f"{custom_url}bot{token}/getMe"
             tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
@@ -1985,14 +1985,35 @@ def test_telegram_endpoint():
                 if "://" not in tg_proxy:
                     tg_proxy = "http://" + tg_proxy
                 proxies_dict = {"http": tg_proxy, "https": tg_proxy}
-            resp = requests.post(url, timeout=10, proxies=proxies_dict)
-            results["Custom URL: requests.post routed through proxy"] = {
+            resp = requests.post(url, timeout=30, proxies=proxies_dict)
+            results["Custom URL: POST requests routed through proxy (timeout=30)"] = {
                 "status": "success",
                 "code": resp.status_code,
                 "body": resp.json()
             }
         except Exception as e:
-            results["Custom URL: requests.post routed through proxy"] = {
+            results["Custom URL: POST requests routed through proxy (timeout=30)"] = {
+                "status": "failed",
+                "error": str(e)
+            }
+
+        # Test 3: Requests through proxy (GET request with timeout=30)
+        try:
+            url = f"{custom_url}bot{token}/getMe"
+            tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+            proxies_dict = None
+            if tg_proxy:
+                if "://" not in tg_proxy:
+                    tg_proxy = "http://" + tg_proxy
+                proxies_dict = {"http": tg_proxy, "https": tg_proxy}
+            resp = requests.get(url, timeout=30, proxies=proxies_dict)
+            results["Custom URL: GET requests routed through proxy (timeout=30)"] = {
+                "status": "success",
+                "code": resp.status_code,
+                "body": resp.json()
+            }
+        except Exception as e:
+            results["Custom URL: GET requests routed through proxy (timeout=30)"] = {
                 "status": "failed",
                 "error": str(e)
             }
