@@ -1802,10 +1802,20 @@ def test_email_endpoint():
 def test_telegram_endpoint():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    custom_url = os.environ.get("TELEGRAM_API_URL")
     if not token or not chat_id:
         return jsonify({"status": "error", "message": "Telegram credentials not configured."}), 400
 
     results = {}
+    
+    # 0. Environment Check
+    results["Environment"] = {
+        "TELEGRAM_API_URL": custom_url,
+        "HTTP_PROXY": os.environ.get("HTTP_PROXY"),
+        "HTTPS_PROXY": os.environ.get("HTTPS_PROXY"),
+        "http_proxy": os.environ.get("http_proxy"),
+        "https_proxy": os.environ.get("https_proxy"),
+    }
 
     # Method 1: Direct requests.post
     try:
@@ -1921,6 +1931,38 @@ def test_telegram_endpoint():
             "status": "failed",
             "error": str(e)
         }
+
+    # Custom URL Direct test
+    if custom_url:
+        # Test 1: Direct requests without proxy dict override
+        try:
+            url = f"{custom_url}bot{token}/getMe"
+            resp = requests.post(url, timeout=10)
+            results["Custom URL: Direct requests.post without proxies override"] = {
+                "status": "success",
+                "code": resp.status_code,
+                "body": resp.json()
+            }
+        except Exception as e:
+            results["Custom URL: Direct requests.post without proxies override"] = {
+                "status": "failed",
+                "error": str(e)
+            }
+
+        # Test 2: Direct requests WITH proxy dict override (proxies={'http': '', 'https': ''})
+        try:
+            url = f"{custom_url}bot{token}/getMe"
+            resp = requests.post(url, timeout=10, proxies={"http": "", "https": ""})
+            results["Custom URL: Direct requests.post WITH proxies override"] = {
+                "status": "success",
+                "code": resp.status_code,
+                "body": resp.json()
+            }
+        except Exception as e:
+            results["Custom URL: Direct requests.post WITH proxies override"] = {
+                "status": "failed",
+                "error": str(e)
+            }
 
     return jsonify(results)
 
