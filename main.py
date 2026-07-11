@@ -171,6 +171,18 @@ def start_telegram_command_listener():
         if init_res.get("ok") and init_res.get("result"):
             offset = init_res["result"][-1]["update_id"] + 1
 
+        # Automatically configure the Telegram bot commands menu
+        commands_payload = {
+            "commands": [
+                {"command": "active", "description": "View all active open trades"},
+                {"command": "balance", "description": "View account/wallet balance"},
+                {"command": "skipped", "description": "View recently skipped/filtered trades"},
+                {"command": "stop_all", "description": "Emergency stop bot and close all trades"},
+                {"command": "start_bot", "description": "Resume bot and enable new trade entries"}
+            ]
+        }
+        execute_telegram_api_call("setMyCommands", commands_payload)
+
         print(f"[Telegram Command Listener] Started polling background loop (initial offset={offset}).")
         while True:
             try:
@@ -188,6 +200,7 @@ def start_telegram_command_listener():
                         if sender_chat_id != str(chat_id):
                             print(f"[Telegram Command Listener] Mismatched chat ID: expected '{chat_id}', got '{sender_chat_id}'")
                             continue
+                        
                         if text == "/active":
                             active_trades_summary = []
                             with active_trades_lock:
@@ -230,6 +243,95 @@ def start_telegram_command_listener():
                                 "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
+                            
+                        elif text == "/balance":
+                            if TRADE_MODE == "simulation":
+                                sim_bal = bot_state.get("simulated_balance", 80.0)
+                                reply_text = f"💵 *SIMULATION ACCOUNT BALANCE*\n\n• *Cash Balance*: ${sim_bal:.2f}"
+                            else:
+                                try:
+                                    live_bal = get_real_bybit_balance_cached(force=True)
+                                    reply_text = f"💰 *LIVE BYBIT ACCOUNT BALANCE* 💰\n\n• *Wallet Balance*: ${live_bal:.2f} USDT"
+                                except Exception as bal_err:
+                                    reply_text = f"❌ *Failed to fetch balance:* {bal_err}"
+                                    
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                            
+                        elif text == "/skipped":
+                            skipped_summary = []
+                            with bot_state_lock:
+                                preds = [p for p in bot_state.get("prediction_history", []) 
+                                         if p.get("status", "").startswith("Skipped (") 
+                                         and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]]
+                                
+                                # Sort by timestamp descending
+                                preds = sorted(preds, key=lambda x: x.get("timestamp", 0.0), reverse=True)
+                                
+                                # Take top 5
+                                for p in preds[:5]:
+                                    symbol = p.get("symbol")
+                                    iv = p.get("interval")
+                                    direction = p.get("direction")
+                                    status = p.get("status", "").replace("Skipped (", "").replace(")", "")
+                                    conf = p.get("calibrated_confidence", 0.0)
+                                    ts = p.get("timestamp", 0.0)
+                                    time_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                                    
+                                    skipped_summary.append(
+                                        f"🚫 *{symbol} ({iv}m)* | signal: {direction}\n"
+                                        f"• *Filter*: {status.upper()}\n"
+                                        f"• *Confidence*: {conf*100:.1f}%\n"
+                                        f"• *Time*: {time_str}"
+                                    )
+                                    
+                            if skipped_summary:
+                                reply_text = "🚫 *LATEST FILTERED/SKIPPED SIGNALS* 🚫\n\n" + "\n\n".join(skipped_summary)
+                            else:
+                                reply_text = "ℹ️ *No skipped trades logged recently.*"
+                                
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                            
+                        elif text == "/stop_all":
+                            try:
+                                with bot_state_lock:
+                                    bot_state["bot_running"] = False
+                                    save_history()
+                                closed_count = close_all_trades_internal("Emergency Telegram Stop")
+                                reply_text = (
+                                    f"🚨 *EMERGENCY PANIC EXIT TRIGGERED* 🚨\n\n"
+                                    f"• Status: *Bot Stopped/Paused*\n"
+                                    f"• Closed *{closed_count}* active open trades on Bybit.\n"
+                                    f"• Cancelled all pending limit and conditional orders.\n"
+                                    f"• New trade entry has been paused."
+                                )
+                            except Exception as stop_err:
+                                reply_text = f"❌ *Failed to stop trades:* {stop_err}"
+                                
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                            
+                        elif text == "/start_bot":
+                            with bot_state_lock:
+                                bot_state["bot_running"] = True
+                                save_history()
+                            reply_text = "▶️ *BTC Trading Bot resumed successfully. New trade entries are enabled.*"
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                            
                 time.sleep(3)
             except Exception as e:
                 print(f"[Telegram Command Listener Error] {e}")
