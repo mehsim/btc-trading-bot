@@ -113,6 +113,21 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
     if not token:
         return {}
         
+    custom_url = os.environ.get("TELEGRAM_API_URL")
+    if custom_url:
+        try:
+            if not custom_url.endswith("/"):
+                custom_url += "/"
+            url = f"{custom_url}bot{token}/{method}"
+            resp = requests.post(url, json=payload, timeout=20)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+        except Exception as e:
+            if method != "getUpdates" or "timed out" not in str(e).lower():
+                print(f"[Telegram Custom API Exception] method={method}: {e}")
+            return {}
+
     tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
     
     try:
@@ -253,10 +268,11 @@ def start_telegram_command_listener():
                             continue
                         
                         sender_chat_id = str(message_obj.get("chat", {}).get("id"))
-                        if sender_chat_id != str(chat_id):
-                            continue
-                            
                         text = message_obj.get("text", "").strip()
+                        print(f"[Telegram Command Listener] Received message: '{text}' from chat_id '{sender_chat_id}'")
+                        if sender_chat_id != str(chat_id):
+                            print(f"[Telegram Command Listener] Mismatched chat ID: expected '{chat_id}', got '{sender_chat_id}'")
+                            continue
                         if text == "/active":
                             active_trades_summary = []
                             with active_trades_lock:
