@@ -119,7 +119,13 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             if not custom_url.endswith("/"):
                 custom_url += "/"
             url = f"{custom_url}bot{token}/{method}"
-            resp = requests.post(url, json=payload, timeout=20, proxies={"http": "", "https": ""})
+            tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+            proxies_dict = None
+            if tg_proxy:
+                if "://" not in tg_proxy:
+                    tg_proxy = "http://" + tg_proxy
+                proxies_dict = {"http": tg_proxy, "https": tg_proxy}
+            resp = requests.post(url, json=payload, timeout=20, proxies=proxies_dict)
             if resp.status_code == 200:
                 return resp.json()
             return {}
@@ -1934,32 +1940,38 @@ def test_telegram_endpoint():
 
     # Custom URL Direct test
     if custom_url:
-        # Test 1: Direct requests without proxy dict override
+        # Test 1: Direct requests without proxy
         try:
             url = f"{custom_url}bot{token}/getMe"
-            resp = requests.post(url, timeout=10)
-            results["Custom URL: Direct requests.post without proxies override"] = {
+            resp = requests.post(url, timeout=10, proxies={"http": "", "https": ""})
+            results["Custom URL: Direct requests.post without proxy"] = {
                 "status": "success",
                 "code": resp.status_code,
                 "body": resp.json()
             }
         except Exception as e:
-            results["Custom URL: Direct requests.post without proxies override"] = {
+            results["Custom URL: Direct requests.post without proxy"] = {
                 "status": "failed",
                 "error": str(e)
             }
 
-        # Test 2: Direct requests WITH proxy dict override (proxies={'http': '', 'https': ''})
+        # Test 2: Requests through proxy
         try:
             url = f"{custom_url}bot{token}/getMe"
-            resp = requests.post(url, timeout=10, proxies={"http": "", "https": ""})
-            results["Custom URL: Direct requests.post WITH proxies override"] = {
+            tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
+            proxies_dict = None
+            if tg_proxy:
+                if "://" not in tg_proxy:
+                    tg_proxy = "http://" + tg_proxy
+                proxies_dict = {"http": tg_proxy, "https": tg_proxy}
+            resp = requests.post(url, timeout=10, proxies=proxies_dict)
+            results["Custom URL: requests.post routed through proxy"] = {
                 "status": "success",
                 "code": resp.status_code,
                 "body": resp.json()
             }
         except Exception as e:
-            results["Custom URL: Direct requests.post WITH proxies override"] = {
+            results["Custom URL: requests.post routed through proxy"] = {
                 "status": "failed",
                 "error": str(e)
             }
