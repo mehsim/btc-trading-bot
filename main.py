@@ -205,7 +205,10 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
                 return resp.json()
             return {}
     except Exception as e:
-        print(f"[Telegram API Exception] method={method}: {e}")
+        if method == "getUpdates" and "timed out" in str(e).lower():
+            pass
+        else:
+            print(f"[Telegram API Exception] method={method}: {e}")
         return {}
 
 def send_telegram_alert(message: str):
