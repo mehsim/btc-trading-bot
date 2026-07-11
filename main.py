@@ -1811,6 +1811,8 @@ def test_telegram_endpoint():
     # 0. Environment Check
     results["Environment"] = {
         "TELEGRAM_API_URL": custom_url,
+        "TELEGRAM_PROXY": os.environ.get("TELEGRAM_PROXY"),
+        "BYBIT_PROXY": os.environ.get("BYBIT_PROXY"),
         "HTTP_PROXY": os.environ.get("HTTP_PROXY"),
         "HTTPS_PROXY": os.environ.get("HTTPS_PROXY"),
         "http_proxy": os.environ.get("http_proxy"),
