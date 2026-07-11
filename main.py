@@ -108,121 +108,36 @@ def get_pkt_time():
     return datetime.utcnow() + timedelta(hours=5)
 
 def execute_telegram_api_call(method: str, payload: dict) -> dict:
-    """Helper to send POST requests to Telegram API using proxy and custom SNI-bypass tunnel if configured."""
+    """Helper to send POST requests to Telegram API using SOCKS5 proxy to bypass firewalls."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         return {}
         
     custom_url = os.environ.get("TELEGRAM_API_URL")
     if custom_url:
-        try:
-            if not custom_url.endswith("/"):
-                custom_url += "/"
-            url = f"{custom_url}bot{token}/{method}"
-            resp = requests.post(url, json=payload, timeout=20, proxies={"http": "", "https": ""})
-            if resp.status_code == 200:
-                return resp.json()
-            return {}
-        except Exception as e:
-            if method != "getUpdates" or "timed out" not in str(e).lower():
-                print(f"[Telegram Custom API Exception] method={method}: {e}")
-            return {}
-
+        if not custom_url.endswith("/"):
+            custom_url += "/"
+        url = f"{custom_url}bot{token}/{method}"
+    else:
+        url = f"https://api.telegram.org/bot{token}/{method}"
+        
     tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
-    
+    proxies_dict = None
+    if tg_proxy:
+        if "://" in tg_proxy:
+            tg_proxy_clean = tg_proxy.split("://", 1)[1]
+        else:
+            tg_proxy_clean = tg_proxy
+        socks_proxy = f"socks5h://{tg_proxy_clean}"
+        proxies_dict = {"http": socks_proxy, "https": socks_proxy}
+        
     try:
-        if tg_proxy:
-            import socket
-            import ssl
-            import urllib.parse
-            import json
-            import base64
-
-            proxy_str = tg_proxy
-            if "://" in proxy_str:
-                parsed_proxy = urllib.parse.urlparse(proxy_str)
-                proxy_host = parsed_proxy.hostname
-                proxy_port = parsed_proxy.port or 80
-                proxy_user = parsed_proxy.username
-                proxy_pass = parsed_proxy.password
-            else:
-                if "@" in proxy_str:
-                    auth_part, host_part = proxy_str.split("@", 1)
-                    proxy_user, proxy_pass = auth_part.split(":", 1)
-                else:
-                    proxy_user, proxy_pass = None, None
-                    host_part = proxy_str
-                
-                if ":" in host_part:
-                    proxy_host, port_str = host_part.split(":", 1)
-                    proxy_port = int(port_str)
-                else:
-                    proxy_host = host_part
-                    proxy_port = 80
-
-            auth_header = ""
-            if proxy_user and proxy_pass:
-                cred = f"{proxy_user}:{proxy_pass}".encode('utf-8')
-                auth_header = f"Proxy-Authorization: Basic {base64.b64encode(cred).decode('utf-8')}\r\n"
-
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(20)
-            s.connect((proxy_host, proxy_port))
-
-            connect_req = (
-                f"CONNECT api.telegram.org:443 HTTP/1.1\r\n"
-                f"Host: api.telegram.org:443\r\n"
-                f"{auth_header}"
-                f"Proxy-Connection: Keep-Alive\r\n\r\n"
-            ).encode('utf-8')
-            s.sendall(connect_req)
-
-            resp = s.recv(4096)
-            if b"200" not in resp:
-                s.close()
-                raise Exception(f"Proxy tunnel establishment failed: {resp.decode('utf-8', errors='ignore')}")
-
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_REQUIRED
-            
-            ssl_sock = context.wrap_socket(s, server_hostname="api.telegram.org")
-
-            body = json.dumps(payload).encode('utf-8')
-            path = f"/bot{token}/{method}"
-            http_req = (
-                f"POST {path} HTTP/1.1\r\n"
-                f"Host: api.telegram.org\r\n"
-                f"Content-Type: application/json\r\n"
-                f"Content-Length: {len(body)}\r\n"
-                f"Connection: close\r\n\r\n"
-            ).encode('utf-8') + body
-
-            ssl_sock.sendall(http_req)
-
-            response_data = b""
-            while True:
-                chunk = ssl_sock.read(4096)
-                if not chunk:
-                    break
-                response_data += chunk
-            
-            ssl_sock.close()
-            resp_str = response_data.decode('utf-8', errors='ignore')
-            if "\r\n\r\n" in resp_str:
-                json_part = resp_str.split("\r\n\r\n", 1)[1]
-                return json.loads(json_part)
-            return {}
-        else:
-            url = f"https://api.telegram.org/bot{token}/{method}"
-            resp = requests.post(url, json=payload, timeout=20)
-            if resp.status_code == 200:
-                return resp.json()
-            return {}
+        resp = requests.post(url, json=payload, timeout=20, proxies=proxies_dict)
+        if resp.status_code == 200:
+            return resp.json()
+        return {}
     except Exception as e:
-        if method == "getUpdates" and "timed out" in str(e).lower():
-            pass
-        else:
+        if method != "getUpdates" or "timed out" not in str(e).lower():
             print(f"[Telegram API Exception] method={method}: {e}")
         return {}
 
