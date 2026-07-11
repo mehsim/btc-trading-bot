@@ -1817,6 +1817,33 @@ def test_telegram_endpoint():
         "https_proxy": os.environ.get("https_proxy"),
     }
 
+    # DNS and Connection test for custom URL host
+    if custom_url:
+        import socket
+        import urllib.parse
+        parsed = urllib.parse.urlparse(custom_url)
+        host = parsed.hostname
+        dns_res = {}
+        try:
+            dns_res["ip"] = socket.gethostbyname(host)
+            dns_res["status"] = "resolved"
+        except Exception as e:
+            dns_res["status"] = "failed"
+            dns_res["error"] = str(e)
+        results["DNS: Custom URL Host"] = dns_res
+
+        socket_res = {}
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(5)
+            s.connect((dns_res.get("ip", host), 443))
+            s.close()
+            socket_res["status"] = "connected"
+        except Exception as e:
+            socket_res["status"] = "failed"
+            socket_res["error"] = str(e)
+        results["Socket: Custom URL Host:443"] = socket_res
+
     # Method 1: Direct requests.post
     try:
         url = f"https://api.telegram.org/bot{token}/getMe"
