@@ -35,25 +35,25 @@ POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTE
 TIMEFRAME_CONFIG = {
     "60": {   # 1H Timeframe
         "lookahead": 10,
-        "sl_mult": 0.8,
+        "sl_mult": 1.5,
         "tp_mult_ranging": 1.5,
         "tp_mult_trending": 2.5
     },
     "120": {  # 2H Timeframe
         "lookahead": 12,
-        "sl_mult": 0.75,
+        "sl_mult": 1.5,
         "tp_mult_ranging": 1.4,
         "tp_mult_trending": 2.2
     },
     "240": {  # 4H Timeframe
         "lookahead": 12,
-        "sl_mult": 0.7,
+        "sl_mult": 1.8,
         "tp_mult_ranging": 1.3,
         "tp_mult_trending": 2.0
     },
     "360": {  # 6H Timeframe
         "lookahead": 16,
-        "sl_mult": 0.65,
+        "sl_mult": 2.0,
         "tp_mult_ranging": 1.2,
         "tp_mult_trending": 1.8
     }
@@ -5834,6 +5834,20 @@ def main():
                                         bybit_scale_out_order_id = None
                                         
                                         if TRADE_MODE != "simulation":
+                                            # Live Exchange Position Guard: check Bybit directly to prevent duplicate positions
+                                            try:
+                                                pos_list = get_all_bybit_positions()
+                                                if pos_list:
+                                                    existing_pos = next((p for p in pos_list if p.get("symbol") == symbol and float(p.get("size", "0")) > 0), None)
+                                                    if existing_pos:
+                                                        print(f"[{symbol} {iv}m API Block] Live order placement skipped: a live position already exists on Bybit.")
+                                                        bybit_success = False
+                                                        status_msg = "Skipped (Already Active on Bybit)"
+                                                        sync_active_positions_from_bybit()
+                                                        continue
+                                            except Exception as pos_check_err:
+                                                print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
+
                                             print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
                                             # 1. Set leverage on exchange
                                             leverage_ok = set_bybit_leverage(symbol, leverage_val)
