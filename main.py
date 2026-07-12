@@ -181,13 +181,14 @@ def start_telegram_command_listener():
             "commands": [
                 {"command": "active", "description": "View all active open trades"},
                 {"command": "balance", "description": "View account/wallet balance"},
+                {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
                 {"command": "stop_all", "description": "Emergency stop bot and close all trades"},
                 {"command": "start_bot", "description": "Resume bot and enable new trade entries"}
             ]
         }
         execute_telegram_api_call("setMyCommands", commands_payload)
- 
+
         print(f"[Telegram Command Listener] Started polling background loop (initial offset={offset}).")
         while True:
             try:
@@ -260,6 +261,56 @@ def start_telegram_command_listener():
                                 except Exception as bal_err:
                                     reply_text = f"❌ *Failed to fetch balance:* {bal_err}"
                                     
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                            
+                        elif text == "/profit":
+                            total_pnl = 0.0
+                            today_pnl = 0.0
+                            week_pnl = 0.0
+                            month_pnl = 0.0
+                            wins = 0
+                            losses = 0
+                            
+                            now_ts = time.time()
+                            one_day_secs = 24 * 3600
+                            
+                            with bot_state_lock:
+                                for t in bot_state.get("trade_history", []):
+                                    pnl = float(t.get("pnl_usd", 0.0))
+                                    total_pnl += pnl
+                                    
+                                    exit_time = float(t.get("exit_time", 0.0))
+                                    age = now_ts - exit_time
+                                    
+                                    if age <= one_day_secs:
+                                        today_pnl += pnl
+                                    if age <= 7 * one_day_secs:
+                                        week_pnl += pnl
+                                    if age <= 30 * one_day_secs:
+                                        month_pnl += pnl
+                                        
+                                    if pnl > 0:
+                                        wins += 1
+                                    elif pnl < 0:
+                                        losses += 1
+                                        
+                            total_trades = wins + losses
+                            win_rate = (wins / total_trades) * 100.0 if total_trades > 0 else 0.0
+                            
+                            reply_text = (
+                                f"📈 *PROFIT / LOSS SUMMARY* 📈\n\n"
+                                f"• *Total PnL*: {total_pnl:+.2f} USD\n"
+                                f"• *Today (24h)*: {today_pnl:+.2f} USD\n"
+                                f"• *7 Days*: {week_pnl:+.2f} USD\n"
+                                f"• *30 Days*: {month_pnl:+.2f} USD\n\n"
+                                f"📊 *Statistics*:\n"
+                                f"• *Win Rate*: {win_rate:.1f}% ({wins} W / {losses} L)"
+                            )
+                            
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
                                 "text": reply_text,
@@ -5862,46 +5913,7 @@ def main():
                                     print(f"Failed checks: {', '.join(failed_list)}")
                                     print("==================================================\n")
                         
-                        # Send Telegram alert for skipped prediction/trade signals
-                        if status_msg.startswith("Skipped (") and status_msg not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]:
-                            current_price = latest_candle.get("close", 0.0)
-                            detail_reason = ""
-                            if status_msg == "Skipped (Circuit Breaker)":
-                                detail_reason = "Daily drawdown circuit breaker active."
-                            elif status_msg == "Skipped (Already Active)":
-                                detail_reason = f"Trade already active on {active_on_tf} timeframe."
-                            elif status_msg == "Skipped (Cool-Off)":
-                                detail_reason = f"Consecutive loss cooling off period active ({remaining_mins} mins remaining)."
-                            elif status_msg == "Skipped (HTF Trend Block)":
-                                detail_reason = f"Macro trend alignment block. {macro_tf} trend is {htf_trend} (contradicts local {ml_trend} signal)."
-                            elif status_msg == "Skipped (Funding Block)":
-                                detail_reason = f"High funding fee risk (Current Funding: {funding_rate*100:.3f}%)."
-                            elif status_msg == "Skipped (Contradiction)":
-                                detail_reason = f"Trend classifier ({ml_trend}) contradicts Regressor predicted target ({pred_change:+.3f} [{pred_pct:.3f}%])."
-                            elif status_msg == "Skipped (Low Confidence)":
-                                detail_reason = f"Calibrated confidence ({calibrated_confidence*100:.2f}%) is below the dynamic threshold ({dynamic_conf_threshold*100:.2f}%)."
-                            elif status_msg == "Skipped (News Block)":
-                                detail_reason = f"High-impact news event window active ({news_event})."
-                            elif status_msg == "Skipped (Confluence Failed)":
-                                failed_list_clean = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
-                                detail_reason = f"Confluence score check failed. Unpassed checks: {', '.join(failed_list_clean)}"
-                            elif status_msg == "Skipped (Insufficient Balance)":
-                                detail_reason = f"Wallet balance (${current_bal:.2f}) must be greater than $2.00."
-                            elif status_msg == "Skipped (Exceeds Wallet)":
-                                detail_reason = "Insufficient wallet balance to maintain minimum $2.00 size."
-                            else:
-                                detail_reason = "Dynamic system verification block."
 
-                            send_telegram_alert(
-                                f"ℹ️ *TRADE FILTERED ({status_msg.replace('Skipped (', '').replace(')', '').upper()})* ℹ️\n"
-                                f"• *Asset*: {symbol}\n"
-                                f"• *Interval*: {iv}m\n"
-                                f"• *Signal*: {ml_trend}\n"
-                                f"• *Confidence*: {calibrated_confidence * 100:.2f}%\n"
-                                f"• *Threshold*: {dynamic_conf_threshold * 100:.2f}%\n"
-                                f"• *Price*: ${current_price:.2f}\n"
-                                f"• *Reason*: {detail_reason}"
-                            )
 
                         # Prevent duplicate predictions for the same candle timestamp
                         exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv and p.get("symbol") == symbol for p in bot_state["prediction_history"])
