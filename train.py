@@ -526,6 +526,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
     df = pd.concat(dfs, ignore_index=True)
     print(f"\n=== Combined Training Dataset: {len(df)} total rows across {len(dfs)} symbols ===")
 
+    # Inject live trade feedback samples if --live-feedback flag is set
+    if globals().get("LIVE_FEEDBACK", False):
+        live_df = load_live_trade_samples(interval)
+        if live_df is not None and len(live_df) > 0:
+            # Ensure all needed columns exist
+            for col in ["target_price_change", "target_trend"]:
+                if col not in live_df.columns:
+                    live_df[col] = 0
+            df = pd.concat([df, live_df], ignore_index=True)
+            print(f"[Live Feedback] Training dataset expanded to {len(df)} rows.")
+
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
     # ==========================================
@@ -778,12 +789,67 @@ def train_models(interval=INTERVAL, pages=PAGES):
     train_regime_model(df_trending, "trending")
     train_regime_model(df_ranging, "ranging")
 
+def load_live_trade_samples(interval, days=2, weight=3.0):
+    """Load recent closed trades, re-fetch features at entry time, return as weighted DataFrame."""
+    try:
+        import json, time as _time
+        history_file = "dashboard_history.json"
+        if not os.path.exists(history_file):
+            return None
+        with open(history_file, "r") as f:
+            data = json.load(f)
+        trades = data.get("trade_history", [])
+        cutoff = _time.time() - days * 86400
+        trades = [t for t in trades if str(t.get("interval", "")) == str(interval) and float(t.get("exit_time", 0)) >= cutoff]
+        if not trades:
+            print(f"[Live Feedback] No trades in last {days} days for interval {interval}m.")
+            return None
+        
+        sample_dfs = []
+        for t in trades:
+            symbol = t.get("symbol")
+            exit_ts = float(t.get("exit_time", 0))
+            pnl = float(t.get("pnl_usd", 0.0))
+            direction = t.get("direction", "Bullish")
+            # Fetch ~60 candles ending just before exit to capture entry features
+            df_c = get_history(symbol=symbol, interval=interval, limit=60, pages=1)
+            if df_c is None or len(df_c) < 20:
+                continue
+            # Keep only rows before exit time
+            df_c = df_c[df_c["timestamp"] <= exit_ts * 1000].copy()
+            if len(df_c) < 10:
+                continue
+            df_c = merge_derivatives_sentiment_features(df_c, symbol=symbol, interval=interval)
+            df_c = add_features(df_c)
+            df_c = df_c.dropna()
+            if len(df_c) == 0:
+                continue
+            # Use the last available row (closest to entry)
+            row = df_c.iloc[[-1]].copy()
+            # Label: correct direction = 1, wrong = 0
+            row["target_trend"] = 1 if pnl > 0 else 0
+            row["target_price_change"] = 0.0
+            row["sample_weight"] = weight
+            sample_dfs.append(row)
+        
+        if not sample_dfs:
+            return None
+        result = pd.concat(sample_dfs, ignore_index=True)
+        print(f"[Live Feedback] Injecting {len(result)} real trade samples (weight={weight}x) for interval {interval}m.")
+        return result
+    except Exception as e:
+        print(f"[Live Feedback] Error loading live trade samples: {e}")
+        return None
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
     parser.add_argument("--interval", type=str, default="60", choices=["60", "120", "240", "360", "all"], help="Timeframe interval to train")
     parser.add_argument("--pages", type=int, default=20, help="Number of data pages to fetch from Bybit")
+    parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
     args = parser.parse_args()
+    LIVE_FEEDBACK = args.live_feedback
 
     if args.interval == "all":
         for iv in ["60", "120", "240", "360"]:

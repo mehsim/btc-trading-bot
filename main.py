@@ -209,6 +209,7 @@ def start_telegram_command_listener():
                 {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
                 {"command": "add_user", "description": "Authorize a new user via email verification"},
+                {"command": "retrain", "description": "Retrain models with recent live trade feedback"},
                 {"command": "stop_all", "description": "Emergency stop bot and close all trades"},
                 {"command": "start_bot", "description": "Resume bot and enable new trade entries"}
             ]
@@ -470,6 +471,18 @@ def start_telegram_command_listener():
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
                                 "text": "🔑 *Verification code sent to mehsimleo@gmail.com.*\n\nPlease reply with the 6-digit code to verify your request.",
+                                "parse_mode": "Markdown"
+                            })
+
+                        elif text == "/retrain":
+                            started = retrain_models_thread(is_manual=True)
+                            if started:
+                                reply_text = "🔄 *Model retraining started with live trade feedback.*\n\nThis runs in the background (~20-40 min). You'll receive a Telegram alert when complete."
+                            else:
+                                reply_text = "⚠️ *Retraining already in progress.* Please wait for it to complete."
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": reply_text,
                                 "parse_mode": "Markdown"
                             })
 
@@ -2248,7 +2261,7 @@ def retrain_models_thread(is_manual=False):
             # Retrain for all intervals sequentially using nice -n 19 to yield CPU to active trading bot
             for iv in ["60", "120", "240", "360"]:
                 print(f"[Retraining] Spawning throttled subprocess for interval {iv}m...")
-                cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "5"]
+                cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "5", "--live-feedback"]
                 p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = p.communicate()
                 if p.returncode == 0:
