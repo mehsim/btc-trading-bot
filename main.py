@@ -169,6 +169,15 @@ def start_telegram_command_listener():
     allowed_chat_ids = [cid.strip() for cid in raw_chat_id.split(",") if cid.strip()]
     if "8827929671" not in allowed_chat_ids:
         allowed_chat_ids.append("8827929671")
+        
+    # Load dynamically authorized chat IDs
+    with bot_state_lock:
+        dyn_list = bot_state.get("telegram_allowed_ids", [])
+        for dyn_id in dyn_list:
+            if dyn_id not in allowed_chat_ids:
+                allowed_chat_ids.append(dyn_id)
+
+    pending_auth = {} # {sender_chat_id: {"code": str, "step": str, "timestamp": float}}
  
     def listener_loop():
         offset = 0
@@ -183,12 +192,13 @@ def start_telegram_command_listener():
                 {"command": "balance", "description": "View account/wallet balance"},
                 {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
+                {"command": "add_user", "description": "Authorize a new user via email verification"},
                 {"command": "stop_all", "description": "Emergency stop bot and close all trades"},
                 {"command": "start_bot", "description": "Resume bot and enable new trade entries"}
             ]
         }
         execute_telegram_api_call("setMyCommands", commands_payload)
-
+ 
         print(f"[Telegram Command Listener] Started polling background loop (initial offset={offset}).")
         while True:
             try:
@@ -203,6 +213,67 @@ def start_telegram_command_listener():
                         sender_chat_id = str(message_obj.get("chat", {}).get("id"))
                         text = message_obj.get("text", "").strip()
                         print(f"[Telegram Command Listener] Received message: '{text}' from chat_id '{sender_chat_id}'")
+                        
+                        # Handle verification flow logic resets
+                        if text in ["/cancel", "/add_user"] and sender_chat_id in pending_auth:
+                            pending_auth.pop(sender_chat_id, None)
+                            
+                        if sender_chat_id in pending_auth:
+                            user_flow = pending_auth[sender_chat_id]
+                            if time.time() - user_flow["timestamp"] > 300:
+                                pending_auth.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Session expired.* Please start over by sending /add_user.",
+                                    "parse_mode": "Markdown"
+                                })
+                                continue
+                                
+                            if user_flow["step"] == "awaiting_code":
+                                if text == user_flow["code"]:
+                                    user_flow["step"] = "awaiting_chat_id"
+                                    user_flow["timestamp"] = time.time()
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "✅ *Authentication successful!*\n\nPlease reply with the new Telegram Chat ID you want to authorize.",
+                                        "parse_mode": "Markdown"
+                                    })
+                                else:
+                                    pending_auth.pop(sender_chat_id, None)
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid verification code.* Request cancelled.",
+                                        "parse_mode": "Markdown"
+                                    })
+                                continue
+                                
+                            elif user_flow["step"] == "awaiting_chat_id":
+                                if text.isdigit():
+                                    new_id = text
+                                    with bot_state_lock:
+                                        dyn_list = bot_state.get("telegram_allowed_ids", [])
+                                        if new_id not in allowed_chat_ids:
+                                            allowed_chat_ids.append(new_id)
+                                        if new_id not in dyn_list:
+                                            dyn_list.append(new_id)
+                                            bot_state["telegram_allowed_ids"] = dyn_list
+                                            save_history()
+                                            
+                                    pending_auth.pop(sender_chat_id, None)
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": f"🎉 *Success! Chat ID {new_id} is now authorized to use the bot.*",
+                                        "parse_mode": "Markdown"
+                                    })
+                                else:
+                                    pending_auth.pop(sender_chat_id, None)
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid Chat ID format.* Request cancelled.",
+                                        "parse_mode": "Markdown"
+                                    })
+                                continue
+
                         if sender_chat_id not in allowed_chat_ids:
                             print(f"[Telegram Command Listener] Mismatched chat ID: expected one of {allowed_chat_ids}, got '{sender_chat_id}'")
                             continue
@@ -355,6 +426,37 @@ def start_telegram_command_listener():
                                 "parse_mode": "Markdown"
                             })
                             
+                        elif text == "/add_user":
+                            import random
+                            code = str(random.randint(100000, 999999))
+                            pending_auth[sender_chat_id] = {
+                                "code": code,
+                                "step": "awaiting_code",
+                                "timestamp": time.time()
+                            }
+                            
+                            subject = "🔑 Bot Authorization Verification Code"
+                            body = (
+                                f"Hello,\n\n"
+                                f"A request was made to authorize a new Telegram Chat ID for your trading bot.\n\n"
+                                f"Your verification code is: {code}\n\n"
+                                f"Please enter this code in Telegram to authenticate the request."
+                            )
+                            
+                            def _send_email():
+                                try:
+                                    send_email_notification(subject, body)
+                                except Exception as mail_err:
+                                    print(f"[Telegram Command Listener] Email auth send error: {mail_err}")
+                                    
+                            threading.Thread(target=_send_email, daemon=True).start()
+                            
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": "🔑 *Verification code sent to mehsimleo@gmail.com.*\n\nPlease reply with the 6-digit code to verify your request.",
+                                "parse_mode": "Markdown"
+                            })
+
                         elif text == "/stop_all":
                             try:
                                 with bot_state_lock:
