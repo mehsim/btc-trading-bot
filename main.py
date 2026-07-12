@@ -3691,9 +3691,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
         trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
         trend_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")
+        if not trend_pass:
+            hard_gate_failed = True
         results["4h_Trend"] = {
             "pass": trend_pass,
-            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})",
+            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f}) [HARD GATE]",
             "weight": weight_4h
         }
         max_score += weight_4h
@@ -3748,11 +3750,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     weight_bb = 2
     bb_pct_val = df_1h["BB_pct"].iloc[-1]
     if ml_trend == "Bullish":
-        bb_pass = (bb_pct_val < 0.95)
-        detail_msg = f"BB Pct is {bb_pct_val:.3f} (< 0.95, Room to run)" if bb_pass else f"BB Pct is {bb_pct_val:.3f} (>= 0.95, Overextended long)"
+        bb_pass = (bb_pct_val < 0.85)
+        detail_msg = f"BB Pct is {bb_pct_val:.3f} (< 0.85, Room to run)" if bb_pass else f"BB Pct is {bb_pct_val:.3f} (>= 0.85, Overextended long)"
     else:
-        bb_pass = (bb_pct_val > 0.05)
-        detail_msg = f"BB Pct is {bb_pct_val:.3f} (> 0.05, Room to run)" if bb_pass else f"BB Pct is {bb_pct_val:.3f} (<= 0.05, Overextended short)"
+        bb_pass = (bb_pct_val > 0.15)
+        detail_msg = f"BB Pct is {bb_pct_val:.3f} (> 0.15, Room to run)" if bb_pass else f"BB Pct is {bb_pct_val:.3f} (<= 0.15, Overextended short)"
     results["BB_Edge_Guard"] = {"pass": bb_pass, "detail": detail_msg, "weight": weight_bb}
     max_score += weight_bb
     if bb_pass:
@@ -3973,8 +3975,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
     
-    # Standardize confluence threshold to flat 80% for consistent accuracy across all market regimes
-    score_threshold = 70.0
+    # Standardize confluence threshold to flat 75% for consistent accuracy across all market regimes
+    score_threshold = 75.0
         
     approved = (not hard_gate_failed) and (score_pct >= score_threshold)
 
