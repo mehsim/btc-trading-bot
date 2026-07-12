@@ -142,6 +142,17 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             return resp.json()
         return {}
     except Exception as e:
+        # If Worker URL failed, auto-retry via direct SOCKS5 fallback
+        if custom_url and tg_proxy:
+            try:
+                fallback_url = f"https://api.telegram.org/bot{token}/{method}"
+                tg_clean = tg_proxy.split("://", 1)[-1]
+                socks = {"http": f"socks5h://{tg_clean}", "https": f"socks5h://{tg_clean}"}
+                resp2 = requests.post(fallback_url, json=payload, timeout=20, proxies=socks)
+                if resp2.status_code == 200:
+                    return resp2.json()
+            except Exception:
+                pass
         if method != "getUpdates" or "timed out" not in str(e).lower():
             print(f"[Telegram API Exception] method={method}: {e}")
         return {}
@@ -4445,7 +4456,9 @@ def main():
         load_model_weights(iv)
     load_history()
     print(f"{SYMBOL} LIVE BOT RUNNING...")
+    send_telegram_alert(f"✅ *Bot started successfully on {TRADE_MODE.upper()} mode.*\n_Container boot detected — all systems nominal._")
     
+
     # Pre-load initial prices for all supported symbols
     load_initial_prices()
 
@@ -4584,7 +4597,15 @@ def main():
                                         bybit_scaled_out = True
                                     else:
                                         status_msg = order_details.get("orderStatus") if order_details else "Unknown"
-                                        print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
+                                        stuck_since = active_trade.get("scale_out_stuck_since", time.time())
+                                        active_trade.setdefault("scale_out_stuck_since", stuck_since)
+                                        if time.time() - stuck_since > 600:  # 10-minute timeout
+                                            print(f"[{active_symbol}] Scale-out stuck >10 min ({status_msg}). Cancelling stale order and marking half_closed.")
+                                            cancel_bybit_order(active_symbol, scale_out_order_id)
+                                            active_trade["half_closed"] = True
+                                            active_trade.pop("scale_out_stuck_since", None)
+                                        else:
+                                            print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
                                 else:
                                     bybit_scaled_out = True
     

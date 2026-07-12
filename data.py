@@ -349,52 +349,66 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             elif str(interval).upper() == "D":
                 kraken_interval = 1440
 
-            kraken_pair = "XBTUSDT"
-            symbol_upper = symbol.upper()
-            if symbol_upper == "BTCUSDT":
-                kraken_pair = "XBTUSDT"
-            elif symbol_upper == "ETHUSDT":
-                kraken_pair = "ETHUSDT"
-            elif symbol_upper == "SOLUSDT":
-                kraken_pair = "SOLUSDT"
-            else:
-                kraken_pair = symbol_upper
-
-            kraken_url = "https://api.kraken.com/0/public/OHLC"
-            kraken_params = {
-                "pair": kraken_pair,
-                "interval": kraken_interval
+            # Explicit symbol map for Kraken (None = not supported, skip cleanly)
+            KRAKEN_SYMBOL_MAP = {
+                "BTCUSDT": "XBTUSDT",
+                "ETHUSDT": "ETHUSDT",
+                "SOLUSDT": "SOLUSDT",
+                "XRPUSDT": "XRPUSDT",
+                "LTCUSDT": "LTCUSDT",
+                "DOGEUSDT": "XDGUSDT",
+                "AVAXUSDT": "AVAXUSDT",
+                "NEARUSDT": None,   # Not available on Kraken
+                "BNBUSDT": None,    # Not available on Kraken
+                "SUIUSDT": None,    # Not available on Kraken
+                "APTUSDT": None,    # Not available on Kraken
+                "DOTUSDT": "DOTUSDT",
+                "ADAUSDT": "ADAUSDT",
             }
-            # Kraken fallback does not use proxy to conserve metered proxy bandwidth
-            resp = requests.get(kraken_url, params=kraken_params, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                res = resp.json()
-                if "result" in res and len(res["result"]) > 0:
-                    pair_key = [k for k in res["result"].keys() if k != "last"][0]
-                    kraken_data = res["result"][pair_key]
-                    
-                    candles_to_take = kraken_data[-limit:] if len(kraken_data) > limit else kraken_data
-                    fallback_data = []
-                    for item in candles_to_take:
-                        fallback_data.append([
-                            float(item[0]) * 1000, # timestamp in ms
-                            float(item[1]),        # open
-                            float(item[2]),        # high
-                            float(item[3]),        # low
-                            float(item[4]),        # close
-                            float(item[6]),        # volume
-                            float(item[6]) * float(item[4]) # turnover
-                        ])
-                    df_history = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
-                    df_history = df_history.astype(float)
-                    df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-                    print(f"Successfully loaded {len(df_history)} candles from Kraken API fallback.")
-                else:
-                    print(f"Kraken returned empty results or error: {res.get('error')}")
+            symbol_upper = symbol.upper()
+            kraken_pair = KRAKEN_SYMBOL_MAP.get(symbol_upper, symbol_upper)
+            if kraken_pair is None:
+                print(f"[Kraken] {symbol_upper} not supported on Kraken. Skipping fallback.")
+                kraken_pair = None  # Will be caught below
+
+            if kraken_pair is None:
+                pass  # Already logged above, skip request
             else:
-                print(f"Kraken fallback failed with HTTP {resp.status_code}")
+                kraken_url = "https://api.kraken.com/0/public/OHLC"
+                kraken_params = {
+                    "pair": kraken_pair,
+                    "interval": kraken_interval
+                }
+                # Kraken fallback does not use proxy to conserve metered proxy bandwidth
+                resp = requests.get(kraken_url, params=kraken_params, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    res = resp.json()
+                    if "result" in res and len(res["result"]) > 0:
+                        pair_key = [k for k in res["result"].keys() if k != "last"][0]
+                        kraken_data = res["result"][pair_key]
+                        candles_to_take = kraken_data[-limit:] if len(kraken_data) > limit else kraken_data
+                        fallback_data = []
+                        for item in candles_to_take:
+                            fallback_data.append([
+                                float(item[0]) * 1000,
+                                float(item[1]),
+                                float(item[2]),
+                                float(item[3]),
+                                float(item[4]),
+                                float(item[6]),
+                                float(item[6]) * float(item[4])
+                            ])
+                        df_history = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+                        df_history = df_history.astype(float)
+                        df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                        print(f"Successfully loaded {len(df_history)} candles from Kraken API fallback.")
+                    else:
+                        print(f"Kraken returned empty results or error: {res.get('error')}")
+                else:
+                    print(f"Kraken fallback failed with HTTP {resp.status_code}")
         except Exception as ex:
             print(f"Error fetching Kraken fallback klines: {ex}")
+
 
     if len(df_history) == 0:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
