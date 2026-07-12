@@ -4449,6 +4449,14 @@ def sync_active_positions_from_bybit():
                     }
                     
                     tf_key = matched_tf
+                    # Cross-timeframe duplicate guard: skip if symbol already active in ANY timeframe
+                    already_in_any_tf = any(
+                        any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
+                        for k in ["1h", "2h", "4h", "6h"]
+                    )
+                    if already_in_any_tf:
+                        print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} — already tracked in an active timeframe.")
+                        continue
                     active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
                     if not isinstance(active_trades_list, list):
                         active_trades_list = []
