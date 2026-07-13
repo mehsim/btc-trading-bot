@@ -305,6 +305,7 @@ def start_telegram_command_listener():
                 allowed_chat_ids.append(dyn_id)
 
     pending_auth = {} # {sender_chat_id: {"code": str, "step": str, "timestamp": float}}
+    pending_confluence = {} # {sender_chat_id: {"step": str, "symbol": str, "timestamp": float}}
  
     def listener_loop():
         offset = 0
@@ -319,7 +320,7 @@ def start_telegram_command_listener():
                 {"command": "balance", "description": "View account/wallet balance"},
                 {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
-                {"command": "confluence", "description": "Get live confluence report for coin e.g. /confluence BTC 1h"},
+                {"command": "confluence", "description": "Get live confluence report for coin"},
                 {"command": "retrain_status", "description": "View model retraining status"},
                 {"command": "logs", "description": "View latest bot running logs"},
                 {"command": "add_user", "description": "Authorize a new user via email verification"},
@@ -409,6 +410,125 @@ def start_telegram_command_listener():
                             print(f"[Telegram Command Listener] Mismatched chat ID: expected one of {allowed_chat_ids}, got '{sender_chat_id}'")
                             continue
                         
+                        # Handle confluence interactive flow logic resets
+                        if text in ["/cancel", "/add_user", "/confluence"] and sender_chat_id in pending_confluence:
+                            pending_confluence.pop(sender_chat_id, None)
+                            
+                        if sender_chat_id in pending_confluence:
+                            flow = pending_confluence[sender_chat_id]
+                            if time.time() - flow["timestamp"] > 300:
+                                pending_confluence.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Session expired.* Please start over by sending /confluence.",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+                                
+                            if text == "/cancel":
+                                pending_confluence.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Operation cancelled.*",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+                                
+                            if text.startswith("/"):
+                                pending_confluence.pop(sender_chat_id, None)
+                            else:
+                                if flow["step"] == "awaiting_symbol":
+                                    raw_sym = text.upper()
+                                    target_sym = raw_sym if raw_sym.endswith("USDT") else f"{raw_sym}USDT"
+                                    if target_sym not in SUPPORTED_SYMBOLS:
+                                        reply_text = f"❌ *Symbol {target_sym} is not supported.*\n\nActive symbols: {', '.join(SUPPORTED_SYMBOLS)}\n\nPlease select one of the supported symbols from the keyboard or send /cancel to abort."
+                                        
+                                        syms_keyboard = []
+                                        row = []
+                                        for idx, s in enumerate(SUPPORTED_SYMBOLS):
+                                            row.append({"text": s})
+                                            if (idx + 1) % 3 == 0:
+                                                syms_keyboard.append(row)
+                                                row = []
+                                        if row:
+                                            syms_keyboard.append(row)
+                                        syms_keyboard.append([{"text": "/cancel"}])
+                                        
+                                        execute_telegram_api_call("sendMessage", {
+                                            "chat_id": sender_chat_id,
+                                            "text": reply_text,
+                                            "parse_mode": "Markdown",
+                                            "reply_markup": {
+                                                "keyboard": syms_keyboard,
+                                                "resize_keyboard": True,
+                                                "one_time_keyboard": True
+                                            }
+                                        })
+                                    else:
+                                        flow["symbol"] = target_sym
+                                        flow["step"] = "awaiting_timeframe"
+                                        flow["timestamp"] = time.time()
+                                        
+                                        tf_keyboard = [
+                                            [{"text": "1h"}, {"text": "2h"}],
+                                            [{"text": "4h"}, {"text": "6h"}],
+                                            [{"text": "/cancel"}]
+                                        ]
+                                        execute_telegram_api_call("sendMessage", {
+                                            "chat_id": sender_chat_id,
+                                            "text": f"✅ *Selected Symbol:* {target_sym}\n\nPlease select a *Timeframe* below:",
+                                            "parse_mode": "Markdown",
+                                            "reply_markup": {
+                                                "keyboard": tf_keyboard,
+                                                "resize_keyboard": True,
+                                                "one_time_keyboard": True
+                                            }
+                                        })
+                                    continue
+                                    
+                                elif flow["step"] == "awaiting_timeframe":
+                                    tf_str = text.lower()
+                                    tf_mapping = {"1h": "60", "2h": "120", "4h": "240", "6h": "360"}
+                                    if tf_str not in tf_mapping:
+                                        reply_text = f"❌ *Timeframe {tf_str} is not supported.*\n\nSupported: `1h`, `2h`, `4h`, `6h`\n\nPlease select a supported timeframe from the keyboard or send /cancel to abort."
+                                        tf_keyboard = [
+                                            [{"text": "1h"}, {"text": "2h"}],
+                                            [{"text": "4h"}, {"text": "6h"}],
+                                            [{"text": "/cancel"}]
+                                        ]
+                                        execute_telegram_api_call("sendMessage", {
+                                            "chat_id": sender_chat_id,
+                                            "text": reply_text,
+                                            "parse_mode": "Markdown",
+                                            "reply_markup": {
+                                                "keyboard": tf_keyboard,
+                                                "resize_keyboard": True,
+                                                "one_time_keyboard": True
+                                            }
+                                        })
+                                    else:
+                                        target_sym = flow["symbol"]
+                                        pending_confluence.pop(sender_chat_id, None)
+                                        
+                                        execute_telegram_api_call("sendMessage", {
+                                            "chat_id": sender_chat_id,
+                                            "text": f"⏳ Fetching live market metrics for *{target_sym}* ({tf_str})...",
+                                            "parse_mode": "Markdown",
+                                            "reply_markup": {"remove_keyboard": True}
+                                        })
+                                        
+                                        def _run_confluence_bg(cid, sym, interval_val):
+                                            rep = run_manual_confluence_report(sym, interval_val)
+                                            execute_telegram_api_call("sendMessage", {
+                                                "chat_id": cid,
+                                                "text": rep,
+                                                "parse_mode": "Markdown"
+                                            })
+                                        threading.Thread(target=_run_confluence_bg, args=(sender_chat_id, target_sym, tf_mapping[tf_str]), daemon=True).start()
+                                    continue
+
                         if text == "/active":
                             active_trades_summary = []
                             with active_trades_lock:
@@ -589,56 +709,31 @@ def start_telegram_command_listener():
                             })
 
                         elif text.startswith("/confluence"):
-                            parts = text.split()
-                            if len(parts) < 3:
-                                reply_text = (
-                                    "⚠️ *Usage:* `/confluence <SYMBOL> <TIMEFRAME>`\n\n"
-                                    "*Examples:*\n"
-                                    "• `/confluence BTC 1h`\n"
-                                    "• `/confluence DOT 2h`\n\n"
-                                    "Supported TFs: `1h`, `2h`, `4h`, `6h`"
-                                )
-                                execute_telegram_api_call("sendMessage", {
-                                    "chat_id": sender_chat_id,
-                                    "text": reply_text,
-                                    "parse_mode": "Markdown"
-                                })
-                            else:
-                                raw_sym = parts[1].upper()
-                                target_sym = raw_sym if raw_sym.endswith("USDT") else f"{raw_sym}USDT"
-                                tf_str = parts[2].lower()
-                                tf_mapping = {"1h": "60", "2h": "120", "4h": "240", "6h": "360"}
-                                
-                                if target_sym not in SUPPORTED_SYMBOLS:
-                                    reply_text = f"❌ *Symbol {target_sym} is not supported.*\n\nActive symbols: {', '.join(SUPPORTED_SYMBOLS)}"
-                                    execute_telegram_api_call("sendMessage", {
-                                        "chat_id": sender_chat_id,
-                                        "text": reply_text,
-                                        "parse_mode": "Markdown"
-                                    })
-                                elif tf_str not in tf_mapping:
-                                    reply_text = f"❌ *Timeframe {tf_str} is not supported.*\n\nSupported: `1h`, `2h`, `4h`, `6h`"
-                                    execute_telegram_api_call("sendMessage", {
-                                        "chat_id": sender_chat_id,
-                                        "text": reply_text,
-                                        "parse_mode": "Markdown"
-                                    })
-                                else:
-                                    execute_telegram_api_call("sendMessage", {
-                                        "chat_id": sender_chat_id,
-                                        "text": f"⏳ Fetching live market metrics for *{target_sym}* ({tf_str})...",
-                                        "parse_mode": "Markdown"
-                                    })
-                                    
-                                    # Perform the calculation in a thread to keep updates polling responsive
-                                    def _run_confluence_bg(cid, sym, interval_val):
-                                        rep = run_manual_confluence_report(sym, interval_val)
-                                        execute_telegram_api_call("sendMessage", {
-                                            "chat_id": cid,
-                                            "text": rep,
-                                            "parse_mode": "Markdown"
-                                        })
-                                    threading.Thread(target=_run_confluence_bg, args=(sender_chat_id, target_sym, tf_mapping[tf_str]), daemon=True).start()
+                            pending_confluence[sender_chat_id] = {
+                                "step": "awaiting_symbol",
+                                "timestamp": time.time()
+                            }
+                            syms_keyboard = []
+                            row = []
+                            for idx, s in enumerate(SUPPORTED_SYMBOLS):
+                                row.append({"text": s})
+                                if (idx + 1) % 3 == 0:
+                                    syms_keyboard.append(row)
+                                    row = []
+                            if row:
+                                syms_keyboard.append(row)
+                            syms_keyboard.append([{"text": "/cancel"}])
+                            
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": "📝 *Confluence Report*\n\nPlease select or reply with the *Symbol* you want a report for:",
+                                "parse_mode": "Markdown",
+                                "reply_markup": {
+                                    "keyboard": syms_keyboard,
+                                    "resize_keyboard": True,
+                                    "one_time_keyboard": True
+                                }
+                            })
 
                         elif text == "/retrain_status":
                             status = bot_state.get("retraining_status", "Idle")
