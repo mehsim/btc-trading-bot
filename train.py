@@ -117,7 +117,7 @@ TIMEFRAME_CONFIG = {
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
 PAGES = 40  # 40 pages of candles provides ~40,000 candles (larger balanced dataset size)
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "LTCUSDT", "DOGEUSDT", "SUIUSDT", "APTUSDT", "DOTUSDT"]
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
 # Feature list matches train.py and main.py
 features = [
