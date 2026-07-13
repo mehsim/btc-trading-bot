@@ -166,31 +166,39 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             proxies_dict = {"http": socks_proxy, "https": socks_proxy}
             
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Connection": "close"
     }
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict, verify=True)
-        if resp.status_code == 200:
-            return resp.json()
-        return {}
-    except Exception as e:
-        # If Worker URL failed, auto-retry via direct SOCKS5 fallback
-        if custom_url and tg_proxy:
-            try:
-                fallback_url = f"https://api.telegram.org/bot{token}/{method}"
-                tg_clean = tg_proxy.split("://", 1)[-1]
-                socks = {"http": f"socks5h://{tg_clean}", "https": f"socks5h://{tg_clean}"}
-                resp2 = requests.post(fallback_url, json=payload, headers=headers, timeout=20, proxies=socks)
-                if resp2.status_code == 200:
-                    return resp2.json()
-            except Exception:
-                pass
-        # Suppress noisy SSL/timeout errors on polling-only methods
-        err_str = str(e).lower()
-        is_silent = method == "getUpdates" and any(x in err_str for x in ["timed out", "eof", "ssl", "connection"])
-        if not is_silent:
-            print(f"[Telegram API Exception] method={method}: {e}")
-        return {}
+    
+    for attempt in range(3):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict, verify=True)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+        except Exception as e:
+            err_str = str(e).lower()
+            is_eof = "eof occurred" in err_str or "unexpected eof" in err_str or "connection aborted" in err_str
+            
+            if custom_url and tg_proxy:
+                try:
+                    fallback_url = f"https://api.telegram.org/bot{token}/{method}"
+                    tg_clean = tg_proxy.split("://", 1)[-1]
+                    socks = {"http": f"socks5h://{tg_clean}", "https": f"socks5h://{tg_clean}"}
+                    resp2 = requests.post(fallback_url, json=payload, headers=headers, timeout=20, proxies=socks)
+                    if resp2.status_code == 200:
+                        return resp2.json()
+                except Exception:
+                    pass
+                    
+            if is_eof and attempt < 2:
+                time.sleep(0.5)
+                continue
+                
+            is_silent = method == "getUpdates" and any(x in err_str for x in ["timed out", "eof", "ssl", "connection"])
+            if not is_silent:
+                print(f"[Telegram API Exception] method={method}: {e}")
+            return {}
 
 def send_telegram_alert(message: str):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
