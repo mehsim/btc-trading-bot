@@ -385,6 +385,7 @@ def start_telegram_command_listener():
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
                 {"command": "confluence", "description": "Get live confluence report for coin"},
                 {"command": "create_manual_trade", "description": "Open a manual trade with bot management"},
+                {"command": "clean_duplicates", "description": "Prune duplicate active trade records from memory"},
                 {"command": "retrain_status", "description": "View model retraining status"},
                 {"command": "logs", "description": "View latest bot running logs"},
                 {"command": "add_user", "description": "Authorize a new user via email verification"},
