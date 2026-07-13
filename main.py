@@ -152,14 +152,18 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
         
     tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
     proxies_dict = None
-    if tg_proxy and not custom_url:
-        # Only use proxy when connecting directly to api.telegram.org
-        if "://" in tg_proxy:
-            tg_proxy_clean = tg_proxy.split("://", 1)[1]
+    if tg_proxy:
+        if custom_url:
+            # If using a custom Cloudflare worker URL, route using standard HTTP proxy CONNECT
+            proxies_dict = {"http": tg_proxy, "https": tg_proxy}
         else:
-            tg_proxy_clean = tg_proxy
-        socks_proxy = f"socks5h://{tg_proxy_clean}"
-        proxies_dict = {"http": socks_proxy, "https": socks_proxy}
+            # If connecting directly to api.telegram.org, use socks5h to delegate DNS resolution
+            if "://" in tg_proxy:
+                tg_proxy_clean = tg_proxy.split("://", 1)[1]
+            else:
+                tg_proxy_clean = tg_proxy
+            socks_proxy = f"socks5h://{tg_proxy_clean}"
+            proxies_dict = {"http": socks_proxy, "https": socks_proxy}
             
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
