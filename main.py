@@ -3737,9 +3737,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         latest_vol = vol_series.iloc[-2]
         rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
         volume_pass = (rvol >= 1.0)
+        if not volume_pass:
+            hard_gate_failed = True
         results["Volume_Participation"] = {
             "pass": volume_pass,
-            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.0x",
+            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.0x (Hard Gate)",
             "weight": 0
         }
     except Exception as e:
