@@ -6635,6 +6635,41 @@ def main():
 
         time.sleep(10)
 
+def run_order_flow_persister():
+    print("[Order Flow] Persister background thread started.")
+    import sqlite3
+    from data import DB_PATH, db_write_lock
+    while True:
+        time.sleep(60) # Dump statistics every 60 seconds
+        try:
+            now_ts = time.time()
+            # Align to minute mark
+            minute_ts = float(int(now_ts / 60) * 60)
+            
+            with order_flow_lock:
+                # Extract and clear/reset current CVD & OFI buffers
+                to_write = []
+                for sym, state in list(order_flow_data.items()):
+                    cvd_val = state.get("cvd", 0.0)
+                    ofi_val = state.get("ofi", 0.0)
+                    to_write.append((sym, minute_ts, cvd_val, ofi_val))
+                    # Reset buffers for the next minute
+                    state["cvd"] = 0.0
+                    state["ofi"] = 0.0
+            
+            if to_write:
+                with db_write_lock:
+                    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                    conn.execute("PRAGMA journal_mode=WAL;")
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO historical_order_flow (symbol, timestamp, cvd, ofi) VALUES (?, ?, ?, ?)",
+                        to_write
+                    )
+                    conn.commit()
+                    conn.close()
+        except Exception as e:
+            print(f"[Order Flow Persister Error] {e}")
+
 def safe_main():
     while True:
         try:
@@ -6673,5 +6708,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_fallback_price_updater, daemon=True).start()
     # Start automated rolling retraining scheduler in a background thread
     threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
+    # Start background order flow persister thread
+    threading.Thread(target=run_order_flow_persister, daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()

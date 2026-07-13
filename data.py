@@ -63,6 +63,15 @@ def init_db():
                 fear_greed REAL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS historical_order_flow (
+                symbol TEXT,
+                timestamp REAL,
+                cvd REAL,
+                ofi REAL,
+                UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
+            )
+        """)
         conn.commit()
         conn.close()
         _db_initialized = True
