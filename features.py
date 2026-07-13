@@ -170,11 +170,37 @@ def add_features(df, fetch_calendar_callback=None):
     df["open_interest_pct_change"] = df["open_interest"].pct_change(1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df["funding_rate_diff"] = df["funding_rate"].diff(1).fillna(0.0)
     
-    # High-fidelity Delta Volume / CVD Proxy
+    # High-fidelity Delta Volume / CVD Proxy (OHLC-based fallback)
     high_low_range = df["high"] - df["low"] + 1e-8
     delta_volume = df["volume"] * (2 * (df["close"] - df["low"]) / high_low_range - 1.0)
     df["CVD_rolling_1h"] = delta_volume.rolling(window=4, min_periods=1).sum()
     df["CVD_rolling_4h"] = delta_volume.rolling(window=16, min_periods=1).sum()
+
+    # Attempt to merge TRUE historical CVD/OFI from SQLite (WebSocket-aggregated)
+    try:
+        import sqlite3, os
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+        sym = df.attrs.get("symbol", "BTCUSDT") if hasattr(df, "attrs") else "BTCUSDT"
+        with sqlite3.connect(db_path, timeout=10) as conn:
+            of_df = pd.read_sql_query(
+                "SELECT timestamp, cvd, ofi FROM historical_order_flow WHERE symbol=? ORDER BY timestamp ASC",
+                conn, params=(sym,)
+            )
+        if not of_df.empty:
+            of_df["timestamp"] = (of_df["timestamp"] * 1000).astype("int64")
+            of_df = of_df.rename(columns={"timestamp": "datetime"})
+            # Align on minute-level timestamps by merging on nearest candle
+            df["_ts"] = df.index.astype("int64") if hasattr(df.index, "astype") else df.index
+            of_df = of_df.set_index("datetime").reindex(df["_ts"], method="nearest", tolerance=60000)
+            df["CVD_true"] = of_df["cvd"].values
+            df["OFI_true"] = of_df["ofi"].values
+            # Fill NaN with proxy values where real data not yet available
+            df["CVD_true"] = df["CVD_true"].fillna(df["CVD_rolling_1h"])
+            df["OFI_true"] = df["OFI_true"].fillna(0.0)
+            df.drop(columns=["_ts"], inplace=True, errors="ignore")
+    except Exception:
+        df["CVD_true"] = df["CVD_rolling_1h"]
+        df["OFI_true"] = 0.0
     
     # Wick Volume (Liquidation & Stop-Loss Sweep Proxies)
     upper_wick = df["high"] - df[["open", "close"]].max(axis=1)

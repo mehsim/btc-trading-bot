@@ -2722,6 +2722,52 @@ def run_daily_journal_scheduler():
         except Exception as e:
             print(f"[Journal Scheduler] Error: {e}")
 
+FUNDING_ARB_THRESHOLD = 0.001  # 0.1% — above this, shorts earn funding income
+FUNDING_ARB_SIZE_USD = 20.0    # Fixed notional size per arbitrage position
+
+def run_funding_rate_arbitrage_monitor():
+    """Monitor funding rates. When rate > 0.1%, open a small short to collect funding income."""
+    print("[Funding Arb] Monitor started.")
+    time.sleep(60)  # Wait for bot to initialize
+    while True:
+        try:
+            for sym in SUPPORTED_SYMBOLS:
+                rate = get_funding_rate(sym)
+                arb_key = f"funding_arb_{sym}"
+                existing = bot_state.get(arb_key)
+
+                if rate > FUNDING_ARB_THRESHOLD and not existing:
+                    # High positive funding — shorts earn. Open small short.
+                    print(f"[Funding Arb] {sym} funding rate {rate*100:.4f}% > 0.1%. Opening arb short.")
+                    if TRADE_MODE == "live":
+                        qty_str = format_bybit_qty(sym, FUNDING_ARB_SIZE_USD / (bot_state.get(f"live_price_{sym}") or live_price))
+                        res = place_bybit_market_order(sym, "Sell", qty_str, reduce_only=False)
+                        if res and res.get("retCode") == 0:
+                            bot_state[arb_key] = {"qty": qty_str, "open_rate": rate}
+                            send_telegram_alert(
+                                f"💰 *FUNDING ARB OPENED*\n"
+                                f"• Asset: {sym}\n"
+                                f"• Funding Rate: {rate*100:.4f}%\n"
+                                f"• Side: Short (collecting funding)\n"
+                                f"• Size: ${FUNDING_ARB_SIZE_USD}"
+                            )
+                elif existing and rate < FUNDING_ARB_THRESHOLD * 0.3:
+                    # Funding rate has normalized — close the arb short
+                    print(f"[Funding Arb] {sym} funding rate normalized ({rate*100:.4f}%). Closing arb short.")
+                    if TRADE_MODE == "live":
+                        qty_str = existing["qty"]
+                        res = place_bybit_market_order(sym, "Buy", qty_str, reduce_only=True)
+                        if res and res.get("retCode") == 0:
+                            bot_state.pop(arb_key, None)
+                            send_telegram_alert(
+                                f"✅ *FUNDING ARB CLOSED*\n"
+                                f"• Asset: {sym}\n"
+                                f"• Current Rate: {rate*100:.4f}%"
+                            )
+        except Exception as e:
+            print(f"[Funding Arb] Error: {e}")
+        time.sleep(300)  # Check every 5 minutes
+
 def run_rolling_retrain_scheduler():
     """
     Background scheduler that runs weekly on Sundays at 00:00 UTC.
@@ -6827,5 +6873,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_order_flow_persister, daemon=True).start()
     # Start daily Telegram trade journal digest scheduler
     threading.Thread(target=run_daily_journal_scheduler, daemon=True).start()
+    # Start funding rate arbitrage monitor thread
+    threading.Thread(target=run_funding_rate_arbitrage_monitor, daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()
