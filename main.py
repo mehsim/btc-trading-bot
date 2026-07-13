@@ -3794,7 +3794,6 @@ def get_news_sentiment():
     try:
         token = os.environ.get("HF_TOKEN") or os.environ.get("token")
         if token:
-            import requests
             API_URL = "https://api-inference.huggingface.co/models/ProsusAI/finbert"
             headers = {"Authorization": f"Bearer {token}"}
             
