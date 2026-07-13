@@ -203,9 +203,41 @@ def send_telegram_alert(message: str):
         }
         execute_telegram_api_call("sendMessage", payload)
         
+def estimate_liquidation_pool(df_history, direction, entry_price):
+    """
+    Estimates the location of the nearest high-leverage liquidation pool
+    based on historical swing highs/lows (support and resistance levels).
+    """
+    import numpy as np
+    
+    # Look at the last 60 candles to find recent swing high/low
+    lookback = min(len(df_history), 60)
+    df_recent = df_history.iloc[-lookback:]
+    
+    if direction == "Bullish":
+        # We are Long. Take Profit is above entry.
+        # Short sellers entered near the recent swing high. Their liquidations (buy stops)
+        # are clustered 1% to 2% above the swing high (representing 100x and 50x leverage liquidations).
+        swing_high = float(df_recent["high"].max())
+        # Target just inside the 50x/100x liquidation pool (1.2% above swing high)
+        liq_pool_target = swing_high * 1.012
+        # Ensure it's higher than entry price
+        return max(liq_pool_target, entry_price * 1.005)
+    elif direction == "Bearish":
+        # We are Short. Take Profit is below entry.
+        # Long buyers entered near the recent swing low. Their liquidations (sell stops)
+        # are clustered 1% to 2% below the swing low.
+        swing_low = float(df_recent["low"].min())
+        # Target just inside the 50x/100x liquidation pool (1.2% below swing low)
+        liq_pool_target = swing_low * 0.988
+        # Ensure it's lower than entry price
+        return min(liq_pool_target, entry_price * 0.995)
+    else:
+        return entry_price
+
 def run_manual_confluence_report(symbol, interval):
     try:
-        from data import get_history, merge_derivatives_sentiment_features
+        from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
         import numpy as np
         df_raw = get_history(symbol=symbol, interval=interval, limit=300)
         if df_raw is None or len(df_raw) < 2:
@@ -236,8 +268,9 @@ def run_manual_confluence_report(symbol, interval):
         if not models_tf or not models_tf["trending"]["price"]:
             return "❌ Models are currently not fully loaded or active."
             
-        adx_regime = latest_candle["ADX"]
-        if adx_regime >= 20.0:
+        # Unsupervised GMM Market Regime Classification
+        regime = classify_market_regime(df_features)
+        if regime == "Trending":
             active_model_price = models_tf["trending"]["price"]
             active_model_trend = models_tf["trending"]["trend"]
             calibrator = models_tf["trending"]["calibrator"]
@@ -246,7 +279,7 @@ def run_manual_confluence_report(symbol, interval):
             active_model_trend = models_tf["ranging"]["trend"]
             calibrator = models_tf["ranging"]["calibrator"]
             
-        ensemble_weights = [0.3, 0.2, 0.5] if adx_regime >= 20.0 else [0.3, 0.5, 0.2]
+        ensemble_weights = [0.3, 0.2, 0.5] if regime == "Trending" else [0.3, 0.5, 0.2]
         pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
         pred_change = pred_pct * float(latest_candle["close"])
         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
@@ -277,11 +310,15 @@ def run_manual_confluence_report(symbol, interval):
             calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.63
         )
         
+        adx_regime = latest_candle["ADX"]
+        est_tp_val = estimate_liquidation_pool(df_features, ml_trend, latest_candle["close"])
+        
         report = (
             f"🔍 *CONFLUENCE REPORT: {symbol} ({iv.replace('60','1H').replace('120','2H').replace('240','4H').replace('360','6H')})*\n"
             f"• *Signal*: {ml_trend} ({calibrated_confidence*100:.1f}% confidence)\n"
-            f"• *Regime*: {'Trending' if adx_regime >= 20.0 else 'Ranging'} (ADX: {adx_regime:.1f})\n"
+            f"• *Regime*: {regime} (ADX: {adx_regime:.1f})\n"
             f"• *Expected Move*: {pred_change:+.4f} ({expected_pct_change:.2f}%)\n"
+            f"• *Liquidation TP Target*: ${est_tp_val:.2f}\n"
             f"• *Decision*: *{'APPROVED' if all_pass else 'REJECTED'}*\n\n"
             f"*Check Details:*\n"
         )
@@ -822,7 +859,7 @@ from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import MFIIndicator
 print("[System Debug] ta imported.")
 print("[System Debug] Importing data.py...")
-from data import get_history, merge_derivatives_sentiment_features
+from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
 import xml.etree.ElementTree as ET
 print("[System Debug] Importing Flask...")
 from flask import Flask, jsonify, render_template, request
@@ -5674,26 +5711,27 @@ def main():
                     else:
                         X_live = latest_candle[features].values.reshape(1, -1)
                     
-                    # Dynamic Regime Routing based on ADX
+                    # Dynamic Regime Routing based on GMM Unsupervised Classifier
+                    regime = classify_market_regime(df)
                     adx_regime = latest_candle["ADX"]
                     
                     if iv in models_by_interval:
                         models_tf = models_by_interval[iv]
-                        if adx_regime >= 20.0:
+                        if regime == "Trending":
                             active_model_price = models_tf["trending"]["price"]
                             active_model_trend = models_tf["trending"]["trend"]
-                            regime_name = "Trending (ADX >= 20)"
+                            regime_name = "Trending (GMM)"
                         else:
                             active_model_price = models_tf["ranging"]["price"]
                             active_model_trend = models_tf["ranging"]["trend"]
-                            regime_name = "Ranging (ADX < 20)"
+                            regime_name = "Ranging (GMM)"
                             
                         if active_model_price is None or active_model_trend is None:
                             print(f"[{symbol} {iv}m Warning] Models are not loaded (None). Skipping signal evaluation.")
                             continue
 
                         # Refined regime switching voting weights (Trending: CatBoost dominant; Ranging: LightGBM dominant)
-                        ensemble_weights = [0.3, 0.2, 0.5] if adx_regime >= 20.0 else [0.3, 0.5, 0.2]
+                        ensemble_weights = [0.3, 0.2, 0.5] if regime == "Trending" else [0.3, 0.5, 0.2]
                         
                         pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
                         pred_change = pred_pct * float(latest_candle["close"])
@@ -5718,7 +5756,7 @@ def main():
                             ml_confidence = prob_neutral
 
                         # Apply Isotonic Regression probability calibration if available
-                        calibrator = models_tf["trending"]["calibrator"] if adx_regime >= 20.0 else models_tf["ranging"]["calibrator"]
+                        calibrator = models_tf["trending"]["calibrator"] if regime == "Trending" else models_tf["ranging"]["calibrator"]
                         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
                             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
                             print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Calibrated: {calibrated_confidence*100:.2f}%")
@@ -5981,10 +6019,14 @@ def main():
                                         
                                     if ml_trend == "Bullish":
                                         stop_loss_price = entry_price - sl_multiplier_adjusted * atr_dollars
-                                        take_profit_price = entry_price + tp_change
+                                        atr_tp_price = entry_price + tp_change
+                                        est_tp_price = estimate_liquidation_pool(df, "Bullish", entry_price)
+                                        take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_change)
                                     else:
                                         stop_loss_price = entry_price + sl_multiplier_adjusted * atr_dollars
-                                        take_profit_price = entry_price - tp_change
+                                        atr_tp_price = entry_price - tp_change
+                                        est_tp_price = estimate_liquidation_pool(df, "Bearish", entry_price)
+                                        take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_change)
                                     print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
 
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
@@ -6254,10 +6296,12 @@ def main():
                                                     # 3. Recalculate SL/TP targets based on actual entry_price
                                                     if ml_trend == "Bullish":
                                                         stop_loss_price = entry_price - sl_multiplier * atr_dollars
-                                                        take_profit_price = entry_price + tp_multiplier_adjusted * atr_dollars
+                                                        est_tp_price = estimate_liquidation_pool(df_completed, "Bullish", entry_price)
+                                                        take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars)
                                                     else:
                                                         stop_loss_price = entry_price + sl_multiplier * atr_dollars
-                                                        take_profit_price = entry_price - tp_multiplier_adjusted * atr_dollars
+                                                        est_tp_price = estimate_liquidation_pool(df_completed, "Bearish", entry_price)
+                                                        take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars)
                                                         
                                                     # 4. Set SL/TP on active position on Bybit
                                                     temp_trade = {"qty": str(actual_qty), "direction": ml_trend}

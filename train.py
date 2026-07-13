@@ -782,9 +782,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
         
         print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
-    # Split dataset based on ADX (Regime Detection)
-    df_trending = df[df["ADX"] >= 20.0].copy().reset_index(drop=True)
-    df_ranging = df[df["ADX"] < 20.0].copy().reset_index(drop=True)
+    # Split dataset based on GMM Unsupervised Regime Classification
+    from sklearn.mixture import GaussianMixture
+    import numpy as np
+
+    print("Fitting Gaussian Mixture Model for Unsupervised Regime Splitting...")
+    features_gmm = df[["ATR_norm", "ADX"]].dropna().values
+    gmm = GaussianMixture(n_components=2, random_state=42)
+    regimes = gmm.fit_predict(features_gmm)
+
+    trending_component = np.argmax(gmm.means_[:, 0])  # Index with highest mean ATR_norm
+
+    df["regime"] = ["trending" if r == trending_component else "ranging" for r in regimes]
+    df_trending = df[df["regime"] == "trending"].copy().reset_index(drop=True)
+    df_ranging = df[df["regime"] == "ranging"].copy().reset_index(drop=True)
 
     train_regime_model(df_trending, "trending")
     train_regime_model(df_ranging, "ranging")

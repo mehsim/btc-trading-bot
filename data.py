@@ -851,3 +851,38 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     df["btc_rsi"] = df["btc_rsi"].ffill().bfill().fillna(50.0)
     
     return df
+
+def classify_market_regime(df_history):
+    """
+    Unsupervised regime classification using a Gaussian Mixture Model (GMM).
+    Returns 'Trending' or 'Ranging' based on recent volatility (ATR_norm) and trend strength (ADX).
+    """
+    from sklearn.mixture import GaussianMixture
+    import numpy as np
+    
+    # Require ATR_norm and ADX columns
+    if "ATR_norm" not in df_history.columns or "ADX" not in df_history.columns:
+        # Fallback if indicators are not yet calculated
+        return "Ranging"
+        
+    df_clean = df_history[["ATR_norm", "ADX"]].dropna()
+    features_gmm = df_clean.values
+    if len(features_gmm) < 30:
+        # Fallback to ADX if not enough data
+        if not df_history.empty:
+            adx = df_history["ADX"].iloc[-1] if "ADX" in df_history.columns else 15.0
+            return "Trending" if adx >= 20.0 else "Ranging"
+        return "Ranging"
+        
+    gmm = GaussianMixture(n_components=2, random_state=42)
+    regimes = gmm.fit_predict(features_gmm)
+    
+    # Identify which component corresponds to the 'Trending' state (the one with higher average volatility/ATR)
+    means = gmm.means_
+    trending_component = np.argmax(means[:, 0]) # Index with highest mean ATR_norm
+    
+    # Predict for the latest candle
+    latest_feat = features_gmm[-1].reshape(1, -1)
+    latest_regime = gmm.predict(latest_feat)[0]
+    
+    return "Trending" if latest_regime == trending_component else "Ranging"
