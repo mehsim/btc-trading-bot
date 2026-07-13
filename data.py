@@ -12,50 +12,60 @@ TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.db")
+db_write_lock = threading.Lock()
+_db_initialized = False
+_db_init_lock = threading.Lock()
 
 def init_db():
-    import sqlite3
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS kline_data (
-            symbol TEXT,
-            interval TEXT,
-            timestamp REAL,
-            open REAL,
-            high REAL,
-            low REAL,
-            close REAL,
-            volume REAL,
-            turnover REAL,
-            UNIQUE(symbol, interval, timestamp) ON CONFLICT REPLACE
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS oi_data (
-            symbol TEXT,
-            interval TEXT,
-            timestamp REAL,
-            open_interest REAL,
-            UNIQUE(symbol, interval, timestamp) ON CONFLICT REPLACE
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS funding_data (
-            symbol TEXT,
-            timestamp REAL,
-            funding_rate REAL,
-            UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS fng_data (
-            timestamp REAL PRIMARY KEY,
-            fear_greed REAL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    global _db_initialized
+    if _db_initialized:
+        return
+    with _db_init_lock:
+        if _db_initialized:
+            return
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS kline_data (
+                symbol TEXT,
+                interval TEXT,
+                timestamp REAL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume REAL,
+                turnover REAL,
+                UNIQUE(symbol, interval, timestamp) ON CONFLICT REPLACE
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oi_data (
+                symbol TEXT,
+                interval TEXT,
+                timestamp REAL,
+                open_interest REAL,
+                UNIQUE(symbol, interval, timestamp) ON CONFLICT REPLACE
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS funding_data (
+                symbol TEXT,
+                timestamp REAL,
+                funding_rate REAL,
+                UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS fng_data (
+                timestamp REAL PRIMARY KEY,
+                fear_greed REAL
+            )
+        """)
+        conn.commit()
+        conn.close()
+        _db_initialized = True
 
 def get_bybit_proxies():
     # If running on Hugging Face and no explicit BYBIT_PROXY is set, bypass internal HF proxy
@@ -428,14 +438,15 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             
         try:
             import sqlite3
-            conn = sqlite3.connect(DB_PATH, timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.executemany(
-                "INSERT OR REPLACE INTO kline_data (symbol, interval, timestamp, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(symbol, str(interval), float(row["timestamp"]), float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row["volume"]), float(row["turnover"])) for _, row in df_combined.iterrows()]
-            )
-            conn.commit()
-            conn.close()
+            with db_write_lock:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.executemany(
+                    "INSERT OR REPLACE INTO kline_data (symbol, interval, timestamp, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(symbol, str(interval), float(row["timestamp"]), float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row["volume"]), float(row["turnover"])) for _, row in df_combined.iterrows()]
+                )
+                conn.commit()
+                conn.close()
         except Exception as e:
             print(f"[Cache Write Error] {e}")
 
@@ -540,14 +551,15 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         # Save cache
         try:
             import sqlite3
-            conn = sqlite3.connect(DB_PATH, timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.executemany(
-                "INSERT OR REPLACE INTO oi_data (symbol, interval, timestamp, open_interest) VALUES (?, ?, ?, ?)",
-                [(symbol, str(interval), float(row["timestamp"]), float(row["open_interest"])) for _, row in df_history.iterrows()]
-            )
-            conn.commit()
-            conn.close()
+            with db_write_lock:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.executemany(
+                    "INSERT OR REPLACE INTO oi_data (symbol, interval, timestamp, open_interest) VALUES (?, ?, ?, ?)",
+                    [(symbol, str(interval), float(row["timestamp"]), float(row["open_interest"])) for _, row in df_history.iterrows()]
+                )
+                conn.commit()
+                conn.close()
         except Exception as e:
             print(f"[OI Cache Write Error] {e}")
 
@@ -653,14 +665,15 @@ def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_m
         # Save cache
         try:
             import sqlite3
-            conn = sqlite3.connect(DB_PATH, timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.executemany(
-                "INSERT OR REPLACE INTO funding_data (symbol, timestamp, funding_rate) VALUES (?, ?, ?)",
-                [(symbol, float(row["timestamp"]), float(row["funding_rate"])) for _, row in df_history.iterrows()]
-            )
-            conn.commit()
-            conn.close()
+            with db_write_lock:
+                conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.executemany(
+                    "INSERT OR REPLACE INTO funding_data (symbol, timestamp, funding_rate) VALUES (?, ?, ?)",
+                    [(symbol, float(row["timestamp"]), float(row["funding_rate"])) for _, row in df_history.iterrows()]
+                )
+                conn.commit()
+                conn.close()
         except Exception as e:
             print(f"[Funding Cache Write Error] {e}")
 
@@ -723,14 +736,15 @@ def get_fear_and_greed_history():
                     
                     # Write to database cache
                     try:
-                        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-                        conn.execute("PRAGMA journal_mode=WAL;")
-                        conn.executemany(
-                            "INSERT OR REPLACE INTO fng_data (timestamp, fear_greed) VALUES (?, ?);",
-                            [(float(row["timestamp"]), float(row["fear_greed"])) for _, row in df_history.iterrows()]
-                        )
-                        conn.commit()
-                        conn.close()
+                        with db_write_lock:
+                            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                            conn.execute("PRAGMA journal_mode=WAL;")
+                            conn.executemany(
+                                "INSERT OR REPLACE INTO fng_data (timestamp, fear_greed) VALUES (?, ?);",
+                                [(float(row["timestamp"]), float(row["fear_greed"])) for _, row in df_history.iterrows()]
+                            )
+                            conn.commit()
+                            conn.close()
                     except Exception as e:
                         print(f"[FnG Cache Write Error] {e}")
                         

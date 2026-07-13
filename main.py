@@ -5603,14 +5603,15 @@ def main():
             print(f"[Parallel Fetch] Querying {len(check_queue)} candle combinations in parallel...")
             t_start = time.time()
             with ThreadPoolExecutor(max_workers=16) as executor:
-                futures = [executor.submit(fetch_single_history, sym, iv) for sym, iv in check_queue]
-                for fut in futures:
+                future_to_pair = {executor.submit(fetch_single_history, sym, iv): (sym, iv) for sym, iv in check_queue}
+                for fut in future_to_pair:
+                    sym, iv = future_to_pair[fut]
                     try:
-                        sym, iv, df_raw_val, df_feat_val = fut.result(timeout=25)
+                        _, _, df_raw_val, df_feat_val = fut.result(timeout=25)
                         if df_raw_val is not None:
                             fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
                     except Exception as e:
-                        print(f"[Parallel Fetch] Error fetching {sym} {iv}: {e}")
+                        print(f"[Parallel Fetch] Error fetching {sym} {iv}: {type(e).__name__} {e}")
             print(f"[Parallel Fetch] Completed in {time.time() - t_start:.2f} seconds.")
  
         just_opened_symbols = set()  # Symbols opened this cycle — block duplicates regardless of Bybit sync latency
