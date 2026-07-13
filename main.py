@@ -206,6 +206,8 @@ def send_telegram_alert(message: str):
         }
         execute_telegram_api_call("sendMessage", payload)
         
+    threading.Thread(target=_post, daemon=True).start()
+        
 def estimate_liquidation_pool(df_history, direction, entry_price):
     """
     Estimates the location of the nearest high-leverage liquidation pool
