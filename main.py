@@ -3611,7 +3611,7 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
 # ==========================================
 # PRE-TRADE CONFLUENCE ANALYSIS
 # ==========================================
-def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None):
+def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.63):
     """
     Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
     Critical checks are hard gates (instant reject if failed).
@@ -3973,6 +3973,37 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     max_score += weight_oi
     if oi_pass:
         total_score += weight_oi
+
+    # ======= CHECK 15: Risk-Reward Ratio (R:R) Hard Gate =======
+    try:
+        cfg = TIMEFRAME_CONFIG.get(str(interval), {"sl_mult": 1.5})
+        sl_multiplier = cfg.get("sl_mult", 1.5)
+        
+        sl_multiplier_adjusted = sl_multiplier
+        if calibrated_confidence > dynamic_conf_threshold and dynamic_conf_threshold < 1.0:
+            confidence_ratio = (calibrated_confidence - dynamic_conf_threshold) / (1.0 - dynamic_conf_threshold)
+            sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
+            
+        atr_norm = float(df_1h["ATR_norm"].iloc[-1])
+        atr_dollars = atr_norm * current_price
+        sl_distance = sl_multiplier_adjusted * atr_dollars
+        
+        min_tp = current_price * 0.005
+        tp_distance = max(min_tp, (expected_pct_change / 100.0) * current_price)
+        
+        rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0.0
+        rr_pass = (rr_ratio >= 1.2)
+        
+        if not rr_pass:
+            hard_gate_failed = True
+            
+        results["Risk_Reward_Ratio"] = {
+            "pass": rr_pass,
+            "detail": f"R:R Ratio: {rr_ratio:.2f}x (TP: {tp_distance:.2f} / SL: {sl_distance:.2f}), required >= 1.20x (Hard Gate)",
+            "weight": 0
+        }
+    except Exception as e:
+        results["Risk_Reward_Ratio"] = {"pass": True, "detail": f"Skipped R:R check (Error: {e})", "weight": 0}
 
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
@@ -5620,7 +5651,8 @@ def main():
                                 news_sentiment = cached_news_sentiment
                                 latest_titles = cached_news_titles
                                 all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
-                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache
+                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
+                                    calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold
                                 )
 
                                 # Update global confluence status
