@@ -205,12 +205,24 @@ def send_telegram_alert(message: str):
         
 def run_manual_confluence_report(symbol, interval):
     try:
-        from data import get_history
+        from data import get_history, merge_derivatives_sentiment_features
         import numpy as np
         df_raw = get_history(symbol=symbol, interval=interval, limit=300)
         if df_raw is None or len(df_raw) < 2:
             return f"❌ Failed to fetch price history from Bybit/Binance/Kraken for *{symbol}*."
             
+        # Ensure close_btc is populated (required for features calculations)
+        if symbol == "BTCUSDT":
+            df_raw["close_btc"] = df_raw["close"]
+        else:
+            df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=300)
+            if df_btc is not None and len(df_btc) > 0:
+                df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
+                df_raw = pd.merge(df_raw, df_btc_sub, on="timestamp", how="inner")
+            else:
+                df_raw["close_btc"] = df_raw["close"]
+                
+        df_raw = merge_derivatives_sentiment_features(df_raw, symbol=symbol, interval=interval)
         df_features = add_features(df_raw)
         latest_candle = df_features.iloc[-1]
         
