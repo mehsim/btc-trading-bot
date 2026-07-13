@@ -396,6 +396,13 @@ def start_telegram_command_listener():
                         
                         sender_chat_id = str(message_obj.get("chat", {}).get("id"))
                         text = message_obj.get("text", "").strip()
+                        if text.startswith("/"):
+                            parts = text.split(" ")
+                            cmd = parts[0]
+                            if "@" in cmd:
+                                cmd = cmd.split("@")[0]
+                            parts[0] = cmd
+                            text = " ".join(parts)
                         print(f"[Telegram Command Listener] Received message: '{text}' from chat_id '{sender_chat_id}'")
                         
                         # Handle verification flow logic resets
