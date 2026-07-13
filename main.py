@@ -2559,6 +2559,39 @@ def test_telegram_endpoint():
 
     return jsonify(results)
 
+@app.route("/api/backtest")
+def api_backtest():
+    history = bot_state.get("prediction_history", [])[-30:]
+    total = len(history)
+    wins = sum(1 for p in history if p.get("evaluation", {}).get("success") is True)
+    losses = sum(1 for p in history if p.get("evaluation", {}).get("success") is False)
+    pending = total - wins - losses
+    win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else None
+    return jsonify({
+        "summary": {
+            "total": total,
+            "wins": wins,
+            "losses": losses,
+            "pending": pending,
+            "win_rate_pct": round(win_rate, 1) if win_rate is not None else None
+        },
+        "signals": [
+            {
+                "trade_id": p.get("trade_id"),
+                "symbol": p.get("symbol"),
+                "interval": p.get("interval"),
+                "direction": p.get("direction"),
+                "confidence_pct": round(p.get("calibrated_confidence", 0) * 100, 1),
+                "threshold_pct": round(p.get("dynamic_threshold", 0) * 100, 1),
+                "status": p.get("status"),
+                "outcome": p.get("evaluation", {}).get("success"),
+                "change_pct": p.get("evaluation", {}).get("change_pct"),
+                "timestamp": p.get("timestamp")
+            }
+            for p in reversed(history)
+        ]
+    })
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -5948,11 +5981,13 @@ def main():
                         atr_norm_val = latest_candle["ATR_norm"]
                         dynamic_conf_threshold = 0.63
                         
-                        # 1. Regime Adjustment (ADX)
-                        if adx_regime >= 25.0:
+                        # 1. Regime Adjustment (GMM-based)
+                        if "Trending" in regime_name:
+                            # Trending: model signals are cleaner, lower bar to enter
                             dynamic_conf_threshold = 0.58
-                        elif adx_regime < 15.0:
-                            dynamic_conf_threshold = 0.65
+                        elif "Ranging" in regime_name:
+                            # Ranging: choppy price action, require higher conviction
+                            dynamic_conf_threshold = 0.67
                             
                         # 2. Volatility Adjustment (ATR)
                         if atr_norm_val > 0.008:
