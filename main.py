@@ -6,7 +6,7 @@ from datetime import datetime
 class CircularLogBuffer:
     def __init__(self, capacity=100):
         self.capacity = capacity
-        self.buffer = []
+        self.logs_list = []
         self.original_stdout = sys.stdout
         
     def write(self, message):
@@ -15,12 +15,15 @@ class CircularLogBuffer:
             # Strip ANSI escape codes to keep logs clean in Telegram
             clean_msg = re.sub(r'\x1b\[[0-9;]*[mK]', '', message.strip())
             timestamp = datetime.now().strftime("%H:%M:%S")
-            self.buffer.append(f"[{timestamp}] {clean_msg}")
-            if len(self.buffer) > self.capacity:
-                self.buffer.pop(0)
+            self.logs_list.append(f"[{timestamp}] {clean_msg}")
+            if len(self.logs_list) > self.capacity:
+                self.logs_list.pop(0)
                 
     def flush(self):
         self.original_stdout.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.original_stdout, name)
 
 log_buffer = CircularLogBuffer(capacity=100)
 sys.stdout = log_buffer
@@ -643,7 +646,7 @@ def start_telegram_command_listener():
                             })
 
                         elif text == "/logs":
-                            logs = "\n".join(log_buffer.buffer[-15:])
+                            logs = "\n".join(log_buffer.logs_list[-15:])
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
                                 "text": f"📋 *Latest Bot Logs:*\n\n```\n{logs}\n```",
