@@ -2647,6 +2647,81 @@ def retrain_models_thread(is_manual=False):
     threading.Thread(target=run_training, daemon=True).start()
     return True
 
+JOURNAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_journal.csv")
+JOURNAL_HEADER = ["timestamp", "symbol", "interval", "direction", "entry_price", "exit_price", "pnl_usd", "change_pct", "success", "reason", "balance", "leverage", "confidence"]
+
+def log_trade_journal(trade: dict):
+    """Append a closed trade to trade_journal.csv."""
+    import csv
+    write_header = not os.path.exists(JOURNAL_PATH)
+    try:
+        with open(JOURNAL_PATH, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=JOURNAL_HEADER, extrasaction="ignore")
+            if write_header:
+                writer.writeheader()
+            writer.writerow({
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(trade.get("exit_time", time.time()))),
+                "symbol": trade.get("symbol"),
+                "interval": trade.get("interval"),
+                "direction": trade.get("direction"),
+                "entry_price": trade.get("entry_price"),
+                "exit_price": trade.get("exit_price"),
+                "pnl_usd": trade.get("pnl_usd"),
+                "change_pct": trade.get("change_pct"),
+                "success": trade.get("success"),
+                "reason": trade.get("reason"),
+                "balance": trade.get("balance"),
+                "leverage": trade.get("leverage"),
+                "confidence": trade.get("confidence"),
+            })
+    except Exception as e:
+        print(f"[Journal] Failed to write journal: {e}")
+
+def send_daily_journal_digest():
+    """Send a Telegram daily summary of today's closed trades."""
+    import csv
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    if not os.path.exists(JOURNAL_PATH):
+        send_telegram_alert(f"📓 *Daily Trade Journal — {today}*\nNo trades recorded today.")
+        return
+    try:
+        wins, losses, total_pnl, rows = 0, 0, 0.0, []
+        with open(JOURNAL_PATH, "r") as f:
+            for row in csv.DictReader(f):
+                if row["timestamp"].startswith(today):
+                    rows.append(row)
+                    pnl = float(row.get("pnl_usd", 0))
+                    total_pnl += pnl
+                    if row.get("success") == "True":
+                        wins += 1
+                    else:
+                        losses += 1
+
+        total = wins + losses
+        wr = f"{wins/total*100:.1f}%" if total > 0 else "N/A"
+        lines = [f"📓 *Daily Trade Journal — {today}*",
+                 f"• Trades: {total} | ✅ {wins} / ❌ {losses} | WR: {wr}",
+                 f"• Total PnL: *${total_pnl:+.2f}*", ""]
+        for r in rows[-10:]:
+            emoji = "✅" if r.get("success") == "True" else "❌"
+            lines.append(f"{emoji} {r['symbol']} {r['direction']} {r['interval']}m | ${float(r['pnl_usd']):+.2f} | {r['reason']}")
+        send_telegram_alert("\n".join(lines))
+    except Exception as e:
+        print(f"[Journal Digest] Error: {e}")
+
+def run_daily_journal_scheduler():
+    """Send daily Telegram digest at 00:00 UTC every day."""
+    print("[Journal Scheduler] Daily digest scheduler started.")
+    while True:
+        now = time.gmtime()
+        # Sleep until next midnight UTC
+        seconds_to_midnight = 86400 - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
+        time.sleep(seconds_to_midnight)
+        try:
+            send_daily_journal_digest()
+        except Exception as e:
+            print(f"[Journal Scheduler] Error: {e}")
+
 def run_rolling_retrain_scheduler():
     """
     Background scheduler that runs weekly on Sundays at 00:00 UTC.
@@ -5562,6 +5637,8 @@ def main():
                             "bybit_order_id": active_trade.get("bybit_order_id"),
                             "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
                         })
+                        # Log to trade journal CSV
+                        log_trade_journal(bot_state["trade_history"][-1])
                         
                         if total_pnl > 0:
                             exit_header = "🚀 *TAKE PROFIT HIT* 🚀" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 *TRAILING STOP HIT (PROFITABLE)* 📈" if "TRAILING" in str(exit_reason).upper() else "🎉 *TRADE CLOSED WITH PROFIT* 🎉"
@@ -6748,5 +6825,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
     # Start background order flow persister thread
     threading.Thread(target=run_order_flow_persister, daemon=True).start()
+    # Start daily Telegram trade journal digest scheduler
+    threading.Thread(target=run_daily_journal_scheduler, daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()
