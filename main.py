@@ -360,6 +360,7 @@ def start_telegram_command_listener():
 
     pending_auth = {} # {sender_chat_id: {"code": str, "step": str, "timestamp": float}}
     pending_confluence = {} # {sender_chat_id: {"step": str, "symbol": str, "timestamp": float}}
+    pending_manual_trade = {} # {sender_chat_id: {"step": str, "timestamp": float}}
  
     def listener_loop():
         offset = 0
@@ -375,6 +376,7 @@ def start_telegram_command_listener():
                 {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
                 {"command": "confluence", "description": "Get live confluence report for coin"},
+                {"command": "create_manual_trade", "description": "Open a manual trade with bot management"},
                 {"command": "retrain_status", "description": "View model retraining status"},
                 {"command": "logs", "description": "View latest bot running logs"},
                 {"command": "add_user", "description": "Authorize a new user via email verification"},
@@ -471,6 +473,417 @@ def start_telegram_command_listener():
                             print(f"[Telegram Command Listener] Mismatched chat ID: expected one of {allowed_chat_ids}, got '{sender_chat_id}'")
                             continue
                         
+                        # Handle confluence interactive flow logic resets
+                        if text in ["/cancel", "/add_user", "/confluence"] and sender_chat_id in pending_confluence:
+                            pending_confluence.pop(sender_chat_id, None)
+                            
+                        # Handle manual trade interactive flow resets
+                        if text in ["/cancel", "/create_manual_trade"] and sender_chat_id in pending_manual_trade:
+                            pending_manual_trade.pop(sender_chat_id, None)
+                            
+                        if sender_chat_id in pending_manual_trade:
+                            flow = pending_manual_trade[sender_chat_id]
+                            if time.time() - flow["timestamp"] > 300:
+                                pending_manual_trade.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Session expired.* Please start over by sending /create_manual_trade.",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+                                
+                            if text == "/cancel":
+                                pending_manual_trade.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Operation cancelled.*",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+                                
+                            step = flow["step"]
+                            
+                            # 1. Symbol Step
+                            if step == "awaiting_symbol":
+                                symbol = text.upper().strip()
+                                if not symbol.endswith("USDT"):
+                                    symbol += "USDT"
+                                    
+                                if not (3 <= len(symbol) <= 12):
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid symbol format.* Please enter a valid coin name (e.g., BTC, ETHUSDT):",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["symbol"] = symbol
+                                flow["step"] = "awaiting_direction"
+                                flow["timestamp"] = time.time()
+                                
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": f"Select the *Direction* for {symbol}:",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {
+                                        "keyboard": [[{"text": "Long (Buy)"}, {"text": "Short (Sell)"}], [{"text": "/cancel"}]],
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                })
+                                continue
+                                
+                            # 2. Direction Step
+                            elif step == "awaiting_direction":
+                                val = text.lower()
+                                if "long" in val or "buy" in val:
+                                    direction = "Bullish"
+                                elif "short" in val or "sell" in val:
+                                    direction = "Bearish"
+                                else:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid direction.* Please select 'Long (Buy)' or 'Short (Sell)':",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["direction"] = direction
+                                flow["step"] = "awaiting_investment"
+                                flow["timestamp"] = time.time()
+                                
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "Enter the *Investment margin (USD)* to allocate to this trade (e.g., 20):",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+                                
+                            # 3. Investment Step
+                            elif step == "awaiting_investment":
+                                try:
+                                    investment = float(text)
+                                    if investment <= 0:
+                                        raise ValueError
+                                except ValueError:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid amount.* Please enter a positive number for investment margin:",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["investment"] = investment
+                                flow["step"] = "awaiting_leverage"
+                                flow["timestamp"] = time.time()
+                                
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "Enter or select the *Leverage* (e.g., 5 or 10):",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {
+                                        "keyboard": [[{"text": "1x"}, {"text": "2x"}, {"text": "5x"}, {"text": "10x"}], [{"text": "/cancel"}]],
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                })
+                                continue
+                                
+                            # 4. Leverage Step
+                            elif step == "awaiting_leverage":
+                                try:
+                                    lev_str = text.lower().replace("x", "")
+                                    leverage = int(lev_str)
+                                    if leverage <= 0 or leverage > 100:
+                                        raise ValueError
+                                except ValueError:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid leverage.* Please enter a valid integer between 1 and 100:",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["leverage"] = leverage
+                                flow["step"] = "awaiting_tp"
+                                flow["timestamp"] = time.time()
+                                
+                                suggested_tp = None
+                                suggested_sl = None
+                                symbol = flow["symbol"]
+                                direction = flow["direction"]
+                                
+                                try:
+                                    cur_p = bot_state.get(f"live_price_{symbol}")
+                                    if cur_p is None:
+                                        cur_p = get_fallback_price(symbol)
+                                    if cur_p is not None:
+                                        flow["live_price"] = cur_p
+                                        calc_atr = 0.015 * cur_p
+                                        if symbol in SUPPORTED_SYMBOLS:
+                                            df_temp = get_history(symbol, "60", limit=100)
+                                            if not df_temp.empty:
+                                                high_low = df_temp["high"] - df_temp["low"]
+                                                high_close = (df_temp["high"] - df_temp["close"].shift()).abs()
+                                                low_close = (df_temp["low"] - df_temp["close"].shift()).abs()
+                                                ranges = pd.concat([high_low, high_close, low_close], axis=1)
+                                                true_range = ranges.max(axis=1)
+                                                calc_atr = float(true_range.rolling(14).mean().iloc[-1])
+                                        
+                                        flow["atr_dollars"] = calc_atr
+                                        
+                                        if direction == "Bullish":
+                                            suggested_tp = cur_p + 1.5 * calc_atr
+                                            suggested_sl = cur_p - 1.0 * calc_atr
+                                        else:
+                                            suggested_tp = cur_p - 1.5 * calc_atr
+                                            suggested_sl = cur_p + 1.0 * calc_atr
+                                except Exception:
+                                    pass
+                                    
+                                reply_markup = {"remove_keyboard": True}
+                                msg_text = "Enter your *Take Profit (TP) price*:"
+                                if suggested_tp:
+                                    flow["suggested_tp"] = round(suggested_tp, 4)
+                                    flow["suggested_sl"] = round(suggested_sl, 4)
+                                    msg_text = f"💡 *Suggested TP (1.5x ATR):* `{suggested_tp:.4f}`\n\nEnter or select your *Take Profit (TP) price*:"
+                                    reply_markup = {
+                                        "keyboard": [[{"text": f"{suggested_tp:.4f}"}], [{"text": "/cancel"}]],
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                    
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": msg_text,
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": reply_markup
+                                })
+                                continue
+                                
+                            # 5. TP Step
+                            elif step == "awaiting_tp":
+                                try:
+                                    tp = float(text)
+                                    if tp <= 0:
+                                        raise ValueError
+                                except ValueError:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid TP.* Please enter a positive number for TP price:",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["tp"] = tp
+                                flow["step"] = "awaiting_sl"
+                                flow["timestamp"] = time.time()
+                                
+                                reply_markup = {"remove_keyboard": True}
+                                msg_text = "Enter your *Stop Loss (SL) price*:"
+                                suggested_sl = flow.get("suggested_sl")
+                                if suggested_sl:
+                                    msg_text = f"💡 *Suggested SL (1.0x ATR):* `{suggested_sl:.4f}`\n\nEnter or select your *Stop Loss (SL) price*:"
+                                    reply_markup = {
+                                        "keyboard": [[{"text": f"{suggested_sl:.4f}"}], [{"text": "/cancel"}]],
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                    
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": msg_text,
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": reply_markup
+                                })
+                                continue
+                                
+                            # 6. SL Step
+                            elif step == "awaiting_sl":
+                                try:
+                                    sl = float(text)
+                                    if sl <= 0:
+                                        raise ValueError
+                                except ValueError:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Invalid SL.* Please enter a positive number for SL price:",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["sl"] = sl
+                                flow["step"] = "awaiting_confirm"
+                                flow["timestamp"] = time.time()
+                                
+                                summary = (
+                                    f"📊 *MANUAL TRADE SUMMARY* 📊\n\n"
+                                    f"• *Symbol*: {flow['symbol']}\n"
+                                    f"• *Direction*: {flow['direction']}\n"
+                                    f"• *Investment*: ${flow['investment']:.2f}\n"
+                                    f"• *Leverage*: {flow['leverage']}x\n"
+                                    f"• *TP Price*: ${flow['tp']:.4f}\n"
+                                    f"• *SL Price*: ${flow['sl']:.4f}\n\n"
+                                    f"Please confirm if you want to open this trade on Bybit:"
+                                )
+                                
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": summary,
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {
+                                        "keyboard": [[{"text": "Confirm Open"}, {"text": "Cancel"}], [{"text": "/cancel"}]],
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                })
+                                continue
+                                
+                            # 7. Confirmation Step
+                            elif step == "awaiting_confirm":
+                                if "confirm" in text.lower():
+                                    symbol = flow["symbol"]
+                                    direction = flow["direction"]
+                                    margin = flow["investment"]
+                                    leverage = flow["leverage"]
+                                    tp = flow["tp"]
+                                    sl = flow["sl"]
+                                    atr_val = flow.get("atr_dollars", 0.015 * flow.get("live_price", tp))
+                                    
+                                    pending_manual_trade.pop(sender_chat_id, None)
+                                    
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": f"⏳ Sending market order to Bybit for *{symbol}*...",
+                                        "parse_mode": "Markdown",
+                                        "reply_markup": {"remove_keyboard": True}
+                                    })
+                                    
+                                    def _execute_manual_trade_bg(cid, sym, d, m, l, t_p, s_l, atr):
+                                        try:
+                                            set_bybit_leverage(sym, l)
+                                            cur_p = bot_state.get(f"live_price_{sym}")
+                                            if cur_p is None:
+                                                cur_p = get_fallback_price(sym)
+                                            if cur_p is None or cur_p <= 0:
+                                                execute_telegram_api_call("sendMessage", {
+                                                    "chat_id": cid,
+                                                    "text": "❌ *Error*: Could not fetch current price. Order aborted.",
+                                                    "parse_mode": "Markdown"
+                                                })
+                                                return
+                                                
+                                            notional = m * l
+                                            qty = notional / cur_p
+                                            qty_str = format_bybit_qty(sym, qty)
+                                            actual_qty = float(qty_str)
+                                            
+                                            side = "Buy" if d == "Bullish" else "Sell"
+                                            order_res = place_bybit_order(sym, side, qty_str, reduce_only=False)
+                                            if order_res and order_res.get("retCode") == 0:
+                                                res_data = order_res.get("result", {})
+                                                order_id = res_data.get("orderId", "MANUAL")
+                                                fill_price = cur_p
+                                                
+                                                try:
+                                                    time.sleep(0.5)
+                                                    pos_info = get_bybit_position(sym)
+                                                    if pos_info:
+                                                        fill_price = float(pos_info.get("avgPrice", fill_price))
+                                                except Exception:
+                                                    pass
+                                                    
+                                                temp_trade = {"qty": str(actual_qty), "direction": d}
+                                                update_bybit_stop_loss(sym, s_l, temp_trade)
+                                                update_bybit_take_profit(sym, t_p, temp_trade)
+                                                
+                                                limit_side = "Sell" if d == "Bullish" else "Buy"
+                                                limit_price = fill_price + 1.0 * atr if d == "Bullish" else fill_price - 1.0 * atr
+                                                limit_qty_str = format_bybit_qty(sym, actual_qty * 0.5)
+                                                scale_out_order_id = None
+                                                if (float(limit_qty_str) * limit_price) >= 5.0:
+                                                    limit_res = place_bybit_limit_order(sym, limit_side, limit_qty_str, limit_price, reduce_only=True)
+                                                    if limit_res.get("retCode") == 0:
+                                                        scale_out_order_id = limit_res.get("result", {}).get("orderId")
+                                                        
+                                                import uuid
+                                                trade_uuid = str(uuid.uuid4())[:8]
+                                                new_trade = {
+                                                    "trade_id": f"{sym}_{trade_uuid}",
+                                                    "bybit_order_id": order_id,
+                                                    "bybit_scale_out_order_id": scale_out_order_id,
+                                                    "symbol": sym,
+                                                    "entry_price": fill_price,
+                                                    "predicted_price": fill_price,
+                                                    "stop_loss": s_l,
+                                                    "take_profit": t_p,
+                                                    "direction": d,
+                                                    "end_time": float(time.time() + 3600 * 10),
+                                                    "entry_time": int(time.time() * 1000),
+                                                    "atr_dollars": atr,
+                                                    "highest_price": fill_price,
+                                                    "lowest_price": fill_price,
+                                                    "break_even_triggered": False,
+                                                    "half_closed": False,
+                                                    "original_size": m,
+                                                    "position_size_usd": m,
+                                                    "fill_pct": 100.0,
+                                                    "original_qty": actual_qty,
+                                                    "qty": actual_qty,
+                                                    "leverage": float(l),
+                                                    "confidence": 1.0,
+                                                    "recovered": False
+                                                }
+                                                
+                                                with active_trades_lock:
+                                                    active_list = bot_state.get("active_trade_1h", [])
+                                                    active_list.append(new_trade)
+                                                    bot_state["active_trade_1h"] = active_list
+                                                    save_history()
+                                                    
+                                                execute_telegram_api_call("sendMessage", {
+                                                    "chat_id": cid,
+                                                    "text": (
+                                                        f"🚀 *MANUAL TRADE OPENED ON BYBIT* 🚀\n\n"
+                                                        f"• *Asset*: {sym}\n"
+                                                        f"• *Direction*: {d}\n"
+                                                        f"• *Entry Price*: ${fill_price:.4f}\n"
+                                                        f"• *Size*: ${m:.2f} ({l}x leverage)\n"
+                                                        f"• *TP Price*: ${t_p:.4f}\n"
+                                                        f"• *SL Price*: ${s_l:.4f}\n\n"
+                                                        f"_The bot will now manage this position automatically._"
+                                                    ),
+                                                    "parse_mode": "Markdown"
+                                                })
+                                            else:
+                                                err_msg = order_res.get("retMsg", "Unknown error")
+                                                execute_telegram_api_call("sendMessage", {
+                                                    "chat_id": cid,
+                                                    "text": f"❌ *Failed to open trade on Bybit:* {err_msg}",
+                                                    "parse_mode": "Markdown"
+                                                })
+                                        except Exception as e_run:
+                                            execute_telegram_api_call("sendMessage", {
+                                                "chat_id": cid,
+                                                "text": f"❌ *Runtime error during order placement:* {str(e_run)}",
+                                                "parse_mode": "Markdown"
+                                            })
+                                            
+                                    threading.Thread(target=_execute_manual_trade_bg, args=(sender_chat_id, symbol, direction, margin, leverage, tp, sl, atr_val), daemon=True).start()
+                                    continue
+                                else:
+                                    pending_manual_trade.pop(sender_chat_id, None)
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Operation cancelled.*",
+                                        "parse_mode": "Markdown",
+                                        "reply_markup": {"remove_keyboard": True}
+                                    })
+                                    continue
+                                    
                         # Handle confluence interactive flow logic resets
                         if text in ["/cancel", "/add_user", "/confluence"] and sender_chat_id in pending_confluence:
                             pending_confluence.pop(sender_chat_id, None)
@@ -794,6 +1207,18 @@ def start_telegram_command_listener():
                                     "resize_keyboard": True,
                                     "one_time_keyboard": True
                                 }
+                            })
+
+                        elif text == "/create_manual_trade":
+                            pending_manual_trade[sender_chat_id] = {
+                                "step": "awaiting_symbol",
+                                "timestamp": time.time()
+                            }
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": "📝 *Create Manual Trade*\n\nPlease reply with the *Symbol* you want to trade (e.g., BTC or ETHUSDT):",
+                                "parse_mode": "Markdown",
+                                "reply_markup": {"remove_keyboard": True}
                             })
 
                         elif text == "/retrain_status":
