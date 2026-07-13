@@ -5574,7 +5574,7 @@ def main():
                         
                         # Session Filter: only open NEW trades during London (08-12 UTC) or New York (13-17 UTC)
                         utc_hour = datetime.utcnow().hour
-                        in_session = (8 <= utc_hour < 12) or (13 <= utc_hour < 17)
+                        in_session = (8 <= utc_hour < 17)
 
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
