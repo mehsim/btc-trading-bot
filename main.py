@@ -5118,6 +5118,88 @@ def sync_active_positions_from_bybit():
         print(f"[Crash Recovery] Error checking Bybit: {e}")
         return False
 
+def recover_missed_closed_trades():
+    """Scan Bybit closed PnL records on startup to detect and alert on any trades closed while the bot was offline."""
+    if TRADE_MODE == "simulation":
+        return
+    print("[Crash Recovery] Scanning recently closed trades on Bybit...")
+    now_ms = int(time.time() * 1000)
+    one_day_ms = 24 * 3600 * 1000
+    
+    for symbol in SUPPORTED_SYMBOLS:
+        try:
+            res = bybit_get_request("/v5/position/closed-pnl", {
+                "category": "linear",
+                "symbol": symbol,
+                "limit": "10"
+            })
+            if res.get("retCode") == 0:
+                pnl_list = res.get("result", {}).get("list", [])
+                for item in pnl_list:
+                    updated_time_ms = int(item.get("updatedTime", 0))
+                    if now_ms - updated_time_ms < one_day_ms:
+                        exit_price = float(item.get("avgExitPrice", 0.0))
+                        entry_price = float(item.get("avgEntryPrice", 0.0))
+                        closed_pnl = float(item.get("closedPnl", 0.0))
+                        side = item.get("side")
+                        direction = "Bullish" if side == "Sell" else "Bearish"
+                        
+                        exit_time_sec = updated_time_ms / 1000.0
+                        already_logged = False
+                        for t in bot_state.get("trade_history", []):
+                            if t.get("symbol") == symbol and abs(t.get("exit_time", 0.0) - exit_time_sec) < 10.0:
+                                already_logged = True
+                                break
+                                
+                        if not already_logged:
+                            print(f"[Crash Recovery] Discovered missed closed trade on Bybit: {symbol} at exit price {exit_price}")
+                            new_bal = bot_state.get("simulated_balance", 0.0)
+                            change_pct = ((exit_price - entry_price) / entry_price) * 100.0 if entry_price > 0 else 0.0
+                            raw_return = change_pct if direction == "Bullish" else -change_pct
+                            
+                            trade_record = {
+                                "symbol": symbol,
+                                "exit_time": exit_time_sec,
+                                "interval": "Unknown",
+                                "direction": direction,
+                                "entry_price": entry_price,
+                                "exit_price": exit_price,
+                                "change_pct": raw_return,
+                                "success": closed_pnl > 0,
+                                "reason": "CLOSED WHILE OFFLINE / RECOVERY SCAN",
+                                "position_size_usd": float(item.get("qty", 0.0)) * entry_price,
+                                "original_size": float(item.get("qty", 0.0)) * entry_price,
+                                "pnl_usd": closed_pnl,
+                                "balance": new_bal,
+                                "leverage": 1.0,
+                                "confidence": 0.0,
+                                "take_profit": 0.0,
+                                "stop_loss": 0.0,
+                                "atr_dollars": 0.0,
+                                "fill_pct": 100.0,
+                                "bybit_order_id": "RECOVERED",
+                                "bybit_scale_out_order_id": "RECOVERED"
+                            }
+                            
+                            bot_state["trade_history"].append(trade_record)
+                            save_history()
+                            log_trade_journal(trade_record)
+                            
+                            emoji = "🚀" if closed_pnl > 0 else "🔴"
+                            status_str = "*TAKE PROFIT HIT (RECOVERED)*" if closed_pnl > 0 else "*STOP LOSS HIT (RECOVERED)*"
+                            send_telegram_alert(
+                                f"{emoji} {status_str} 💻\n"
+                                f"• *Asset*: {symbol}\n"
+                                f"• *Status*: Trade closed while bot container was offline/restarting.\n"
+                                f"• *Direction*: {direction}\n"
+                                f"• *Entry Price*: ${entry_price:.2f}\n"
+                                f"• *Exit Price*: ${exit_price:.2f}\n"
+                                f"• *Realized PnL*: *${closed_pnl:+.2f}*\n"
+                                f"• *Exit Time*: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(exit_time_sec))}"
+                            )
+        except Exception as err:
+            print(f"[Crash Recovery Scan Error] for {symbol}: {err}")
+
 def main():
     global live_price, last_ws_update_time
     # Load model weights here (deferred from module level)
@@ -5133,6 +5215,9 @@ def main():
 
     # Crash Recovery: re-sync orphaned Bybit positions
     sync_active_positions_from_bybit()
+    
+    # Crash Recovery: scan for closed trades while offline
+    recover_missed_closed_trades()
 
     print("Connecting to WebSocket and waiting for initial price...")
 
