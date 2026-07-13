@@ -1303,6 +1303,32 @@ def start_telegram_command_listener():
                                 "reply_markup": {"remove_keyboard": True}
                             })
 
+                        elif text == "/clean_duplicates":
+                            cleaned_count = 0
+                            with active_trades_lock:
+                                for tf_key in ["1h", "2h", "4h", "6h"]:
+                                    trades = bot_state.get(f"active_trade_{tf_key}", [])
+                                    seen_symbols = set()
+                                    unique_trades = []
+                                    for t in trades:
+                                        sym = t.get("symbol")
+                                        if sym in seen_symbols:
+                                            cleaned_count += 1
+                                            print(f"[Cleanup] Removed duplicate active trade record for {sym} in {tf_key}")
+                                        else:
+                                            seen_symbols.add(sym)
+                                            unique_trades.append(t)
+                                    bot_state[f"active_trade_{tf_key}"] = unique_trades
+                                
+                                if cleaned_count > 0:
+                                    save_history()
+                                    
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": f"🧹 *Cleaned active trades:*\n\nRemoved `{cleaned_count}` duplicate trade records from the bot's state.",
+                                "parse_mode": "Markdown"
+                            })
+
                         elif text == "/retrain_status":
                             status = bot_state.get("retraining_status", "Idle")
                             execute_telegram_api_call("sendMessage", {
