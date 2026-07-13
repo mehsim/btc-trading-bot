@@ -2282,60 +2282,25 @@ def retrain_models_thread(is_manual=False):
     return True
 
 def run_rolling_retrain_scheduler():
-    import os
-    if os.environ.get("SPACE_ID"):
-        print("[Scheduler] Running in Hugging Face Space. Disabling automated rolling retraining scheduler to conserve resources and prevent OOM restarts.")
-        return
-
     """
-    Background scheduler that runs indefinitely.
-    Every 1 hour, it checks if the models on disk are older than 3 days (259,200 seconds).
-    If they are, or if any model file is missing, it triggers rolling retraining.
+    Background scheduler that runs weekly on Sundays at 00:00 UTC.
+    Checks time every 15 minutes.
     """
-    print("[Scheduler] Automated 72-hour rolling retraining scheduler started.")
-    # Give the bot some time to initialize before running the first check
-    time.sleep(30)
-    
-    retrain_interval_seconds = 3 * 24 * 60 * 60  # 3 days
-    
+    print("[Scheduler] Automated weekly Sunday retraining scheduler started.")
     while True:
         try:
-            now = time.time()
-            needs_retrain = False
-            
-            # Check if any model file is missing or older than 3 days
-            for iv in ["60", "120", "240", "360"]:
-                filenames = [
-                    f"ensemble_trending_trend_{iv}_xgb.json",
-                    f"ensemble_trending_price_{iv}_xgb.json",
-                    f"ensemble_ranging_trend_{iv}_xgb.json",
-                    f"ensemble_ranging_price_{iv}_xgb.json",
-                    f"meta_trending_trend_{iv}.json",
-                    f"meta_ranging_trend_{iv}.json"
-                ]
-                for filename in filenames:
-                    if not os.path.exists(filename):
-                        print(f"[Scheduler] Model file {filename} is missing. Triggering retraining.")
-                        needs_retrain = True
-                        break
-                    else:
-                        mtime = os.path.getmtime(filename)
-                        age = now - mtime
-                        if age > retrain_interval_seconds:
-                            print(f"[Scheduler] Model file {filename} is {age/(24*3600):.1f} days old (exceeds 3 days). Triggering retraining.")
-                            needs_retrain = True
-                            break
-                if needs_retrain:
-                    break
-            
-            if needs_retrain:
+            now_utc = datetime.utcnow()
+            # Sunday is weekday 6. Check if it is Sunday between 00:00 and 00:20 UTC.
+            if now_utc.weekday() == 6 and now_utc.hour == 0 and now_utc.minute < 20:
+                print(f"[Scheduler] Sunday 00:00 UTC detected. Triggering weekly model retraining...")
                 retrain_models_thread(is_manual=False)
-                
+                # Sleep 45 minutes to prevent double trigger within the same hour
+                time.sleep(2700)
         except Exception as e:
-            print(f"[Scheduler] Error in rolling retraining scheduler: {e}")
-            
-        # Sleep for 1 hour before checking again
-        time.sleep(3600)
+            print(f"[Scheduler] Error in weekly retraining scheduler: {e}")
+        
+        # Sleep for 15 minutes before checking time again
+        time.sleep(900)
 
 def run_flask():
     import logging
@@ -3736,12 +3701,12 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         avg_vol_20 = vol_series.iloc[:-1].rolling(20).mean().iloc[-1]
         latest_vol = vol_series.iloc[-2]
         rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
-        volume_pass = (rvol >= 1.0)
+        volume_pass = (rvol >= 1.5)
         if not volume_pass:
             hard_gate_failed = True
         results["Volume_Participation"] = {
             "pass": volume_pass,
-            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.0x (Hard Gate)",
+            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.5x (Hard Gate)",
             "weight": 0
         }
     except Exception as e:
