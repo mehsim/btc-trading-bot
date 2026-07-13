@@ -5813,12 +5813,12 @@ def main():
             curr_bal = bot_state.get("simulated_balance", start_bal)
             daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
             daily_profit = curr_bal - start_bal
-            # Enable Daily Drawdown Circuit Breaker at 10%
-            if daily_dd_pct >= 10.0:
+            # Enable Daily Drawdown Circuit Breaker at 7%
+            if daily_dd_pct >= 7.0:
                 if not bot_state.get("circuit_breaker_active", False):
-                    send_telegram_alert(f"⚠️ *DAILY DRAWDOWN CIRCUIT BREAKER* ⚠️\n• Start Balance: ${start_bal:.2f}\n• Current Balance: ${curr_bal:.2f}\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (>= 10%)\n• *Trading Halted* until reset.")
+                    send_telegram_alert(f"⚠️ *DAILY DRAWDOWN CIRCUIT BREAKER* ⚠️\n• Start Balance: ${start_bal:.2f}\n• Current Balance: ${curr_bal:.2f}\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (>= 7%)\n• *Trading Halted* until reset.")
                 bot_state["circuit_breaker_active"] = True
-                print(f"[Circuit Breaker] TRIGGERED — Daily drawdown is {daily_dd_pct:.2f}% (>= 10.0%). Trading halted.")
+                print(f"[Circuit Breaker] TRIGGERED — Daily drawdown is {daily_dd_pct:.2f}% (>= 7.0%). Trading halted.")
             else:
                 bot_state["circuit_breaker_active"] = False
             if daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
