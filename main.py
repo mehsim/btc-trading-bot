@@ -551,6 +551,67 @@ def start_telegram_command_listener():
                                     continue
                                     
                                 flow["direction"] = direction
+                                flow["step"] = "awaiting_entry"
+                                flow["timestamp"] = time.time()
+                                
+                                symbol = flow["symbol"]
+                                cur_p = bot_state.get(f"live_price_{symbol}")
+                                if cur_p is None:
+                                    cur_p = get_fallback_price(symbol)
+                                    
+                                keyboard = []
+                                text_msg = "Enter your desired *Entry Price*:"
+                                if cur_p:
+                                    flow["live_price"] = cur_p
+                                    text_msg = f"💡 *Current Price:* `{cur_p:.4f}`\n\nEnter or select your *Entry Price*:"
+                                    keyboard = [[{"text": f"Current Price ({cur_p:.4f})"}], [{"text": "/cancel"}]]
+                                else:
+                                    keyboard = [[{"text": "/cancel"}]]
+                                    
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": text_msg,
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {
+                                        "keyboard": keyboard,
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                })
+                                continue
+                                
+                            # 3. Entry Price Step
+                            elif step == "awaiting_entry":
+                                symbol = flow["symbol"]
+                                raw_text = text.lower()
+                                if "current price" in raw_text:
+                                    entry_price = flow.get("live_price")
+                                    if not entry_price:
+                                        entry_price = get_fallback_price(symbol)
+                                    flow["entry_type"] = "market"
+                                else:
+                                    try:
+                                        entry_price = float(text)
+                                        if entry_price <= 0:
+                                            raise ValueError
+                                        flow["entry_type"] = "limit"
+                                    except ValueError:
+                                        execute_telegram_api_call("sendMessage", {
+                                            "chat_id": sender_chat_id,
+                                            "text": "❌ *Invalid price.* Please enter a positive number for entry price:",
+                                            "parse_mode": "Markdown"
+                                        })
+                                        continue
+                                        
+                                if not entry_price or entry_price <= 0:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Could not resolve entry price.* Please type a manual price:",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    continue
+                                    
+                                flow["entry_price"] = entry_price
                                 flow["step"] = "awaiting_investment"
                                 flow["timestamp"] = time.time()
                                 
@@ -562,7 +623,7 @@ def start_telegram_command_listener():
                                 })
                                 continue
                                 
-                            # 3. Investment Step
+                            # 4. Investment Step
                             elif step == "awaiting_investment":
                                 try:
                                     investment = float(text)
@@ -592,7 +653,7 @@ def start_telegram_command_listener():
                                 })
                                 continue
                                 
-                            # 4. Leverage Step
+                            # 5. Leverage Step
                             elif step == "awaiting_leverage":
                                 try:
                                     lev_str = text.lower().replace("x", "")
@@ -615,32 +676,28 @@ def start_telegram_command_listener():
                                 suggested_sl = None
                                 symbol = flow["symbol"]
                                 direction = flow["direction"]
+                                entry_p = flow["entry_price"]
                                 
                                 try:
-                                    cur_p = bot_state.get(f"live_price_{symbol}")
-                                    if cur_p is None:
-                                        cur_p = get_fallback_price(symbol)
-                                    if cur_p is not None:
-                                        flow["live_price"] = cur_p
-                                        calc_atr = 0.015 * cur_p
-                                        if symbol in SUPPORTED_SYMBOLS:
-                                            df_temp = get_history(symbol, "60", limit=100)
-                                            if not df_temp.empty:
-                                                high_low = df_temp["high"] - df_temp["low"]
-                                                high_close = (df_temp["high"] - df_temp["close"].shift()).abs()
-                                                low_close = (df_temp["low"] - df_temp["close"].shift()).abs()
-                                                ranges = pd.concat([high_low, high_close, low_close], axis=1)
-                                                true_range = ranges.max(axis=1)
-                                                calc_atr = float(true_range.rolling(14).mean().iloc[-1])
-                                        
-                                        flow["atr_dollars"] = calc_atr
-                                        
-                                        if direction == "Bullish":
-                                            suggested_tp = cur_p + 1.5 * calc_atr
-                                            suggested_sl = cur_p - 1.0 * calc_atr
-                                        else:
-                                            suggested_tp = cur_p - 1.5 * calc_atr
-                                            suggested_sl = cur_p + 1.0 * calc_atr
+                                    calc_atr = 0.015 * entry_p
+                                    if symbol in SUPPORTED_SYMBOLS:
+                                        df_temp = get_history(symbol, "60", limit=100)
+                                        if not df_temp.empty:
+                                            high_low = df_temp["high"] - df_temp["low"]
+                                            high_close = (df_temp["high"] - df_temp["close"].shift()).abs()
+                                            low_close = (df_temp["low"] - df_temp["close"].shift()).abs()
+                                            ranges = pd.concat([high_low, high_close, low_close], axis=1)
+                                            true_range = ranges.max(axis=1)
+                                            calc_atr = float(true_range.rolling(14).mean().iloc[-1])
+                                            
+                                    flow["atr_dollars"] = calc_atr
+                                    
+                                    if direction == "Bullish":
+                                        suggested_tp = entry_p + 1.5 * calc_atr
+                                        suggested_sl = entry_p - 1.0 * calc_atr
+                                    else:
+                                        suggested_tp = entry_p - 1.5 * calc_atr
+                                        suggested_sl = entry_p + 1.0 * calc_atr
                                 except Exception:
                                     pass
                                     
@@ -664,7 +721,7 @@ def start_telegram_command_listener():
                                 })
                                 continue
                                 
-                            # 5. TP Step
+                            # 6. TP Step
                             elif step == "awaiting_tp":
                                 try:
                                     tp = float(text)
@@ -701,7 +758,7 @@ def start_telegram_command_listener():
                                 })
                                 continue
                                 
-                            # 6. SL Step
+                            # 7. SL Step
                             elif step == "awaiting_sl":
                                 try:
                                     sl = float(text)
@@ -723,6 +780,8 @@ def start_telegram_command_listener():
                                     f"📊 *MANUAL TRADE SUMMARY* 📊\n\n"
                                     f"• *Symbol*: {flow['symbol']}\n"
                                     f"• *Direction*: {flow['direction']}\n"
+                                    f"• *Entry Type*: {flow['entry_type'].upper()}\n"
+                                    f"• *Entry Price*: ${flow['entry_price']:.4f}\n"
                                     f"• *Investment*: ${flow['investment']:.2f}\n"
                                     f"• *Leverage*: {flow['leverage']}x\n"
                                     f"• *TP Price*: ${flow['tp']:.4f}\n"
@@ -742,7 +801,7 @@ def start_telegram_command_listener():
                                 })
                                 continue
                                 
-                            # 7. Confirmation Step
+                            # 8. Confirmation Step
                             elif step == "awaiting_confirm":
                                 if "confirm" in text.lower():
                                     symbol = flow["symbol"]
@@ -751,120 +810,140 @@ def start_telegram_command_listener():
                                     leverage = flow["leverage"]
                                     tp = flow["tp"]
                                     sl = flow["sl"]
-                                    atr_val = flow.get("atr_dollars", 0.015 * flow.get("live_price", tp))
+                                    entry_type = flow["entry_type"]
+                                    entry_price = flow["entry_price"]
+                                    atr_val = flow.get("atr_dollars", 0.015 * entry_price)
                                     
                                     pending_manual_trade.pop(sender_chat_id, None)
                                     
                                     execute_telegram_api_call("sendMessage", {
                                         "chat_id": sender_chat_id,
-                                        "text": f"⏳ Sending market order to Bybit for *{symbol}*...",
+                                        "text": f"⏳ Sending {entry_type} order to Bybit for *{symbol}*...",
                                         "parse_mode": "Markdown",
                                         "reply_markup": {"remove_keyboard": True}
                                     })
                                     
-                                    def _execute_manual_trade_bg(cid, sym, d, m, l, t_p, s_l, atr):
+                                    def _execute_manual_trade_bg(cid, sym, d, m, l, t_p, s_l, atr, e_type, e_price):
                                         try:
                                             set_bybit_leverage(sym, l)
-                                            cur_p = bot_state.get(f"live_price_{sym}")
-                                            if cur_p is None:
-                                                cur_p = get_fallback_price(sym)
-                                            if cur_p is None or cur_p <= 0:
-                                                execute_telegram_api_call("sendMessage", {
-                                                    "chat_id": cid,
-                                                    "text": "❌ *Error*: Could not fetch current price. Order aborted.",
-                                                    "parse_mode": "Markdown"
-                                                })
-                                                return
-                                                
+                                            
                                             notional = m * l
-                                            qty = notional / cur_p
+                                            qty = notional / e_price
                                             qty_str = format_bybit_qty(sym, qty)
                                             actual_qty = float(qty_str)
                                             
                                             side = "Buy" if d == "Bullish" else "Sell"
-                                            order_res = place_bybit_order(sym, side, qty_str, reduce_only=False)
-                                            if order_res and order_res.get("retCode") == 0:
-                                                res_data = order_res.get("result", {})
-                                                order_id = res_data.get("orderId", "MANUAL")
-                                                fill_price = cur_p
-                                                
-                                                try:
-                                                    time.sleep(0.5)
-                                                    pos_info = get_bybit_position(sym)
-                                                    if pos_info:
-                                                        fill_price = float(pos_info.get("avgPrice", fill_price))
-                                                except Exception:
-                                                    pass
-                                                    
-                                                temp_trade = {"qty": str(actual_qty), "direction": d}
-                                                update_bybit_stop_loss(sym, s_l, temp_trade)
-                                                update_bybit_take_profit(sym, t_p, temp_trade)
-                                                
-                                                limit_side = "Sell" if d == "Bullish" else "Buy"
-                                                limit_price = fill_price + 1.0 * atr if d == "Bullish" else fill_price - 1.0 * atr
-                                                limit_qty_str = format_bybit_qty(sym, actual_qty * 0.5)
-                                                scale_out_order_id = None
-                                                if (float(limit_qty_str) * limit_price) >= 5.0:
-                                                    limit_res = place_bybit_limit_order(sym, limit_side, limit_qty_str, limit_price, reduce_only=True)
-                                                    if limit_res.get("retCode") == 0:
-                                                        scale_out_order_id = limit_res.get("result", {}).get("orderId")
-                                                        
-                                                import uuid
-                                                trade_uuid = str(uuid.uuid4())[:8]
-                                                new_trade = {
-                                                    "trade_id": f"{sym}_{trade_uuid}",
-                                                    "bybit_order_id": order_id,
-                                                    "bybit_scale_out_order_id": scale_out_order_id,
-                                                    "symbol": sym,
-                                                    "entry_price": fill_price,
-                                                    "predicted_price": fill_price,
-                                                    "stop_loss": s_l,
-                                                    "take_profit": t_p,
-                                                    "direction": d,
-                                                    "end_time": float(time.time() + 3600 * 10),
-                                                    "entry_time": int(time.time() * 1000),
-                                                    "atr_dollars": atr,
-                                                    "highest_price": fill_price,
-                                                    "lowest_price": fill_price,
-                                                    "break_even_triggered": False,
-                                                    "half_closed": False,
-                                                    "original_size": m,
-                                                    "position_size_usd": m,
-                                                    "fill_pct": 100.0,
-                                                    "original_qty": actual_qty,
-                                                    "qty": actual_qty,
-                                                    "leverage": float(l),
-                                                    "confidence": 1.0,
-                                                    "recovered": False
-                                                }
-                                                
-                                                with active_trades_lock:
-                                                    active_list = bot_state.get("active_trade_1h", [])
-                                                    active_list.append(new_trade)
-                                                    bot_state["active_trade_1h"] = active_list
-                                                    save_history()
-                                                    
-                                                execute_telegram_api_call("sendMessage", {
-                                                    "chat_id": cid,
-                                                    "text": (
-                                                        f"🚀 *MANUAL TRADE OPENED ON BYBIT* 🚀\n\n"
-                                                        f"• *Asset*: {sym}\n"
-                                                        f"• *Direction*: {d}\n"
-                                                        f"• *Entry Price*: ${fill_price:.4f}\n"
-                                                        f"• *Size*: ${m:.2f} ({l}x leverage)\n"
-                                                        f"• *TP Price*: ${t_p:.4f}\n"
-                                                        f"• *SL Price*: ${s_l:.4f}\n\n"
-                                                        f"_The bot will now manage this position automatically._"
-                                                    ),
-                                                    "parse_mode": "Markdown"
-                                                })
+                                            
+                                            if e_type == "limit":
+                                                # Place limit order directly with TP/SL attached
+                                                order_res = place_bybit_limit_order(sym, side, qty_str, e_price, sl=s_l, tp=t_p)
+                                                if order_res and order_res.get("retCode") == 0:
+                                                    execute_telegram_api_call("sendMessage", {
+                                                        "chat_id": cid,
+                                                        "text": (
+                                                            f"🎯 *MANUAL LIMIT ORDER PLACED* 🎯\n\n"
+                                                            f"• *Asset*: {sym}\n"
+                                                            f"• *Side*: {side}\n"
+                                                            f"• *Limit Price*: ${e_price:.4f}\n"
+                                                            f"• *Size*: ${m:.2f} ({l}x leverage)\n"
+                                                            f"• *TP Price*: ${t_p:.4f}\n"
+                                                            f"• *SL Price*: ${s_l:.4f}\n\n"
+                                                            f"_Once the limit order gets filled on Bybit, the bot will automatically pick up the position and start tracking it._"
+                                                        ),
+                                                        "parse_mode": "Markdown"
+                                                    })
+                                                else:
+                                                    err_msg = order_res.get("retMsg", "Unknown error")
+                                                    execute_telegram_api_call("sendMessage", {
+                                                        "chat_id": cid,
+                                                        "text": f"❌ *Failed to place Limit order on Bybit:* {err_msg}",
+                                                        "parse_mode": "Markdown"
+                                                    })
                                             else:
-                                                err_msg = order_res.get("retMsg", "Unknown error")
-                                                execute_telegram_api_call("sendMessage", {
-                                                    "chat_id": cid,
-                                                    "text": f"❌ *Failed to open trade on Bybit:* {err_msg}",
-                                                    "parse_mode": "Markdown"
-                                                })
+                                                # Market order execution
+                                                order_res = place_bybit_order(sym, side, qty_str, reduce_only=False)
+                                                if order_res and order_res.get("retCode") == 0:
+                                                    res_data = order_res.get("result", {})
+                                                    order_id = res_data.get("orderId", "MANUAL")
+                                                    fill_price = e_price
+                                                    
+                                                    try:
+                                                        time.sleep(0.5)
+                                                        pos_info = get_bybit_position(sym)
+                                                        if pos_info:
+                                                            fill_price = float(pos_info.get("avgPrice", fill_price))
+                                                    except Exception:
+                                                        pass
+                                                        
+                                                    temp_trade = {"qty": str(actual_qty), "direction": d}
+                                                    update_bybit_stop_loss(sym, s_l, temp_trade)
+                                                    update_bybit_take_profit(sym, t_p, temp_trade)
+                                                    
+                                                    limit_side = "Sell" if d == "Bullish" else "Buy"
+                                                    limit_price = fill_price + 1.0 * atr if d == "Bullish" else fill_price - 1.0 * atr
+                                                    limit_qty_str = format_bybit_qty(sym, actual_qty * 0.5)
+                                                    scale_out_order_id = None
+                                                    if (float(limit_qty_str) * limit_price) >= 5.0:
+                                                        limit_res = place_bybit_limit_order(sym, limit_side, limit_qty_str, limit_price, reduce_only=True)
+                                                        if limit_res.get("retCode") == 0:
+                                                            scale_out_order_id = limit_res.get("result", {}).get("orderId")
+                                                            
+                                                    import uuid
+                                                    trade_uuid = str(uuid.uuid4())[:8]
+                                                    new_trade = {
+                                                        "trade_id": f"{sym}_{trade_uuid}",
+                                                        "bybit_order_id": order_id,
+                                                        "bybit_scale_out_order_id": scale_out_order_id,
+                                                        "symbol": sym,
+                                                        "entry_price": fill_price,
+                                                        "predicted_price": fill_price,
+                                                        "stop_loss": s_l,
+                                                        "take_profit": t_p,
+                                                        "direction": d,
+                                                        "end_time": float(time.time() + 3600 * 10),
+                                                        "entry_time": int(time.time() * 1000),
+                                                        "atr_dollars": atr,
+                                                        "highest_price": fill_price,
+                                                        "lowest_price": fill_price,
+                                                        "break_even_triggered": False,
+                                                        "half_closed": False,
+                                                        "original_size": m,
+                                                        "position_size_usd": m,
+                                                        "fill_pct": 100.0,
+                                                        "original_qty": actual_qty,
+                                                        "qty": actual_qty,
+                                                        "leverage": float(l),
+                                                        "confidence": "MT",
+                                                        "recovered": False
+                                                    }
+                                                    
+                                                    with active_trades_lock:
+                                                        active_list = bot_state.get("active_trade_1h", [])
+                                                        active_list.append(new_trade)
+                                                        bot_state["active_trade_1h"] = active_list
+                                                        save_history()
+                                                        
+                                                    execute_telegram_api_call("sendMessage", {
+                                                        "chat_id": cid,
+                                                        "text": (
+                                                            f"🚀 *MANUAL TRADE OPENED ON BYBIT* 🚀\n\n"
+                                                            f"• *Asset*: {sym}\n"
+                                                            f"• *Direction*: {d}\n"
+                                                            f"• *Entry Price*: ${fill_price:.4f}\n"
+                                                            f"• *Size*: ${m:.2f} ({l}x leverage)\n"
+                                                            f"• *TP Price*: ${t_p:.4f}\n"
+                                                            f"• *SL Price*: ${s_l:.4f}\n\n"
+                                                            f"_The bot will now manage this position automatically._"
+                                                        ),
+                                                        "parse_mode": "Markdown"
+                                                    })
+                                                else:
+                                                    err_msg = order_res.get("retMsg", "Unknown error")
+                                                    execute_telegram_api_call("sendMessage", {
+                                                        "chat_id": cid,
+                                                        "text": f"❌ *Failed to open trade on Bybit:* {err_msg}",
+                                                        "parse_mode": "Markdown"
+                                                    })
                                         except Exception as e_run:
                                             execute_telegram_api_call("sendMessage", {
                                                 "chat_id": cid,
@@ -872,7 +951,7 @@ def start_telegram_command_listener():
                                                 "parse_mode": "Markdown"
                                             })
                                             
-                                    threading.Thread(target=_execute_manual_trade_bg, args=(sender_chat_id, symbol, direction, margin, leverage, tp, sl, atr_val), daemon=True).start()
+                                    threading.Thread(target=_execute_manual_trade_bg, args=(sender_chat_id, symbol, direction, margin, leverage, tp, sl, atr_val, entry_type, entry_price), daemon=True).start()
                                     continue
                                 else:
                                     pending_manual_trade.pop(sender_chat_id, None)
@@ -1016,6 +1095,7 @@ def start_telegram_command_listener():
                                         stop_loss = t.get("stop_loss")
                                         take_profit = t.get("take_profit")
                                         confidence = t.get("confidence", 0.63)
+                                        conf_str = "MT" if confidence == "MT" else f"{float(confidence) * 100:.1f}%"
                                         leverage = t.get("leverage", 1.0)
                                         size_usd = t.get("position_size_usd", 0.0)
                                         
@@ -1027,7 +1107,7 @@ def start_telegram_command_listener():
                                         active_trades_summary.append(
                                             f"💼 *{symbol} ({tf_key.upper()})*\n"
                                             f"• *Signal*: {direction}\n"
-                                            f"• *Confidence*: {confidence * 100:.1f}%\n"
+                                            f"• *Confidence*: {conf_str}\n"
                                             f"• *Leverage*: {leverage:.1f}x\n"
                                             f"• *Investment*: ${size_usd:.2f} (Value: ${size_usd * leverage:.2f})\n"
                                             f"• *Price*: ${current_p:.2f} (Entry: ${entry_p:.2f})\n"
@@ -2143,7 +2223,7 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         print(f"[Bybit API Error] Failed to update Take Profit for {symbol}: {res.get('retMsg')}")
         return False
 
-def place_bybit_limit_order(symbol, side, qty, price, reduce_only=False):
+def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_only=False):
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -2156,6 +2236,10 @@ def place_bybit_limit_order(symbol, side, qty, price, reduce_only=False):
     }
     if reduce_only:
         payload["reduceOnly"] = True
+    if sl:
+        payload["stopLoss"] = format_bybit_price(symbol, sl)
+    if tp:
+        payload["takeProfit"] = format_bybit_price(symbol, tp)
     res = bybit_post_request("/v5/order/create", payload)
     return res
 
@@ -5259,8 +5343,8 @@ def sync_active_positions_from_bybit():
                         pos = open_positions[symbol]
                         t["bybit_closed"] = False
                         
-                        # Restore confidence for recovered trades if it is currently 0
-                        if float(t.get("confidence", 0.0)) == 0.0:
+                        conf_val = t.get("confidence", 0.0)
+                        if conf_val != "MT" and float(conf_val) == 0.0:
                             trade_dir = t.get("direction", "Bullish")
                             for p in reversed(bot_state.get("prediction_history", [])):
                                 if p.get("symbol") == symbol and p.get("direction") == trade_dir:
@@ -6193,7 +6277,7 @@ def main():
                             "pnl_usd": float(total_pnl),
                             "balance": float(new_bal),
                             "leverage": float(leverage),
-                            "confidence": float(active_trade.get("confidence", 0.0)),
+                            "confidence": active_trade.get("confidence") if active_trade.get("confidence") == "MT" else float(active_trade.get("confidence", 0.0)),
                             "take_profit": float(active_trade.get("take_profit", 0.0)),
                             "stop_loss": float(active_trade.get("stop_loss", 0.0)),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
