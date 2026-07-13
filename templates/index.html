@@ -1028,29 +1028,10 @@
                         <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">AVAX:</span>
                         <span id="live-price-avax" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">NEAR:</span>
-                        <span id="live-price-near" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">LINK:</span>
-                        <span id="live-price-link" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
+
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">LTC:</span>
                         <span id="live-price-ltc" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">DOGE:</span>
-                        <span id="live-price-doge" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">SUI:</span>
-                        <span id="live-price-sui" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">APT:</span>
-                        <span id="live-price-apt" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">DOT:</span>
@@ -1416,7 +1397,7 @@
         let activeTimeframeFilter = 'all'; // 'all', '60', '120', '240', '360'
         let activeConfluenceTimeframe = '1h'; // default to 1H
         let activeTradesState = {};
-        let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null, AVAX: null, NEAR: null, LINK: null, LTC: null, DOGE: null, SUI: null, APT: null, DOT: null};
+        let lastPrices = {BTC: null, ETH: null, SOL: null, BNB: null, ADA: null, XRP: null, AVAX: null, LTC: null, DOT: null};
         let globalDataCache = null;
 
         function setConfluenceTimeframe(tf, element) {
@@ -2035,7 +2016,7 @@
                     // 2. Update Live Price
                     globalDataCache = data;
                     const currentPrice = data.live_price;
-                    const symbols = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "AVAX", "NEAR", "LINK", "LTC", "DOGE", "SUI", "APT", "DOT"];
+                    const symbols = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "AVAX", "LTC", "DOT"];
                     
                     symbols.forEach(sym => {
                         const val = data[`live_price_${sym}USDT`];
