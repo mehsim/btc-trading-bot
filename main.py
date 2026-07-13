@@ -161,8 +161,11 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
         socks_proxy = f"socks5h://{tg_proxy_clean}"
         proxies_dict = {"http": socks_proxy, "https": socks_proxy}
             
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
-        resp = requests.post(url, json=payload, timeout=20, proxies=proxies_dict)
+        resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict)
         if resp.status_code == 200:
             return resp.json()
         return {}
@@ -173,7 +176,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
                 fallback_url = f"https://api.telegram.org/bot{token}/{method}"
                 tg_clean = tg_proxy.split("://", 1)[-1]
                 socks = {"http": f"socks5h://{tg_clean}", "https": f"socks5h://{tg_clean}"}
-                resp2 = requests.post(fallback_url, json=payload, timeout=20, proxies=socks)
+                resp2 = requests.post(fallback_url, json=payload, headers=headers, timeout=20, proxies=socks)
                 if resp2.status_code == 200:
                     return resp2.json()
             except Exception:
