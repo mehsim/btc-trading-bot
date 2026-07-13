@@ -5338,6 +5338,7 @@ def main():
                         print(f"[Parallel Fetch] Error fetching {sym} {iv}: {e}")
             print(f"[Parallel Fetch] Completed in {time.time() - t_start:.2f} seconds.")
  
+        just_opened_symbols = set()  # Symbols opened this cycle — block duplicates regardless of Bybit sync latency
         for symbol, iv in check_queue:
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
@@ -5561,11 +5562,15 @@ def main():
                         # Prevent duplicate parallel trades of the same symbol on ANY interval/timeframe
                         already_active = False
                         active_on_tf = None
-                        for tf_key in ["1h", "2h", "4h", "6h"]:
-                            if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
-                                already_active = True
-                                active_on_tf = tf_key
-                                break
+                        if symbol in just_opened_symbols:
+                            already_active = True
+                            active_on_tf = "current_cycle"
+                        else:
+                            for tf_key in ["1h", "2h", "4h", "6h"]:
+                                if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
+                                    already_active = True
+                                    active_on_tf = tf_key
+                                    break
                         
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
@@ -6060,6 +6065,8 @@ def main():
                                                 current_trades.append(active_trade)
                                                 bot_state[active_trade_key] = current_trades
                                             
+                                            # Mark symbol as opened this cycle — prevents duplicate opens due to Bybit sync latency
+                                            just_opened_symbols.add(symbol)
                                             # Sync positions immediately to load live Bybit state parameters
                                             if TRADE_MODE != "simulation":
                                                 sync_active_positions_from_bybit()
