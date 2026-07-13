@@ -169,7 +169,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict)
+        resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict, verify=False)
         if resp.status_code == 200:
             return resp.json()
         return {}
@@ -185,7 +185,10 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
                     return resp2.json()
             except Exception:
                 pass
-        if method != "getUpdates" or "timed out" not in str(e).lower():
+        # Suppress noisy SSL/timeout errors on polling-only methods
+        err_str = str(e).lower()
+        is_silent = method == "getUpdates" and any(x in err_str for x in ["timed out", "eof", "ssl", "connection"])
+        if not is_silent:
             print(f"[Telegram API Exception] method={method}: {e}")
         return {}
 
