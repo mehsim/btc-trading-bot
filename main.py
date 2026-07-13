@@ -1,4 +1,30 @@
 print("[System Debug] main.py global execution started.")
+import sys
+import re
+from datetime import datetime
+
+class CircularLogBuffer:
+    def __init__(self, capacity=100):
+        self.capacity = capacity
+        self.buffer = []
+        self.original_stdout = sys.stdout
+        
+    def write(self, message):
+        self.original_stdout.write(message)
+        if message.strip():
+            # Strip ANSI escape codes to keep logs clean in Telegram
+            clean_msg = re.sub(r'\x1b\[[0-9;]*[mK]', '', message.strip())
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.buffer.append(f"[{timestamp}] {clean_msg}")
+            if len(self.buffer) > self.capacity:
+                self.buffer.pop(0)
+                
+    def flush(self):
+        self.original_stdout.flush()
+
+log_buffer = CircularLogBuffer(capacity=100)
+sys.stdout = log_buffer
+
 import os
 print("[System Debug] os imported.")
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -171,7 +197,86 @@ def send_telegram_alert(message: str):
         }
         execute_telegram_api_call("sendMessage", payload)
         
-    threading.Thread(target=_post, daemon=True).start()
+def run_manual_confluence_report(symbol, interval):
+    try:
+        from data import get_history
+        import numpy as np
+        df_raw = get_history(symbol=symbol, interval=interval, limit=300)
+        if df_raw is None or len(df_raw) < 2:
+            return f"❌ Failed to fetch price history from Bybit/Binance/Kraken for *{symbol}*."
+            
+        df_features = add_features(df_raw)
+        latest_candle = df_features.iloc[-1]
+        
+        iv = str(interval)
+        if iv in models_by_interval and models_by_interval[iv].get("selected_features") is not None:
+            X_live = latest_candle[models_by_interval[iv]["selected_features"]].values.reshape(1, -1)
+        else:
+            X_live = latest_candle[features].values.reshape(1, -1)
+            
+        models_tf = models_by_interval.get(iv)
+        if not models_tf or not models_tf["trending"]["price"]:
+            return "❌ Models are currently not fully loaded or active."
+            
+        adx_regime = latest_candle["ADX"]
+        if adx_regime >= 20.0:
+            active_model_price = models_tf["trending"]["price"]
+            active_model_trend = models_tf["trending"]["trend"]
+            calibrator = models_tf["trending"]["calibrator"]
+        else:
+            active_model_price = models_tf["ranging"]["price"]
+            active_model_trend = models_tf["ranging"]["trend"]
+            calibrator = models_tf["ranging"]["calibrator"]
+            
+        ensemble_weights = [0.3, 0.2, 0.5] if adx_regime >= 20.0 else [0.3, 0.5, 0.2]
+        pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
+        pred_change = pred_pct * float(latest_candle["close"])
+        expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
+        
+        probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
+        winning_class = int(np.argmax(probs))
+        if winning_class == 2:
+            ml_trend = "Bullish"
+            ml_confidence = float(probs[2])
+        elif winning_class == 0:
+            ml_trend = "Bearish"
+            ml_confidence = float(probs[0])
+        else:
+            ml_trend = "Neutral"
+            ml_confidence = float(probs[1])
+            
+        if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
+            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+        else:
+            calibration = bot_state.get(f"calibration_{iv.replace('60','1h').replace('120','2h').replace('240','4h').replace('360','6h')}", {"p95": 0.8, "max_conf": 0.95})
+            calibrated_confidence = calibrate_confidence(ml_confidence, calibration["p95"], calibration["max_conf"])
+            
+        with news_sentiment_lock:
+            news_sentiment = cached_news_sentiment
+            
+        all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
+            latest_candle["close"], df_features, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol,
+            calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.63
+        )
+        
+        report = (
+            f"🔍 *CONFLUENCE REPORT: {symbol} ({iv.replace('60','1H').replace('120','2H').replace('240','4H').replace('360','6H')})*\n"
+            f"• *Signal*: {ml_trend} ({calibrated_confidence*100:.1f}% confidence)\n"
+            f"• *Regime*: {'Trending' if adx_regime >= 20.0 else 'Ranging'} (ADX: {adx_regime:.1f})\n"
+            f"• *Expected Move*: {pred_change:+.4f} ({expected_pct_change:.2f}%)\n"
+            f"• *Decision*: *{'APPROVED' if all_pass else 'REJECTED'}*\n\n"
+            f"*Check Details:*\n"
+        )
+        for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
+            if check_name == "_Score_Summary":
+                continue
+            circle = "🟢" if res_val["pass"] else "🔴"
+            report += f"{circle} *{check_name.replace('_', ' ')}*: {res_val['detail']}\n"
+            
+        report += f"\n📊 *{confluence_results.get('_Score_Summary', {}).get('detail', '')}*"
+        return report
+    except Exception as e:
+        return f"❌ *Error running manual check:* {str(e)}"
 
 def start_telegram_command_listener():
     """Starts the background thread to poll and handle incoming Telegram commands."""
@@ -208,6 +313,9 @@ def start_telegram_command_listener():
                 {"command": "balance", "description": "View account/wallet balance"},
                 {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
+                {"command": "confluence", "description": "Get live confluence report for coin e.g. /confluence BTC 1h"},
+                {"command": "retrain_status", "description": "View model retraining status"},
+                {"command": "logs", "description": "View latest bot running logs"},
                 {"command": "add_user", "description": "Authorize a new user via email verification"},
                 {"command": "retrain", "description": "Retrain models with recent live trade feedback"},
                 {"command": "stop_all", "description": "Emergency stop bot and close all trades"},
@@ -471,6 +579,74 @@ def start_telegram_command_listener():
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
                                 "text": "🔑 *Verification code sent to mehsimleo@gmail.com.*\n\nPlease reply with the 6-digit code to verify your request.",
+                                "parse_mode": "Markdown"
+                            })
+
+                        elif text.startswith("/confluence"):
+                            parts = text.split()
+                            if len(parts) < 3:
+                                reply_text = (
+                                    "⚠️ *Usage:* `/confluence <SYMBOL> <TIMEFRAME>`\n\n"
+                                    "*Examples:*\n"
+                                    "• `/confluence BTC 1h`\n"
+                                    "• `/confluence DOT 2h`\n\n"
+                                    "Supported TFs: `1h`, `2h`, `4h`, `6h`"
+                                )
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": reply_text,
+                                    "parse_mode": "Markdown"
+                                })
+                            else:
+                                raw_sym = parts[1].upper()
+                                target_sym = raw_sym if raw_sym.endswith("USDT") else f"{raw_sym}USDT"
+                                tf_str = parts[2].lower()
+                                tf_mapping = {"1h": "60", "2h": "120", "4h": "240", "6h": "360"}
+                                
+                                if target_sym not in SUPPORTED_SYMBOLS:
+                                    reply_text = f"❌ *Symbol {target_sym} is not supported.*\n\nActive symbols: {', '.join(SUPPORTED_SYMBOLS)}"
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": reply_text,
+                                        "parse_mode": "Markdown"
+                                    })
+                                elif tf_str not in tf_mapping:
+                                    reply_text = f"❌ *Timeframe {tf_str} is not supported.*\n\nSupported: `1h`, `2h`, `4h`, `6h`"
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": reply_text,
+                                        "parse_mode": "Markdown"
+                                    })
+                                else:
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": f"⏳ Fetching live market metrics for *{target_sym}* ({tf_str})...",
+                                        "parse_mode": "Markdown"
+                                    })
+                                    
+                                    # Perform the calculation in a thread to keep updates polling responsive
+                                    def _run_confluence_bg(cid, sym, interval_val):
+                                        rep = run_manual_confluence_report(sym, interval_val)
+                                        execute_telegram_api_call("sendMessage", {
+                                            "chat_id": cid,
+                                            "text": rep,
+                                            "parse_mode": "Markdown"
+                                        })
+                                    threading.Thread(target=_run_confluence_bg, args=(sender_chat_id, target_sym, tf_mapping[tf_str]), daemon=True).start()
+
+                        elif text == "/retrain_status":
+                            status = bot_state.get("retraining_status", "Idle")
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": f"🔄 *Model Retraining Status:* `{status}`",
+                                "parse_mode": "Markdown"
+                            })
+
+                        elif text == "/logs":
+                            logs = "\n".join(log_buffer.buffer[-15:])
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": f"📋 *Latest Bot Logs:*\n\n```\n{logs}\n```",
                                 "parse_mode": "Markdown"
                             })
 
