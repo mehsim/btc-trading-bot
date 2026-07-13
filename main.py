@@ -5572,6 +5572,10 @@ def main():
                                     active_on_tf = tf_key
                                     break
                         
+                        # Session Filter: only open NEW trades during London (08-12 UTC) or New York (13-17 UTC)
+                        utc_hour = datetime.utcnow().hour
+                        in_session = (8 <= utc_hour < 12) or (13 <= utc_hour < 17)
+
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
@@ -5581,6 +5585,9 @@ def main():
                         elif already_active:
                             status_msg = "Skipped (Already Active)"
                             print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
+                        elif not in_session:
+                            status_msg = "Skipped (Off-Session)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
                         elif is_cooling:
                             status_msg = "Skipped (Cool-Off)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
