@@ -880,6 +880,10 @@ cached_news_sentiment = "Neutral"
 cached_news_titles = []
 news_sentiment_lock = threading.Lock()
 
+# Thread-safe real-time Order Flow (CVD & OFI)
+order_flow_lock = threading.Lock()
+order_flow_data = {} # {symbol: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, ...}}
+
 economic_calendar_cache = None
 last_calendar_fetch = 0.0
 economic_calendar_lock = threading.Lock()
@@ -2954,9 +2958,13 @@ def on_message(ws, message):
     last_ws_update_time = time.time()
     try:
         data = json.loads(message)
-        if "data" in data and isinstance(data["data"], dict):
-            sym = data["data"].get("symbol")
-            price_str = data["data"].get("lastPrice")
+        topic = data.get("topic", "")
+        
+        # 1. Price Tickers Handler
+        if topic.startswith("tickers."):
+            ticker_data = data.get("data", {})
+            sym = ticker_data.get("symbol")
+            price_str = ticker_data.get("lastPrice")
             if price_str and sym:
                 val = float(price_str)
                 bot_state[f"live_price_{sym}"] = val
@@ -2964,6 +2972,92 @@ def on_message(ws, message):
                     live_price = val
                     bot_state["live_price"] = val
                     bot_state["last_update"] = last_ws_update_time
+                    
+        # 2. Public Trade (CVD) Handler
+        elif topic.startswith("publicTrade."):
+            trade_list = data.get("data", [])
+            for t in trade_list:
+                sym = t.get("s")
+                side = t.get("S")
+                qty = float(t.get("v", 0.0))
+                if sym:
+                    with order_flow_lock:
+                        if sym not in order_flow_data:
+                            order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": []}
+                        order_flow_data[sym]["cvd"] += qty if side == "Buy" else -qty
+                        
+        # 3. Order Book L2 (OFI & Depth Cache) Handler
+        elif topic.startswith("orderbook.50."):
+            ob_data = data.get("data", {})
+            sym = ob_data.get("s")
+            bids = ob_data.get("b", [])
+            asks = ob_data.get("a", [])
+            
+            if sym:
+                with order_flow_lock:
+                    if sym not in order_flow_data:
+                        order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": []}
+                    
+                    state = order_flow_data[sym]
+                    
+                    # Reconstruct bids/asks cache for delta updates
+                    is_snapshot = (data.get("type") == "snapshot")
+                    if is_snapshot:
+                        state["latest_bids"] = bids[:25]
+                        state["latest_asks"] = asks[:25]
+                    else:
+                        if bids:
+                            cached_b = {float(p): float(s) for p, s in state["latest_bids"]}
+                            for p, s in bids:
+                                price, size = float(p), float(s)
+                                if size == 0.0:
+                                    cached_b.pop(price, None)
+                                else:
+                                    cached_b[price] = size
+                            state["latest_bids"] = sorted([[str(p), str(s)] for p, s in cached_b.items()], key=lambda x: float(x[0]), reverse=True)[:25]
+                        if asks:
+                            cached_a = {float(p): float(s) for p, s in state["latest_asks"]}
+                            for p, s in asks:
+                                price, size = float(p), float(s)
+                                if size == 0.0:
+                                    cached_a.pop(price, None)
+                                else:
+                                    cached_a[price] = size
+                            state["latest_asks"] = sorted([[str(p), str(s)] for p, s in cached_a.items()], key=lambda x: float(x[0]))[:25]
+
+                    # Compute L1 OFI (top of book price/size change)
+                    bids_cache = state["latest_bids"]
+                    asks_cache = state["latest_asks"]
+                    
+                    if bids_cache:
+                        bid_p = float(bids_cache[0][0])
+                        bid_q = float(bids_cache[0][1])
+                        if bid_p > state["prev_bid_price"]:
+                            db = bid_q
+                        elif bid_p == state["prev_bid_price"]:
+                            db = bid_q - state["prev_bid_size"]
+                        else:
+                            db = 0.0
+                        state["prev_bid_price"] = bid_p
+                        state["prev_bid_size"] = bid_q
+                    else:
+                        db = 0.0
+                        
+                    if asks_cache:
+                        ask_p = float(asks_cache[0][0])
+                        ask_q = float(asks_cache[0][1])
+                        if ask_p > state["prev_ask_price"]:
+                            da = 0.0
+                        elif ask_p == state["prev_ask_price"]:
+                            da = ask_q - state["prev_ask_size"]
+                        else:
+                            da = ask_q
+                        state["prev_ask_price"] = ask_p
+                        state["prev_ask_size"] = ask_q
+                    else:
+                        da = 0.0
+                        
+                    state["ofi"] += (db - da)
     except Exception as e:
         print(f"[WebSocket msg exception] {e}")
 
@@ -2973,10 +3067,16 @@ def on_open(ws):
     active_public_ws = ws
     last_ws_update_time = time.time()
     ws_retry_delay = 3  # Reset backoff on successful connection
-    print("Connected to Bybit WebSocket for multi-asset prices")
-    # Bybit public websocket ticker subscription allows at most 10 arguments per subscription message
+    print("Connected to Bybit WebSocket for multi-asset prices and order flow")
+    
+    # Subscribe to tickers, publicTrade, and orderbook topics for all supported symbols
+    args = []
+    for s in SUPPORTED_SYMBOLS:
+        args.append(f"tickers.{s}")
+        args.append(f"publicTrade.{s}")
+        args.append(f"orderbook.50.{s}")
+        
     chunk_size = 10
-    args = [f"tickers.{s}" for s in SUPPORTED_SYMBOLS]
     for i in range(0, len(args), chunk_size):
         chunk = args[i:i + chunk_size]
         ws.send(json.dumps({
@@ -3535,12 +3635,45 @@ def get_news_sentiment():
         return "Neutral", []
 
     try:
-        # Lazy load FinBERT pipeline (approx. 400MB download on first run)
+        token = os.environ.get("HF_TOKEN") or os.environ.get("token")
+        if token:
+            import requests
+            API_URL = "https://api-inference.huggingface.co/models/ProsusAI/finbert"
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            total_score = 0.0
+            processed = 0
+            print(f"[News/Sentiment Serverless] Querying HF Inference API for {len(cleaned_titles)} inputs...")
+            for text in cleaned_titles:
+                try:
+                    resp = requests.post(API_URL, headers=headers, json={"inputs": text[:300]}, timeout=5)
+                    if resp.status_code == 200:
+                        res = resp.json()
+                        if isinstance(res, list) and len(res) > 0 and isinstance(res[0], list):
+                            scores = {item["label"].lower(): item["score"] for item in res[0]}
+                            bullish = scores.get("positive", 0.0)
+                            bearish = scores.get("negative", 0.0)
+                            total_score += (bullish - bearish)
+                            processed += 1
+                except Exception as e:
+                    pass
+            
+            if processed > 0:
+                avg_score = total_score / processed
+                sentiment = "Neutral"
+                if avg_score > 0.15:
+                    sentiment = "Bullish"
+                elif avg_score < -0.15:
+                    sentiment = "Bearish"
+                print(f"[News/Sentiment Serverless] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
+                return sentiment, cleaned_titles
+
+        # Local pipeline fallback if HF_TOKEN is missing
         if sentiment_pipeline is None:
             from transformers import pipeline
             sentiment_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=-1)
 
-        print(f"[News/Sentiment] Running FinBERT sentiment analysis on {len(cleaned_titles)} text inputs...")
+        print(f"[News/Sentiment Local] Running local FinBERT pipeline on {len(cleaned_titles)} inputs...")
         results = sentiment_pipeline(cleaned_titles)
         
         total_score = 0.0
@@ -3560,10 +3693,10 @@ def get_news_sentiment():
         elif avg_score < -0.15:
             sentiment = "Bearish"
             
-        print(f"[News/Sentiment] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated Sentiment: {sentiment}")
+        print(f"[News/Sentiment Local] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
         return sentiment, cleaned_titles
     except Exception as e:
-        print(f"[News/Sentiment] Error executing FinBERT pipeline: {e}")
+        print(f"[News/Sentiment] Error executing FinBERT analysis: {e}")
     return "Neutral", []
 
 def run_news_sentiment_updater():
@@ -3680,6 +3813,32 @@ def add_news_proximity_feature(df):
 def get_orderbook_imbalance(symbol=None):
     if symbol is None:
         symbol = SYMBOL
+        
+    # WebSocket Cache Check (Instantly bypass HTTP request if cache is warm)
+    with order_flow_lock:
+        cached = order_flow_data.get(symbol)
+        if cached and cached.get("latest_bids") and cached.get("latest_asks"):
+            bids = cached["latest_bids"]
+            asks = cached["latest_asks"]
+            try:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                mid_price = (best_bid + best_ask) / 2.0
+                spread = (best_ask - best_bid) / mid_price if mid_price > 0 else 0.0
+                
+                # Calculate weighted imbalance over top 10 levels
+                bid_vol = 0.0
+                ask_vol = 0.0
+                for i in range(min(10, len(bids), len(asks))):
+                    w = 1.0 / (i + 1.0)
+                    bid_vol += float(bids[i][1]) * w
+                    ask_vol += float(asks[i][1]) * w
+                    
+                imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-9)
+                return {"imbalance": imbalance, "spread": spread}
+            except Exception as cache_err:
+                pass
+
     try:
         url = f"{BYBIT_BASE_URL}/v5/market/orderbook"
         headers = {
