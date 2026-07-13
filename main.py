@@ -169,7 +169,7 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict, verify=False)
+        resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict, verify=True)
         if resp.status_code == 200:
             return resp.json()
         return {}
