@@ -919,9 +919,11 @@ def start_telegram_command_listener():
                                                     
                                                     with active_trades_lock:
                                                         active_list = bot_state.get("active_trade_1h", [])
-                                                        active_list.append(new_trade)
-                                                        bot_state["active_trade_1h"] = active_list
-                                                        save_history()
+                                                        exists = any(t.get("symbol") == sym for t in active_list)
+                                                        if not exists:
+                                                            active_list.append(new_trade)
+                                                            bot_state["active_trade_1h"] = active_list
+                                                            save_history()
                                                         
                                                     execute_telegram_api_call("sendMessage", {
                                                         "chat_id": cid,
@@ -5499,7 +5501,7 @@ def sync_active_positions_from_bybit():
             # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
             recovered = 0
             for symbol, pos in open_positions.items():
-                if symbol not in matched_symbols and symbol in SUPPORTED_SYMBOLS:
+                if symbol not in matched_symbols:
                     avg_price = float(pos.get("avgPrice", "0"))
                     liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
                     mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
