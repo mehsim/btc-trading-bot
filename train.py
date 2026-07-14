@@ -772,8 +772,19 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
         sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
-        final_ensemble_t.fit(X, y_trend, sample_weight=sample_weight_full, X_val=X_val, y_val=y_val_t)
-        final_ensemble_p.fit(X, y_price, X_val=X_val, y_val=y_val_p)
+        sample_weight_train_last = compute_sample_weight(class_weight='balanced', y=y_train_t)
+        
+        final_ensemble_t.fit(
+            X, y_trend, sample_weight=sample_weight_full, 
+            X_val=X_val, y_val=y_val_t, 
+            X_train=X_train, y_train=y_train_t, 
+            sample_weight_train=sample_weight_train_last
+        )
+        final_ensemble_p.fit(
+            X, y_price, 
+            X_val=X_val, y_val=y_val_p, 
+            X_train=X_train, y_train=y_train_p
+        )
         
         # Save models to disk using native text/JSON saving methods
         import os

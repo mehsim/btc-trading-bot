@@ -56,14 +56,9 @@ class EnsembleClassifier:
         self.meta_coef_ = None
         self.meta_intercept_ = None
 
-    def fit(self, X, y, sample_weight=None, X_val=None, y_val=None):
+    def fit(self, X, y, sample_weight=None, X_val=None, y_val=None, X_train=None, y_train=None, sample_weight_train=None):
         X_arr = np.asarray(X, dtype=float)
-        self.xgb_model.fit(X_arr, y, sample_weight=sample_weight)
-        if self.lgb_model is not None:
-            self.lgb_model.fit(X_arr, y, sample_weight=sample_weight)
-        if self.cat_model is not None:
-            self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
-            
+        
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
         self.meta_coef_ = None
         self.meta_intercept_ = None
@@ -73,9 +68,18 @@ class EnsembleClassifier:
             try:
                 from sklearn.metrics import accuracy_score
                 from sklearn.linear_model import LogisticRegression
-                X_v_arr = np.asarray(X_val, dtype=float)
                 
-                # Calibrate standard weighted average metrics as baseline
+                # Fit base models on training fold ONLY to avoid data leakage
+                X_tr = X_train if X_train is not None else X
+                y_tr = y_train if y_train is not None else y
+                w_tr = sample_weight_train if sample_weight_train is not None else sample_weight
+                
+                X_tr_arr = np.asarray(X_tr, dtype=float)
+                self.xgb_model.fit(X_tr_arr, y_tr, sample_weight=w_tr)
+                self.lgb_model.fit(X_tr_arr, y_tr, sample_weight=w_tr)
+                self.cat_model.fit(X_tr_arr, y_tr, sample_weight=w_tr)
+                
+                X_v_arr = np.asarray(X_val, dtype=float)
                 xgb_acc = accuracy_score(y_val, self.xgb_model.predict(X_v_arr))
                 lgb_acc = accuracy_score(y_val, self.lgb_model.predict(X_v_arr))
                 cat_acc = accuracy_score(y_val, self.cat_model.predict(X_v_arr))
@@ -95,9 +99,16 @@ class EnsembleClassifier:
                 meta_clf.fit(X_meta, y_val)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
-                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully.")
+                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully (leak-free).")
             except Exception as e:
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
+                
+        # Now refit base models on the ENTIRE dataset for live trading
+        self.xgb_model.fit(X_arr, y, sample_weight=sample_weight)
+        if self.lgb_model is not None:
+            self.lgb_model.fit(X_arr, y, sample_weight=sample_weight)
+        if self.cat_model is not None:
+            self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
         return self
 
     def predict_proba(self, X, weights=None):
@@ -143,14 +154,9 @@ class EnsembleRegressor:
         self.meta_coef_ = None
         self.meta_intercept_ = None
 
-    def fit(self, X, y, X_val=None, y_val=None):
+    def fit(self, X, y, X_val=None, y_val=None, X_train=None, y_train=None):
         X_arr = np.asarray(X, dtype=float)
-        self.xgb_model.fit(X_arr, y)
-        if self.lgb_model is not None:
-            self.lgb_model.fit(X_arr, y)
-        if self.cat_model is not None:
-            self.cat_model.fit(X_arr, y)
-            
+        
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
         self.meta_coef_ = None
         self.meta_intercept_ = None
@@ -159,9 +165,17 @@ class EnsembleRegressor:
             try:
                 from sklearn.metrics import mean_absolute_error
                 from sklearn.linear_model import Ridge
-                X_v_arr = np.asarray(X_val, dtype=float)
                 
-                # Calibrate standard weighted average metrics as baseline
+                # Fit base models on training fold ONLY to avoid data leakage
+                X_tr = X_train if X_train is not None else X
+                y_tr = y_train if y_train is not None else y
+                
+                X_tr_arr = np.asarray(X_tr, dtype=float)
+                self.xgb_model.fit(X_tr_arr, y_tr)
+                self.lgb_model.fit(X_tr_arr, y_tr)
+                self.cat_model.fit(X_tr_arr, y_tr)
+                
+                X_v_arr = np.asarray(X_val, dtype=float)
                 xgb_mae = mean_absolute_error(y_val, self.xgb_model.predict(X_v_arr))
                 lgb_mae = mean_absolute_error(y_val, self.lgb_model.predict(X_v_arr))
                 cat_mae = mean_absolute_error(y_val, self.cat_model.predict(X_v_arr))
@@ -183,6 +197,13 @@ class EnsembleRegressor:
                 print(f"[Ensemble Stacking] Regressor Meta-Learner calibrated successfully.")
             except Exception as e:
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
+                
+        # Now refit base models on the ENTIRE dataset for live trading
+        self.xgb_model.fit(X_arr, y)
+        if self.lgb_model is not None:
+            self.lgb_model.fit(X_arr, y)
+        if self.cat_model is not None:
+            self.cat_model.fit(X_arr, y)
         return self
 
     def predict(self, X, weights=None):
