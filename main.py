@@ -4895,7 +4895,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     try:
         vol_series = df_1h["volume"]
         avg_vol_20 = vol_series.iloc[:-1].rolling(20).mean().iloc[-1]
-        latest_vol = vol_series.iloc[-2]
+        latest_vol = vol_series.iloc[-1]
         rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
         volume_pass = (rvol >= 1.5)
         if not volume_pass:
@@ -4926,9 +4926,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= CHECK 6: Counter-Momentum Guard (Weight: 2) =======
     weight_cm = 2
     try:
-        c1 = df_1h.iloc[-2]
-        c2 = df_1h.iloc[-3]
-        c3 = df_1h.iloc[-4]
+        c1 = df_1h.iloc[-1]
+        c2 = df_1h.iloc[-2]
+        c3 = df_1h.iloc[-3]
         is_red = [c1["close"] < c1["open"], c2["close"] < c2["open"], c3["close"] < c3["open"]]
         is_green = [c1["close"] > c1["open"], c2["close"] > c2["open"], c3["close"] > c3["open"]]
         if ml_trend == "Bullish":
@@ -5381,7 +5381,14 @@ def sync_active_positions_from_bybit():
                         t["bybit_closed"] = False
                         
                         conf_val = t.get("confidence", 0.0)
-                        if conf_val != "MT" and float(conf_val) == 0.0:
+                        is_zero_conf = False
+                        if conf_val is not None and conf_val != "MT":
+                            try:
+                                is_zero_conf = (float(conf_val) == 0.0)
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        if is_zero_conf:
                             trade_dir = t.get("direction", "Bullish")
                             for p in reversed(bot_state.get("prediction_history", [])):
                                 if p.get("symbol") == symbol and p.get("direction") == trade_dir:
@@ -6314,7 +6321,7 @@ def main():
                             "pnl_usd": float(total_pnl),
                             "balance": float(new_bal),
                             "leverage": float(leverage),
-                            "confidence": active_trade.get("confidence") if active_trade.get("confidence") == "MT" else float(active_trade.get("confidence", 0.0)),
+                            "confidence": active_trade.get("confidence") if active_trade.get("confidence") == "MT" else float(active_trade.get("confidence") or 0.0),
                             "take_profit": float(active_trade.get("take_profit", 0.0)),
                             "stop_loss": float(active_trade.get("stop_loss", 0.0)),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
@@ -6802,7 +6809,7 @@ def main():
                         confluence_blocked = False
                         htf_trend = "Neutral"
                         macro_tf = ""
-                        htf_mapping = {60: 240, 120: 360}
+                        htf_mapping = {"60": "240", "120": "360"}
                         if iv in htf_mapping:
                             macro_iv = htf_mapping[iv]
                             macro_tf = tf_map.get(str(macro_iv))
@@ -7254,11 +7261,11 @@ def main():
                                                 if bybit_success:
                                                     # 3. Recalculate SL/TP targets based on actual entry_price
                                                     if ml_trend == "Bullish":
-                                                        stop_loss_price = entry_price - sl_multiplier * atr_dollars
+                                                        stop_loss_price = entry_price - sl_multiplier_adjusted * atr_dollars
                                                         est_tp_price = estimate_liquidation_pool(df_completed, "Bullish", entry_price)
                                                         take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars)
                                                     else:
-                                                        stop_loss_price = entry_price + sl_multiplier * atr_dollars
+                                                        stop_loss_price = entry_price + sl_multiplier_adjusted * atr_dollars
                                                         est_tp_price = estimate_liquidation_pool(df_completed, "Bearish", entry_price)
                                                         take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars)
                                                         

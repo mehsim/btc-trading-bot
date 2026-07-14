@@ -15,7 +15,8 @@ from main import (
     calculate_historical_thresholds,
     SYMBOL,
     INTERVAL,
-    features
+    features,
+    TIMEFRAME_CONFIG
 )
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
@@ -46,18 +47,27 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if adx_val >= 20.0:
             pred_pct = float(models_trending["price"].predict(row_X)[0])
             pred_change = pred_pct * close_price
-            prob_bullish = float(models_trending["trend"].predict_proba(row_X)[0][1])
+            probs = models_trending["trend"].predict_proba(row_X)[0]
         else:
             pred_pct = float(models_ranging["price"].predict(row_X)[0])
             pred_change = pred_pct * close_price
-            prob_bullish = float(models_ranging["trend"].predict_proba(row_X)[0][1])
+            probs = models_ranging["trend"].predict_proba(row_X)[0]
 
-        if prob_bullish >= 0.50:
+        winning_class = int(np.argmax(probs))
+        if winning_class == 2:
             ml_trend = "Bullish"
-            ml_confidence = prob_bullish
-        else:
+            ml_confidence = float(probs[2])
+        elif winning_class == 0:
             ml_trend = "Bearish"
-            ml_confidence = 1.0 - prob_bullish
+            ml_confidence = float(probs[0])
+        else:
+            ml_trend = "Neutral"
+            ml_confidence = float(probs[1])
+
+        # Skip Neutral trades
+        if ml_trend == "Neutral":
+            i += 1
+            continue
 
         calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
         expected_pct_change = (abs(pred_change) / close_price) * 100
@@ -163,37 +173,58 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             stop_loss = entry_price + 0.75 * atr_dollars
             take_profit = entry_price - tp_multiplier * atr_dollars
 
-        next_high = df.loc[i+1, "high"]
-        next_low = df.loc[i+1, "low"]
-        next_close = df.loc[i+1, "close"]
+        # Look up to lookahead candles
+        cfg = TIMEFRAME_CONFIG.get(str(INTERVAL), {"lookahead": 10})
+        lookahead = cfg.get("lookahead", 10)
         
-        exit_price = next_close
+        exit_price = df.loc[min(i + lookahead, total_candles - 1), "close"]
         exit_reason = "Timer Elapsed"
+        candles_elapsed = lookahead
 
-        if ml_trend == "Bullish":
-            sl_hit = (next_low <= stop_loss)
-            tp_hit = (next_high >= take_profit)
-            if sl_hit and tp_hit:
-                exit_price = stop_loss
-                exit_reason = "Stop Loss Hit"
-            elif sl_hit:
-                exit_price = stop_loss
-                exit_reason = "Stop Loss Hit"
-            elif tp_hit:
-                exit_price = take_profit
-                exit_reason = "Take Profit Hit"
-        else:
-            sl_hit = (next_high >= stop_loss)
-            tp_hit = (next_low <= take_profit)
-            if sl_hit and tp_hit:
-                exit_price = stop_loss
-                exit_reason = "Stop Loss Hit"
-            elif sl_hit:
-                exit_price = stop_loss
-                exit_reason = "Stop Loss Hit"
-            elif tp_hit:
-                exit_price = take_profit
-                exit_reason = "Take Profit Hit"
+        for step in range(1, lookahead + 1):
+            if i + step >= total_candles:
+                candles_elapsed = step - 1
+                break
+            
+            next_high = df.loc[i + step, "high"]
+            next_low = df.loc[i + step, "low"]
+            
+            if ml_trend == "Bullish":
+                sl_hit = (next_low <= stop_loss)
+                tp_hit = (next_high >= take_profit)
+                if sl_hit and tp_hit:
+                    exit_price = stop_loss
+                    exit_reason = "Stop Loss Hit"
+                    candles_elapsed = step
+                    break
+                elif sl_hit:
+                    exit_price = stop_loss
+                    exit_reason = "Stop Loss Hit"
+                    candles_elapsed = step
+                    break
+                elif tp_hit:
+                    exit_price = take_profit
+                    exit_reason = "Take Profit Hit"
+                    candles_elapsed = step
+                    break
+            else:
+                sl_hit = (next_high >= stop_loss)
+                tp_hit = (next_low <= take_profit)
+                if sl_hit and tp_hit:
+                    exit_price = stop_loss
+                    exit_reason = "Stop Loss Hit"
+                    candles_elapsed = step
+                    break
+                elif sl_hit:
+                    exit_price = stop_loss
+                    exit_reason = "Stop Loss Hit"
+                    candles_elapsed = step
+                    break
+                elif tp_hit:
+                    exit_price = take_profit
+                    exit_reason = "Take Profit Hit"
+                    candles_elapsed = step
+                    break
 
         if ml_trend == "Bullish":
             gross_return = (exit_price - entry_price) / entry_price
@@ -212,7 +243,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         trades.append({
             "net_return": net_return
         })
-        i += 1
+        i += max(1, candles_elapsed)
 
     total_trades = len(trades)
     if total_trades == 0:
