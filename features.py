@@ -250,6 +250,23 @@ def add_features(df, fetch_calendar_callback=None):
     # 1D Kalman Filter trend feature
     df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values)
 
+    # Advanced Microstructure Features
+    dp_ret = df["close"].pct_change(1).fillna(0.0)
+    autocov = dp_ret.rolling(24).cov(dp_ret.shift(1)).fillna(0.0)
+    df["roll_spread"] = 2.0 * np.sqrt(np.maximum(0.0, -autocov))
+    df["leverage_divergence"] = df["open_interest_pct_change"] - dp_ret
+    df["oi_velocity"] = df["open_interest_pct_change"].diff(1).fillna(0.0)
+    df["funding_acceleration"] = df["funding_rate_diff"].diff(1).fillna(0.0)
+    df["bid_ask_imbalance_ohlc"] = (df["close"] - df["low"]) / (high_low_range) - 0.5
+    
+    # Lag advanced microstructure features
+    for lag in [1, 2]:
+        df[f"roll_spread_lag{lag}"] = df["roll_spread"].shift(lag)
+        df[f"leverage_divergence_lag{lag}"] = df["leverage_divergence"].shift(lag)
+        df[f"oi_velocity_lag{lag}"] = df["oi_velocity"].shift(lag)
+        df[f"funding_acceleration_lag{lag}"] = df["funding_acceleration"].shift(lag)
+        df[f"bid_ask_imbalance_ohlc_lag{lag}"] = df["bid_ask_imbalance_ohlc"].shift(lag)
+
     df = add_news_proximity_feature(df, fetch_calendar_callback)
     df.dropna(inplace=True)
     return df

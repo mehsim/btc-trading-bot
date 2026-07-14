@@ -4097,6 +4097,15 @@ for lag in [1, 2]:
     features.append(f"btc_volume_lag{lag}")
     features.append(f"btc_rsi_lag{lag}")
 
+# Advanced Microstructure features
+features.extend(["roll_spread", "leverage_divergence", "oi_velocity", "funding_acceleration", "bid_ask_imbalance_ohlc"])
+for lag in [1, 2]:
+    features.append(f"roll_spread_lag{lag}")
+    features.append(f"leverage_divergence_lag{lag}")
+    features.append(f"oi_velocity_lag{lag}")
+    features.append(f"funding_acceleration_lag{lag}")
+    features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
+
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 
 

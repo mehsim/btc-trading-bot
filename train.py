@@ -177,6 +177,15 @@ for lag in [1, 2]:
     features.append(f"btc_volume_lag{lag}")
     features.append(f"btc_rsi_lag{lag}")
 
+# Advanced Microstructure features
+features.extend(["roll_spread", "leverage_divergence", "oi_velocity", "funding_acceleration", "bid_ask_imbalance_ohlc"])
+for lag in [1, 2]:
+    features.append(f"roll_spread_lag{lag}")
+    features.append(f"leverage_divergence_lag{lag}")
+    features.append(f"oi_velocity_lag{lag}")
+    features.append(f"funding_acceleration_lag{lag}")
+    features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
+
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
     global economic_calendar_cache
     with economic_calendar_lock:
@@ -616,6 +625,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             X_val, y_val_t, y_val_p = X.iloc[val_idx], y_trend.iloc[val_idx], y_price.iloc[val_idx]
             
             sample_weight_train = compute_sample_weight(class_weight='balanced', y=y_train_t)
+            decay_weights = np.linspace(0.3, 1.0, len(y_train_t))
+            sample_weight_train = sample_weight_train * decay_weights
             
             if first_fold:
                 print("  Optimizing hyperparameters on first fold...")
@@ -772,7 +783,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
         sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
+        decay_full = np.linspace(0.3, 1.0, len(y_trend))
+        sample_weight_full = sample_weight_full * decay_full
+        
         sample_weight_train_last = compute_sample_weight(class_weight='balanced', y=y_train_t)
+        decay_train_last = np.linspace(0.3, 1.0, len(y_train_t))
+        sample_weight_train_last = sample_weight_train_last * decay_train_last
         
         final_ensemble_t.fit(
             X, y_trend, sample_weight=sample_weight_full, 
