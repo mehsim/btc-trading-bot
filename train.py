@@ -21,7 +21,7 @@ from sklearn.metrics import accuracy_score, mean_absolute_error
 from data import get_history, merge_derivatives_sentiment_features
 import threading
 import requests
-import features
+import features as features_module
 from datetime import datetime, timedelta
 
 # Dynamic GPU training hardware auto-detection
@@ -227,7 +227,7 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
         return economic_calendar_cache
 
 def add_features(df):
-    return features.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
+    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
 
 def add_triple_barrier_labels(df, interval):
     atr = df["ATR_norm"] * df["close"]
@@ -776,11 +776,60 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_ensemble_p.fit(X, y_price)
         
         # Save models to disk using native text/JSON saving methods
-        save_ensemble_classifier(final_ensemble_t, f"ensemble_{name}_trend_{interval}")
-        save_ensemble_regressor(final_ensemble_p, f"ensemble_{name}_price_{interval}")
-        meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+        import os
+        from ensemble import load_ensemble_classifier, load_ensemble_regressor
         
-        print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
+        c_prefix_t = f"ensemble_{name}_trend_{interval}"
+        c_prefix_p = f"ensemble_{name}_price_{interval}"
+        
+        # Check if champion model exists
+        champion_exists = os.path.exists(f"{c_prefix_t}_xgb.json")
+        
+        should_save = True
+        if champion_exists:
+            try:
+                # Load existing champion
+                champion_t = load_ensemble_classifier(c_prefix_t, n_features=X_val.shape[1])
+                champion_p = load_ensemble_regressor(c_prefix_p, n_features=X_val.shape[1])
+                
+                # Evaluate champion on the last validation fold
+                champ_pred_t = champion_t.predict(X_val)
+                champ_pred_p = champion_p.predict(X_val)
+                champ_acc = accuracy_score(y_val_t, champ_pred_t)
+                champ_mae = mean_absolute_error(y_val_p, champ_pred_p)
+                
+                # Evaluate challenger on the last validation fold
+                chal_pred_t = final_ensemble_t.predict(X_val)
+                chal_pred_p = final_ensemble_p.predict(X_val)
+                chal_acc = accuracy_score(y_val_t, chal_pred_t)
+                chal_mae = mean_absolute_error(y_val_p, chal_pred_p)
+                
+                print(f"  [Champion-Challenger] Validation Comparison for {name.upper()}:")
+                print(f"    - Classifier Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
+                print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
+                
+                # Update if accuracy is strictly better, or equal accuracy with lower MAE
+                if chal_acc > champ_acc:
+                    should_save = True
+                elif chal_acc == champ_acc and chal_mae < champ_mae:
+                    should_save = True
+                else:
+                    should_save = False
+            except Exception as eval_err:
+                print(f"  [Champion-Challenger Warning] Error comparing models, defaulting to save: {eval_err}")
+                should_save = True
+        else:
+            print(f"  [Champion-Challenger] No existing champion model for {name.upper()}. Saving challenger.")
+            should_save = True
+            
+        if should_save:
+            print(f"  [Champion-Challenger] Challenger approved. Overwriting active model files...")
+            save_ensemble_classifier(final_ensemble_t, c_prefix_t)
+            save_ensemble_regressor(final_ensemble_p, c_prefix_p)
+            meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+            print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
+        else:
+            print(f"  [Champion-Challenger] Champion model retained (Challenger did not show improvement).")
 
     # Split dataset based on GMM Unsupervised Regime Classification
     from sklearn.mixture import GaussianMixture
