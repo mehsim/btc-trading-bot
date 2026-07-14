@@ -180,12 +180,14 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             err_str = str(e).lower()
             is_eof = "eof occurred" in err_str or "unexpected eof" in err_str or "connection aborted" in err_str
             
-            if custom_url and tg_proxy:
+            if custom_url:
                 try:
                     fallback_url = f"https://api.telegram.org/bot{token}/{method}"
-                    tg_clean = tg_proxy.split("://", 1)[-1]
-                    socks = {"http": f"socks5h://{tg_clean}", "https": f"socks5h://{tg_clean}"}
-                    resp2 = requests.post(fallback_url, json=payload, headers=headers, timeout=20, proxies=socks)
+                    fallback_proxies = None
+                    if tg_proxy:
+                        tg_clean = tg_proxy.split("://", 1)[-1]
+                        fallback_proxies = {"http": f"socks5h://{tg_clean}", "https": f"socks5h://{tg_clean}"}
+                    resp2 = requests.post(fallback_url, json=payload, headers=headers, timeout=20, proxies=fallback_proxies)
                     if resp2.status_code == 200:
                         return resp2.json()
                 except Exception:
