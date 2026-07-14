@@ -7159,6 +7159,17 @@ def main():
                                             if scaled_leverage > leverage_val:
                                                 leverage_val = scaled_leverage
                                                 print(f"[{symbol} {iv}m Leverage Scaling] Increased leverage to {leverage_val}x to meet minimum order size within balance limits.")
+                                                
+                                            # Recalculate margin after leverage scale-up
+                                            required_margin = (qty_val * entry_price) / leverage_val
+                                            if required_margin > current_bal * 0.95:
+                                                # Downscale quantity to fit 90% of available balance
+                                                max_margin = current_bal * 0.90
+                                                new_raw_qty = (max_margin * leverage_val) / entry_price
+                                                qty_str = format_bybit_qty(symbol, new_raw_qty)
+                                                qty_val = float(qty_str)
+                                                raw_qty = qty_val
+                                                print(f"[{symbol} {iv}m Balance Guard] Downscaled order quantity to {qty_str} to fit within 90% of available balance (Margin: ${max_margin:.2f})")
 
                                         # Set Bybit Leverage and Place Order if in live/testnet mode
                                         bybit_success = True

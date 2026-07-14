@@ -179,7 +179,7 @@ def add_features(df, fetch_calendar_callback=None):
     # Attempt to merge TRUE historical CVD/OFI from SQLite (WebSocket-aggregated)
     try:
         import sqlite3, os
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.db")
         sym = df.attrs.get("symbol", "BTCUSDT") if hasattr(df, "attrs") else "BTCUSDT"
         with sqlite3.connect(db_path, timeout=10) as conn:
             of_df = pd.read_sql_query(
