@@ -45,13 +45,16 @@ class PurgedEmbargoTimeSeriesSplit:
 
 class EnsembleClassifier:
     """
-    Blends XGBoost, LightGBM, and CatBoost classifiers using performance-weighted probability voting.
+    Blends XGBoost, LightGBM, and CatBoost classifiers using a Stacking Meta-Classifier
+    (Logistic Regression) with validation-calibrated coefficients and fallbacks.
     """
     def __init__(self, xgb_model, lgb_model=None, cat_model=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
+        self.meta_coef_ = None
+        self.meta_intercept_ = None
 
     def fit(self, X, y, sample_weight=None, X_val=None, y_val=None):
         X_arr = np.asarray(X, dtype=float)
@@ -62,37 +65,67 @@ class EnsembleClassifier:
             self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
             
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
+        self.meta_coef_ = None
+        self.meta_intercept_ = None
+        
+        # Fit stacking meta-classifier on validation out-of-fold predictions
         if X_val is not None and y_val is not None and self.lgb_model is not None and self.cat_model is not None:
             try:
                 from sklearn.metrics import accuracy_score
+                from sklearn.linear_model import LogisticRegression
                 X_v_arr = np.asarray(X_val, dtype=float)
+                
+                # Calibrate standard weighted average metrics as baseline
                 xgb_acc = accuracy_score(y_val, self.xgb_model.predict(X_v_arr))
                 lgb_acc = accuracy_score(y_val, self.lgb_model.predict(X_v_arr))
                 cat_acc = accuracy_score(y_val, self.cat_model.predict(X_v_arr))
-                
                 raw_weights = [max(0.01, xgb_acc), max(0.01, lgb_acc), max(0.01, cat_acc)]
                 sum_w = sum(raw_weights)
                 self.weights = [w / sum_w for w in raw_weights]
-                print(f"[Ensemble Weighting] Classifier Weights calibrated: XGB={self.weights[0]:.3f}, LGB={self.weights[1]:.3f}, CAT={self.weights[2]:.3f}")
+                
+                # Extract validation probabilities from each base model
+                p_xgb = self.xgb_model.predict_proba(X_v_arr)
+                p_lgb = self.lgb_model.predict_proba(X_v_arr)
+                p_cat = self.cat_model.predict_proba(X_v_arr)
+                
+                # Stack features for meta-learner (multi-class probabilities stacked column-wise)
+                X_meta = np.column_stack([p_xgb, p_lgb, p_cat])
+                
+                meta_clf = LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42)
+                meta_clf.fit(X_meta, y_val)
+                self.meta_coef_ = meta_clf.coef_.tolist()
+                self.meta_intercept_ = meta_clf.intercept_.tolist()
+                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully.")
             except Exception as e:
-                print(f"[Ensemble Weighting Warning] Failed to calibrate weights: {e}")
+                print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
         return self
 
     def predict_proba(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
         xgb_prob = self.xgb_model.predict_proba(X_arr)
-        if self.lgb_model is None or self.cat_model is None:
-            return xgb_prob
+        if self.lgb_model is None or self.cat_model is None or self.meta_coef_ is None:
+            # Fallback to performance-weighted blending if base models or meta-coefficients are missing
+            w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+            w = np.array(w_to_use, dtype=float)
+            w = w / np.sum(w)
+            if self.lgb_model is None or self.cat_model is None:
+                return xgb_prob
+            lgb_prob = self.lgb_model.predict_proba(X_arr)
+            cat_prob = self.cat_model.predict_proba(X_arr)
+            return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+            
         lgb_prob = self.lgb_model.predict_proba(X_arr)
         cat_prob = self.cat_model.predict_proba(X_arr)
         
-        w_to_use = weights
-        if w_to_use is None:
-            w_to_use = getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
-            
-        w = np.array(w_to_use, dtype=float)
-        w = w / np.sum(w)
-        return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+        # Stack probabilities for prediction
+        X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])
+        
+        from sklearn.linear_model import LogisticRegression
+        meta_clf = LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42)
+        meta_clf.coef_ = np.array(self.meta_coef_)
+        meta_clf.intercept_ = np.array(self.meta_intercept_)
+        meta_clf.classes_ = np.array([0, 1, 2])
+        return meta_clf.predict_proba(X_meta)
 
     def predict(self, X, weights=None):
         probs = self.predict_proba(X, weights=weights)
@@ -100,13 +133,15 @@ class EnsembleClassifier:
 
 class EnsembleRegressor:
     """
-    Blends XGBoost, LightGBM, and CatBoost regressors using performance-weighted averaging.
+    Blends XGBoost, LightGBM, and CatBoost regressors using a Stacking Meta-Regressor (Ridge).
     """
     def __init__(self, xgb_model, lgb_model=None, cat_model=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
+        self.meta_coef_ = None
+        self.meta_intercept_ = None
 
     def fit(self, X, y, X_val=None, y_val=None):
         X_arr = np.asarray(X, dtype=float)
@@ -117,37 +152,64 @@ class EnsembleRegressor:
             self.cat_model.fit(X_arr, y)
             
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
+        self.meta_coef_ = None
+        self.meta_intercept_ = None
+        
         if X_val is not None and y_val is not None and self.lgb_model is not None and self.cat_model is not None:
             try:
                 from sklearn.metrics import mean_absolute_error
+                from sklearn.linear_model import Ridge
                 X_v_arr = np.asarray(X_val, dtype=float)
+                
+                # Calibrate standard weighted average metrics as baseline
                 xgb_mae = mean_absolute_error(y_val, self.xgb_model.predict(X_v_arr))
                 lgb_mae = mean_absolute_error(y_val, self.lgb_model.predict(X_v_arr))
                 cat_mae = mean_absolute_error(y_val, self.cat_model.predict(X_v_arr))
-                
                 raw_weights = [1.0 / max(1e-6, xgb_mae), 1.0 / max(1e-6, lgb_mae), 1.0 / max(1e-6, cat_mae)]
                 sum_w = sum(raw_weights)
                 self.weights = [w / sum_w for w in raw_weights]
-                print(f"[Ensemble Weighting] Regressor Weights calibrated: XGB={self.weights[0]:.3f}, LGB={self.weights[1]:.3f}, CAT={self.weights[2]:.3f}")
+                
+                # Extract predictions for stacking
+                p_xgb = self.xgb_model.predict(X_v_arr)
+                p_lgb = self.lgb_model.predict(X_v_arr)
+                p_cat = self.cat_model.predict(X_v_arr)
+                
+                X_meta = np.column_stack([p_xgb, p_lgb, p_cat])
+                
+                meta_reg = Ridge(alpha=1.0, random_state=42)
+                meta_reg.fit(X_meta, y_val)
+                self.meta_coef_ = meta_reg.coef_.tolist()
+                self.meta_intercept_ = float(meta_reg.intercept_)
+                print(f"[Ensemble Stacking] Regressor Meta-Learner calibrated successfully.")
             except Exception as e:
-                print(f"[Ensemble Weighting Warning] Failed to calibrate weights: {e}")
+                print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
         return self
 
     def predict(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
         xgb_pred = self.xgb_model.predict(X_arr)
-        if self.lgb_model is None or self.cat_model is None:
-            return xgb_pred
+        if self.lgb_model is None or self.cat_model is None or self.meta_coef_ is None:
+            # Fallback to performance-weighted average if any base models or meta-coefficients are missing
+            w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+            w = np.array(w_to_use, dtype=float)
+            w = w / np.sum(w)
+            if self.lgb_model is None or self.cat_model is None:
+                return xgb_pred
+            lgb_pred = self.lgb_model.predict(X_arr)
+            cat_pred = self.cat_model.predict(X_arr)
+            return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
+            
         lgb_pred = self.lgb_model.predict(X_arr)
         cat_pred = self.cat_model.predict(X_arr)
         
-        w_to_use = weights
-        if w_to_use is None:
-            w_to_use = getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
-            
-        w = np.array(w_to_use, dtype=float)
-        w = w / np.sum(w)
-        return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
+        # Apply Ridge meta-model
+        X_meta = np.column_stack([xgb_pred, lgb_pred, cat_pred])
+        
+        from sklearn.linear_model import Ridge
+        meta_reg = Ridge(alpha=1.0, random_state=42)
+        meta_reg.coef_ = np.array(self.meta_coef_)
+        meta_reg.intercept_ = float(self.meta_intercept_)
+        return meta_reg.predict(X_meta)
 
 # ==========================================
 # NATIVE SAVING/LOADING (TEXT/JSON ONLY)
@@ -159,9 +221,13 @@ def save_ensemble_classifier(model, prefix):
     model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
     model.cat_model.save_model(f"{prefix}_cat.json", format="json")
     
-    weights = getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+    meta_data = {
+        "weights": getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0]),
+        "meta_coef": getattr(model, "meta_coef_", None),
+        "meta_intercept": getattr(model, "meta_intercept_", None)
+    }
     with open(f"{prefix}_weights.json", "w") as f:
-        json.dump(weights, f)
+        json.dump(meta_data, f)
 
 def load_ensemble_classifier(prefix, n_features=54):
     xgb = XGBClassifier()
@@ -172,8 +238,14 @@ def load_ensemble_classifier(prefix, n_features=54):
     import json
     weights_path = f"{prefix}_weights.json"
     if os.path.exists(weights_path):
-        with open(weights_path, "r") as f:
-            clf.weights = json.load(f)
+        try:
+            with open(weights_path, "r") as f:
+                meta_data = json.load(f)
+                clf.weights = meta_data.get("weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+                clf.meta_coef_ = meta_data.get("meta_coef")
+                clf.meta_intercept_ = meta_data.get("meta_intercept")
+        except Exception:
+            clf.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
             
     if os.environ.get("SPACE_ID"):
         return clf
@@ -204,9 +276,13 @@ def save_ensemble_regressor(model, prefix):
     model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
     model.cat_model.save_model(f"{prefix}_cat.json", format="json")
     
-    weights = getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+    meta_data = {
+        "weights": getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0]),
+        "meta_coef": getattr(model, "meta_coef_", None),
+        "meta_intercept": getattr(model, "meta_intercept_", None)
+    }
     with open(f"{prefix}_weights.json", "w") as f:
-        json.dump(weights, f)
+        json.dump(meta_data, f)
 
 def load_ensemble_regressor(prefix, n_features=54):
     xgb = XGBRegressor()
@@ -217,8 +293,14 @@ def load_ensemble_regressor(prefix, n_features=54):
     import json
     weights_path = f"{prefix}_weights.json"
     if os.path.exists(weights_path):
-        with open(weights_path, "r") as f:
-            reg.weights = json.load(f)
+        try:
+            with open(weights_path, "r") as f:
+                meta_data = json.load(f)
+                reg.weights = meta_data.get("weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+                reg.meta_coef_ = meta_data.get("meta_coef")
+                reg.meta_intercept_ = meta_data.get("meta_intercept")
+        except Exception:
+            reg.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
             
     if os.environ.get("SPACE_ID"):
         return reg
