@@ -861,13 +861,15 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     
     return df
 
-def classify_market_regime(df_history):
+def classify_market_regime(df_history, interval=None):
     """
     Unsupervised regime classification using a Gaussian Mixture Model (GMM).
     Returns 'Trending' or 'Ranging' based on recent volatility (ATR_norm) and trend strength (ADX).
     """
     from sklearn.mixture import GaussianMixture
     import numpy as np
+    import os
+    import joblib
     
     # Require ATR_norm and ADX columns
     if "ATR_norm" not in df_history.columns or "ADX" not in df_history.columns:
@@ -876,6 +878,31 @@ def classify_market_regime(df_history):
         
     df_clean = df_history[["ATR_norm", "ADX"]].dropna()
     features_gmm = df_clean.values
+    if len(features_gmm) == 0:
+        return "Ranging"
+
+    # Try loading pre-trained GMM for this interval
+    gmm = None
+    if interval:
+        gmm_path = f"gmm_regime_{interval}.pkl"
+        if os.path.exists(gmm_path):
+            try:
+                gmm = joblib.load(gmm_path)
+            except Exception as load_err:
+                print(f"[GMM Load Warning] Failed to load pre-trained GMM: {load_err}")
+
+    if gmm is not None:
+        try:
+            # Use pre-trained GMM for predictions
+            regimes = gmm.predict(features_gmm)
+            # Component with highest mean ATR_norm is Trending
+            trending_component = np.argmax(gmm.means_[:, 0])
+            latest_regime = regimes[-1]
+            return "Trending" if latest_regime == trending_component else "Ranging"
+        except Exception as pred_err:
+            print(f"[GMM Prediction Warning] Fallback due to error: {pred_err}")
+
+    # Fallback to fitting GMM on-the-fly if no pre-trained model is available or no interval passed
     if len(features_gmm) < 30:
         # Fallback to ADX if not enough data
         if not df_history.empty:

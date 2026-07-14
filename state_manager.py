@@ -144,3 +144,7 @@ class StateManager:
         with self._lock:
             for k, v in other.items():
                 self[k] = v
+
+    def save_prediction(self, pred):
+        with self._lock:
+            database.save_prediction(pred)

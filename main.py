@@ -282,7 +282,7 @@ def run_manual_confluence_report(symbol, interval):
             return "❌ Models are currently not fully loaded or active."
             
         # Unsupervised GMM Market Regime Classification
-        regime = classify_market_regime(df_features)
+        regime = classify_market_regime(df_features, interval=interval)
         if regime == "Trending":
             active_model_price = models_tf["trending"]["price"]
             active_model_trend = models_tf["trending"]["trend"]
@@ -2026,6 +2026,14 @@ def get_bybit_order_details(symbol, order_id):
         "symbol": symbol,
         "orderId": order_id
     }
+    # 1. Try active/realtime orders first
+    res = bybit_get_request("/v5/order/realtime", params)
+    if res.get("retCode") == 0:
+        orders = res.get("result", {}).get("list", [])
+        if orders:
+            return orders[0]
+            
+    # 2. Fall back to order history
     res = bybit_get_request("/v5/order/history", params)
     if res.get("retCode") == 0:
         orders = res.get("result", {}).get("list", [])
@@ -2632,6 +2640,7 @@ def force_close_trade():
                 "change_pct": float(raw_return_pct),
                 "success": bool(signal_correct)
             }
+            bot_state.save_prediction(p)
             break
             
     save_history()
@@ -2795,6 +2804,7 @@ def close_all_trades_internal(exit_reason):
                             "change_pct": float(raw_return_pct),
                             "success": bool(signal_correct)
                         }
+                        bot_state.save_prediction(p)
                         break
                         
             bot_state[active_trade_key] = []
@@ -4143,6 +4153,7 @@ def evaluate_predictions(df_completed, interval, symbol):
                 "success": None
             }
             pred["evaluation"] = eval_dict
+            bot_state.save_prediction(pred)
             
         if pred.get("interval") == interval and pred.get("symbol", "BTCUSDT") == symbol and not eval_dict.get("evaluated"):
             interval_mins = int(interval)
@@ -4166,6 +4177,7 @@ def evaluate_predictions(df_completed, interval, symbol):
                     "change_pct": float(change_pct),
                     "success": bool(success)
                 }
+                bot_state.save_prediction(pred)
                 
                 # Print to log
                 success_str = "SUCCESSFUL" if success else "UNSUCCESSFUL"
@@ -6435,6 +6447,7 @@ def main():
                                     "change_pct": float(raw_return_pct),
                                     "success": bool(signal_correct)
                                 }
+                                bot_state.save_prediction(p)
                                 break
                         save_history()
                     else:
@@ -6676,7 +6689,7 @@ def main():
                         X_live = latest_candle[features].values.reshape(1, -1)
                     
                     # Dynamic Regime Routing based on GMM Unsupervised Classifier
-                    regime = classify_market_regime(df)
+                    regime = classify_market_regime(df, interval=iv)
                     adx_regime = latest_candle["ADX"]
                     
                     if iv in models_by_interval:

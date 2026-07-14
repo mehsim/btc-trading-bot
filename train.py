@@ -791,6 +791,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
     gmm = GaussianMixture(n_components=2, random_state=42)
     regimes = gmm.fit_predict(features_gmm)
 
+    # Save pre-trained GMM for inference mapping
+    joblib.dump(gmm, f"gmm_regime_{interval}.pkl")
+    print(f"Saved GMM model: gmm_regime_{interval}.pkl")
+
     trending_component = np.argmax(gmm.means_[:, 0])  # Index with highest mean ATR_norm
 
     df["regime"] = ["trending" if r == trending_component else "ranging" for r in regimes]
