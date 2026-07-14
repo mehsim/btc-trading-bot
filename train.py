@@ -323,7 +323,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=150)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -355,7 +355,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=150)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -381,7 +381,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=150)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -411,7 +411,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=150)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -441,7 +441,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=150)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -466,7 +466,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=150)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
@@ -772,8 +772,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
         sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
-        final_ensemble_t.fit(X, y_trend, sample_weight=sample_weight_full)
-        final_ensemble_p.fit(X, y_price)
+        final_ensemble_t.fit(X, y_trend, sample_weight=sample_weight_full, X_val=X_val, y_val=y_val_t)
+        final_ensemble_p.fit(X, y_price, X_val=X_val, y_val=y_val_p)
         
         # Save models to disk using native text/JSON saving methods
         import os

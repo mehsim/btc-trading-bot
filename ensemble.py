@@ -45,20 +45,37 @@ class PurgedEmbargoTimeSeriesSplit:
 
 class EnsembleClassifier:
     """
-    Blends XGBoost, LightGBM, and CatBoost classifiers using average probability voting.
+    Blends XGBoost, LightGBM, and CatBoost classifiers using performance-weighted probability voting.
     """
     def __init__(self, xgb_model, lgb_model=None, cat_model=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
+        self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, sample_weight=None, X_val=None, y_val=None):
         X_arr = np.asarray(X, dtype=float)
         self.xgb_model.fit(X_arr, y, sample_weight=sample_weight)
         if self.lgb_model is not None:
             self.lgb_model.fit(X_arr, y, sample_weight=sample_weight)
         if self.cat_model is not None:
             self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
+            
+        self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
+        if X_val is not None and y_val is not None and self.lgb_model is not None and self.cat_model is not None:
+            try:
+                from sklearn.metrics import accuracy_score
+                X_v_arr = np.asarray(X_val, dtype=float)
+                xgb_acc = accuracy_score(y_val, self.xgb_model.predict(X_v_arr))
+                lgb_acc = accuracy_score(y_val, self.lgb_model.predict(X_v_arr))
+                cat_acc = accuracy_score(y_val, self.cat_model.predict(X_v_arr))
+                
+                raw_weights = [max(0.01, xgb_acc), max(0.01, lgb_acc), max(0.01, cat_acc)]
+                sum_w = sum(raw_weights)
+                self.weights = [w / sum_w for w in raw_weights]
+                print(f"[Ensemble Weighting] Classifier Weights calibrated: XGB={self.weights[0]:.3f}, LGB={self.weights[1]:.3f}, CAT={self.weights[2]:.3f}")
+            except Exception as e:
+                print(f"[Ensemble Weighting Warning] Failed to calibrate weights: {e}")
         return self
 
     def predict_proba(self, X, weights=None):
@@ -68,12 +85,14 @@ class EnsembleClassifier:
             return xgb_prob
         lgb_prob = self.lgb_model.predict_proba(X_arr)
         cat_prob = self.cat_model.predict_proba(X_arr)
-        if weights is None:
-            return (xgb_prob + lgb_prob + cat_prob) / 3.0
-        else:
-            w = np.array(weights, dtype=float)
-            w = w / np.sum(w)
-            return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+        
+        w_to_use = weights
+        if w_to_use is None:
+            w_to_use = getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+            
+        w = np.array(w_to_use, dtype=float)
+        w = w / np.sum(w)
+        return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
 
     def predict(self, X, weights=None):
         probs = self.predict_proba(X, weights=weights)
@@ -81,20 +100,37 @@ class EnsembleClassifier:
 
 class EnsembleRegressor:
     """
-    Blends XGBoost, LightGBM, and CatBoost regressors using simple averaging.
+    Blends XGBoost, LightGBM, and CatBoost regressors using performance-weighted averaging.
     """
     def __init__(self, xgb_model, lgb_model=None, cat_model=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
+        self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
 
-    def fit(self, X, y):
+    def fit(self, X, y, X_val=None, y_val=None):
         X_arr = np.asarray(X, dtype=float)
         self.xgb_model.fit(X_arr, y)
         if self.lgb_model is not None:
             self.lgb_model.fit(X_arr, y)
         if self.cat_model is not None:
             self.cat_model.fit(X_arr, y)
+            
+        self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
+        if X_val is not None and y_val is not None and self.lgb_model is not None and self.cat_model is not None:
+            try:
+                from sklearn.metrics import mean_absolute_error
+                X_v_arr = np.asarray(X_val, dtype=float)
+                xgb_mae = mean_absolute_error(y_val, self.xgb_model.predict(X_v_arr))
+                lgb_mae = mean_absolute_error(y_val, self.lgb_model.predict(X_v_arr))
+                cat_mae = mean_absolute_error(y_val, self.cat_model.predict(X_v_arr))
+                
+                raw_weights = [1.0 / max(1e-6, xgb_mae), 1.0 / max(1e-6, lgb_mae), 1.0 / max(1e-6, cat_mae)]
+                sum_w = sum(raw_weights)
+                self.weights = [w / sum_w for w in raw_weights]
+                print(f"[Ensemble Weighting] Regressor Weights calibrated: XGB={self.weights[0]:.3f}, LGB={self.weights[1]:.3f}, CAT={self.weights[2]:.3f}")
+            except Exception as e:
+                print(f"[Ensemble Weighting Warning] Failed to calibrate weights: {e}")
         return self
 
     def predict(self, X, weights=None):
@@ -104,34 +140,43 @@ class EnsembleRegressor:
             return xgb_pred
         lgb_pred = self.lgb_model.predict(X_arr)
         cat_pred = self.cat_model.predict(X_arr)
-        if weights is None:
-            return (xgb_pred + lgb_pred + cat_pred) / 3.0
-        else:
-            w = np.array(weights, dtype=float)
-            w = w / np.sum(w)
-            return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
+        
+        w_to_use = weights
+        if w_to_use is None:
+            w_to_use = getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+            
+        w = np.array(w_to_use, dtype=float)
+        w = w / np.sum(w)
+        return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
 
 # ==========================================
 # NATIVE SAVING/LOADING (TEXT/JSON ONLY)
 # ==========================================
 
 def save_ensemble_classifier(model, prefix):
-    # 1. Save XGBoost as JSON
+    import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
-    
-    # 2. Save LightGBM as text file
     model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
-    
-    # 3. Save CatBoost as JSON file
     model.cat_model.save_model(f"{prefix}_cat.json", format="json")
+    
+    weights = getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+    with open(f"{prefix}_weights.json", "w") as f:
+        json.dump(weights, f)
 
 def load_ensemble_classifier(prefix, n_features=54):
     xgb = XGBClassifier()
     xgb.load_model(f"{prefix}_xgb.json")
     
+    clf = EnsembleClassifier(xgb, None, None)
+    
+    import json
+    weights_path = f"{prefix}_weights.json"
+    if os.path.exists(weights_path):
+        with open(weights_path, "r") as f:
+            clf.weights = json.load(f)
+            
     if os.environ.get("SPACE_ID"):
-        # Run extremely lightweight model footprint on HF spaces (no LightGBM/CatBoost to prevent OOM)
-        return EnsembleClassifier(xgb, None, None)
+        return clf
         
     import lightgbm as lgb
     from lightgbm import LGBMClassifier
@@ -149,25 +194,34 @@ def load_ensemble_classifier(prefix, n_features=54):
     cat = CatBoostClassifier()
     cat.load_model(f"{prefix}_cat.json", format="json")
     
-    return EnsembleClassifier(xgb, lgb_clf, cat)
+    clf.lgb_model = lgb_clf
+    clf.cat_model = cat
+    return clf
 
 def save_ensemble_regressor(model, prefix):
-    # 1. Save XGBoost as JSON
+    import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
-    
-    # 2. Save LightGBM as text file
     model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
-    
-    # 3. Save CatBoost as JSON file
     model.cat_model.save_model(f"{prefix}_cat.json", format="json")
+    
+    weights = getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
+    with open(f"{prefix}_weights.json", "w") as f:
+        json.dump(weights, f)
 
 def load_ensemble_regressor(prefix, n_features=54):
     xgb = XGBRegressor()
     xgb.load_model(f"{prefix}_xgb.json")
     
+    reg = EnsembleRegressor(xgb, None, None)
+    
+    import json
+    weights_path = f"{prefix}_weights.json"
+    if os.path.exists(weights_path):
+        with open(weights_path, "r") as f:
+            reg.weights = json.load(f)
+            
     if os.environ.get("SPACE_ID"):
-        # Run extremely lightweight model footprint on HF spaces (no LightGBM/CatBoost to prevent OOM)
-        return EnsembleRegressor(xgb, None, None)
+        return reg
         
     import lightgbm as lgb
     from lightgbm import LGBMRegressor
@@ -183,5 +237,7 @@ def load_ensemble_regressor(prefix, n_features=54):
     cat = CatBoostRegressor()
     cat.load_model(f"{prefix}_cat.json", format="json")
     
-    return EnsembleRegressor(xgb, lgb_reg, cat)
+    reg.lgb_model = lgb_reg
+    reg.cat_model = cat
+    return reg
 
