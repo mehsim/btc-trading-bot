@@ -4109,6 +4109,9 @@ for lag in [1, 2]:
     features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
     features.append(f"close_to_Kalman_lag{lag}")
 
+# Garman-Klass Volatility features
+features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])
+
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 
 

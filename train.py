@@ -188,6 +188,9 @@ for lag in [1, 2]:
     features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
     features.append(f"close_to_Kalman_lag{lag}")
 
+# Garman-Klass Volatility features
+features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])
+
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
     global economic_calendar_cache
     with economic_calendar_lock:

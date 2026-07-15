@@ -1,5 +1,8 @@
 [
   "close_to_Kalman",
   "close_to_Kalman_lag1",
-  "close_to_Kalman_lag2"
+  "close_to_Kalman_lag2",
+  "volatility_gk",
+  "volatility_gk_lag1",
+  "volatility_gk_lag2"
 ]

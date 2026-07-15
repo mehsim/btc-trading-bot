@@ -9,27 +9,27 @@ from ta.volatility import BollingerBands, AverageTrueRange
 try:
     from numba import jit
     @jit(nopython=True, cache=True)
-    def _kalman_loop(prices, state_estimate, error_covariance, process_variance, measurement_variance):
+    def _kalman_loop(prices, state_estimate, error_covariance, process_variance_arr, measurement_variance):
         n = len(prices)
         for i in range(1, n):
             pred_state = state_estimate[i-1]
-            pred_error = error_covariance[i-1] + process_variance
+            pred_error = error_covariance[i-1] + process_variance_arr[i]
             kalman_gain = pred_error / (pred_error + measurement_variance)
             state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
             error_covariance[i] = (1.0 - kalman_gain) * pred_error
         return state_estimate
 except ImportError:
-    def _kalman_loop(prices, state_estimate, error_covariance, process_variance, measurement_variance):
+    def _kalman_loop(prices, state_estimate, error_covariance, process_variance_arr, measurement_variance):
         n = len(prices)
         for i in range(1, n):
             pred_state = state_estimate[i-1]
-            pred_error = error_covariance[i-1] + process_variance
+            pred_error = error_covariance[i-1] + process_variance_arr[i]
             kalman_gain = pred_error / (pred_error + measurement_variance)
             state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
             error_covariance[i] = (1.0 - kalman_gain) * pred_error
         return state_estimate
 
-def calculate_kalman_feature(prices):
+def calculate_kalman_feature(prices, atr_norm=None):
     n = len(prices)
     if n == 0:
         return np.zeros(0)
@@ -38,11 +38,21 @@ def calculate_kalman_feature(prices):
     state_estimate[0] = prices[0]
     error_covariance[0] = 1.0
     
-    process_variance = 1e-4
+    if atr_norm is not None and len(atr_norm) == n:
+        # Scale process variance dynamically based on normalized volatility (clamped 1e-5 to 1e-3)
+        process_variance_arr = np.clip(np.asarray(atr_norm, dtype=float) * 0.05, 1e-5, 1e-3)
+    else:
+        process_variance_arr = np.full(n, 1e-4)
+        
     measurement_variance = 1e-2
-    
-    state_estimate = _kalman_loop(prices, state_estimate, error_covariance, process_variance, measurement_variance)
+    state_estimate = _kalman_loop(prices, state_estimate, error_covariance, process_variance_arr, measurement_variance)
     return (prices / (state_estimate + 1e-8)) - 1.0
+
+def calculate_garman_klass_vol(df, window=14):
+    log_hl = np.log(df["high"] / (df["low"] + 1e-8))
+    log_co = np.log(df["close"] / (df["open"] + 1e-8))
+    gk = 0.5 * log_hl**2 - (2.0 * np.log(2.0) - 1.0) * log_co**2
+    return np.sqrt(np.maximum(0.0, gk.rolling(window).mean()))
 
 def add_news_proximity_feature(df, fetch_calendar_callback=None):
     if df.empty:
@@ -247,10 +257,15 @@ def add_features(df, fetch_calendar_callback=None):
     df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
     df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
 
-    # 1D Kalman Filter trend feature
-    df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values)
+    # 1D Kalman Filter trend feature (Adaptive process variance)
+    df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values, df["ATR_norm"].values)
     for lag in [1, 2]:
         df[f"close_to_Kalman_lag{lag}"] = df["close_to_Kalman"].shift(lag)
+
+    # Garman-Klass Volatility
+    df["volatility_gk"] = calculate_garman_klass_vol(df, window=14)
+    for lag in [1, 2]:
+        df[f"volatility_gk_lag{lag}"] = df["volatility_gk"].shift(lag)
 
     # Advanced Microstructure Features
     dp_ret = df["close"].pct_change(1).fillna(0.0)
