@@ -1040,6 +1040,18 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
             df_c = df_c[df_c["timestamp"] <= exit_ts * 1000].copy()
             if len(df_c) < 10:
                 continue
+            
+            # Merge BTC close price to support correlation features
+            if symbol == "BTCUSDT":
+                df_c["close_btc"] = df_c["close"]
+            else:
+                df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350, pages=1)
+                if df_btc is not None and len(df_btc) > 0:
+                    df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
+                    df_c = pd.merge(df_c, df_btc_sub, on="timestamp", how="inner")
+                else:
+                    df_c["close_btc"] = df_c["close"]
+
             df_c = merge_derivatives_sentiment_features(df_c, symbol=symbol, interval=interval)
             df_c = add_features(df_c)
             df_c = df_c.dropna()
@@ -1056,9 +1068,9 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
         if not sample_dfs:
             return None
         result = pd.concat(sample_dfs, ignore_index=True)
-        # Align to selected features only (P1 fix)
+        # Align to selected features only (P1 fix), preserving system-critical regime indicators (ATR_norm, ADX)
         keep = [c for c in live_selected if c in result.columns]
-        keep += [c for c in ["target_trend", "target_price_change", "sample_weight"] if c in result.columns]
+        keep += [c for c in ["target_trend", "target_price_change", "sample_weight", "ATR_norm", "ADX"] if c in result.columns]
         result = result[keep]
         print(f"[Live Feedback] Injecting {len(result)} real trade samples (weight={weight}x) for interval {interval}m.")
         return result
