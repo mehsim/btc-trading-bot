@@ -658,7 +658,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     
     # Use a small estimator and 3-fold Purged CV for rapid feature elimination
     cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
-    estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=-1)
+    estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
     
     selector = RFECV(
         estimator=estimator,
