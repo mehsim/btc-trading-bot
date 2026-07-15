@@ -617,6 +617,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     df_coin["target_price_change"] = (df_coin["future"] - df_coin["close"]) / df_coin["close"]
                     df_coin = add_triple_barrier_labels(df_coin, interval)
                     df_coin.dropna(subset=["target_price_change", "target_trend"], inplace=True)
+                    df_coin = df_coin.copy()
                     
                     dfs.append(df_coin)
                     print(f"Successfully processed {s}: {len(df_coin)} rows.")

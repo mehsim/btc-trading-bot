@@ -269,4 +269,5 @@ def add_features(df, fetch_calendar_callback=None):
 
     df = add_news_proximity_feature(df, fetch_calendar_callback)
     df.dropna(inplace=True)
+    df = df.copy()  # Defragment memory layout to silence PerformanceWarnings
     return df
