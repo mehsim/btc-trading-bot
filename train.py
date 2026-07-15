@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 import numpy as np
 import joblib
@@ -185,6 +186,7 @@ for lag in [1, 2]:
     features.append(f"oi_velocity_lag{lag}")
     features.append(f"funding_acceleration_lag{lag}")
     features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
+    features.append(f"close_to_Kalman_lag{lag}")
 
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
     global economic_calendar_cache
@@ -645,7 +647,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
     # ==========================================
-    import json
     from sklearn.feature_selection import RFECV
     from xgboost import XGBClassifier
     print("\nRunning advanced feature selection via RFECV with Purged CV...")
@@ -757,6 +758,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             # Metrics
             acc = accuracy_score(y_val_t, pred_val_t)
             mae = mean_absolute_error(y_val_p, pred_val_p)
+            print(f"    - Chronological Walk-Forward Fold {fold+1} Accuracy: {acc*100:.2f}% | MAE: {mae:.5f}")
             primary_accuracies.append(acc)
             primary_maes.append(mae)
             
@@ -837,7 +839,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "y": ir.y_thresholds_.tolist()
             }
             calibrator_filename = f"calibrator_{name}_{interval}.json"
-            import json
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)
             print(f"  [Calibrator] Saved Isotonic Regression calibrator to {calibrator_filename}")
@@ -845,7 +846,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
             # Save default identity mapping if no predictions occurred
             calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
             calibrator_filename = f"calibrator_{name}_{interval}.json"
-            import json
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)
             print(f"  [Calibrator] Saved default calibrator to {calibrator_filename}")
@@ -979,7 +979,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 def load_live_trade_samples(interval, days=2, weight=3.0):
     """Load recent closed trades, re-fetch features at entry time, return as weighted DataFrame."""
     try:
-        import json, time as _time
+        import time as _time
         history_file = "dashboard_history.json"
         if not os.path.exists(history_file):
             return None

@@ -4105,6 +4105,7 @@ for lag in [1, 2]:
     features.append(f"oi_velocity_lag{lag}")
     features.append(f"funding_acceleration_lag{lag}")
     features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
+    features.append(f"close_to_Kalman_lag{lag}")
 
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 

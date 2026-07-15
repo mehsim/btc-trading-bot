@@ -249,6 +249,8 @@ def add_features(df, fetch_calendar_callback=None):
 
     # 1D Kalman Filter trend feature
     df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values)
+    for lag in [1, 2]:
+        df[f"close_to_Kalman_lag{lag}"] = df["close_to_Kalman"].shift(lag)
 
     # Advanced Microstructure Features
     dp_ret = df["close"].pct_change(1).fillna(0.0)
