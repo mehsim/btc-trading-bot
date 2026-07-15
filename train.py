@@ -1029,8 +1029,8 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
             exit_ts = float(t.get("exit_time", 0))
             pnl = float(t.get("pnl_usd", 0.0))
             direction = t.get("direction", "Bullish")
-            # Fetch ~60 candles ending just before exit to capture entry features
-            df_c = get_history(symbol=symbol, interval=interval, limit=60, pages=1)
+            # Fetch ~350 candles ending just before exit to capture entry features without NaN drops
+            df_c = get_history(symbol=symbol, interval=interval, limit=350, pages=1)
             if df_c is None or len(df_c) < 20:
                 continue
             # Keep only rows before exit time
