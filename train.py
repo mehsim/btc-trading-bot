@@ -23,7 +23,7 @@ from data import get_history, merge_derivatives_sentiment_features
 import threading
 import requests
 import features as features_module
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Dynamic GPU training hardware auto-detection
 GPU_XGB = False
@@ -196,14 +196,14 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
             
         try:
             finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             if start_ts_ms:
-                from_dt = datetime.utcfromtimestamp(start_ts_ms / 1000.0)
+                from_dt = datetime.fromtimestamp(start_ts_ms / 1000.0, timezone.utc)
             else:
                 from_dt = now - timedelta(days=60)
                 
             if end_ts_ms:
-                to_dt = datetime.utcfromtimestamp(end_ts_ms / 1000.0) + timedelta(days=2)
+                to_dt = datetime.fromtimestamp(end_ts_ms / 1000.0, timezone.utc) + timedelta(days=2)
             else:
                 to_dt = now + timedelta(days=7)
                 
@@ -671,8 +671,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
     
     selected_features = [f for f, support in zip(features, selector.support_) if support]
 
-    # Force-protect domain-critical Kalman features from RFECV elimination
+    # Force-protect domain-critical features from RFECV elimination
     protected = ["close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2"]
+    try:
+        if os.path.exists("protected_features.json"):
+            with open("protected_features.json") as pf_file:
+                protected = json.load(pf_file)
+    except Exception as e:
+        print(f"[Warning] Error loading protected_features.json: {e}")
+
     for pf in protected:
         if pf not in selected_features and pf in X_prelim.columns:
             selected_features.append(pf)

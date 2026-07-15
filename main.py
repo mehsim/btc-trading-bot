@@ -1509,20 +1509,22 @@ def save_history():
             token = os.environ.get("HF_TOKEN") or os.environ.get("token")
             space_id = os.environ.get("SPACE_ID")
             if token and space_id:
-                try:
-                    from huggingface_hub import HfApi
-                    api = HfApi()
-                    dataset_id = f"{space_id}-history"
-                    api.create_repo(repo_id=dataset_id, repo_type="dataset", exist_ok=True, token=token)
-                    api.upload_file(
-                        path_or_fileobj=HISTORY_FILE,
-                        path_in_repo="dashboard_history.json",
-                        repo_id=dataset_id,
-                        repo_type="dataset",
-                        token=token
-                    )
-                except Exception as hf_err:
-                    print(f"HF Space Sync: Failed to backup history to Dataset: {hf_err}")
+                def _hf_backup():
+                    try:
+                        from huggingface_hub import HfApi
+                        api = HfApi()
+                        dataset_id = f"{space_id}-history"
+                        api.create_repo(repo_id=dataset_id, repo_type="dataset", exist_ok=True, token=token)
+                        api.upload_file(
+                            path_or_fileobj=HISTORY_FILE,
+                            path_in_repo="dashboard_history.json",
+                            repo_id=dataset_id,
+                            repo_type="dataset",
+                            token=token
+                        )
+                    except Exception as hf_err:
+                        print(f"HF Space Sync: Failed to backup history to Dataset: {hf_err}")
+                threading.Thread(target=_hf_backup, daemon=True).start()
         except Exception as e:
             print(f"Error saving history to disk: {e}")
 
