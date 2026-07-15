@@ -4798,6 +4798,42 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
 
     return float(multiplier), float(total_risk)
 
+def calculate_recent_performance_leverage_multiplier(days=7):
+    """
+    Calculates a leverage multiplier based on the rolling Sharpe ratio of completed trades.
+    Reduces max leverage during drawdowns to manage risk.
+    """
+    try:
+        trades = bot_state.get("trade_history", [])
+        if len(trades) < 5:
+            return 1.0
+            
+        import time as _time
+        cutoff = _time.time() - days * 86400
+        recent_trades = [t for t in trades if float(t.get("exit_time", 0.0)) >= cutoff]
+        
+        if len(recent_trades) < 3:
+            return 1.0
+            
+        pnls = [float(t.get("pnl_usd", 0.0)) for t in recent_trades]
+        mean_pnl = np.mean(pnls)
+        std_pnl = np.std(pnls)
+        
+        if std_pnl < 1e-4:
+            return 1.0
+            
+        sharpe = mean_pnl / std_pnl
+        if sharpe >= 0:
+            return 1.0
+        else:
+            # Scale down leverage. Clamp multiplier between 0.30 and 1.0
+            multiplier = max(0.30, min(1.0, 1.0 - 0.3 * abs(sharpe)))
+            print(f"[Sharpe-Adaptive Leverage] Sharpe={sharpe:.2f} -> Sizing down leverage by {multiplier:.2f}x")
+            return float(multiplier)
+    except Exception as e:
+        print(f"[Sharpe-Adaptive Leverage Error] {e}")
+        return 1.0
+
 # ==========================================
 # PRE-TRADE CONFLUENCE ANALYSIS
 # ==========================================
@@ -7138,6 +7174,11 @@ def main():
                                             leverage_val *= 2.0
                                             lev_cap *= 2.0
                                             print(f"[{symbol} {iv}m Golden Hour Boost] 18:00 - 21:00 PKT: Doubled leverage target to {leverage_val:.1f}x and cap to {lev_cap:.1f}x")
+                                            
+                                        # Sharpe-Adaptive Leverage Multiplier (Dynamic drawdown safety)
+                                        sharpe_mult = calculate_recent_performance_leverage_multiplier(days=7)
+                                        leverage_val = leverage_val * sharpe_mult
+                                        lev_cap = lev_cap * sharpe_mult
                                             
                                         leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
