@@ -362,7 +362,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             for train_idx, val_idx in cv.split(X, y):
                 if len(train_idx) < 10 or len(val_idx) < 10:
                     continue
-                model = XGBClassifier(n_estimators=30, max_depth=3, learning_rate=0.1, random_state=42, n_jobs=1)
+                model = XGBClassifier(n_estimators=30, max_depth=3, learning_rate=0.1, random_state=42, n_jobs=-1)
                 model.fit(X[train_idx], y[train_idx])
                 scores.append(accuracy_score(y[val_idx], model.predict(X[val_idx])))
             return np.mean(scores) if scores else 0.0
@@ -399,14 +399,14 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'num_class': 3,
             'eval_metric': 'mlogloss',
             'random_state': 42,
-            'n_jobs': 1
+            'n_jobs': -1
         }
         model = create_model(XGBClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=60)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -431,14 +431,14 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'num_class': 3,
             'verbose': -1,
             'random_state': 42,
-            'n_jobs': 1
+            'n_jobs': -1
         }
         model = create_model(LGBMClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=60)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -464,7 +464,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=60)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -487,14 +487,14 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
             'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
             'gamma': trial.suggest_float('gamma', 1e-8, 1.0, log=True),
             'random_state': 42,
-            'n_jobs': 1
+            'n_jobs': -1
         }
         model = create_model(XGBRegressor, params)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=60)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -517,14 +517,14 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
             'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
             'verbose': -1,
             'random_state': 42,
-            'n_jobs': 1
+            'n_jobs': -1
         }
         model = create_model(LGBMRegressor, params)
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=60)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -549,7 +549,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=60)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
@@ -654,7 +654,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     
     # Use a small estimator and 3-fold Purged CV for rapid feature elimination
     cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
-    estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
+    estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=-1)
     
     selector = RFECV(
         estimator=estimator,
@@ -662,7 +662,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         cv=cv_selector,
         scoring="accuracy",
         min_features_to_select=20,
-        n_jobs=1
+        n_jobs=-1
     )
     
     print("Fitting RFECV model (this may take a few seconds)...")
@@ -816,7 +816,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             eval_metric='logloss',
             scale_pos_weight=scale_pos_weight,
             random_state=42,
-            n_jobs=1
+            n_jobs=-1
         )
         if len(meta_X) >= 20:
             meta_model.fit(meta_X, meta_y)
