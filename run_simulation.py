@@ -52,20 +52,24 @@ print("=" * 60)
 # 1. Load trained models
 print("Loading trained models...")
 try:
-    from xgboost import XGBClassifier, XGBRegressor
+    from ensemble import load_ensemble_classifier, load_ensemble_regressor
+    import json
+    selected_features_filename = f"selected_features_{INTERVAL}.json"
+    if os.path.exists(selected_features_filename):
+        with open(selected_features_filename, "r") as f:
+            n_features = len(json.load(f))
+    else:
+        n_features = len(features)
+
     models_trending = {
-        "trend": XGBClassifier(),
-        "price": XGBRegressor()
+        "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", n_features),
+        "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", n_features)
     }
-    models_trending["trend"].load_model(f"ensemble_trending_trend_{INTERVAL}_xgb.json")
-    models_trending["price"].load_model(f"ensemble_trending_price_{INTERVAL}_xgb.json")
 
     models_ranging = {
-        "trend": XGBClassifier(),
-        "price": XGBRegressor()
+        "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", n_features),
+        "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", n_features)
     }
-    models_ranging["trend"].load_model(f"ensemble_ranging_trend_{INTERVAL}_xgb.json")
-    models_ranging["price"].load_model(f"ensemble_ranging_price_{INTERVAL}_xgb.json")
     print("Models loaded successfully.")
 except Exception as e:
     print(f"Error loading models: {e}. Please run 'train.py' first.")
