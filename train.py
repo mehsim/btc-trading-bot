@@ -238,6 +238,8 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
 def add_features(df):
     return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
 
+OPTIMIZED_BARRIERS = {}
+
 def add_triple_barrier_labels(df, interval):
     atr = df["ATR_norm"] * df["close"]
     atr_vals = atr.values
@@ -248,17 +250,18 @@ def add_triple_barrier_labels(df, interval):
     n_samples = len(df)
     labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral
     
-    cfg = TIMEFRAME_CONFIG.get(str(interval), {
+    # Load optimized barriers if available globally, else default to timeframe config
+    cfg = OPTIMIZED_BARRIERS if OPTIMIZED_BARRIERS else TIMEFRAME_CONFIG.get(str(interval), {
         "lookahead": 10,
         "sl_mult": 0.8,
         "tp_mult_ranging": 1.5,
         "tp_mult_trending": 2.5
     })
     
-    lookahead = cfg["lookahead"]
-    sl_mult = cfg["sl_mult"]
-    tp_mult_trending = cfg["tp_mult_trending"]
-    tp_mult_ranging = cfg["tp_mult_ranging"]
+    lookahead = cfg.get("lookahead", 10)
+    sl_mult = cfg.get("sl_mult", 0.8)
+    tp_mult_trending = cfg.get("tp_mult_trending", 2.5)
+    tp_mult_ranging = cfg.get("tp_mult_ranging", 1.5)
         
     for i in range(n_samples):
         p_t = closes[i]
@@ -301,6 +304,77 @@ def add_triple_barrier_labels(df, interval):
                 
     df["target_trend"] = labels
     return df
+
+def tune_triple_barrier_multipliers(df_coin, interval):
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    selected_feats = ["ATR_norm", "ADX", "RSI", "MACD_diff", "volume_ratio"]
+    df_clean = df_coin.dropna(subset=selected_feats).copy().reset_index(drop=True)
+    if len(df_clean) < 100:
+        return {}
+    X = df_clean[selected_feats].values
+    cv = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=10, embargo_pct=0.01)
+    
+    def objective(trial):
+        tp_m_ranging = trial.suggest_float("tp_mult_ranging", 1.0, 3.0)
+        tp_m_trending = trial.suggest_float("tp_mult_trending", 2.0, 5.0)
+        sl_m = trial.suggest_float("sl_mult", 0.5, 2.0)
+        
+        atr_vals = (df_clean["ATR_norm"] * df_clean["close"]).values
+        closes = df_clean["close"].values
+        highs = df_clean["high"].values
+        lows = df_clean["low"].values
+        adxs = df_clean["ADX"].values
+        n_samples = len(df_clean)
+        labels = np.ones(n_samples, dtype=int) * 1
+        
+        for i in range(n_samples):
+            p_t = closes[i]
+            atr_t = atr_vals[i]
+            adx_t = adxs[i]
+            if atr_t <= 0: atr_t = p_t * 0.001
+            tp_mult = tp_m_trending if adx_t >= 20.0 else tp_m_ranging
+            upper_b = p_t + tp_mult * atr_t
+            lower_b = p_t - tp_mult * atr_t
+            upper_s = p_t + sl_m * atr_t
+            lower_s = p_t - sl_m * atr_t
+            
+            for step in range(1, 11):
+                if i + step >= n_samples: break
+                h, l = highs[i + step], lows[i + step]
+                hit_bull = h >= upper_b and l > lower_s
+                hit_bear = l <= lower_b and h < upper_s
+                if hit_bull and not hit_bear:
+                    labels[i] = 2
+                    break
+                elif hit_bear and not hit_bull:
+                    labels[i] = 0
+                    break
+                elif l <= lower_s:
+                    labels[i] = 0
+                    break
+                elif h >= upper_s:
+                    labels[i] = 2
+                    break
+        y = labels
+        from xgboost import XGBClassifier
+        scores = []
+        try:
+            for train_idx, val_idx in cv.split(X, y):
+                if len(train_idx) < 10 or len(val_idx) < 10:
+                    continue
+                model = XGBClassifier(n_estimators=30, max_depth=3, learning_rate=0.1, random_state=42, n_jobs=1)
+                model.fit(X[train_idx], y[train_idx])
+                scores.append(accuracy_score(y[val_idx], model.predict(X[val_idx])))
+            return np.mean(scores) if scores else 0.0
+        except Exception:
+            return 0.0
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=15)
+    best = study.best_params
+    best["lookahead"] = 10
+    print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
+    return best
 
 def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -479,6 +553,27 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
+    global OPTIMIZED_BARRIERS
+    OPTIMIZED_BARRIERS = {}
+    
+    # Pre-tune Triple-Barrier Multipliers on BTCUSDT to maximize general accuracy
+    try:
+        print("\n--- Running Optuna pre-study to optimize Triple-Barrier Multipliers ---")
+        df_tune = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=min(pages, 4))
+        if df_tune is not None and len(df_tune) > 100:
+            df_tune["close_btc"] = df_tune["close"]
+            df_tune = merge_derivatives_sentiment_features(df_tune, symbol="BTCUSDT", interval=interval)
+            df_tune = add_features(df_tune)
+            best_barriers = tune_triple_barrier_multipliers(df_tune, interval)
+            if best_barriers:
+                OPTIMIZED_BARRIERS = best_barriers
+                # Save to JSON for live load
+                with open(f"optimized_barriers_{interval}.json", "w") as f:
+                    json.dump(best_barriers, f)
+                print(f"Saved optimized barriers configuration to optimized_barriers_{interval}.json")
+    except Exception as e:
+        print(f"[Warning] Optuna multiplier pre-tuning failed, using defaults: {e}")
+
     # =========================
     # LOAD & PROCESS DATA FOR ALL SUPPORTED COINS
     # =========================
