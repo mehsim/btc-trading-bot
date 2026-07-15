@@ -361,7 +361,6 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                     labels[i] = 2
                     break
         y = labels
-        from xgboost import XGBClassifier
         scores = []
         try:
             for train_idx, val_idx in cv.split(X, y):
@@ -664,7 +663,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
     if not skip_rfecv:
         from sklearn.feature_selection import RFECV
-        from xgboost import XGBClassifier
         print("\nRunning advanced feature selection via RFECV with Purged CV...")
         
         # Subsample data for feature selection to accelerate training times (Pros: 5x speedup)
