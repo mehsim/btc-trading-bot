@@ -650,29 +650,49 @@ def train_models(interval=INTERVAL, pages=PAGES):
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
     # ==========================================
-    from sklearn.feature_selection import RFECV
-    from xgboost import XGBClassifier
-    print("\nRunning advanced feature selection via RFECV with Purged CV...")
-    X_prelim = df[features]
-    y_prelim = df["target_trend"]
-    
-    # Use a small estimator and 3-fold Purged CV for rapid feature elimination
-    cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
-    estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
-    
-    selector = RFECV(
-        estimator=estimator,
-        step=2,
-        cv=cv_selector,
-        scoring="accuracy",
-        min_features_to_select=20,
-        n_jobs=-1
-    )
-    
-    print("Fitting RFECV model (this may take a few seconds)...")
-    selector.fit(X_prelim, y_prelim)
-    
-    selected_features = [f for f, support in zip(features, selector.support_) if support]
+    features_filename = f"selected_features_{interval}.json"
+    skip_rfecv = False
+    if os.path.exists(features_filename) and not globals().get("FORCE_RFECV", False):
+        try:
+            with open(features_filename, "r") as f:
+                selected_features = json.load(f)
+            if len(selected_features) >= 20:
+                print(f"[Training Optimization] Reusing existing {len(selected_features)} features from {features_filename}. Skipping RFECV.")
+                skip_rfecv = True
+        except Exception as e:
+            print(f"[Warning] Failed to load {features_filename}: {e}. Running RFECV.")
+
+    if not skip_rfecv:
+        from sklearn.feature_selection import RFECV
+        from xgboost import XGBClassifier
+        print("\nRunning advanced feature selection via RFECV with Purged CV...")
+        
+        # Subsample data for feature selection to accelerate training times (Pros: 5x speedup)
+        if len(df) > 40000:
+            df_sub = df.sample(n=40000, random_state=42)
+            print(f"[Training Optimization] Subsampled RFECV training set from {len(df)} to {len(df_sub)} rows.")
+        else:
+            df_sub = df
+            
+        X_prelim = df_sub[features]
+        y_prelim = df_sub["target_trend"]
+        
+        # Use a small estimator and 3-fold Purged CV for rapid feature elimination
+        cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
+        estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
+        
+        selector = RFECV(
+            estimator=estimator,
+            step=5, # Dropping 5 features at a time (Pros: 2.5x speedup)
+            cv=cv_selector,
+            scoring="accuracy",
+            min_features_to_select=20,
+            n_jobs=-1
+        )
+        
+        print("Fitting RFECV model (this may take a few seconds)...")
+        selector.fit(X_prelim, y_prelim)
+        selected_features = [f for f, support in zip(features, selector.support_) if support]
 
     # Force-protect domain-critical features from RFECV elimination
     protected = ["close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2"]
@@ -1093,8 +1113,10 @@ if __name__ == "__main__":
     parser.add_argument("--interval", type=str, default="60", choices=["60", "120", "240", "360", "all"], help="Timeframe interval to train")
     parser.add_argument("--pages", type=int, default=20, help="Number of data pages to fetch from Bybit")
     parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
+    parser.add_argument("--force-rfecv", action="store_true", help="Force running RFECV feature selection instead of reusing cached features")
     args = parser.parse_args()
     LIVE_FEEDBACK = args.live_feedback
+    FORCE_RFECV = args.force_rfecv
 
     if args.interval == "all":
         for iv in ["60", "120", "240", "360"]:
