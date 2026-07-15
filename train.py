@@ -670,6 +670,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
     selector.fit(X_prelim, y_prelim)
     
     selected_features = [f for f, support in zip(features, selector.support_) if support]
+
+    # Force-protect domain-critical Kalman features from RFECV elimination
+    protected = ["close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2"]
+    for pf in protected:
+        if pf not in selected_features and pf in X_prelim.columns:
+            selected_features.append(pf)
+
     print(f"RFECV complete: Selected optimal subset of {len(selected_features)} features (out of {len(features)}):")
     for rank, f_name in enumerate(selected_features, 1):
         print(f"  {rank}. {f_name}")
@@ -911,6 +918,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
         should_save = True
         if champion_exists:
             try:
+                # Check feature alignment before comparing
+                feat_file = f"selected_features_{interval}.json"
+                if os.path.exists(feat_file):
+                    with open(feat_file) as _ff:
+                        champ_feats = json.load(_ff)
+                    if len(champ_feats) != X_val.shape[1]:
+                        print(f"  [Champion-Challenger] Feature count mismatch "
+                              f"(on-disk={len(champ_feats)}, challenger={X_val.shape[1]}). Saving challenger.")
+                        should_save = True
+                        raise Exception("feature_count_mismatch")
                 # Load existing champion
                 champion_t = load_ensemble_classifier(c_prefix_t, n_features=X_val.shape[1])
                 champion_p = load_ensemble_regressor(c_prefix_p, n_features=X_val.shape[1])
@@ -980,6 +997,13 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
     """Load recent closed trades, re-fetch features at entry time, return as weighted DataFrame."""
     try:
         import time as _time
+        # Load selected features to align columns (P1 fix)
+        feat_file = f"selected_features_{interval}.json"
+        if not os.path.exists(feat_file):
+            print(f"[Live Feedback] No selected_features_{interval}.json found, skipping.")
+            return None
+        with open(feat_file) as _ff:
+            live_selected = json.load(_ff)
         history_file = "dashboard_history.json"
         if not os.path.exists(history_file):
             return None
@@ -1022,6 +1046,10 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
         if not sample_dfs:
             return None
         result = pd.concat(sample_dfs, ignore_index=True)
+        # Align to selected features only (P1 fix)
+        keep = [c for c in live_selected if c in result.columns]
+        keep += [c for c in ["target_trend", "target_price_change", "sample_weight"] if c in result.columns]
+        result = result[keep]
         print(f"[Live Feedback] Injecting {len(result)} real trade samples (weight={weight}x) for interval {interval}m.")
         return result
     except Exception as e:

@@ -29,3 +29,7 @@ kline_cache.db
 kline_cache.db-journal
 kline_cache.db-wal
 kline_cache.db-shm
+
+# Runtime database and trade history
+trading_bot.db
+dashboard_history.json
