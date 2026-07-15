@@ -1071,7 +1071,15 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
         # Align to selected features only (P1 fix), preserving system-critical regime indicators (ATR_norm, ADX)
         keep = [c for c in live_selected if c in result.columns]
         keep += [c for c in ["target_trend", "target_price_change", "sample_weight", "ATR_norm", "ADX"] if c in result.columns]
-        result = result[keep]
+        
+        # Deduplicate keep list to prevent duplicate columns in sliced DataFrame
+        seen = set()
+        deduped_keep = []
+        for c in keep:
+            if c not in seen:
+                deduped_keep.append(c)
+                seen.add(c)
+        result = result[deduped_keep]
         print(f"[Live Feedback] Injecting {len(result)} real trade samples (weight={weight}x) for interval {interval}m.")
         return result
     except Exception as e:
