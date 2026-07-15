@@ -322,7 +322,7 @@ def run_manual_confluence_report(symbol, interval):
             
         all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
             latest_candle["close"], df_features, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol,
-            calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.55
+            calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.58
         )
         
         adx_regime = latest_candle["ADX"]
@@ -4796,7 +4796,7 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
 # ==========================================
 # PRE-TRADE CONFLUENCE ANALYSIS
 # ==========================================
-def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.55):
+def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58):
     """
     Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
     Critical checks are hard gates (instant reject if failed).
@@ -6773,21 +6773,19 @@ def main():
 
                         # Determine dynamic confidence threshold based on regime and volatility
                         atr_norm_val = latest_candle["ATR_norm"]
-                        dynamic_conf_threshold = 0.55
+                        dynamic_conf_threshold = 0.58
                         
                         # 1. Regime Adjustment (GMM-based)
                         if "Trending" in regime_name:
-                            # Trending: model signals are cleaner, lower bar to enter
-                            dynamic_conf_threshold = 0.52
+                            dynamic_conf_threshold = 0.55
                         elif "Ranging" in regime_name:
-                            # Ranging: choppy price action, require higher conviction
-                            dynamic_conf_threshold = 0.60
+                            dynamic_conf_threshold = 0.63
                             
                         # 2. Volatility Adjustment (ATR)
                         if atr_norm_val > 0.008:
-                            dynamic_conf_threshold = min(0.65, dynamic_conf_threshold + 0.03)
+                            dynamic_conf_threshold = min(0.68, dynamic_conf_threshold + 0.03)
                         elif atr_norm_val < 0.003:
-                            dynamic_conf_threshold = min(0.65, dynamic_conf_threshold + 0.02)
+                            dynamic_conf_threshold = min(0.68, dynamic_conf_threshold + 0.02)
                             
                         # 3. Sentiment-Adaptive Adjustment
                         with news_sentiment_lock:
@@ -6812,11 +6810,11 @@ def main():
                             if active_meta_model is not None:
                                 meta_pred = int(active_meta_model.predict(X_live)[0])
                                 if meta_pred == 1:
-                                    meta_adjustment = +0.05  # Meta predicts success: boost confidence
+                                    meta_adjustment = +0.05
                                     print(f"[{iv}m] Meta-Classifier: PASS (confidence boosted +5%)")
                                 else:
-                                    meta_adjustment = -0.05  # Meta predicts failure: reduce confidence
-                                    print(f"[{iv}m] Meta-Classifier: FAIL (confidence reduced -5%)")
+                                    meta_adjustment = -0.07  # Middle ground penalty
+                                    print(f"[{iv}m] Meta-Classifier: FAIL (confidence reduced -7%)")
                                 calibrated_confidence = max(0.0, min(1.0, calibrated_confidence + meta_adjustment))
                                 print(f"[{iv}m] Adjusted Calibrated Confidence: {calibrated_confidence*100:.2f}%")
 
