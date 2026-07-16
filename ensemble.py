@@ -133,10 +133,28 @@ class EnsembleClassifier:
         
         from sklearn.linear_model import LogisticRegression
         meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
-        meta_clf.coef_ = np.array(self.meta_coef_)
-        meta_clf.intercept_ = np.array(self.meta_intercept_)
-        meta_clf.classes_ = np.array([0, 1, 2])
-        return meta_clf.predict_proba(X_meta)
+        coef = np.array(self.meta_coef_)
+        intercept = np.array(self.meta_intercept_)
+        
+        if coef.ndim == 1 or coef.shape[0] == 1:
+            meta_clf.coef_ = coef.reshape(1, -1)
+            meta_clf.intercept_ = intercept.reshape(-1)
+            meta_clf.classes_ = np.array([0, 2])
+            try:
+                binary_probs = meta_clf.predict_proba(X_meta)
+                three_probs = np.zeros((binary_probs.shape[0], 3))
+                three_probs[:, 0] = binary_probs[:, 0]
+                three_probs[:, 2] = binary_probs[:, 1]
+                return three_probs
+            except Exception:
+                w = np.array(self.weights, dtype=float)
+                w = w / np.sum(w)
+                return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+        else:
+            meta_clf.coef_ = coef
+            meta_clf.intercept_ = intercept
+            meta_clf.classes_ = np.array([0, 1, 2])
+            return meta_clf.predict_proba(X_meta)
 
     def predict(self, X, weights=None):
         probs = self.predict_proba(X, weights=weights)
