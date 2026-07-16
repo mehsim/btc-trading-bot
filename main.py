@@ -6996,9 +6996,9 @@ def main():
                                     active_on_tf = tf_key
                                     break
                         
-                        # Session Filter: only open NEW trades during London (08-12 UTC) or New York (13-17 UTC)
+                        # Session Filter: temporarily allow 24-hour trading
                         utc_hour = datetime.utcnow().hour
-                        in_session = (8 <= utc_hour < 17)
+                        in_session = True
 
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
