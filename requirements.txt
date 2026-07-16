@@ -8,8 +8,6 @@ joblib
 requests
 python-dotenv
 flask
-transformers
-torch
 optuna
 lightgbm
 catboost

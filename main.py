@@ -2421,6 +2421,13 @@ def get_status():
             if tf_key in state_copy and isinstance(state_copy[tf_key], list):
                 state_copy[tf_key] = list(state_copy[tf_key])
 
+    # Filter out simulated skipped trades from the frontend view
+    if "trade_history" in state_copy:
+        state_copy["trade_history"] = [
+            t for t in state_copy["trade_history"]
+            if "SIMULATED" not in str(t.get("reason", "")).upper()
+        ]
+
     with logs_lock:
         state_copy["logs"] = list(bot_logs)
     
@@ -4410,8 +4417,12 @@ def get_news_sentiment():
 
         # Local pipeline fallback if HF_TOKEN is missing
         if sentiment_pipeline is None:
-            from transformers import pipeline
-            sentiment_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=-1)
+            try:
+                from transformers import pipeline
+                sentiment_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=-1)
+            except ImportError:
+                print("[News/Sentiment] transformers/torch not installed. Serverless HF_TOKEN must be configured. Sentiment defaults to Neutral.")
+                return "Neutral", cleaned_titles
 
         print(f"[News/Sentiment Local] Running local FinBERT pipeline on {len(cleaned_titles)} inputs...")
         results = sentiment_pipeline(cleaned_titles)
