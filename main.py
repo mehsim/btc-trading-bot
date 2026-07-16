@@ -5012,18 +5012,22 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         total_score += weight_rsi
 
     # ======= CHECK 4: Volume Confirmation (RVOL) Hard Gate =======
-    # Filter out low-liquidity fakeouts (RVOL must be >= 1.0x)
+    # Filter out low-liquidity fakeouts using last completed candle volume
     try:
-        vol_series = df_1h["volume"]
-        avg_vol_20 = vol_series.iloc[:-1].rolling(20).mean().iloc[-1]
-        latest_vol = vol_series.iloc[-1]
-        rvol = latest_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
-        volume_pass = (rvol >= 1.5)
+        vol_series_completed = df_1h["volume"].iloc[:-1]
+        avg_vol_20 = vol_series_completed.rolling(20).mean().iloc[-1]
+        latest_completed_vol = vol_series_completed.iloc[-1]
+        rvol = latest_completed_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
+        
+        regime = bot_state.get(f"regime_{interval}h", "Ranging")
+        min_rvol_req = 0.8 if "Ranging" in regime else 1.2
+        
+        volume_pass = (rvol >= min_rvol_req)
         if not volume_pass:
             hard_gate_failed = True
         results["Volume_Participation"] = {
             "pass": volume_pass,
-            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= 1.5x (Hard Gate)",
+            "detail": f"RVOL: {rvol:.2f}x (Vol: {latest_completed_vol:.1f} / Avg20: {avg_vol_20:.1f}), required >= {min_rvol_req:.1f}x (Hard Gate)",
             "weight": 0
         }
     except Exception as e:
@@ -5258,30 +5262,39 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
     # ======= CHECK 15: Risk-Reward Ratio (R:R) Hard Gate =======
     try:
-        cfg = TIMEFRAME_CONFIG.get(str(interval), {"sl_mult": 1.5})
+        cfg = TIMEFRAME_CONFIG.get(str(interval), {"sl_mult": 1.5, "tp_mult_ranging": 1.5, "tp_mult_trending": 2.5})
         sl_multiplier = cfg.get("sl_mult", 1.5)
         
+        regime = bot_state.get(f"regime_{interval}h", "Ranging")
+        if "Trending" in regime:
+            tp_multiplier = cfg.get("tp_mult_trending", 2.5)
+        else:
+            tp_multiplier = cfg.get("tp_mult_ranging", 1.5)
+            
         sl_multiplier_adjusted = sl_multiplier
+        tp_multiplier_adjusted = tp_multiplier
+        
         if calibrated_confidence > dynamic_conf_threshold and dynamic_conf_threshold < 1.0:
             confidence_ratio = (calibrated_confidence - dynamic_conf_threshold) / (1.0 - dynamic_conf_threshold)
             sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
+            tp_multiplier_adjusted = tp_multiplier * (1.0 + 0.2 * confidence_ratio)
             
         atr_norm = float(df_1h["ATR_norm"].iloc[-1])
         atr_dollars = atr_norm * current_price
         sl_distance = sl_multiplier_adjusted * atr_dollars
-        
-        min_tp = current_price * 0.005
-        tp_distance = max(min_tp, (expected_pct_change / 100.0) * current_price)
+        tp_distance = tp_multiplier_adjusted * atr_dollars
         
         rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0.0
-        rr_pass = (rr_ratio >= 1.2)
+        
+        min_rr_required = 0.9 if "Ranging" in regime else 1.2
+        rr_pass = (rr_ratio >= min_rr_required)
         
         if not rr_pass:
             hard_gate_failed = True
             
         results["Risk_Reward_Ratio"] = {
             "pass": rr_pass,
-            "detail": f"R:R Ratio: {rr_ratio:.2f}x (TP: {tp_distance:.2f} / SL: {sl_distance:.2f}), required >= 1.20x (Hard Gate)",
+            "detail": f"R:R Ratio: {rr_ratio:.2f}x (TP: {tp_distance:.4f} / SL: {sl_distance:.4f}), required >= {min_rr_required:.2f}x (Hard Gate)",
             "weight": 0
         }
     except Exception as e:
