@@ -1,6 +1,6 @@
-# Walkthrough: WebSocket Execution & Redis Caching Upgrades
+# Walkthrough: Model Accuracy & Feature Engineering Upgrades
 
-This walkthrough documents the technical modifications, testing procedures, and latency results after implementing the WebSocket and Redis caching upgrades on the AWS Tokyo server.
+This walkthrough documents the technical modifications, testing procedures, and latency results after implementing the WebSocket, Redis, and Model/Feature updates.
 
 ---
 
@@ -15,6 +15,10 @@ This walkthrough documents the technical modifications, testing procedures, and 
 * **Local Redis Instance**: Installed and started `redis-server` co-located on port 6379 on the EC2 instance.
 * **State Manager Backing**: Rewrote `state_manager.StateManager` to transparently back dict keys using local Redis hashes.
 * **Failover Fallback**: If the Redis server stops, the StateManager automatically detects it and reverts back to local in-memory dictionaries.
+
+### 📈 Model Accuracy & Feature Upgrades
+* **VTS Volatility Feature**: Added `volatility_vts` (and lag-1/lag-2) to [features.py](file:///Users/mehsimkhurshid/Downloads/btc-trading-bot/features.py#L264-L270) to detect volatility compression vs. expansion.
+* **Adversarial Validation**: Added drift detector inside [train.py](file:///Users/mehsimkhurshid/Downloads/btc-trading-bot/train.py#L705-L743). During weekly retraining, features that show significant chronological distribution shift (ROC-AUC score distance > 0.20) are automatically dropped to prevent model decay.
 
 ---
 
