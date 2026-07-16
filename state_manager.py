@@ -1,4 +1,6 @@
 import threading
+import json
+import redis
 import database
 
 class ObservedList(list):
@@ -18,6 +20,15 @@ class ObservedList(list):
 class StateManager:
     def __init__(self):
         self._lock = threading.RLock()
+        self._redis = None
+        try:
+            self._redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+            self._redis.ping()
+            print("[StateManager] Connected to local Redis server.")
+        except Exception as e:
+            print(f"[StateManager Warning] Could not connect to Redis: {e}. Falling back to memory-only state.")
+            self._redis = None
+
         self._cache = {
             "live_price": None,
             "live_price_BTCUSDT": None,
@@ -80,65 +91,129 @@ class StateManager:
         for tf in ["1h", "2h", "4h", "6h"]:
             self._cache[f"active_trade_{tf}"] = database.get_active_trades(tf)
 
+        # Initialize defaults to Redis
+        if self._redis:
+            for k, v in self._cache.items():
+                try:
+                    if not self._redis.exists(f"bot_state:{k}"):
+                        self._redis.set(f"bot_state:{k}", json.dumps(v))
+                except Exception as e:
+                    print(f"[StateManager Redis Init Error] Failed to write {k} to Redis: {e}")
+
+    def _on_mutate_trade(self, item):
+        database.save_completed_trade(item)
+        if self._redis:
+            # Sync mutated trade_history list back to Redis
+            try:
+                raw_list = list(self._cache.get("trade_history", []))
+                self._redis.set("bot_state:trade_history", json.dumps(raw_list))
+            except Exception as e:
+                print(f"[StateManager Redis Error] Failed to sync trade_history mutation: {e}")
+
+    def _on_mutate_prediction(self, item):
+        database.save_prediction(item)
+        if self._redis:
+            # Sync mutated prediction_history list back to Redis
+            try:
+                raw_list = list(self._cache.get("prediction_history", []))
+                self._redis.set("bot_state:prediction_history", json.dumps(raw_list))
+            except Exception as e:
+                print(f"[StateManager Redis Error] Failed to sync prediction_history mutation: {e}")
+
     def __getitem__(self, key):
         with self._lock:
-            val = self._cache.get(key)
+            val = None
+            if self._redis:
+                try:
+                    val_str = self._redis.get(f"bot_state:{key}")
+                    if val_str is not None:
+                        val = json.loads(val_str)
+                except Exception as e:
+                    pass
+            
+            if val is None:
+                val = self._cache.get(key)
+                
             if key == "trade_history" and isinstance(val, list) and not isinstance(val, ObservedList):
-                val = ObservedList(val, lambda lst, item: database.save_completed_trade(item))
+                val = ObservedList(val, lambda lst, item: self._on_mutate_trade(item))
                 self._cache[key] = val
             elif key == "prediction_history" and isinstance(val, list) and not isinstance(val, ObservedList):
-                val = ObservedList(val, lambda lst, item: database.save_prediction(item))
+                val = ObservedList(val, lambda lst, item: self._on_mutate_prediction(item))
                 self._cache[key] = val
             return val
 
     def __setitem__(self, key, value):
         with self._lock:
-            if key == "trade_history" and isinstance(value, list) and not isinstance(value, ObservedList):
-                value = ObservedList(value, lambda lst, item: database.save_completed_trade(item))
+            raw_value = value
+            if isinstance(value, ObservedList):
+                raw_value = list(value)
+            elif key == "trade_history" and isinstance(value, list) and not isinstance(value, ObservedList):
+                value = ObservedList(value, lambda lst, item: self._on_mutate_trade(item))
+                raw_value = list(value)
             elif key == "prediction_history" and isinstance(value, list) and not isinstance(value, ObservedList):
-                value = ObservedList(value, lambda lst, item: database.save_prediction(item))
+                value = ObservedList(value, lambda lst, item: self._on_mutate_prediction(item))
+                raw_value = list(value)
                 
+            if self._redis:
+                try:
+                    self._redis.set(f"bot_state:{key}", json.dumps(raw_value))
+                except Exception as e:
+                    print(f"[StateManager Redis Error] Failed to set {key}: {e}")
+                    
             self._cache[key] = value
             
             # Persist to database if it's one of the persistent keys
             if key in ["active_trade_1h", "active_trade_2h", "active_trade_4h", "active_trade_6h"]:
                 tf = key.split("_")[-1]
-                database.save_active_trades(tf, value)
+                database.save_active_trades(tf, raw_value)
             elif key in ["simulated_balance", "bot_running", "fresh_reset_v3"]:
-                database.set_setting(key, str(value))
+                database.set_setting(key, str(raw_value))
 
     def get(self, key, default=None):
         with self._lock:
-            val = self._cache.get(key)
+            val = None
+            if self._redis:
+                try:
+                    val_str = self._redis.get(f"bot_state:{key}")
+                    if val_str is not None:
+                        val = json.loads(val_str)
+                except Exception as e:
+                    pass
             if val is None:
-                return default
+                val = self._cache.get(key)
+                if val is None:
+                    return default
+            
             if key == "trade_history" and isinstance(val, list) and not isinstance(val, ObservedList):
-                val = ObservedList(val, lambda lst, item: database.save_completed_trade(item))
+                val = ObservedList(val, lambda lst, item: self._on_mutate_trade(item))
                 self._cache[key] = val
             elif key == "prediction_history" and isinstance(val, list) and not isinstance(val, ObservedList):
-                val = ObservedList(val, lambda lst, item: database.save_prediction(item))
+                val = ObservedList(val, lambda lst, item: self._on_mutate_prediction(item))
                 self._cache[key] = val
             return val
 
     def __contains__(self, key):
         with self._lock:
+            if self._redis:
+                try:
+                    return self._redis.exists(f"bot_state:{key}")
+                except Exception as e:
+                    pass
             return key in self._cache
 
     def copy(self):
         with self._lock:
             res = {}
-            for k, v in self._cache.items():
-                if isinstance(v, list):
-                    res[k] = list(v)
-                elif isinstance(v, dict):
-                    res[k] = dict(v)
-                else:
-                    res[k] = v
+            for k in self._cache.keys():
+                res[k] = self[k]
             return res
 
     def items(self):
         with self._lock:
-            return list(self._cache.items())
+            res = []
+            for k in self._cache.keys():
+                res.append((k, self[k]))
+            return res
 
     def update(self, other):
         with self._lock:

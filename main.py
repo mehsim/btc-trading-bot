@@ -2004,6 +2004,44 @@ def get_bybit_min_qty_step(symbol):
     }
     return min_limits.get(symbol, 0.1)
 
+_ws_responses = {}
+_ws_responses_lock = threading.Lock()
+
+def execute_bybit_order_ws_or_rest(endpoint, payload):
+    global private_ws_connected, active_private_ws
+    op_map = {
+        "/v5/order/create": "order.create",
+        "/v5/order/cancel": "order.cancel"
+    }
+    op = op_map.get(endpoint)
+    if op and private_ws_connected and active_private_ws:
+        req_id = f"req_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}"
+        ws_payload = {
+            "op": op,
+            "reqId": req_id,
+            "args": [payload]
+        }
+        try:
+            print(f"[WebSocket Private Execution] Sending {op} reqId={req_id}")
+            active_private_ws.send(json.dumps(ws_payload))
+            
+            # Wait for response
+            timeout = 1.0 # 1,000ms
+            start_t = time.time()
+            while time.time() - start_t < timeout:
+                with _ws_responses_lock:
+                    if req_id in _ws_responses:
+                        resp = _ws_responses.pop(req_id)
+                        print(f"[WebSocket Private Execution] Received response for reqId={req_id} retCode={resp.get('retCode')}")
+                        return resp
+                time.sleep(0.01) # 10ms
+            print(f"[WebSocket Private Execution Warning] Timeout waiting for reqId={req_id}. Falling back to REST...")
+        except Exception as e:
+            print(f"[WebSocket Private Execution Error] {e}. Falling back to REST...")
+            
+    # Fallback to standard REST API request
+    return bybit_post_request(endpoint, payload)
+
 def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False):
     payload = {
         "category": "linear",
@@ -2021,7 +2059,7 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_on
     if tp:
         payload["takeProfit"] = format_bybit_price(symbol, tp)
         
-    res = bybit_post_request("/v5/order/create", payload)
+    res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
 
 def get_bybit_order_details(symbol, order_id):
@@ -2051,7 +2089,7 @@ def cancel_bybit_order(symbol, order_id):
         "symbol": symbol,
         "orderId": order_id
     }
-    return bybit_post_request("/v5/order/cancel", cancel_payload)
+    return execute_bybit_order_ws_or_rest("/v5/order/cancel", cancel_payload)
 
 def bybit_get_request(endpoint, query_params):
     import time
@@ -2289,7 +2327,7 @@ def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_o
         payload["stopLoss"] = format_bybit_price(symbol, sl)
     if tp:
         payload["takeProfit"] = format_bybit_price(symbol, tp)
-    res = bybit_post_request("/v5/order/create", payload)
+    res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
 
 def get_bybit_bid_ask(symbol):
@@ -3928,6 +3966,13 @@ def on_private_message(ws, message):
         data = json.loads(message)
         op = data.get("op")
         topic = data.get("topic")
+        
+        # Capture operations responses (e.g. order.create or order.cancel callbacks)
+        req_id = data.get("reqId")
+        if req_id:
+            with _ws_responses_lock:
+                _ws_responses[req_id] = data
+                
         if op == "auth":
             if data.get("success") is True:
                 print("[WebSocket Private] Authentication successful. Subscribing to topics...")

@@ -12,4 +12,5 @@ optuna
 lightgbm
 catboost
 PySocks
-aiohttp
+aiohttp
+redis
