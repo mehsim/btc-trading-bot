@@ -95,7 +95,7 @@ class EnsembleClassifier:
                 # Stack features for meta-learner (multi-class probabilities stacked column-wise)
                 X_meta = np.column_stack([p_xgb, p_lgb, p_cat])
                 
-                meta_clf = LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42)
+                meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
                 meta_clf.fit(X_meta, y_val)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
@@ -132,7 +132,7 @@ class EnsembleClassifier:
         X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])
         
         from sklearn.linear_model import LogisticRegression
-        meta_clf = LogisticRegression(multi_class='multinomial', solver='lbfgs', max_iter=200, random_state=42)
+        meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
         meta_clf.coef_ = np.array(self.meta_coef_)
         meta_clf.intercept_ = np.array(self.meta_intercept_)
         meta_clf.classes_ = np.array([0, 1, 2])
