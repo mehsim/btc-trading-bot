@@ -264,8 +264,13 @@ def add_features(df, fetch_calendar_callback=None):
 
     # Garman-Klass Volatility
     df["volatility_gk"] = calculate_garman_klass_vol(df, window=14)
+    # Volatility Term Structure (gk_5 / gk_60)
+    gk_5 = calculate_garman_klass_vol(df, window=5)
+    gk_60 = calculate_garman_klass_vol(df, window=60)
+    df["volatility_vts"] = gk_5 / (gk_60 + 1e-8)
     for lag in [1, 2]:
         df[f"volatility_gk_lag{lag}"] = df["volatility_gk"].shift(lag)
+        df[f"volatility_vts_lag{lag}"] = df["volatility_vts"].shift(lag)
 
     # Advanced Microstructure Features
     dp_ret = df["close"].pct_change(1).fillna(0.0)

@@ -705,6 +705,43 @@ def train_models(interval=INTERVAL, pages=PAGES):
         if pf not in selected_features and pf in X_prelim.columns:
             selected_features.append(pf)
 
+    # ADVERSARIAL VALIDATION DRIFT DETECTOR (Model Accuracy Upgrade)
+    if len(selected_features) > 20:
+        print("\nRunning Adversarial Validation to drop drifted features...")
+        try:
+            split_idx = int(len(df) * 0.8)
+            av_df = df.copy()
+            av_df["av_label"] = 0
+            av_df.iloc[split_idx:, av_df.columns.get_loc("av_label")] = 1
+            
+            from sklearn.metrics import roc_auc_score
+            
+            drifted_features = []
+            for feat in list(selected_features):
+                if feat in protected:
+                    continue
+                # Make sure we don't drop below the minimum required 20 features
+                if len(selected_features) <= 20:
+                    break
+                feat_series = av_df[feat].fillna(0.0)
+                try:
+                    auc = roc_auc_score(av_df["av_label"], feat_series)
+                    auc_dist = abs(auc - 0.5)
+                    if auc_dist > 0.20: # AUC > 0.70 or < 0.30 (significant drift)
+                        drifted_features.append((feat, auc))
+                        selected_features.remove(feat)
+                except Exception:
+                    pass
+            
+            if drifted_features:
+                print(f"[Adversarial Validation] Purged {len(drifted_features)} drifted features:")
+                for df_feat, df_auc in drifted_features:
+                    print(f"  - {df_feat} (Separation AUC: {df_auc:.3f})")
+            else:
+                print("[Adversarial Validation] No drifted features found. All features stable.")
+        except Exception as av_err:
+            print(f"[Adversarial Validation Error] {av_err}")
+
     print(f"RFECV complete: Selected optimal subset of {len(selected_features)} features (out of {len(features)}):")
     for rank, f_name in enumerate(selected_features, 1):
         print(f"  {rank}. {f_name}")
