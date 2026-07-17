@@ -1116,7 +1116,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     train_regime_model(df_ranging, "ranging")
 
 def load_live_trade_samples(interval, days=2, weight=3.0):
-    """Load recent closed trades, re-fetch features at entry time, return as weighted DataFrame."""
+    """Load recent closed trades and simulated skipped predictions, re-fetch features at entry time, return as weighted DataFrame."""
     try:
         import time as _time
         # Load selected features to align columns (P1 fix)
@@ -1127,56 +1127,131 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
         with open(feat_file) as _ff:
             live_selected = json.load(_ff)
         history_file = "dashboard_history.json"
-        if not os.path.exists(history_file):
-            return None
-        with open(history_file, "r") as f:
-            data = json.load(f)
-        trades = data.get("trade_history", [])
-        cutoff = _time.time() - days * 86400
-        trades = [t for t in trades if str(t.get("interval", "")) == str(interval) and float(t.get("exit_time", 0)) >= cutoff]
-        if not trades:
-            print(f"[Live Feedback] No trades in last {days} days for interval {interval}m.")
-            return None
         
         sample_dfs = []
-        for t in trades:
-            symbol = t.get("symbol")
-            exit_ts = float(t.get("exit_time", 0))
-            pnl = float(t.get("pnl_usd", 0.0))
-            direction = t.get("direction", "Bullish")
-            # Fetch ~350 candles ending just before exit to capture entry features without NaN drops
-            df_c = get_history(symbol=symbol, interval=interval, limit=350, pages=1)
-            if df_c is None or len(df_c) < 20:
-                continue
-            # Keep only rows before exit time
-            df_c = df_c[df_c["timestamp"] <= exit_ts * 1000].copy()
-            if len(df_c) < 10:
-                continue
-            
-            # Merge BTC close price to support correlation features
-            if symbol == "BTCUSDT":
-                df_c["close_btc"] = df_c["close"]
-            else:
-                df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350, pages=1)
-                if df_btc is not None and len(df_btc) > 0:
-                    df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-                    df_c = pd.merge(df_c, df_btc_sub, on="timestamp", how="inner")
-                else:
-                    df_c["close_btc"] = df_c["close"]
-
-            df_c = merge_derivatives_sentiment_features(df_c, symbol=symbol, interval=interval)
-            df_c = add_features(df_c)
-            df_c = df_c.dropna()
-            if len(df_c) == 0:
-                continue
-            # Use the last available row (closest to entry)
-            row = df_c.iloc[[-1]].copy()
-            # Label: correct direction = 1, wrong = 0
-            row["target_trend"] = 1 if pnl > 0 else 0
-            row["target_price_change"] = 0.0
-            row["sample_weight"] = weight
-            sample_dfs.append(row)
         
+        # 1. Load executed trades from dashboard history
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                data = json.load(f)
+            trades = data.get("trade_history", [])
+            cutoff = _time.time() - days * 86400
+            trades = [t for t in trades if str(t.get("interval", "")) == str(interval) and float(t.get("exit_time", 0)) >= cutoff]
+            
+            for t in trades:
+                symbol = t.get("symbol")
+                exit_ts = float(t.get("exit_time", 0))
+                pnl = float(t.get("pnl_usd", 0.0))
+                direction = t.get("direction", "Bullish")
+                df_c = get_history(symbol=symbol, interval=interval, limit=350, pages=1)
+                if df_c is None or len(df_c) < 20:
+                    continue
+                df_c = df_c[df_c["timestamp"] <= exit_ts * 1000].copy()
+                if len(df_c) < 10:
+                    continue
+                
+                if symbol == "BTCUSDT":
+                    df_c["close_btc"] = df_c["close"]
+                else:
+                    df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350, pages=1)
+                    if df_btc is not None and len(df_btc) > 0:
+                        df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
+                        df_c = pd.merge(df_c, df_btc_sub, on="timestamp", how="inner")
+                    else:
+                        df_c["close_btc"] = df_c["close"]
+
+                df_c = merge_derivatives_sentiment_features(df_c, symbol=symbol, interval=interval)
+                df_c = add_features(df_c)
+                df_c = df_c.dropna()
+                if len(df_c) == 0:
+                    continue
+                row = df_c.iloc[[-1]].copy()
+                row["target_trend"] = 1 if pnl > 0 else 0
+                row["target_price_change"] = 0.0
+                row["sample_weight"] = weight
+                sample_dfs.append(row)
+
+        # 2. Load and simulate skipped predictions from SQLite db
+        try:
+            db_file = "trading_bot.db"
+            if os.path.exists(db_file):
+                import sqlite3
+                conn = sqlite3.connect(db_file)
+                c = conn.cursor()
+                cutoff_ts = _time.time() - days * 86400
+                c.execute('SELECT raw_data FROM predictions WHERE timestamp >= ?', (cutoff_ts,))
+                db_rows = c.fetchall()
+                conn.close()
+                
+                skipped_trades = []
+                for r in db_rows:
+                    try:
+                        d = json.loads(r[0])
+                        if str(d.get("interval", "")) == str(interval) and "skip" in d.get("status", "").lower():
+                            skipped_trades.append(d)
+                    except Exception:
+                        pass
+                
+                for t in skipped_trades:
+                    symbol = t.get("symbol")
+                    entry_price = float(t.get("ref_price", 0.0))
+                    entry_time_sec = float(t.get("timestamp", 0.0))
+                    entry_time_ms = entry_time_sec * 1000
+                    direction = t.get("direction", "Bullish")
+                    
+                    df_c = get_history(symbol=symbol, interval=interval, limit=350, pages=1)
+                    if df_c is None or len(df_c) < 20:
+                        continue
+                    df_c_before = df_c[df_c["timestamp"] <= entry_time_ms].copy()
+                    if len(df_c_before) < 10:
+                        continue
+                    
+                    # Simple PnL simulator (TP vs SL)
+                    atr_series = df_c_before["close"].diff().abs().rolling(14).mean()
+                    atr = atr_series.iloc[-1] if len(atr_series) > 0 and not pd.isna(atr_series.iloc[-1]) else entry_price * 0.01
+                    sl = entry_price - 1.5 * atr if direction == "Bullish" else entry_price + 1.5 * atr
+                    tp = entry_price + 1.25 * atr if direction == "Bullish" else entry_price - 1.25 * atr
+                    
+                    df_future = df_c[df_c["timestamp"] > entry_time_ms].copy()
+                    pnl = 0.0
+                    for _, row_fut in df_future.iterrows():
+                        high = row_fut["high"]
+                        low = row_fut["low"]
+                        if direction == "Bullish":
+                            if low <= sl:
+                                pnl = -0.01
+                                break
+                            if high >= tp:
+                                pnl = 0.015
+                                break
+                        else:
+                            if high >= sl:
+                                pnl = -0.01
+                                break
+                            if low <= tp:
+                                pnl = 0.015
+                                break
+                    else:
+                        if len(df_future) > 0:
+                            pnl = (df_future.iloc[-1]["close"] - entry_price) / entry_price
+                            if direction == "Bearish":
+                                pnl = -pnl
+                                
+                    df_c_before = merge_derivatives_sentiment_features(df_c_before, symbol=symbol, interval=interval)
+                    if "close_btc" not in df_c_before.columns:
+                        df_c_before["close_btc"] = df_c_before["close"]
+                    df_c_before = add_features(df_c_before)
+                    df_c_before = df_c_before.dropna()
+                    if len(df_c_before) == 0:
+                        continue
+                    row = df_c_before.iloc[[-1]].copy()
+                    row["target_trend"] = 1 if pnl > 0 else 0
+                    row["target_price_change"] = 0.0
+                    row["sample_weight"] = 1.0  # Skipped trades have baseline weight
+                    sample_dfs.append(row)
+        except Exception as e_db:
+            print(f"[Live Feedback Warning] Error loading skipped predictions: {e_db}")
+
         if not sample_dfs:
             return None
         result = pd.concat(sample_dfs, ignore_index=True)
@@ -1192,7 +1267,7 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
                 deduped_keep.append(c)
                 seen.add(c)
         result = result[deduped_keep]
-        print(f"[Live Feedback] Injecting {len(result)} real trade samples (weight={weight}x) for interval {interval}m.")
+        print(f"[Live Feedback] Injecting {len(result)} feedback samples (real + simulated skipped) for interval {interval}m.")
         return result
     except Exception as e:
         print(f"[Live Feedback] Error loading live trade samples: {e}")
