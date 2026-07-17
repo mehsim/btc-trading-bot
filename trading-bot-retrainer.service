@@ -1,0 +1,17 @@
+[Unit]
+Description=BTC Trading Bot Model Retrainer
+After=network.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/btc-trading-bot
+Environment=PYTHONUNBUFFERED=1
+Environment=TELEGRAM_BOT_TOKEN=8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY
+Environment=TELEGRAM_CHAT_ID=8957269359
+ExecStart=/home/ubuntu/btc-trading-bot/.venv/bin/python3 retrain_worker.py
+CPUQuota=50%
+MemoryLimit=800M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run BTC Trading Bot Model Retrainer Weekly on Sunday 09:00 UTC
+
+[Timer]
+OnCalendar=Sun *-*-* 09:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
