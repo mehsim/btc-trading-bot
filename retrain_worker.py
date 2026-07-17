@@ -37,7 +37,7 @@ def main():
 
     for iv in intervals:
         print(f"[retrain_worker] Spawning subprocess for interval {iv}m...")
-        cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "20", "--live-feedback"]
+        cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "5", "--live-feedback"]
         p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = p.communicate()
         
