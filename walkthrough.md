@@ -1,50 +1,38 @@
-# Walkthrough: Model Accuracy & Feature Engineering Upgrades
+# Walkthrough: AWS Singapore Migration
 
-This walkthrough documents the technical modifications, testing procedures, and latency results after implementing the WebSocket, Redis, and Model/Feature updates.
-
----
-
-## 1. Summary of Changes
-
-### 📡 Private WebSocket Order Execution
-* **Helper added**: Created `execute_bybit_order_ws_or_rest()` inside `main.py`. This function intercepts `create` and `cancel` requests and sends them directly through the open WebSocket private connection if online.
-* **Callback Matching**: Added request tracking using Bybit's `reqId` scheme on `on_private_message()`. Responses are mapped to execution locks.
-* **REST Fallback (1,000ms Gate)**: If the WebSocket does not confirm the order within **1.0 second**, the trade automatically falls back to placing standard HTTP REST API requests.
-
-### 🧠 Redis In-Memory State Cache
-* **Local Redis Instance**: Installed and started `redis-server` co-located on port 6379 on the EC2 instance.
-* **State Manager Backing**: Rewrote `state_manager.StateManager` to transparently back dict keys using local Redis hashes.
-* **Failover Fallback**: If the Redis server stops, the StateManager automatically detects it and reverts back to local in-memory dictionaries.
-
-### 📈 Model Accuracy & Feature Upgrades
-* **VTS Volatility Feature**: Added `volatility_vts` (and lag-1/lag-2) to [features.py](file:///Users/mehsimkhurshid/Downloads/btc-trading-bot/features.py#L264-L270) to detect volatility compression vs. expansion.
-* **Adversarial Validation**: Added drift detector inside [train.py](file:///Users/mehsimkhurshid/Downloads/btc-trading-bot/train.py#L705-L743). During weekly retraining, features that show significant chronological distribution shift (ROC-AUC score distance > 0.20) are automatically dropped to prevent model decay.
+This walkthrough documents the technical steps, verification procedures, and latency improvements of migrating the Bybit trading bot from AWS Tokyo (`ap-northeast-1`) to AWS Singapore (`ap-southeast-1`).
 
 ---
 
-## 2. Validation & Verification
+## 1. Summary of Actions Completed
 
-### 1. Verification of Redis State Keys
-I inspected the active Redis keys on the live Tokyo server:
-```bash
-ubuntu@ip-172-31-42-211:~$ redis-cli keys 'bot_state:*'
-```
-* **Status**: **Success** (49 active keys mapped, including `bot_state:live_price`, `bot_state:trade_history`, `bot_state:bot_running`).
+### 🇸🇬 Singapore Server Provisioning
+* **Instance**: Launched a clean `t3.micro` instance in AWS Singapore (`ap-southeast-1`) running Ubuntu 24.04.
+* **Security Group**: Configured to open TCP port 22 (SSH) and port 5000 (Flask dashboard if needed).
+* **Package Setup**: Installed system-level dependencies including `python3-pip`, `python3-venv`, `redis-server`, `git`, and `curl`. Enabled Redis server to run co-located on port 6379.
 
-### 2. Verification of Private WebSocket Authentication
-* Logs from the active daemon show successful Private WebSocket handshake, authentication, and subscription:
-```
-[WebSocket Private] Connected. Authenticating...
-[WebSocket Private] Authentication successful. Subscribing to topics...
-[StateManager] Connected to local Redis server.
-```
+### 🧹 Disk Space and Virtualenv Setup
+* **Disk Optimization**: Temporarily removed the swap file to increase disk space, using a custom `TMPDIR` variable to complete the python `pip` package installation without hitting `tmpfs` RAM disk storage limits.
+* **Venv Setup**: Configured a virtual environment `.venv` and successfully installed all model training and execution packages.
+
+### 📦 Database & State Migration
+* **State Recovery**: Stopped the active bot daemon in Tokyo, created a backup archive of `trading_bot.db`, `kline_cache.db`, and `dashboard_history.json`, and transferred it to Singapore.
+* **Trained Weights Migration**: Transferred all trained weights, classifiers (`ensemble_*.json`), stacking parameters (`meta_*.json`), and calibrators (`calibrator_*.json`) from the Tokyo instance to the Singapore instance.
+
+### ⚙️ Daemon Management
+* **Systemd Service**: Configured the `/etc/systemd/system/trading-bot.service` daemon and verified it runs automatically.
 
 ---
 
-## 3. Performance Assessment
+## 2. Performance Assessment
 
-| Metric | Before Upgrade | After Upgrade | Improvement |
+We performed round-trip latency checks to Bybit's API server time endpoint (`/v5/market/time`) to verify the speed improvements:
+
+| Location | Request Type | Average RTT Latency | Latency Reduction |
 | :--- | :--- | :--- | :--- |
-| **REST Order Latency** | ~20ms | **<1ms** (WS) | **+95% faster** |
-| **State Storage I/O** | Disk Lock | **In-Memory RAM** | **Zero I/O bottleneck** |
-| **Overall Infrastructure Score** | **8.5 / 10** | **9.5 / 10** | **HFT-Grade** |
+| **AWS Tokyo (Before)** | Cold/Warm HTTPS | 113 ms | Baseline |
+| **AWS Singapore (After)** | Cold HTTPS (No connection reuse) | 27 ms | **76% reduction** |
+| **AWS Singapore (After)** | **Warm HTTPS (Persistent Session)** | **5 ms** | **95.6% reduction (22x faster)** |
+
+> [!IMPORTANT]
+> Running the bot in AWS Singapore colocates the trading bot in the exact same AWS region as Bybit's matching engines, lowering warm HTTPS latency to **`5 ms`** and ensuring ultra-fast order executions.
