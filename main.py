@@ -911,7 +911,7 @@ def start_telegram_command_listener():
                                                         "stop_loss": s_l,
                                                         "take_profit": t_p,
                                                         "direction": d,
-                                                        "end_time": float(time.time() + 3600 * 10),
+                                                        "end_time": float(time.time() + 3600 * 48),
                                                         "entry_time": int(time.time() * 1000),
                                                         "atr_dollars": atr,
                                                         "highest_price": fill_price,
@@ -3241,7 +3241,7 @@ def retrain_models_thread(is_manual=False):
             # Retrain for all intervals sequentially using nice -n 19 to yield CPU to active trading bot
             for iv in ["60", "120", "240", "360"]:
                 print(f"[Retraining] Spawning throttled subprocess for interval {iv}m...")
-                cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "20", "--live-feedback"]
+                cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "10", "--live-feedback"]
                 p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 stdout, stderr = p.communicate()
                 if p.returncode == 0:
@@ -5761,7 +5761,7 @@ def sync_active_positions_from_bybit():
                         "stop_loss": sl_price,
                         "take_profit": tp_price,
                         "direction": direction,
-                        "end_time": float(time.time() + 3600 * 10),
+                        "end_time": float(time.time() + 3600 * 48),
                         "entry_time": int(time.time() * 1000),
                         "atr_dollars": calc_atr,
                         "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
