@@ -20,7 +20,7 @@ This report bypasses the standard praise and critically dissects the bot's core 
 * **The Vulnerability**: The bot, dashboard, API server, and Redis cache all run on a single, shared `t3.micro` VPS in AWS Singapore.
 * **The Risk**: Model retraining is highly memory and CPU intensive. While adding `1.0 GB` swap space prevents OOM crashes, it causes the disk to thrash heavily. If a high-volatility event occurs *during* retraining, disk I/O bottlenecks can delay WebSocket event loops, causing the bot to miss execution triggers or experience delayed stop-loss updates.
 * **The Fix**: **Decouple Analytics from Execution**. Run execution (WebSocket listener, order manager, safety guards) on a dedicated, lightweight instance. Offload training/analytics to a separate instance or serverless workers (AWS Lambda/ECS) that only push weight files to the execution server when complete.
-* 🚀 **Completed** — `retrain_worker.py` systemd service with `CPUQuota=50%` and `MemoryLimit=800M` decouples retraining from the live execution loop.
+* 🚀 **Completed** — Decoupled retraining loop via a dedicated systemd service `trading-bot-retrainer.service` and systemd timer `trading-bot-retrainer.timer` scheduled weekly on Sundays at 09:00 UTC. Optimized memory footprint (pages capped at 5) to protect 1GB RAM host from OOM spikes.
 
 ### 💾 File-Based State Management
 * **The Vulnerability**: The system relies on a local SQLite database (`trading_bot.db`) and local files (`trade_journal.csv`, `dashboard_history.json`).
@@ -82,7 +82,7 @@ This report bypasses the standard praise and critically dissects the bot's core 
 * **The Vulnerability**: The Logistic Regression stacking meta-learner and Isotonic Calibrators are trained on historical data.
 * **The Risk**: The meta-learner is slow to adapt to changing base-model relationships. If LightGBM begins performing poorly because of a structural change, the meta-learner will still weight it heavily based on historical success, leading to lag in performance decay detection.
 * **The Fix**: Implement an **Adaptive Meta-Learner Weight Decay**. Apply an exponential time-decay factor to the meta-learner's training set to heavily weight recent trade performance (e.g., last 14 days) over old historical data.
-* 🚀 **Completed** — Exponential sample weight decay based on historical age added to `EnsembleClassifier` and `EnsembleRegressor` fit methods.
+* 🚀 **Completed** — Exponential sample weight decay based on historical age added to `EnsembleClassifier` and `EnsembleRegressor` fit methods. Injected simulated outcomes of skipped predictions directly into training feedback loops for zero-cost false-positive learning.
 
 ---
 
