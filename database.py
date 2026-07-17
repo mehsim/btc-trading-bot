@@ -16,6 +16,14 @@ def get_db_connection():
 def init_db():
     with db_lock:
         conn = get_db_connection()
+        try:
+            check_res = conn.execute("PRAGMA integrity_check;").fetchone()
+            if check_res and check_res[0] == "ok":
+                print("[Database] SQLite integrity check passed.")
+            else:
+                print(f"[Database Warning] SQLite integrity check failed: {check_res}")
+        except Exception as e:
+            print(f"[Database Error] SQLite integrity check failed with exception: {e}")
         cursor = conn.cursor()
         
         # 1. Create Predictions Table

@@ -761,7 +761,64 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"Skipping {name} due to insufficient data.")
             return
 
-        X = df_regime[selected_features]
+        features_filename = f"selected_features_{interval}_{name}.json"
+        regime_features = []
+        skip_rfecv = False
+        if os.path.exists(features_filename) and not globals().get("FORCE_RFECV", False):
+            try:
+                with open(features_filename, "r") as f:
+                    regime_features = json.load(f)
+                if len(regime_features) >= 15:
+                    print(f"[{name.upper()} regime] Reusing existing {len(regime_features)} features. Skipping RFECV.")
+                    skip_rfecv = True
+            except Exception as e:
+                print(f"[Warning] Failed to load {features_filename}: {e}. Running RFECV.")
+
+        if not skip_rfecv:
+            from sklearn.feature_selection import RFECV
+            print(f"\nRunning RFECV feature selection specifically for regime: {name.upper()}...")
+            y_rfecv = df_regime["target_trend"]
+            X_rfecv_prelim = df_regime[features]
+            
+            if len(df_regime) > 25000:
+                df_sub = df_regime.sample(n=25000, random_state=42)
+                X_rfecv_prelim = df_sub[features]
+                y_rfecv = df_sub["target_trend"]
+                
+            from xgboost import XGBClassifier
+            estimator = XGBClassifier(
+                n_estimators=40,
+                max_depth=3,
+                learning_rate=0.1,
+                random_state=42,
+                tree_method="hist",
+                n_jobs=-1
+            )
+            cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
+            selector = RFECV(
+                estimator=estimator,
+                step=2,
+                cv=cv_rfecv,
+                scoring="accuracy",
+                min_features_to_select=15,
+                n_jobs=-1
+            )
+            selector.fit(X_rfecv_prelim.values, y_rfecv.values)
+            regime_features = [f for f, support in zip(features, selector.support_) if support]
+            
+            required_price_features = ["close_to_Kalman", "close_btc", "btc_rsi", "ADX", "ATR_norm", "open_interest"]
+            for pf in required_price_features:
+                if pf not in regime_features and pf in df_regime.columns:
+                    regime_features.append(pf)
+                    
+            if len(regime_features) > 22:
+                regime_features = regime_features[:22]
+                
+            with open(features_filename, "w") as f:
+                json.dump(regime_features, f)
+            print(f"Saved {name.upper()} regime selected features to {features_filename}")
+
+        X = df_regime[regime_features]
         y_trend = df_regime["target_trend"]
         y_price = df_regime["target_price_change"]
 

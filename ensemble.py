@@ -95,11 +95,16 @@ class EnsembleClassifier:
                 # Stack features for meta-learner (multi-class probabilities stacked column-wise)
                 X_meta = np.column_stack([p_xgb, p_lgb, p_cat])
                 
+                # Apply exponential time-decay sample weighting (newer validation samples weighted higher)
+                N_val = len(y_val)
+                val_decay_weights = np.exp(-0.02 * np.arange(N_val)[::-1])
+                val_decay_weights = val_decay_weights / np.sum(val_decay_weights) * N_val
+                
                 meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
-                meta_clf.fit(X_meta, y_val)
+                meta_clf.fit(X_meta, y_val, sample_weight=val_decay_weights)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
-                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully (leak-free).")
+                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully with time-decay weights (leak-free).")
             except Exception as e:
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
                 
@@ -208,11 +213,16 @@ class EnsembleRegressor:
                 
                 X_meta = np.column_stack([p_xgb, p_lgb, p_cat])
                 
+                # Apply exponential time-decay sample weighting (newer validation samples weighted higher)
+                N_val = len(y_val)
+                val_decay_weights = np.exp(-0.02 * np.arange(N_val)[::-1])
+                val_decay_weights = val_decay_weights / np.sum(val_decay_weights) * N_val
+                
                 meta_reg = Ridge(alpha=1.0, random_state=42)
-                meta_reg.fit(X_meta, y_val)
+                meta_reg.fit(X_meta, y_val, sample_weight=val_decay_weights)
                 self.meta_coef_ = meta_reg.coef_.tolist()
                 self.meta_intercept_ = float(meta_reg.intercept_)
-                print(f"[Ensemble Stacking] Regressor Meta-Learner calibrated successfully.")
+                print(f"[Ensemble Stacking] Regressor Meta-Learner calibrated successfully with time-decay weights.")
             except Exception as e:
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
                 

@@ -462,25 +462,21 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     return df_history.iloc[-target_count:].reset_index(drop=True)
 
 def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
-    init_db()
-    # 1. Load cache if it exists
+    # Load cache from CSV
+    cache_dir = "kline_cache"
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    csv_file = os.path.join(cache_dir, f"oi_{symbol}_{interval}.csv")
+    
     df_cache = None
-    try:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT timestamp, open_interest FROM oi_data WHERE symbol=? AND interval=? ORDER BY timestamp ASC",
-            (symbol, str(interval))
-        )
-        rows = cursor.fetchall()
-        conn.close()
-        if rows:
-            df_cache = pd.DataFrame(rows, columns=["timestamp", "open_interest"])
-    except Exception as e:
-        print(f"[OI Cache Load Error] {e}")
-        df_cache = None
+    if os.path.exists(csv_file):
+        try:
+            df_cache = pd.read_csv(csv_file)
+            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
+            df_cache["open_interest"] = df_cache["open_interest"].astype(float)
+        except Exception as e:
+            print(f"[OI CSV Load Error] {e}")
+            df_cache = None
 
     url = f"{BYBIT_BASE_URL}/v5/market/open-interest"
     interval_time = "1h"
@@ -498,8 +494,9 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
     
     cache_max_ts = float(df_cache["timestamp"].max()) if df_cache is not None and len(df_cache) > 0 else None
     stop_fetching = False
+    max_pages = 2 if cache_max_ts is not None else 50
     
-    for page in range(50):
+    for page in range(max_pages):
         params = {
             "category": "linear",
             "symbol": symbol,
@@ -559,18 +556,9 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         
         # Save cache
         try:
-            import sqlite3
-            with db_write_lock:
-                conn = sqlite3.connect(DB_PATH, timeout=30.0)
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.executemany(
-                    "INSERT OR REPLACE INTO oi_data (symbol, interval, timestamp, open_interest) VALUES (?, ?, ?, ?)",
-                    [(symbol, str(interval), float(row["timestamp"]), float(row["open_interest"])) for _, row in df_history.iterrows()]
-                )
-                conn.commit()
-                conn.close()
+            df_history.to_csv(csv_file, index=False)
         except Exception as e:
-            print(f"[OI Cache Write Error] {e}")
+            print(f"[OI CSV Write Error] {e}")
 
     # Slice for start/end if requested
     if start_ts_ms:
@@ -587,25 +575,21 @@ def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None
         return _get_bybit_funding_history_impl(symbol, start_ts_ms, end_ts_ms)
 
 def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
-    init_db()
-    # 1. Load cache if it exists
+    # Load cache from CSV
+    cache_dir = "kline_cache"
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+    csv_file = os.path.join(cache_dir, f"funding_{symbol}.csv")
+    
     df_cache = None
-    try:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT timestamp, funding_rate FROM funding_data WHERE symbol=? ORDER BY timestamp ASC",
-            (symbol,)
-        )
-        rows = cursor.fetchall()
-        conn.close()
-        if rows:
-            df_cache = pd.DataFrame(rows, columns=["timestamp", "funding_rate"])
-    except Exception as e:
-        print(f"[Funding Cache Load Error] {e}")
-        df_cache = None
+    if os.path.exists(csv_file):
+        try:
+            df_cache = pd.read_csv(csv_file)
+            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
+            df_cache["funding_rate"] = df_cache["funding_rate"].astype(float)
+        except Exception as e:
+            print(f"[Funding CSV Load Error] {e}")
+            df_cache = None
 
     url = f"{BYBIT_BASE_URL}/v5/market/funding/history"
     funding_data = []
@@ -613,8 +597,9 @@ def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_m
     cache_max_ts = float(df_cache["timestamp"].max()) if df_cache is not None and len(df_cache) > 0 else None
     current_end = int(end_ts_ms) if end_ts_ms else int(time.time() * 1000)
     stop_fetching = False
+    max_pages = 2 if cache_max_ts is not None else 50
     
-    for page in range(50):
+    for page in range(max_pages):
         params = {
             "category": "linear",
             "symbol": symbol,
@@ -673,18 +658,9 @@ def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_m
         
         # Save cache
         try:
-            import sqlite3
-            with db_write_lock:
-                conn = sqlite3.connect(DB_PATH, timeout=30.0)
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.executemany(
-                    "INSERT OR REPLACE INTO funding_data (symbol, timestamp, funding_rate) VALUES (?, ?, ?)",
-                    [(symbol, float(row["timestamp"]), float(row["funding_rate"])) for _, row in df_history.iterrows()]
-                )
-                conn.commit()
-                conn.close()
+            df_history.to_csv(csv_file, index=False)
         except Exception as e:
-            print(f"[Funding Cache Write Error] {e}")
+            print(f"[Funding CSV Write Error] {e}")
 
     # Slice for start/end if requested
     if start_ts_ms:
@@ -721,8 +697,9 @@ def get_fear_and_greed_history():
             print(f"[FnG Cache Load Error] {e}")
             df_cache = None
 
-        # Fetch fresh data from API
-        url = "https://api.alternative.me/fng/?limit=0&format=json"
+        # Fetch fresh data from API (limit=30 if cache is warm, limit=0/all if cold)
+        limit_val = 0 if df_cache is None or len(df_cache) == 0 else 30
+        url = f"https://api.alternative.me/fng/?limit={limit_val}&format=json"
         try:
             resp = requests.get(url, timeout=15)
             if resp.status_code == 200:

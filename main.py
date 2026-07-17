@@ -33,7 +33,8 @@ print("[System Debug] os imported.")
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 print("[System Debug] Thread env vars set.")
-
+import time
+startup_time = time.time()
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -274,11 +275,6 @@ def run_manual_confluence_report(symbol, interval):
         latest_candle = df_features.iloc[-1]
         
         iv = str(interval)
-        if iv in models_by_interval and models_by_interval[iv].get("selected_features") is not None:
-            X_live = latest_candle[models_by_interval[iv]["selected_features"]].values.reshape(1, -1)
-        else:
-            X_live = latest_candle[features].values.reshape(1, -1)
-            
         models_tf = models_by_interval.get(iv)
         if not models_tf or not models_tf["trending"]["price"]:
             return "❌ Models are currently not fully loaded or active."
@@ -289,10 +285,17 @@ def run_manual_confluence_report(symbol, interval):
             active_model_price = models_tf["trending"]["price"]
             active_model_trend = models_tf["trending"]["trend"]
             calibrator = models_tf["trending"]["calibrator"]
+            feat_list = models_tf.get("selected_features_trending")
         else:
             active_model_price = models_tf["ranging"]["price"]
             active_model_trend = models_tf["ranging"]["trend"]
             calibrator = models_tf["ranging"]["calibrator"]
+            feat_list = models_tf.get("selected_features_ranging")
+            
+        if feat_list is not None:
+            X_live = latest_candle[feat_list].values.reshape(1, -1)
+        else:
+            X_live = latest_candle[features].values.reshape(1, -1)
             
         ensemble_weights = [0.3, 0.2, 0.5] if regime == "Trending" else [0.3, 0.5, 0.2]
         pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
@@ -389,6 +392,7 @@ def start_telegram_command_listener():
                 {"command": "create_manual_trade", "description": "Open a manual trade with bot management"},
                 {"command": "clean_duplicates", "description": "Prune duplicate active trade records from memory"},
                 {"command": "retrain_status", "description": "View model retraining status"},
+                {"command": "latency", "description": "Check Bybit API round-trip latency"},
                 {"command": "logs", "description": "View latest bot running logs"},
                 {"command": "add_user", "description": "Authorize a new user via email verification"},
                 {"command": "retrain", "description": "Retrain models with recent live trade feedback"},
@@ -1156,6 +1160,24 @@ def start_telegram_command_listener():
                                 "parse_mode": "Markdown"
                             })
                             
+                        elif text == "/latency":
+                            t_start = time.time()
+                            try:
+                                resp = get_shared_session().get(f"{BYBIT_BASE_URL}/v5/market/time", timeout=5)
+                                elapsed = (time.time() - t_start) * 1000.0
+                                if resp.status_code == 200:
+                                    reply_text = f"⚡ *Bybit API Latency:* `{elapsed:.1f} ms`"
+                                else:
+                                    reply_text = f"⚠️ *Bybit API Latency:* `{elapsed:.1f} ms` (Status: {resp.status_code})"
+                            except Exception as e:
+                                reply_text = f"❌ *Latency Check Failed:* {type(e).__name__}"
+                                
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+                            
                         elif text == "/profit":
                             total_pnl = 0.0
                             today_pnl = 0.0
@@ -1885,6 +1907,16 @@ def bybit_post_request(endpoint, payload):
             except Exception:
                 text = await resp.text()
                 data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
+            
+            # Adaptive rate limiting dynamic sleep
+            try:
+                remaining = int(resp.headers.get("X-Bapi-Limit-Remaining", 100))
+                if remaining <= 5:
+                    print(f"[Rate Limiter Warning] Post remaining limit is low: {remaining}. Sleeping 1s...")
+                    await asyncio.sleep(1.0)
+            except Exception:
+                pass
+                
             return status, data
 
     max_retries = 3
@@ -2137,6 +2169,16 @@ def bybit_get_request(endpoint, query_params):
             except Exception:
                 text = await resp.text()
                 data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
+            
+            # Adaptive rate limiting dynamic sleep
+            try:
+                remaining = int(resp.headers.get("X-Bapi-Limit-Remaining", 100))
+                if remaining <= 5:
+                    print(f"[Rate Limiter Warning] Get remaining limit is low: {remaining}. Sleeping 1s...")
+                    await asyncio.sleep(1.0)
+            except Exception:
+                pass
+                
             return status, data
 
     max_retries = 3
@@ -2330,6 +2372,25 @@ def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_o
     res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
 
+def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only=False):
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "side": side,
+        "orderType": "Market",
+        "qty": str(qty),
+        "timeInForce": "IOC",
+        "positionIdx": 0
+    }
+    if reduce_only:
+        payload["reduceOnly"] = True
+    if sl:
+        payload["stopLoss"] = format_bybit_price(symbol, sl)
+    if tp:
+        payload["takeProfit"] = format_bybit_price(symbol, tp)
+    res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
+    return res
+
 def get_bybit_bid_ask(symbol):
     res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
     if res.get("retCode") == 0:
@@ -2448,6 +2509,32 @@ def run_bybit_balance_updater():
                 bot_state["simulated_balance"] = val
         except Exception as e:
             print(f"[Bybit Balance] Error in background balance update: {e}")
+
+@app.route("/api/health")
+def get_health():
+    ws_status = "live" if ws_connected else "disconnected"
+    private_ws_status = "live" if private_ws_connected else "disconnected"
+    
+    max_age_hours = 0.0
+    if model_files_mtime:
+        newest_mtime = max(model_files_mtime.values())
+        max_age_hours = (time.time() - newest_mtime) / 3600.0
+        
+    active_count = 0
+    with bot_state_lock:
+        for tf in ["1h", "2h", "4h", "6h"]:
+            active_count += len(bot_state.get(f"active_trade_{tf}", []))
+            
+    return jsonify({
+        "status": "ok",
+        "uptime_seconds": int(time.time() - startup_time),
+        "bybit_api": "connected" if get_real_bybit_balance_cached() != "API_KEYS_MISSING" else "API_KEYS_MISSING",
+        "websocket": ws_status,
+        "private_websocket": private_ws_status,
+        "model_weights_age_hours": round(max_age_hours, 2),
+        "active_trades": active_count,
+        "last_candle_close": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(last_ws_update_time)) if last_ws_update_time > 0 else "N/A"
+    })
 
 @app.route("/api/status")
 def get_status():
@@ -3292,17 +3379,17 @@ def log_trade_journal(trade: dict):
         print(f"[Journal] Failed to write journal: {e}")
 
 def send_daily_journal_digest():
-    """Send a Telegram daily summary of today's closed trades."""
+    """Send a Telegram daily summary of yesterday's closed trades."""
     import csv
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    target_day = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     if not os.path.exists(JOURNAL_PATH):
-        send_telegram_alert(f"📓 *Daily Trade Journal — {today}*\nNo trades recorded today.")
+        send_telegram_alert(f"📓 *Daily Trade Journal — {target_day}*\nNo trades recorded today.")
         return
     try:
         wins, losses, total_pnl, rows = 0, 0, 0.0, []
         with open(JOURNAL_PATH, "r") as f:
             for row in csv.DictReader(f):
-                if row["timestamp"].startswith(today):
+                if row["timestamp"].startswith(target_day):
                     rows.append(row)
                     pnl = float(row.get("pnl_usd", 0))
                     total_pnl += pnl
@@ -3313,7 +3400,7 @@ def send_daily_journal_digest():
 
         total = wins + losses
         wr = f"{wins/total*100:.1f}%" if total > 0 else "N/A"
-        lines = [f"📓 *Daily Trade Journal — {today}*",
+        lines = [f"📓 *Daily Trade Journal — {target_day}*",
                  f"• Trades: {total} | ✅ {wins} / ❌ {losses} | WR: {wr}",
                  f"• Total PnL: *${total_pnl:+.2f}*", ""]
         for r in rows[-10:]:
@@ -3381,6 +3468,54 @@ def run_funding_rate_arbitrage_monitor():
         except Exception as e:
             print(f"[Funding Arb] Error: {e}")
         time.sleep(300)  # Check every 5 minutes
+
+def run_daily_backup_scheduler():
+    """
+    Background scheduler that runs daily at 00:00 UTC.
+    Calculates time to UTC midnight, sleeps, then creates a compressed zip file
+    of trading_bot.db and trade_journal.csv, uploading to AWS S3 if credentials are set.
+    """
+    print("[Backup Scheduler] Daily database backup scheduler started.")
+    import zipfile
+    import shutil
+    from database import DB_FILE
+    
+    while True:
+        now = time.gmtime()
+        # Sleep until next midnight UTC
+        seconds_to_midnight = 86400 - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
+        time.sleep(max(1, seconds_to_midnight))
+        
+        try:
+            print("[Backup Scheduler] Triggering daily backup...")
+            backup_dir = "backups"
+            if not os.path.exists(backup_dir):
+                os.makedirs(backup_dir)
+                
+            timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+            zip_filename = os.path.join(backup_dir, f"backup_{timestamp_str}.zip")
+            
+            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                if os.path.exists(DB_FILE):
+                    zipf.write(DB_FILE, os.path.basename(DB_FILE))
+                if os.path.exists(JOURNAL_PATH):
+                    zipf.write(JOURNAL_PATH, os.path.basename(JOURNAL_PATH))
+                    
+            print(f"[Backup Scheduler] Created local compressed backup: {zip_filename}")
+            
+            # Optional S3 upload
+            s3_bucket = os.environ.get("AWS_S3_BUCKET")
+            if s3_bucket:
+                try:
+                    import boto3
+                    s3_client = boto3.client('s3')
+                    s3_key = f"backups/{os.path.basename(zip_filename)}"
+                    s3_client.upload_file(zip_filename, s3_bucket, s3_key)
+                    print(f"[Backup Scheduler] Successfully uploaded backup to S3: s3://{s3_bucket}/{s3_key}")
+                except Exception as s3_err:
+                    print(f"[Backup Scheduler Warning] S3 upload failed (boto3 or credentials missing): {s3_err}")
+        except Exception as e:
+            print(f"[Backup Scheduler Error] Daily backup failed: {e}")
 
 def run_rolling_retrain_scheduler():
     """
@@ -3463,32 +3598,53 @@ def load_model_weights(iv):
             
     # Load
     try:
-        # Load selected features if they exist
+        # Load selected features for both regimes
         selected_features_filename = f"selected_features_{iv}.json"
-        if os.path.exists(selected_features_filename):
+        trending_features_filename = f"selected_features_{iv}_trending.json"
+        ranging_features_filename = f"selected_features_{iv}_ranging.json"
+        
+        feat_trending = None
+        if os.path.exists(trending_features_filename):
+            with open(trending_features_filename, "r") as f:
+                feat_trending = json.load(f)
+        elif os.path.exists(selected_features_filename):
             with open(selected_features_filename, "r") as f:
-                selected_features_list = json.load(f)
-            models_by_interval[iv]["selected_features"] = selected_features_list
-            n_features = len(selected_features_list)
-            print(f"Loaded {n_features} selected features for interval {iv}")
-        else:
-            print(f"[Model Load Warning] {selected_features_filename} is missing! Disabling model loading for interval {iv} to prevent shape mismatch crashes.")
+                feat_trending = json.load(f)
+                
+        feat_ranging = None
+        if os.path.exists(ranging_features_filename):
+            with open(ranging_features_filename, "r") as f:
+                feat_ranging = json.load(f)
+        elif os.path.exists(selected_features_filename):
+            with open(selected_features_filename, "r") as f:
+                feat_ranging = json.load(f)
+                
+        if feat_trending is None or feat_ranging is None:
+            print(f"[Model Load Warning] selected_features for interval {iv} missing! Disabling model loading.")
             models_by_interval[iv]["selected_features"] = None
             return
+            
+        models_by_interval[iv]["selected_features_trending"] = feat_trending
+        models_by_interval[iv]["selected_features_ranging"] = feat_ranging
+        models_by_interval[iv]["selected_features"] = feat_trending
+        
+        n_features_trending = len(feat_trending)
+        n_features_ranging = len(feat_ranging)
+        print(f"Loaded feature counts - Trending: {n_features_trending}, Ranging: {n_features_ranging} for interval {iv}")
         
         if os.path.exists(f"{prefixes['trending_trend']}_xgb.json"):
-            models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features)
+            models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending)
         if os.path.exists(f"{prefixes['trending_price']}_xgb.json"):
-            models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features)
+            models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending)
         if os.path.exists(prefixes["trending_meta"]):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["trending_meta"])
             models_by_interval[iv]["trending"]["meta"] = meta_clf
             
         if os.path.exists(f"{prefixes['ranging_trend']}_xgb.json"):
-            models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features)
+            models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging)
         if os.path.exists(f"{prefixes['ranging_price']}_xgb.json"):
-            models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features)
+            models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging)
         if os.path.exists(prefixes["ranging_meta"]):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["ranging_meta"])
@@ -3518,6 +3674,7 @@ def load_model_weights(iv):
 
 
 def check_and_hot_reload_models():
+    reloaded = []
     for iv in ["60", "120", "240", "360"]:
         filenames = {
             "trending_trend": f"ensemble_trending_trend_{iv}_xgb.json",
@@ -3552,6 +3709,8 @@ def check_and_hot_reload_models():
                 print(f"[Hot-Reload] Recalculated calibration thresholds for {iv} (p95: {p95:.2f}, max_conf: {max_conf:.2f})")
             except Exception as e:
                 print(f"[Hot-Reload] Warning: Could not recalculate thresholds for {iv}m: {e}")
+            reloaded.append(iv)
+    return reloaded
 
 # =========================
 # WEB SOCKET FOR LIVE PRICE
@@ -4808,9 +4967,25 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
         ("ADAUSDT", "XRPUSDT"): 0.65
     }
 
+    is_stressed = False
+    try:
+        df_vol = get_history(symbol=new_symbol, interval="60", limit=30)
+        if df_vol is not None and not df_vol.empty and "ATR_norm" in df_vol.columns:
+            rolling_atr = df_vol["ATR_norm"].tail(30)
+            atr_mean = rolling_atr.mean()
+            atr_std = rolling_atr.std()
+            vol_z_score = (df_vol["ATR_norm"].iloc[-1] - atr_mean) / (atr_std + 1e-8) if atr_std > 0 else 0.0
+            is_stressed = vol_z_score > 2.0
+            if is_stressed:
+                print(f"[Stress Covariance] Volatility Z-score: {vol_z_score:.2f} > 2.0. Stressed correlation mode active.")
+    except Exception as e:
+        print(f"[Stress Covariance Warning] Could not calculate volatility z-score: {e}")
+
     def get_correlation(s1, s2):
         if s1 == s2:
             return 1.0
+        if is_stressed:
+            return 0.95
         return CORRELATION_MAP.get((s1, s2)) or CORRELATION_MAP.get((s2, s1)) or 0.70
 
     # Collect active trades from all timeframes
@@ -6652,7 +6827,7 @@ def main():
                     
             return False, 0
 
-        check_and_hot_reload_models()
+        reloaded_intervals = check_and_hot_reload_models()
         
         # --- Intelligent Boundary Window Candle Polling ---
         current_time_utc = datetime.utcnow()
@@ -6699,6 +6874,22 @@ def main():
                         hour_check_complete = True
                     else:
                         check_queue = missing_pairs
+
+        forced_intervals = set()
+        # 3. Handle hot-reload queue inject
+        if reloaded_intervals:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Hot-reloaded intervals detected: {reloaded_intervals}. Resetting processed timestamps and forcing check...")
+            for iv_hr in reloaded_intervals:
+                forced_intervals.add(iv_hr)
+                # Clear interval specific tracker
+                last_processed_timestamps[f"last_processed_{iv_hr}_ts"] = None
+                # Clear per-symbol tracker
+                for sym in SUPPORTED_SYMBOLS:
+                    last_ts_key = f"last_processed_{sym}_{iv_hr}_ts"
+                    last_processed_timestamps.pop(last_ts_key, None)
+                    
+            # Inject to queue
+            check_queue.extend([(symbol, iv_hr) for iv_hr in reloaded_intervals for symbol in SUPPORTED_SYMBOLS])
         
         # Calculate expected timestamp boundary
         current_hour_dt = datetime(current_time_utc.year, current_time_utc.month, current_time_utc.day, current_time_utc.hour)
@@ -6755,7 +6946,7 @@ def main():
                 for fut in future_to_pair:
                     sym, iv = future_to_pair[fut]
                     try:
-                        _, _, df_raw_val, df_feat_val = fut.result(timeout=25)
+                        _, _, df_raw_val, df_feat_val = fut.result(timeout=60)
                         if df_raw_val is not None:
                             fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
                     except Exception as e:
@@ -6791,7 +6982,8 @@ def main():
                 # Validate if candle is up to date based on expected window boundary
                 interval_ms = int(iv) * 60 * 1000
                 expected_start_ms = current_hour_ts - interval_ms
-                is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_startup
+                is_forced = iv in forced_intervals
+                is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_startup or is_forced
                 
                 if not is_up_to_date:
                     # Candle is stale, wait for exchange to finalize the new candle
@@ -6804,12 +6996,6 @@ def main():
                     
                     latest_candle = df.iloc[-1]
                     
-                    # Slicing features based on selected_features if loaded
-                    if iv in models_by_interval and models_by_interval[iv].get("selected_features") is not None:
-                        X_live = latest_candle[models_by_interval[iv]["selected_features"]].values.reshape(1, -1)
-                    else:
-                        X_live = latest_candle[features].values.reshape(1, -1)
-                    
                     # Dynamic Regime Routing based on GMM Unsupervised Classifier
                     regime = classify_market_regime(df, interval=iv)
                     adx_regime = latest_candle["ADX"]
@@ -6820,24 +7006,36 @@ def main():
                             active_model_price = models_tf["trending"]["price"]
                             active_model_trend = models_tf["trending"]["trend"]
                             regime_name = "Trending (GMM)"
+                            feat_list = models_tf.get("selected_features_trending")
                         else:
                             active_model_price = models_tf["ranging"]["price"]
                             active_model_trend = models_tf["ranging"]["trend"]
                             regime_name = "Ranging (GMM)"
+                            feat_list = models_tf.get("selected_features_ranging")
                             
                         if active_model_price is None or active_model_trend is None:
                             print(f"[{symbol} {iv}m Warning] Models are not loaded (None). Skipping signal evaluation.")
                             continue
+                            
+                        if feat_list is not None:
+                            X_live = latest_candle[feat_list].values.reshape(1, -1)
+                        else:
+                            X_live = latest_candle[features].values.reshape(1, -1)
 
                         # Refined regime switching voting weights (Trending: CatBoost dominant; Ranging: LightGBM dominant)
                         ensemble_weights = [0.3, 0.2, 0.5] if regime == "Trending" else [0.3, 0.5, 0.2]
                         
-                        pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
-                        pred_change = pred_pct * float(latest_candle["close"])
-                        predicted_price = float(latest_candle["close"]) + pred_change
+                        try:
+                            pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
+                            pred_change = pred_pct * float(latest_candle["close"])
+                            predicted_price = float(latest_candle["close"]) + pred_change
+                            
+                            # 3-class probabilities
+                            probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
+                        except Exception as pred_err:
+                            print(f"[{symbol} {iv}m Prediction Error] Failed to run model prediction: {pred_err}. Skipping signal evaluation.")
+                            continue
                         
-                        # 3-class probabilities
-                        probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
                         prob_bearish = float(probs[0])
                         prob_neutral = float(probs[1])
                         prob_bullish = float(probs[2])
@@ -7158,6 +7356,24 @@ def main():
                                     # Covariance multiplier to account for existing correlations
                                     position_size_usd = position_size_usd * cov_multiplier
                                     
+                                    # CVaR (Expected Shortfall) Risk Constraint
+                                    try:
+                                        hist_close = df["close"].values
+                                        if len(hist_close) > 30:
+                                            returns_pct = (hist_close[1:] - hist_close[:-1]) / hist_close[:-1]
+                                            returns_sorted = np.sort(returns_pct)
+                                            alpha_idx = max(1, int(len(returns_sorted) * 0.05))
+                                            tail_losses = returns_sorted[:alpha_idx]
+                                            cvar_95 = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else 0.03
+                                        else:
+                                            cvar_95 = 0.03
+                                        daily_loss_budget = current_bal * 0.05
+                                        max_cvar_size = daily_loss_budget / (cvar_95 + 1e-8)
+                                        print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Risk Size Allowed: ${max_cvar_size:.2f}")
+                                        position_size_usd = min(position_size_usd, max_cvar_size)
+                                    except Exception as cvar_err:
+                                        print(f"[CVaR Error] {cvar_err}")
+                                    
                                     if is_golden_hour:
                                         # Golden Hour: Double the target slot allocation size
                                         position_size_usd = position_size_usd * 2.0
@@ -7167,7 +7383,7 @@ def main():
                                         
                                     # Clip to minimum Bybit order requirement (e.g. $2.0)
                                     position_size_usd = max(2.0, position_size_usd)
-                                    print(f"[{iv}m Trade Size Boundary Check] Final size before leverage: ${position_size_usd:.2f}")
+                                    print(f"[{iv}m Trade Size Boundary Check] Final size before leverage (CVaR constrained): ${position_size_usd:.2f}")
 
                                     # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
                                     kelly_fraction = raw_kelly
@@ -7321,90 +7537,116 @@ def main():
                                             if leverage_ok:
                                                 side = "Buy" if ml_trend == "Bullish" else "Sell"
                                                 
-                                                # 2. Place Limit Maker entry order with dynamic price chasing to ensure zero slippage
+                                                # 2. Place Maker Limit or Taker IOC order depending on volatility
                                                 bybit_success = False
                                                 bybit_order_id = None
                                                 actual_qty = raw_qty
                                                 
-                                                # Try up to 5 chases (12s each = 60s max)
-                                                for chase in range(5):
-                                                    bid, ask, last = get_bybit_bid_ask(symbol)
-                                                    if bid is None or ask is None:
-                                                        bid, ask = entry_price, entry_price
-                                                    
-                                                    # Maker execution price selection
-                                                    limit_price = bid if side == "Buy" else ask
-                                                    print(f"[{symbol} {iv}m API] Placing Limit Maker order at ${limit_price:.4f} (Chase {chase+1}/5)...")
-                                                    order_res = place_bybit_limit_order(symbol, side, qty_str, limit_price)
-                                                    
+                                                # Calculate standard deviation of ATR_norm to determine volatility threshold
+                                                rolling_atr = df_completed["ATR_norm"].tail(30)
+                                                atr_mean = rolling_atr.mean()
+                                                atr_std = rolling_atr.std()
+                                                vol_z_score = (latest_candle["ATR_norm"] - atr_mean) / (atr_std + 1e-8) if atr_std > 0 else 0.0
+                                                is_extreme_volatility = vol_z_score > 3.0
+                                                
+                                                if is_extreme_volatility:
+                                                    print(f"[{symbol} {iv}m API] Volatility Spiked! Z-score: {vol_z_score:.2f} > 3.0. Placing Taker IOC order immediately...")
+                                                    order_res = place_bybit_taker_ioc_order(symbol, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
                                                     if order_res.get("retCode") == 0:
                                                         bybit_order_id = order_res.get("result", {}).get("orderId")
-                                                        # Wait for fill (checks WebSocket cache every 500ms, falls back to HTTP polling every 3s)
-                                                        filled = False
-                                                        for idx in range(24):
-                                                            time.sleep(0.5)
-                                                            with _ws_filled_orders_lock:
-                                                                ws_details = _ws_filled_orders.get(bybit_order_id)
-                                                            if ws_details:
-                                                                entry_price = float(ws_details.get("avgPrice", limit_price))
-                                                                actual_qty = float(ws_details.get("cumExecQty", raw_qty))
-                                                                filled = True
-                                                                bybit_success = True
-                                                                print(f"[{symbol} {iv}m API] Order fill detected via WebSocket in {idx*0.5:.1f}s.")
-                                                                break
-                                                            if idx > 0 and idx % 6 == 0:
-                                                                order_details = get_bybit_order_details(symbol, bybit_order_id)
-                                                                if order_details:
-                                                                    status = order_details.get("orderStatus")
-                                                                    if status == "Filled":
-                                                                        entry_price = float(order_details.get("avgPrice", limit_price))
-                                                                        actual_qty = float(order_details.get("cumExecQty", raw_qty))
-                                                                        filled = True
-                                                                        bybit_success = True
-                                                                        break
-                                                                    elif status in ["Cancelled", "Rejected"]:
-                                                                        break
-                                                        if filled:
-                                                            print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled at ${entry_price:.4f}.")
-                                                            break
+                                                        bybit_success = True
+                                                        time.sleep(0.5)
+                                                        order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                        if order_details:
+                                                            entry_price = float(order_details.get("avgPrice", entry_price))
+                                                            actual_qty = float(order_details.get("cumExecQty", raw_qty))
                                                         else:
-                                                            print(f"[{symbol} {iv}m API] Order unfilled after 12s. Cancelling and re-quoting...")
-                                                            cancel_bybit_order(symbol, bybit_order_id)
-                                                            # Race condition safety check: query order status one final time
-                                                            time.sleep(0.5)
-                                                            final_details = get_bybit_order_details(symbol, bybit_order_id)
-                                                            if final_details and final_details.get("orderStatus") == "Filled":
-                                                                entry_price = float(final_details.get("avgPrice", limit_price))
-                                                                actual_qty = float(final_details.get("cumExecQty", raw_qty))
-                                                                filled = True
-                                                                bybit_success = True
-                                                                print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled during cancel request at ${entry_price:.4f}.")
-                                                                break
+                                                            fill_exec = get_bybit_last_execution(symbol)
+                                                            if fill_exec:
+                                                                entry_price = float(fill_exec.get("execPrice", entry_price))
+                                                            actual_qty = raw_qty
                                                     else:
-                                                        print(f"[{symbol} {iv}m API WARNING] Limit order placement failed: {order_res.get('retMsg')} (waiting 2s before retry)")
-                                                        time.sleep(2)
+                                                        print(f"[{symbol} {iv}m API ERROR] Taker IOC order failed: {order_res.get('retMsg')}")
+                                                else:
+                                                    # Normal Volatility: Place Limit Maker entry order with dynamic price chasing
+                                                    for chase in range(5):
+                                                        bid, ask, last = get_bybit_bid_ask(symbol)
+                                                        if bid is None or ask is None:
+                                                            bid, ask = entry_price, entry_price
                                                         
-                                                # Fallback to Market order if all limit order chases failed to ensure we don't miss the entry
-                                                if not bybit_success:
-                                                    atr_norm = float(latest_candle.get("ATR_norm", 0.0))
-                                                    if atr_norm >= 0.015:
-                                                        print(f"[{symbol} {iv}m API BLOCK] Limit chases failed. Market fallback blocked due to extreme volatility (ATR_norm: {atr_norm:.4f} >= 0.015).")
-                                                    else:
-                                                        print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
-                                                        order_res = place_bybit_order(symbol, side, qty_str)
+                                                        # Maker execution price selection
+                                                        limit_price = bid if side == "Buy" else ask
+                                                        print(f"[{symbol} {iv}m API] Placing Limit Maker order at ${limit_price:.4f} (Chase {chase+1}/5)...")
+                                                        order_res = place_bybit_limit_order(symbol, side, qty_str, limit_price)
+                                                        
                                                         if order_res.get("retCode") == 0:
                                                             bybit_order_id = order_res.get("result", {}).get("orderId")
-                                                            bybit_success = True
-                                                            time.sleep(0.5)
-                                                            order_details = get_bybit_order_details(symbol, bybit_order_id)
-                                                            if order_details:
-                                                                entry_price = float(order_details.get("avgPrice", entry_price))
-                                                                actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                            # Wait for fill (checks WebSocket cache every 500ms, falls back to HTTP polling every 3s)
+                                                            filled = False
+                                                            for idx in range(24):
+                                                                time.sleep(0.5)
+                                                                with _ws_filled_orders_lock:
+                                                                    ws_details = _ws_filled_orders.get(bybit_order_id)
+                                                                if ws_details:
+                                                                    entry_price = float(ws_details.get("avgPrice", limit_price))
+                                                                    actual_qty = float(ws_details.get("cumExecQty", raw_qty))
+                                                                    filled = True
+                                                                    bybit_success = True
+                                                                    print(f"[{symbol} {iv}m API] Order fill detected via WebSocket in {idx*0.5:.1f}s.")
+                                                                    break
+                                                                if idx > 0 and idx % 6 == 0:
+                                                                    order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                                    if order_details:
+                                                                        status = order_details.get("orderStatus")
+                                                                        if status == "Filled":
+                                                                            entry_price = float(order_details.get("avgPrice", limit_price))
+                                                                            actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                                            filled = True
+                                                                            bybit_success = True
+                                                                            break
+                                                                        elif status in ["Cancelled", "Rejected"]:
+                                                                            break
+                                                            if filled:
+                                                                print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled at ${entry_price:.4f}.")
+                                                                break
                                                             else:
-                                                                fill_exec = get_bybit_last_execution(symbol)
-                                                                if fill_exec:
-                                                                    entry_price = float(fill_exec.get("execPrice", entry_price))
-                                                                actual_qty = raw_qty
+                                                                print(f"[{symbol} {iv}m API] Order unfilled after 12s. Cancelling and re-quoting...")
+                                                                cancel_bybit_order(symbol, bybit_order_id)
+                                                                # Race condition safety check: query order status one final time
+                                                                time.sleep(0.5)
+                                                                final_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                                if final_details and final_details.get("orderStatus") == "Filled":
+                                                                    entry_price = float(final_details.get("avgPrice", limit_price))
+                                                                    actual_qty = float(final_details.get("cumExecQty", raw_qty))
+                                                                    filled = True
+                                                                    bybit_success = True
+                                                                    print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled during cancel request at ${entry_price:.4f}.")
+                                                                    break
+                                                        else:
+                                                            print(f"[{symbol} {iv}m API WARNING] Limit order placement failed: {order_res.get('retMsg')} (waiting 2s before retry)")
+                                                            time.sleep(2)
+                                                            
+                                                    # Fallback to Market order if all limit order chases failed to ensure we don't miss the entry
+                                                    if not bybit_success:
+                                                        atr_norm = float(latest_candle.get("ATR_norm", 0.0))
+                                                        if atr_norm >= 0.015:
+                                                            print(f"[{symbol} {iv}m API BLOCK] Limit chases failed. Market fallback blocked due to extreme volatility (ATR_norm: {atr_norm:.4f} >= 0.015).")
+                                                        else:
+                                                            print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
+                                                            order_res = place_bybit_order(symbol, side, qty_str)
+                                                            if order_res.get("retCode") == 0:
+                                                                bybit_order_id = order_res.get("result", {}).get("orderId")
+                                                                bybit_success = True
+                                                                time.sleep(0.5)
+                                                                order_details = get_bybit_order_details(symbol, bybit_order_id)
+                                                                if order_details:
+                                                                    entry_price = float(order_details.get("avgPrice", entry_price))
+                                                                    actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                                                                else:
+                                                                    fill_exec = get_bybit_last_execution(symbol)
+                                                                    if fill_exec:
+                                                                        entry_price = float(fill_exec.get("execPrice", entry_price))
+                                                                    actual_qty = raw_qty
                                                             
                                                 if bybit_success:
                                                     # 3. Recalculate SL/TP targets based on actual entry_price
@@ -7661,13 +7903,15 @@ if __name__ == "__main__":
     threading.Thread(target=run_websocket_watchdog, daemon=True).start()
     # Start Bybit REST API fallback price updater thread
     threading.Thread(target=run_fallback_price_updater, daemon=True).start()
-    # Start automated rolling retraining scheduler in a background thread
-    threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
+    # Start automated rolling retraining scheduler in a background thread (Moved to retrain_worker.py)
+    # threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
     # Start background order flow persister thread
     threading.Thread(target=run_order_flow_persister, daemon=True).start()
-    # Start daily Telegram trade journal digest scheduler
-    threading.Thread(target=run_daily_journal_scheduler, daemon=True).start()
+    # Start daily Telegram trade journal digest scheduler (Moved to retrain_worker.py / cron)
+    # threading.Thread(target=run_daily_journal_scheduler, daemon=True).start()
     # Start funding rate arbitrage monitor thread
     threading.Thread(target=run_funding_rate_arbitrage_monitor, daemon=True).start()
+    # Start daily database and trade journal backup thread
+    threading.Thread(target=run_daily_backup_scheduler, daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()
