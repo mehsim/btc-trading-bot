@@ -1462,6 +1462,10 @@ news_sentiment_lock = threading.Lock()
 order_flow_lock = threading.Lock()
 order_flow_data = {} # {symbol: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, ...}}
 
+# Thread-safe active background order execution guard
+active_execution_lock = threading.Lock()
+active_execution_symbols = set()
+
 economic_calendar_cache = None
 last_calendar_fetch = 0.0
 economic_calendar_lock = threading.Lock()
@@ -6109,7 +6113,15 @@ def recover_missed_closed_trades():
         except Exception as err:
             print(f"[Crash Recovery Scan Error] for {symbol}: {err}")
 
-def execute_bybit_trade_async(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key):
+def execute_bybit_trade_async(*args, **kwargs):
+    symbol = args[0]
+    try:
+        _execute_bybit_trade_async_inner(*args, **kwargs)
+    finally:
+        with active_execution_lock:
+            active_execution_symbols.discard(symbol)
+
+def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key):
     bybit_success = True
     bybit_order_id = None
     bybit_scale_out_order_id = None
@@ -7233,6 +7245,13 @@ def main():
  
         just_opened_symbols = set()  # Symbols opened this cycle — block duplicates regardless of Bybit sync latency
         for symbol, iv in check_queue:
+            # Global active execution guard check
+            with active_execution_lock:
+                in_execution = symbol in active_execution_symbols
+            if in_execution:
+                print(f"[{symbol} {iv}m] Skip signal check: A live order placement is currently executing in the background.")
+                continue
+
             tf = tf_map[iv]
             active_trade_key = f"active_trade_{tf}"
             with active_trades_lock:
@@ -7797,6 +7816,8 @@ def main():
                                         if TRADE_MODE != "simulation":
                                             # Live trading execution offloaded to background thread to minimize latency
                                             just_opened_symbols.add(symbol)
+                                            with active_execution_lock:
+                                                active_execution_symbols.add(symbol)
                                             threading.Thread(
                                                 target=execute_bybit_trade_async,
                                                 args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key),
