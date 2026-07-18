@@ -3913,7 +3913,7 @@ def on_message(ws, message):
                 if sym:
                     with order_flow_lock:
                         if sym not in order_flow_data:
-                            order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": []}
+                            order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0}
                         order_flow_data[sym]["cvd"] += qty if side == "Buy" else -qty
                         
         # 3. Order Book L2 (OFI & Depth Cache) Handler
@@ -3926,11 +3926,9 @@ def on_message(ws, message):
             if sym:
                 with order_flow_lock:
                     if sym not in order_flow_data:
-                        order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": []}
+                        order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0}
                     
                     state = order_flow_data[sym]
-                    
-                    # Reconstruct bids/asks cache for delta updates
                     is_snapshot = (data.get("type") == "snapshot")
                     if is_snapshot:
                         state["latest_bids"] = bids[:25]
@@ -3955,10 +3953,21 @@ def on_message(ws, message):
                                     cached_a[price] = size
                             state["latest_asks"] = sorted([[str(p), str(s)] for p, s in cached_a.items()], key=lambda x: float(x[0]))[:25]
 
-                    # Compute L1 OFI (top of book price/size change)
                     bids_cache = state["latest_bids"]
                     asks_cache = state["latest_asks"]
                     
+                    # Compute actual L2 imbalance and spread
+                    if bids_cache and asks_cache:
+                        bid_L1 = float(bids_cache[0][0])
+                        ask_L1 = float(asks_cache[0][0])
+                        state["ob_spread_L2"] = (ask_L1 - bid_L1) / bid_L1 if bid_L1 > 0 else 0.0
+                        
+                        top_bids_size = sum(float(b[1]) for b in bids_cache[:10])
+                        top_asks_size = sum(float(a[1]) for a in asks_cache[:10])
+                        tot_size = top_bids_size + top_asks_size + 1e-8
+                        state["ob_imbalance_L2"] = (top_bids_size - top_asks_size) / tot_size
+
+                    # Compute L1 OFI
                     if bids_cache:
                         bid_p = float(bids_cache[0][0])
                         bid_q = float(bids_cache[0][1])
@@ -3988,6 +3997,24 @@ def on_message(ws, message):
                         da = 0.0
                         
                     state["ofi"] += (db - da)
+
+        # 4. Public Liquidation Feed Handler
+        elif topic.startswith("liquidation."):
+            liq_data = data.get("data", {})
+            sym = liq_data.get("symbol")
+            side = liq_data.get("side") # Buy/Sell
+            qty = float(liq_data.get("size", 0.0))
+            price = float(liq_data.get("price", 0.0))
+            usd_val = qty * price
+            if sym and usd_val > 0.0:
+                with order_flow_lock:
+                    if sym not in order_flow_data:
+                        order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0}
+                    state = order_flow_data[sym]
+                    if side == "Buy": # Short liquidation (market buy filled)
+                        state["liq_short_1h"] += usd_val
+                    else: # Long liquidation (market sell filled)
+                        state["liq_long_1h"] += usd_val
     except Exception as e:
         print(f"[WebSocket msg exception] {e}")
 
@@ -3999,12 +4026,13 @@ def on_open(ws):
     ws_retry_delay = 3  # Reset backoff on successful connection
     print("Connected to Bybit WebSocket for multi-asset prices and order flow")
     
-    # Subscribe to tickers, publicTrade, and orderbook topics for all supported symbols
+    # Subscribe to tickers, publicTrade, orderbook, and liquidation topics for all supported symbols
     args = []
     for s in SUPPORTED_SYMBOLS:
         args.append(f"tickers.{s}")
         args.append(f"publicTrade.{s}")
         args.append(f"orderbook.50.{s}")
+        args.append(f"liquidation.{s}")
         
     chunk_size = 10
     for i in range(0, len(args), chunk_size):
@@ -4283,13 +4311,13 @@ for lag in [1, 2]:
 # New microstructure and derivatives momentum features
 features.extend([
     "open_interest_pct_change", "funding_rate_diff", 
-    "CVD_rolling_1h", "CVD_rolling_4h"
+    "CVD_true", "OFI_true"
 ])
 for lag in [1, 2]:
     features.append(f"open_interest_pct_change_lag{lag}")
     features.append(f"funding_rate_diff_lag{lag}")
-    features.append(f"CVD_rolling_1h_lag{lag}")
-    features.append(f"CVD_rolling_4h_lag{lag}")
+    features.append(f"CVD_true_lag{lag}")
+    features.append(f"OFI_true_lag{lag}")
 
 # New Wick Volume features (absorption/liquidation proxies)
 features.extend([
@@ -4311,7 +4339,10 @@ for lag in [1, 2]:
     features.append(f"btc_rsi_lag{lag}")
 
 # Advanced Microstructure features
-features.extend(["roll_spread", "leverage_divergence", "oi_velocity", "funding_acceleration", "bid_ask_imbalance_ohlc"])
+features.extend([
+    "roll_spread", "leverage_divergence", "oi_velocity", "funding_acceleration", "bid_ask_imbalance_ohlc",
+    "ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"
+])
 for lag in [1, 2]:
     features.append(f"roll_spread_lag{lag}")
     features.append(f"leverage_divergence_lag{lag}")
@@ -4319,6 +4350,10 @@ for lag in [1, 2]:
     features.append(f"funding_acceleration_lag{lag}")
     features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
     features.append(f"close_to_Kalman_lag{lag}")
+    features.append(f"ob_imbalance_L2_lag{lag}")
+    features.append(f"ob_spread_L2_lag{lag}")
+    features.append(f"liq_long_1h_lag{lag}")
+    features.append(f"liq_short_1h_lag{lag}")
 
 # Garman-Klass Volatility features
 features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])
@@ -7849,17 +7884,24 @@ def run_order_flow_persister():
                 for sym, state in list(order_flow_data.items()):
                     cvd_val = state.get("cvd", 0.0)
                     ofi_val = state.get("ofi", 0.0)
-                    to_write.append((sym, minute_ts, cvd_val, ofi_val))
-                    # Reset buffers for the next minute
+                    ob_imb = state.get("ob_imbalance_L2", 0.0)
+                    ob_spr = state.get("ob_spread_L2", 0.0)
+                    liq_l = state.get("liq_long_1h", 0.0)
+                    liq_s = state.get("liq_short_1h", 0.0)
+                    
+                    to_write.append((sym, minute_ts, cvd_val, ofi_val, ob_imb, ob_spr, liq_l, liq_s))
+                    # Reset accumulators for the next minute
                     state["cvd"] = 0.0
                     state["ofi"] = 0.0
+                    state["liq_long_1h"] = 0.0
+                    state["liq_short_1h"] = 0.0
             
             if to_write:
                 with db_write_lock:
                     conn = sqlite3.connect(DB_PATH, timeout=30.0)
                     conn.execute("PRAGMA journal_mode=WAL;")
                     conn.executemany(
-                        "INSERT OR REPLACE INTO historical_order_flow (symbol, timestamp, cvd, ofi) VALUES (?, ?, ?, ?)",
+                        "INSERT OR REPLACE INTO historical_order_flow (symbol, timestamp, cvd, ofi, ob_imbalance_L2, ob_spread_L2, liq_long_1h, liq_short_1h) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         to_write
                     )
                     conn.commit()

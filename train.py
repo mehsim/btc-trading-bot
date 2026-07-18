@@ -151,13 +151,13 @@ for lag in [1, 2]:
 # New microstructure and derivatives momentum features
 features.extend([
     "open_interest_pct_change", "funding_rate_diff", 
-    "CVD_rolling_1h", "CVD_rolling_4h"
+    "CVD_true", "OFI_true"
 ])
 for lag in [1, 2]:
     features.append(f"open_interest_pct_change_lag{lag}")
     features.append(f"funding_rate_diff_lag{lag}")
-    features.append(f"CVD_rolling_1h_lag{lag}")
-    features.append(f"CVD_rolling_4h_lag{lag}")
+    features.append(f"CVD_true_lag{lag}")
+    features.append(f"OFI_true_lag{lag}")
 
 # New Wick Volume features (absorption/liquidation proxies)
 features.extend([
@@ -179,7 +179,10 @@ for lag in [1, 2]:
     features.append(f"btc_rsi_lag{lag}")
 
 # Advanced Microstructure features
-features.extend(["roll_spread", "leverage_divergence", "oi_velocity", "funding_acceleration", "bid_ask_imbalance_ohlc"])
+features.extend([
+    "roll_spread", "leverage_divergence", "oi_velocity", "funding_acceleration", "bid_ask_imbalance_ohlc",
+    "ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"
+])
 for lag in [1, 2]:
     features.append(f"roll_spread_lag{lag}")
     features.append(f"leverage_divergence_lag{lag}")
@@ -187,6 +190,10 @@ for lag in [1, 2]:
     features.append(f"funding_acceleration_lag{lag}")
     features.append(f"bid_ask_imbalance_ohlc_lag{lag}")
     features.append(f"close_to_Kalman_lag{lag}")
+    features.append(f"ob_imbalance_L2_lag{lag}")
+    features.append(f"ob_spread_L2_lag{lag}")
+    features.append(f"liq_long_1h_lag{lag}")
+    features.append(f"liq_short_1h_lag{lag}")
 
 # Garman-Klass Volatility features
 features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])

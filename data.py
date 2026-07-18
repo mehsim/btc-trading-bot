@@ -69,9 +69,19 @@ def init_db():
                 timestamp REAL,
                 cvd REAL,
                 ofi REAL,
+                ob_imbalance_L2 REAL DEFAULT 0.0,
+                ob_spread_L2 REAL DEFAULT 0.0,
+                liq_long_1h REAL DEFAULT 0.0,
+                liq_short_1h REAL DEFAULT 0.0,
                 UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
             )
         """)
+        # Migration for existing databases
+        for col in ["ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"]:
+            try:
+                cursor.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
+            except Exception:
+                pass
         conn.commit()
         conn.close()
         _db_initialized = True

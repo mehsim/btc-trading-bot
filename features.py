@@ -186,14 +186,14 @@ def add_features(df, fetch_calendar_callback=None):
     df["CVD_rolling_1h"] = delta_volume.rolling(window=4, min_periods=1).sum()
     df["CVD_rolling_4h"] = delta_volume.rolling(window=16, min_periods=1).sum()
 
-    # Attempt to merge TRUE historical CVD/OFI from SQLite (WebSocket-aggregated)
+    # Attempt to merge TRUE historical CVD/OFI/L2/Liquidations from SQLite (WebSocket-aggregated)
     try:
         import sqlite3, os
         db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.db")
         sym = df.attrs.get("symbol", "BTCUSDT") if hasattr(df, "attrs") else "BTCUSDT"
         with sqlite3.connect(db_path, timeout=10) as conn:
             of_df = pd.read_sql_query(
-                "SELECT timestamp, cvd, ofi FROM historical_order_flow WHERE symbol=? ORDER BY timestamp ASC",
+                "SELECT timestamp, cvd, ofi, ob_imbalance_L2, ob_spread_L2, liq_long_1h, liq_short_1h FROM historical_order_flow WHERE symbol=? ORDER BY timestamp ASC",
                 conn, params=(sym,)
             )
         if not of_df.empty:
@@ -204,13 +204,27 @@ def add_features(df, fetch_calendar_callback=None):
             of_df = of_df.set_index("datetime").reindex(df["_ts"], method="nearest", tolerance=60000)
             df["CVD_true"] = of_df["cvd"].values
             df["OFI_true"] = of_df["ofi"].values
+            df["ob_imbalance_L2"] = of_df["ob_imbalance_L2"].values
+            df["ob_spread_L2"] = of_df["ob_spread_L2"].values
+            df["liq_long_1h"] = of_df["liq_long_1h"].values
+            df["liq_short_1h"] = of_df["liq_short_1h"].values
             # Fill NaN with proxy values where real data not yet available
             df["CVD_true"] = df["CVD_true"].fillna(df["CVD_rolling_1h"])
             df["OFI_true"] = df["OFI_true"].fillna(0.0)
+            df["ob_imbalance_L2"] = df["ob_imbalance_L2"].fillna(0.0)
+            df["ob_spread_L2"] = df["ob_spread_L2"].fillna(0.0)
+            df["liq_long_1h"] = df["liq_long_1h"].fillna(0.0)
+            df["liq_short_1h"] = df["liq_short_1h"].fillna(0.0)
             df.drop(columns=["_ts"], inplace=True, errors="ignore")
+        else:
+            raise ValueError("Empty order flow table")
     except Exception:
         df["CVD_true"] = df["CVD_rolling_1h"]
         df["OFI_true"] = 0.0
+        df["ob_imbalance_L2"] = 0.0
+        df["ob_spread_L2"] = 0.0
+        df["liq_long_1h"] = 0.0
+        df["liq_short_1h"] = 0.0
     
     # Wick Volume (Liquidation & Stop-Loss Sweep Proxies)
     upper_wick = df["high"] - df[["open", "close"]].max(axis=1)
