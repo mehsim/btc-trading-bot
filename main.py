@@ -1161,8 +1161,10 @@ def start_telegram_command_listener():
                             })
                             
                         elif text == "/latency":
-                            t_start = time.time()
                             try:
+                                # Warm up connection first to ensure we measure reused connection latency
+                                get_shared_session().get(f"{BYBIT_BASE_URL}/v5/market/time", timeout=5)
+                                t_start = time.time()
                                 resp = get_shared_session().get(f"{BYBIT_BASE_URL}/v5/market/time", timeout=5)
                                 elapsed = (time.time() - t_start) * 1000.0
                                 if resp.status_code == 200:
