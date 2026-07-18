@@ -6249,12 +6249,16 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             
         if bybit_success:
             # 3. Recalculate SL/TP targets based on actual entry_price
+            min_sl_pct = 1.0 if symbol == "BTCUSDT" else (1.5 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 2.0)
+            min_sl_dist = entry_price * (min_sl_pct / 100.0)
+            raw_sl_dist = max(sl_multiplier_adjusted * atr_dollars, min_sl_dist)
+            
             if ml_trend == "Bullish":
-                stop_loss_price = entry_price - sl_multiplier_adjusted * atr_dollars
+                stop_loss_price = entry_price - raw_sl_dist
                 est_tp_price = estimate_liquidation_pool(df_completed, "Bullish", entry_price)
                 take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars)
             else:
-                stop_loss_price = entry_price + sl_multiplier_adjusted * atr_dollars
+                stop_loss_price = entry_price + raw_sl_dist
                 est_tp_price = estimate_liquidation_pool(df_completed, "Bearish", entry_price)
                 take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars)
                 
@@ -7610,13 +7614,17 @@ def main():
                                         # Scale SL down by up to 30% for maximum confidence trades
                                         sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
                                         
+                                    min_sl_pct = 1.0 if symbol == "BTCUSDT" else (1.5 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 2.0)
+                                    min_sl_dist = entry_price * (min_sl_pct / 100.0)
+                                    raw_sl_dist = max(sl_multiplier_adjusted * atr_dollars, min_sl_dist)
+                                    
                                     if ml_trend == "Bullish":
-                                        stop_loss_price = entry_price - sl_multiplier_adjusted * atr_dollars
+                                        stop_loss_price = entry_price - raw_sl_dist
                                         atr_tp_price = entry_price + tp_change
                                         est_tp_price = estimate_liquidation_pool(df, "Bullish", entry_price)
                                         take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_change)
                                     else:
-                                        stop_loss_price = entry_price + sl_multiplier_adjusted * atr_dollars
+                                        stop_loss_price = entry_price + raw_sl_dist
                                         atr_tp_price = entry_price - tp_change
                                         est_tp_price = estimate_liquidation_pool(df, "Bearish", entry_price)
                                         take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_change)
