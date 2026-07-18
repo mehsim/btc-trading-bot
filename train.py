@@ -198,6 +198,14 @@ for lag in [1, 2]:
 # Garman-Klass Volatility features
 features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])
 
+# Cross-Asset Lead-Lag Correlation features
+features.extend(["lead_lag_diff_5m", "lead_lag_diff_1h", "lead_lag_diff_4h", "volume_ratio_to_btc"])
+for lag in [1, 2]:
+    features.append(f"lead_lag_diff_5m_lag{lag}")
+    features.append(f"lead_lag_diff_1h_lag{lag}")
+    features.append(f"lead_lag_diff_4h_lag{lag}")
+    features.append(f"volume_ratio_to_btc_lag{lag}")
+
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
     global economic_calendar_cache
     with economic_calendar_lock:

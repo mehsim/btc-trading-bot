@@ -155,6 +155,24 @@ def add_features(df, fetch_calendar_callback=None):
     for lag in [1, 2, 3]:
         df[f"btc_return_5m_lag{lag}"] = df["btc_return_5m"].shift(lag)
         
+    # Cross-Asset Lead-Lag Correlation Features
+    df["return_5m"] = df["close"].pct_change(1)
+    df["return_1h"] = df["close"].pct_change(12)
+    df["btc_return_1h"] = df["close_btc"].pct_change(12)
+    df["return_4h"] = df["close"].pct_change(48)
+    df["btc_return_4h"] = df["close_btc"].pct_change(48)
+    
+    df["lead_lag_diff_5m"] = (df["return_5m"] - df["btc_return_5m"]).fillna(0.0)
+    df["lead_lag_diff_1h"] = (df["return_1h"] - df["btc_return_1h"]).fillna(0.0)
+    df["lead_lag_diff_4h"] = (df["return_4h"] - df["btc_return_4h"]).fillna(0.0)
+    df["volume_ratio_to_btc"] = (df["volume"] / (df["btc_volume"] + 1e-8)).fillna(0.0)
+    
+    for lag in [1, 2]:
+        df[f"lead_lag_diff_5m_lag{lag}"] = df["lead_lag_diff_5m"].shift(lag).fillna(0.0)
+        df[f"lead_lag_diff_1h_lag{lag}"] = df["lead_lag_diff_1h"].shift(lag).fillna(0.0)
+        df[f"lead_lag_diff_4h_lag{lag}"] = df["lead_lag_diff_4h"].shift(lag).fillna(0.0)
+        df[f"volume_ratio_to_btc_lag{lag}"] = df["volume_ratio_to_btc"].shift(lag).fillna(0.0)
+        
     # Autoregressive target coin lags
     for lag in [1, 2, 3, 4, 5]:
         df[f"return_5m_lag{lag}"] = df["return_5m"].shift(lag)

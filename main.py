@@ -4358,6 +4358,14 @@ for lag in [1, 2]:
 # Garman-Klass Volatility features
 features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])
 
+# Cross-Asset Lead-Lag Correlation features
+features.extend(["lead_lag_diff_5m", "lead_lag_diff_1h", "lead_lag_diff_4h", "volume_ratio_to_btc"])
+for lag in [1, 2]:
+    features.append(f"lead_lag_diff_5m_lag{lag}")
+    features.append(f"lead_lag_diff_1h_lag{lag}")
+    features.append(f"lead_lag_diff_4h_lag{lag}")
+    features.append(f"volume_ratio_to_btc_lag{lag}")
+
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 
 
@@ -5515,13 +5523,15 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     
     # Standardize confluence threshold to flat 75% for consistent accuracy across all market regimes
     score_threshold = 75.0
+    traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
         
-    approved = (not hard_gate_failed) and (score_pct >= score_threshold)
+    # Pro-Level Meta-Labeling Gate: Approved if predicted probability of success >= 60%
+    approved = (calibrated_confidence >= 0.60)
 
     # Add score summary to results
     results["_Score_Summary"] = {
         "pass": approved,
-        "detail": f"Score: {total_score}/{max_score} ({score_pct:.0f}%) | Threshold: {score_threshold:.0f}% | Hard Gates: {'FAILED' if hard_gate_failed else 'PASSED'}",
+        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: 60%) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
         "weight": "SUMMARY"
     }
 
