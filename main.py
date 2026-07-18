@@ -5531,13 +5531,14 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
         
-    # Pro-Level Meta-Labeling Gate: Approved if predicted probability of success >= 60%
-    approved = (calibrated_confidence >= 0.60)
+    # Pro-Level Meta-Labeling Gate: Approved if predicted probability of success >= 60% AND 1d/4h trend gates pass
+    trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True)
+    approved = (calibrated_confidence >= 0.60) and trend_gates_passed
 
     # Add score summary to results
     results["_Score_Summary"] = {
         "pass": approved,
-        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: 60%) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
+        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: 60%, Trend Pass: {trend_gates_passed}) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
         "weight": "SUMMARY"
     }
 
@@ -6253,14 +6254,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             min_sl_dist = entry_price * (min_sl_pct / 100.0)
             raw_sl_dist = max(sl_multiplier_adjusted * atr_dollars, min_sl_dist)
             
+            min_tp_dist = entry_price * 0.015
             if ml_trend == "Bullish":
                 stop_loss_price = entry_price - raw_sl_dist
                 est_tp_price = estimate_liquidation_pool(df_completed, "Bullish", entry_price)
-                take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars)
+                take_profit_price = max(entry_price + min_tp_dist, min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars))
             else:
                 stop_loss_price = entry_price + raw_sl_dist
                 est_tp_price = estimate_liquidation_pool(df_completed, "Bearish", entry_price)
-                take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars)
+                take_profit_price = min(entry_price - min_tp_dist, max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars))
                 
             # 4. Set SL/TP on active position on Bybit
             temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
@@ -7618,16 +7620,17 @@ def main():
                                     min_sl_dist = entry_price * (min_sl_pct / 100.0)
                                     raw_sl_dist = max(sl_multiplier_adjusted * atr_dollars, min_sl_dist)
                                     
+                                    min_tp_dist = entry_price * 0.015
                                     if ml_trend == "Bullish":
                                         stop_loss_price = entry_price - raw_sl_dist
                                         atr_tp_price = entry_price + tp_change
                                         est_tp_price = estimate_liquidation_pool(df, "Bullish", entry_price)
-                                        take_profit_price = min(est_tp_price, entry_price + 1.5 * tp_change)
+                                        take_profit_price = max(entry_price + min_tp_dist, min(est_tp_price, entry_price + 1.5 * tp_change))
                                     else:
                                         stop_loss_price = entry_price + raw_sl_dist
                                         atr_tp_price = entry_price - tp_change
                                         est_tp_price = estimate_liquidation_pool(df, "Bearish", entry_price)
-                                        take_profit_price = max(est_tp_price, entry_price - 1.5 * tp_change)
+                                        take_profit_price = min(entry_price - min_tp_dist, max(est_tp_price, entry_price - 1.5 * tp_change))
                                     print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
 
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
