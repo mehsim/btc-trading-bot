@@ -7738,7 +7738,7 @@ def main():
                                         elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
                                             lev_cap = 20.0
                                         else:
-                                            lev_cap = 15.0
+                                            lev_cap = 5.0
                                         # Volatility-based leverage scaling cap
                                         atr_pct_of_price = (atr_dollars / entry_price) * 100.0
                                         if atr_pct_of_price > 3.0:
