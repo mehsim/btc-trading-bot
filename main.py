@@ -6758,12 +6758,10 @@ def main():
                             stagnation_age_hours = 0.6 * lookahead_duration_hours
                             
                             if trade_age_hours >= stagnation_age_hours:
-                                current_change_pct = ((current_price - entry_price) / entry_price) * 100.0
-                                current_raw_return = current_change_pct if direction == "Bullish" else -current_change_pct
-                                current_leverage = active_trade.get("leverage", 1.0)
-                                current_net_return_pct = (current_raw_return * current_leverage) - (current_leverage * 0.0011 * 100.0)
-                                if -1.0 <= current_net_return_pct < 1.0:
-                                    exit_reason = f"STAGNATION TIMEOUT (Age: {trade_age_hours:.1f}h, Net: {current_net_return_pct:+.2f}%)"
+                                atr_dollars = active_trade.get("atr_dollars") or (entry_price * 0.01)
+                                price_dev = abs(current_price - entry_price)
+                                if price_dev < (0.5 * atr_dollars):
+                                    exit_reason = f"STAGNATION TIMEOUT (Age: {trade_age_hours:.1f}h, Price within 0.5 ATR)"
                     
                     # 3. Simulation mode SL/TP price checks
                     if TRADE_MODE == "simulation" and not exit_reason:
