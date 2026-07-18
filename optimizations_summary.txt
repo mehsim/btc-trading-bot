@@ -1,0 +1,42 @@
+TODAY'S OPTIMIZATIONS SUMMARY: HIGH-FIDELITY MICROSTRUCTURE & PRO-LEVEL TRADING
+Prepared by: Antigravity AI Systems Team
+Date: July 18, 2026
+
+================================================================================
+1. HIGH-FIDELITY MICROSTRUCTURE FEATURES
+================================================================================
+We transitioned the models from chart-based estimations to real-time exchange order-flow data.
+
+-- WebSocket CVD & OFI:
+* What it is: The models now use the actual, transaction-by-transaction Cumulative Volume Delta (CVD) and Order Flow Imbalance (OFI) directly from Bybit's public trade feeds.
+* Simple Benefit: Tells the bot exactly whether institutional traders are actively buying or selling, instead of guessing using price wicks.
+
+-- Real-time Liquidation Feed:
+* What it is: Subscribed to Bybit's liquidation.{symbol} WebSocket feed. The bot now logs and aggregates the dollar value of long vs. short liquidations in 1-minute intervals.
+* Simple Benefit: Allows the bot to spot panic and capitulation. It can buy panic drops (short liquidations peak) and sell euphoric breakouts (long liquidations peak).
+
+-- L2 Orderbook Depth Imbalance & Spread:
+* What it is: The bot now tracks the exact size of buy and sell orders in the top 10 levels of the order book and measures the exact L1 bid-ask spread.
+* Simple Benefit: Prevents the bot from opening trades directly into a massive wall of sell orders, and avoids paying high spreads.
+
+================================================================================
+2. CROSS-ASSET LEAD-LAG CORRELATION FEATURES
+================================================================================
+We gave the models the ability to analyze how altcoins behave relative to Bitcoin.
+
+-- BTC/ETH Momentum Leads:
+* What it is: Calculated rolling return differentials between the altcoin and BTC/ETH over 5m, 1h, and 4h windows.
+* Simple Benefit: Bitcoin usually moves first, and altcoins follow a few minutes later. This allows the bot to front-run altcoin moves by entering trades before the altcoin catches up.
+
+-- Volume Dominance Ratios:
+* What it is: Added the ratio of altcoin volume relative to BTC volume.
+* Simple Benefit: Helps the bot identify when capital is shifting from Bitcoin into altcoins (Altseason), selecting the best coins to trade.
+
+================================================================================
+3. MACHINE-LEARNED GATING (META-LABELING)
+================================================================================
+We replaced the rigid, old-school trading rules with an adaptive machine-learned gate.
+
+-- 60% Meta-Gate:
+* What it is: The bot no longer rejects trades because of static, inflexible rules (like requiring RSI to be strictly above 30). Instead, the trade is passed to a secondary Meta-Classifier model. If the classifier predicts a probability of success of 60% or higher, the trade is approved.
+* Simple Benefit: Significantly increases trade frequency while maintaining high accuracy. The AI dynamically adapts to different volatility levels and market regimes, only blocking trades when the context is unsafe.
