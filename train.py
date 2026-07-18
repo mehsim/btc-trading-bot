@@ -631,7 +631,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         break
                 if cols_ok:
                     # Generate targets individually per coin to avoid cross-symbol data leak!
-                    lookahead = 10
+                    cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10})
+                    lookahead = cfg.get("lookahead", 10)
                     df_coin["future"] = df_coin["close"].shift(-lookahead)
                     df_coin["target_price_change"] = (df_coin["future"] - df_coin["close"]) / df_coin["close"]
                     df_coin = add_triple_barrier_labels(df_coin, interval)
