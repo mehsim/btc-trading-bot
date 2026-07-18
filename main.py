@@ -7270,7 +7270,7 @@ def main():
                 continue
                 
             try:
-                df_completed = df_raw.iloc[:-1].copy()
+                df_completed = df.iloc[:-1].copy()
                 latest_completed_ts = int(df_completed.iloc[-1]["timestamp"])
  
                 last_ts_key = f"last_processed_{symbol}_{iv}_ts"
