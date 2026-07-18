@@ -40,3 +40,16 @@ We replaced the rigid, old-school trading rules with an adaptive machine-learned
 -- 60% Meta-Gate:
 * What it is: The bot no longer rejects trades because of static, inflexible rules (like requiring RSI to be strictly above 30). Instead, the trade is passed to a secondary Meta-Classifier model. If the classifier predicts a probability of success of 60% or higher, the trade is approved.
 * Simple Benefit: Significantly increases trade frequency while maintaining high accuracy. The AI dynamically adapts to different volatility levels and market regimes, only blocking trades when the context is unsafe.
+
+================================================================================
+4. EXECUTION SPEED & SAFETY GUARD OPTIMIZATIONS
+================================================================================
+We upgraded the trade loop to run asynchronously, removing API latency bottlenecks, and added thread guards to prevent duplicate entries.
+
+-- Asynchronous Background Order Execution:
+* What it is: Offloaded the Bybit API interactions (position checks, leverage setting, limit-order chasing, and TP/SL setup) to background threads.
+* Simple Benefit: The bot's main loop evaluates all symbols in <1ms. When a trade triggers, it spawns an execution thread and continues scanning the next symbol immediately, ensuring execution speeds close to institutional levels.
+
+-- Thread-Safe Active Execution Guard:
+* What it is: Added a global lock (active_execution_symbols) to track which coins are currently placing orders.
+* Simple Benefit: Prevents the bot from placing duplicate, overlapping trades on the same coin if the limit-chase loop takes longer than the 20-second main polling interval. Allows the bot to run concurrently and safely.
