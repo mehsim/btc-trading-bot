@@ -101,20 +101,22 @@ for i in range(len(df_1h) - 1, 100, -1):
         continue
 
     # Now let's evaluate all technical confluence checks for this historical timestamp
-    # Align 1d trend (find nearest daily candle before or equal to this timestamp)
-    idx_1d = df_1d[df_1d["timestamp"] <= timestamp].index
-    if len(idx_1d) == 0:
+    # Align 1d trend (strictly historical data up to this timestamp)
+    df_1d_sub = df_1d[df_1d["timestamp"] <= timestamp].copy()
+    if len(df_1d_sub) < 21:
         continue
-    last_idx_1d = idx_1d[-1]
-    trend_1d_bullish = ema9_1d.loc[last_idx_1d] > ema21_1d.loc[last_idx_1d]
+    ema9_1d_val = EMAIndicator(df_1d_sub["close"], window=9).ema_indicator().iloc[-1]
+    ema21_1d_val = EMAIndicator(df_1d_sub["close"], window=21).ema_indicator().iloc[-1]
+    trend_1d_bullish = ema9_1d_val > ema21_1d_val
     
-    # Align 4h trend
-    idx_4h = df_4h[df_4h["timestamp"] <= timestamp].index
-    if len(idx_4h) == 0:
+    # Align 4h trend (strictly historical data up to this timestamp)
+    df_4h_sub = df_4h[df_4h["timestamp"] <= timestamp].copy()
+    if len(df_4h_sub) < 21:
         continue
-    last_idx_4h = idx_4h[-1]
-    trend_4h_bullish = ema9_4h.loc[last_idx_4h] > ema21_4h.loc[last_idx_4h]
-    rsi_4h_val = rsi_4h.loc[last_idx_4h]
+    ema9_4h_val = EMAIndicator(df_4h_sub["close"], window=9).ema_indicator().iloc[-1]
+    ema21_4h_val = EMAIndicator(df_4h_sub["close"], window=21).ema_indicator().iloc[-1]
+    rsi_4h_val = RSIIndicator(df_4h_sub["close"], window=14).rsi().iloc[-1]
+    trend_4h_bullish = ema9_4h_val > ema21_4h_val
 
     # Check 1: 1d Trend
     if ml_trend == "Bullish":
@@ -164,10 +166,10 @@ for i in range(len(df_1h) - 1, 100, -1):
     else:
         pass_momentum = not all(is_green)
 
-    # Check 8: Volatility Guard
-    atr_series = df_prior["ATR_norm"].iloc[-100:]
-    p10 = float(np.percentile(atr_series, 10))
-    p90 = float(np.percentile(atr_series, 90))
+    # Check 8: Volatility Guard (expanding historical window up to current candle)
+    atr_series = df_prior["ATR_norm"].dropna()
+    p10 = float(np.percentile(atr_series, 10)) if len(atr_series) >= 20 else 0.001
+    p90 = float(np.percentile(atr_series, 90)) if len(atr_series) >= 20 else 0.05
     current_atr = candle["ATR_norm"]
     pass_volatility = p10 <= current_atr <= p90
 

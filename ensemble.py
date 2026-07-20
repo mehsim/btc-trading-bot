@@ -319,7 +319,6 @@ def load_ensemble_classifier(prefix, n_features=54):
             pass
     lgb_clf.fitted_ = True
     lgb_clf._n_classes = 3
-    lgb_clf.classes_ = np.array([0, 1, 2])
     lgb_clf._classes = np.array([0, 1, 2])
     lgb_clf._n_features = n_features
     lgb_clf._n_features_in = n_features

@@ -34,15 +34,17 @@ workspace_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(workspace_dir)
 
 from data import get_history, merge_derivatives_sentiment_features
-from main import (
+from core import (
     add_features, 
-    check_pre_trade_confluence, 
-    get_news_sentiment, 
     calibrate_confidence,
     calculate_historical_thresholds,
     SYMBOL, 
     INTERVAL,
     features
+)
+from main import (
+    check_pre_trade_confluence, 
+    get_news_sentiment
 )
 
 print("=" * 60)
@@ -126,14 +128,20 @@ else:
 pred_pct = float(active_model_price.predict(X_live)[0])
 pred_change = pred_pct * latest_close
 predicted_price = latest_close + pred_change
-prob_bullish = float(active_model_trend.predict_proba(X_live)[0][1])
-
-if prob_bullish >= 0.50:
-    ml_trend = "Bullish"
-    ml_confidence = prob_bullish
+probs = active_model_trend.predict_proba(X_live)[0]
+if len(probs) >= 3:
+    pred_class = int(np.argmax(probs))
+    class_map = {0: "Bearish", 1: "Neutral", 2: "Bullish"}
+    ml_trend = class_map.get(pred_class, "Neutral")
+    ml_confidence = float(probs[pred_class])
 else:
-    ml_trend = "Bearish"
-    ml_confidence = 1.0 - prob_bullish
+    prob_bullish = float(probs[1]) if len(probs) > 1 else float(probs[0])
+    if prob_bullish >= 0.50:
+        ml_trend = "Bullish"
+        ml_confidence = prob_bullish
+    else:
+        ml_trend = "Bearish"
+        ml_confidence = 1.0 - prob_bullish
 
 calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
 expected_pct_change = (abs(pred_change) / latest_close) * 100
