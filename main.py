@@ -1453,6 +1453,37 @@ active_trades_lock = threading.Lock()
 
 bot_state = state_manager.StateManager()
 
+def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
+    print(f"[EMERGENCY KILL SWITCH] Triggered! Reason: {reason}")
+    bot_state["bot_running"] = False
+    send_telegram_alert(f"🚨 *EMERGENCY KILL SWITCH ACTIVATED* 🚨\n• Reason: `{reason}`\n• Action: Halting bot & closing open positions at market.")
+    try:
+        if TRADE_MODE != "simulation":
+            bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
+            positions = get_all_bybit_positions()
+            for p in positions:
+                sym = p.get("symbol")
+                sz = float(p.get("size", "0"))
+                side = p.get("side")
+                if sz > 0 and sym:
+                    close_side = "Sell" if side == "Buy" else "Buy"
+                    bybit_post_request("/v5/order/create", {
+                        "category": "linear",
+                        "symbol": sym,
+                        "side": close_side,
+                        "orderType": "Market",
+                        "qty": str(sz),
+                        "timeInForce": "IOC",
+                        "reduceOnly": True
+                    })
+    except Exception as err:
+        print(f"[Kill Switch Error] Failed executing emergency close: {err}")
+
+@app.route("/killswitch", methods=["GET", "POST"])
+def killswitch_endpoint():
+    trigger_emergency_kill_switch("HTTP /killswitch Request")
+    return jsonify({"status": "KILL_SWITCH_ACTIVATED", "message": "All orders cancelled and bot halted."})
+
 cached_news_sentiment = "Neutral"
 cached_news_titles = []
 news_sentiment_lock = threading.Lock()
