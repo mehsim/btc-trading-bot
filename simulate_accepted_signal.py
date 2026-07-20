@@ -21,9 +21,10 @@ from core import (
 from ta.trend import EMAIndicator
 from ta.momentum import RSIIndicator
 
-print("=" * 60)
-print("SEARCHING FOR AN APPROVED SIGNAL IN RECENT HISTORY")
-print("=" * 60)
+def main():
+    print("=" * 60)
+    print("SEARCHING FOR AN APPROVED SIGNAL IN RECENT HISTORY")
+    print("=" * 60)
 
 # Load models
 # Load models
@@ -284,3 +285,6 @@ if not found_signal:
     print(f"  - Stop-Loss (SL): {mock_sl:.2f} (Distance: {0.75*mock_atr_dollars:.2f})")
     print(f"  - Take-Profit (TP): {mock_tp:.2f} (Distance: {1.50*mock_atr_dollars:.2f})")
     print("==================================================\n")
+
+if __name__ == "__main__":
+    main()

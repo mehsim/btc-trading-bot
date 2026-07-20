@@ -47,9 +47,10 @@ from main import (
     get_news_sentiment
 )
 
-print("=" * 60)
-print(f"RUNNING LIVE SIMULATION AT {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-print("=" * 60)
+def main():
+    print("=" * 60)
+    print(f"RUNNING LIVE SIMULATION AT {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
 
 # 1. Load trained models
 print("Loading trained models...")
@@ -212,4 +213,6 @@ else:
     print("==================================================\n\n")
 
 # Restore stdout and close file properly
-sys.stdout = sys.stdout.terminal
+if __name__ == "__main__":
+    main()
+    sys.stdout = sys.stdout.terminal
