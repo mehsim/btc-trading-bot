@@ -43,6 +43,8 @@ import state_manager
 import risk_engine
 import mlops_engine
 import retrain_pipeline
+import feature_pipeline
+import meta_model_engine
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
@@ -7447,19 +7449,27 @@ def main():
 
                         # Determine dynamic confidence threshold based on regime and volatility
                         atr_norm_val = latest_candle["ATR_norm"]
-                        dynamic_conf_threshold = 0.58
                         
-                        # 1. Regime Adjustment (GMM-based)
+                        # 1. Regime-Specific Thresholds (Section 11.5)
                         if "Trending" in regime_name:
-                            dynamic_conf_threshold = 0.55
+                            dynamic_conf_threshold = 0.65
                         elif "Ranging" in regime_name:
-                            dynamic_conf_threshold = 0.63
+                            dynamic_conf_threshold = 0.55
+                        else:
+                            dynamic_conf_threshold = 0.58
                             
-                        # 2. Volatility Adjustment (ATR)
-                        if atr_norm_val > 0.008:
-                            dynamic_conf_threshold = min(0.68, dynamic_conf_threshold + 0.03)
-                        elif atr_norm_val < 0.003:
-                            dynamic_conf_threshold = min(0.68, dynamic_conf_threshold + 0.02)
+                        # 2. High Volatility Adjustment (ATR > 0.015)
+                        if atr_norm_val > 0.015:
+                            dynamic_conf_threshold = 0.70
+                            
+                        # 3. Recent 50-Trade Performance Decay Filter
+                        recent_trades = bot_state.get("trade_history", [])[-50:]
+                        if len(recent_trades) >= 10:
+                            win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
+                            recent_win_rate = (win_count / len(recent_trades)) * 100.0
+                            if recent_win_rate < 45.0:
+                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.10)
+                                print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
                             
                         # 3. Sentiment-Adaptive Adjustment
                         with news_sentiment_lock:
