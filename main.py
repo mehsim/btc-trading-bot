@@ -1848,6 +1848,7 @@ def get_bybit_time_offset():
 
     for attempt in range(3):
         try:
+            _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_time_sync(), _async_loop)
             status, res = future.result(timeout=7)
             if status == 200:
@@ -1924,6 +1925,7 @@ def bybit_post_request(endpoint, payload):
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
             status, res = future.result(timeout=10)
             if status == 200:
@@ -2192,6 +2194,7 @@ def bybit_get_request(endpoint, query_params):
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
             status, res = future.result(timeout=10)
             if status == 200:
