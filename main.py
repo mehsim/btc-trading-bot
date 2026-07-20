@@ -41,6 +41,8 @@ load_dotenv()
 import features as features_module
 import state_manager
 import risk_engine
+import mlops_engine
+import retrain_pipeline
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
