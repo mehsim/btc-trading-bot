@@ -217,15 +217,20 @@ def add_features(df, fetch_calendar_callback=None):
         if not of_df.empty:
             of_df["timestamp"] = (of_df["timestamp"] * 1000).astype("int64")
             of_df = of_df.rename(columns={"timestamp": "datetime"})
-            # Align on minute-level timestamps by merging on nearest candle
-            df["_ts"] = df.index.astype("int64") if hasattr(df.index, "astype") else df.index
-            of_df = of_df.set_index("datetime").reindex(df["_ts"], method="nearest", tolerance=60000)
-            df["CVD_true"] = of_df["cvd"].values
-            df["OFI_true"] = of_df["ofi"].values
-            df["ob_imbalance_L2"] = of_df["ob_imbalance_L2"].values
-            df["ob_spread_L2"] = of_df["ob_spread_L2"].values
-            df["liq_long_1h"] = of_df["liq_long_1h"].values
-            df["liq_short_1h"] = of_df["liq_short_1h"].values
+            # Align without look-ahead using pd.merge_asof (direction="backward")
+            ts_series = df["timestamp"] if "timestamp" in df.columns else df.index.astype("int64")
+            df["_ts"] = ts_series
+            of_df_sorted = of_df.sort_values("datetime")
+            df_sorted = df[["_ts"]].copy().sort_values("_ts")
+            merged_of = pd.merge_asof(df_sorted, of_df_sorted, left_on="_ts", right_on="datetime", direction="backward")
+            merged_of.set_index("_ts", inplace=True)
+            
+            df["CVD_true"] = df["_ts"].map(merged_of["cvd"])
+            df["OFI_true"] = df["_ts"].map(merged_of["ofi"])
+            df["ob_imbalance_L2"] = df["_ts"].map(merged_of["ob_imbalance_L2"])
+            df["ob_spread_L2"] = df["_ts"].map(merged_of["ob_spread_L2"])
+            df["liq_long_1h"] = df["_ts"].map(merged_of["liq_long_1h"])
+            df["liq_short_1h"] = df["_ts"].map(merged_of["liq_short_1h"])
             # Fill NaN with proxy values where real data not yet available
             df["CVD_true"] = df["CVD_true"].fillna(df["CVD_rolling_1h"])
             df["OFI_true"] = df["OFI_true"].fillna(0.0)

@@ -9,7 +9,7 @@ from datetime import datetime
 # Add workspace path to python path
 sys.path.append("/Users/mehsimkhurshid/Downloads/btc-trading-bot")
 from data import get_history, merge_derivatives_sentiment_features
-from main import (
+from core import (
     add_features,
     calibrate_confidence,
     calculate_historical_thresholds,
@@ -354,8 +354,8 @@ def run_backtest():
     df["avg_vol_20"] = df["volume"].rolling(20).mean().shift(1)
     df["volume_pass"] = df["volume"] >= 0.8 * df["avg_vol_20"]
 
-    df["p10_atr"] = df["ATR_norm"].rolling(100).quantile(0.10)
-    df["p90_atr"] = df["ATR_norm"].rolling(100).quantile(0.90)
+    df["p10_atr"] = df["ATR_norm"].expanding(min_periods=100).quantile(0.10)
+    df["p90_atr"] = df["ATR_norm"].expanding(min_periods=100).quantile(0.90)
 
     # 5. Fetch Calibration limits
     print("\n[Step 3] Calibrating confidence thresholds...")

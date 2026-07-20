@@ -10,7 +10,7 @@ workspace_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(workspace_dir)
 
 from data import get_history
-from main import (
+from core import (
     add_features,
     calibrate_confidence,
     calculate_historical_thresholds,

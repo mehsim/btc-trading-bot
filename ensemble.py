@@ -267,7 +267,12 @@ class EnsembleRegressor:
 def save_ensemble_classifier(model, prefix):
     import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
-    model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
+    if hasattr(model.lgb_model, "_Booster") and model.lgb_model._Booster is not None:
+        model.lgb_model._Booster.save_model(f"{prefix}_lgb.txt")
+    elif hasattr(model.lgb_model, "booster_"):
+        model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
+    elif hasattr(model.lgb_model, "save_model"):
+        model.lgb_model.save_model(f"{prefix}_lgb.txt")
     model.cat_model.save_model(f"{prefix}_cat.json", format="json")
     
     meta_data = {
@@ -322,7 +327,12 @@ def load_ensemble_classifier(prefix, n_features=54):
 def save_ensemble_regressor(model, prefix):
     import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
-    model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
+    if hasattr(model.lgb_model, "_Booster") and model.lgb_model._Booster is not None:
+        model.lgb_model._Booster.save_model(f"{prefix}_lgb.txt")
+    elif hasattr(model.lgb_model, "booster_"):
+        model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
+    elif hasattr(model.lgb_model, "save_model"):
+        model.lgb_model.save_model(f"{prefix}_lgb.txt")
     model.cat_model.save_model(f"{prefix}_cat.json", format="json")
     
     meta_data = {

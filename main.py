@@ -104,26 +104,22 @@ import time
 _async_loop = None
 _aiohttp_session = None
 
-def _start_async_loop():
-    global _async_loop
-    _async_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(_async_loop)
-    _async_loop.run_forever()
-
-_async_thread = threading.Thread(target=_start_async_loop, daemon=True)
-_async_thread.start()
-
-# Wait for loop thread to start
-while _async_loop is None or not _async_loop.is_running():
-    time.sleep(0.01)
-
-# Initialize ClientSession inside the loop thread to make it thread-safe
-async def _init_session():
-    global _aiohttp_session
-    connector = aiohttp.TCPConnector(ssl=False, limit=100, keepalive_timeout=30)
-    _aiohttp_session = aiohttp.ClientSession(connector=connector)
-
-asyncio.run_coroutine_threadsafe(_init_session(), _async_loop).result()
+def _ensure_async_loop():
+    global _async_loop, _aiohttp_session
+    if _async_loop is None or not _async_loop.is_running():
+        _async_loop = asyncio.new_event_loop()
+        def _run():
+            asyncio.set_event_loop(_async_loop)
+            _async_loop.run_forever()
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        while not _async_loop.is_running():
+            time.sleep(0.01)
+        async def _init_session():
+            global _aiohttp_session
+            connector = aiohttp.TCPConnector(ssl=False, limit=100, keepalive_timeout=30)
+            _aiohttp_session = aiohttp.ClientSession(connector=connector)
+        asyncio.run_coroutine_threadsafe(_init_session(), _async_loop).result()
 
 print("[System Debug] Importing pandas/numpy/joblib...")
 import pandas as pd
@@ -2047,6 +2043,10 @@ _ws_responses_lock = threading.Lock()
 
 def execute_bybit_order_ws_or_rest(endpoint, payload):
     global private_ws_connected, active_private_ws
+    # Add clientOrderId (orderLinkId) for request deduplication on order creation
+    if endpoint == "/v5/order/create" and "orderLinkId" not in payload:
+        payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}"
+        
     op_map = {
         "/v5/order/create": "order.create",
         "/v5/order/cancel": "order.cancel"
@@ -2063,8 +2063,8 @@ def execute_bybit_order_ws_or_rest(endpoint, payload):
             print(f"[WebSocket Private Execution] Sending {op} reqId={req_id}")
             active_private_ws.send(json.dumps(ws_payload))
             
-            # Wait for response
-            timeout = 1.0 # 1,000ms
+            # Wait for response (increased timeout to 4.0s for high volatility/latency resilience)
+            timeout = 4.0 # 4,000ms
             start_t = time.time()
             while time.time() - start_t < timeout:
                 with _ws_responses_lock:
@@ -2087,7 +2087,7 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_on
         "side": side,
         "orderType": "Market", # Market order ensures instant execution
         "qty": str(qty),
-        "timeInForce": "GTC",
+        "timeInForce": "IOC",
         "positionIdx": 0
     }
     if reduce_only:
@@ -6718,9 +6718,9 @@ def main():
                             position_size_usd = remaining_size
                             active_trade["position_size_usd"] = remaining_size
                             
-                            # Move stop loss to entry price - fee offset (fee-free break-even)
+                            # Move stop loss to entry price + fee offset (fee-free break-even for short)
                             fee_buffer = entry_price * 0.0005
-                            target_sl = entry_price - fee_buffer
+                            target_sl = entry_price + fee_buffer
                             
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)

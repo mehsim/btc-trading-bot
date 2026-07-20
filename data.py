@@ -889,23 +889,8 @@ def classify_market_regime(df_history, interval=None):
         except Exception as pred_err:
             print(f"[GMM Prediction Warning] Fallback due to error: {pred_err}")
 
-    # Fallback to fitting GMM on-the-fly if no pre-trained model is available or no interval passed
-    if len(features_gmm) < 30:
-        # Fallback to ADX if not enough data
-        if not df_history.empty:
-            adx = df_history["ADX"].iloc[-1] if "ADX" in df_history.columns else 15.0
-            return "Trending" if adx >= 20.0 else "Ranging"
-        return "Ranging"
-        
-    gmm = GaussianMixture(n_components=2, random_state=42)
-    regimes = gmm.fit_predict(features_gmm)
-    
-    # Identify which component corresponds to the 'Trending' state (the one with higher average volatility/ATR)
-    means = gmm.means_
-    trending_component = np.argmax(means[:, 0]) # Index with highest mean ATR_norm
-    
-    # Predict for the latest candle
-    latest_feat = features_gmm[-1].reshape(1, -1)
-    latest_regime = gmm.predict(latest_feat)[0]
-    
-    return "Trending" if latest_regime == trending_component else "Ranging"
+    # Fallback if no pre-trained model is available or load failed: use non-look-ahead ADX threshold
+    if not df_history.empty and "ADX" in df_history.columns:
+        adx = df_history["ADX"].iloc[-1]
+        return "Trending" if adx >= 20.0 else "Ranging"
+    return "Ranging"
