@@ -27,21 +27,27 @@ def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr
     return float(np.clip(effective_lev, min_lev, max_limit))
 
 def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict) -> float:
-    if not open_positions or symbol not in df_dict:
+    if not open_positions or symbol not in df_dict or not isinstance(df_dict[symbol], pd.DataFrame):
+        return 0.0
+    if "close" not in df_dict[symbol].columns or len(df_dict[symbol]) < 20:
         return 0.0
     
     target_returns = df_dict[symbol]["close"].pct_change().dropna().iloc[-100:]
     max_corr = 0.0
     
     for pos in open_positions:
-        pos_symbol = pos.get("symbol")
-        if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol:
-            other_returns = df_dict[pos_symbol]["close"].pct_change().dropna().iloc[-100:]
-            combined = pd.concat([target_returns, other_returns], axis=1).dropna()
-            if len(combined) >= 20:
-                corr = combined.corr().iloc[0, 1]
-                if not np.isnan(corr):
-                    max_corr = max(max_corr, abs(float(corr)))
+        if isinstance(pos, dict):
+            pos_symbol = pos.get("symbol")
+            if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
+                if "close" in df_dict[pos_symbol].columns:
+                    other_returns = df_dict[pos_symbol]["close"].pct_change().dropna().iloc[-100:]
+                    combined = pd.concat([target_returns, other_returns], axis=1).dropna()
+                    if len(combined) >= 20:
+                        corr_matrix = combined.corr()
+                        if corr_matrix.shape == (2, 2):
+                            corr_val = corr_matrix.iloc[0, 1]
+                            if not np.isnan(corr_val):
+                                max_corr = max(max_corr, abs(float(corr_val)))
                     
     return max_corr
 
@@ -49,7 +55,10 @@ def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candid
     if total_equity <= 0:
         return False, 0.0
     
-    current_heat_usd = sum(float(p.get("position_size_usd", 0.0)) * float(p.get("leverage", 1.0)) for p in open_positions)
+    current_heat_usd = sum(
+        float(p.get("position_size_usd", 0.0)) * float(p.get("leverage", 1.0))
+        for p in open_positions if isinstance(p, dict)
+    )
     new_heat_usd = current_heat_usd + (candidate_size_usd * candidate_lev)
     heat_pct = (new_heat_usd / total_equity) * 100.0
     
