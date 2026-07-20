@@ -76,7 +76,7 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
     events_utc = [pd.Timestamp(ev).tz_localize("UTC") for ev in events]
     
     for current_time in df_dt:
-        idx = bisect.bisect_right(events_utc, current_time)
+        idx = bisect.bisect_left(events_utc, current_time)
         if idx < len(events_utc):
             next_event = events_utc[idx]
             diff_hours = (next_event - current_time).total_seconds() / 3600.0

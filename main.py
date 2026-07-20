@@ -6117,9 +6117,15 @@ def recover_missed_closed_trades():
             print(f"[Crash Recovery Scan Error] for {symbol}: {err}")
 
 def execute_bybit_trade_async(*args, **kwargs):
-    symbol = args[0]
+    symbol = args[0] if args else "Unknown"
     try:
         _execute_bybit_trade_async_inner(*args, **kwargs)
+    except Exception as e:
+        import traceback
+        err_msg = str(e)
+        print(f"[CRITICAL EXECUTION ERROR] Async trade execution failed for {symbol}: {err_msg}")
+        traceback.print_exc()
+        send_telegram_alert(f"🚨 *Async Trade Execution Error* 🚨\n• Symbol: `{symbol}`\n• Error: `{err_msg}`")
     finally:
         with active_execution_lock:
             active_execution_symbols.discard(symbol)
@@ -6215,18 +6221,27 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.5)
                         final_details = get_bybit_order_details(symbol, bybit_order_id)
-                        if final_details and final_details.get("orderStatus") == "Filled":
-                            entry_price = float(final_details.get("avgPrice", limit_price))
-                            actual_qty = float(final_details.get("cumExecQty", raw_qty))
-                            filled = True
-                            bybit_success = True
-                            print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled during cancel request at ${entry_price:.4f}.")
-                            break
+                        if final_details:
+                            status = final_details.get("orderStatus")
+                            cum_qty = float(final_details.get("cumExecQty", 0.0))
+                            if status == "Filled" or cum_qty > 0:
+                                entry_price = float(final_details.get("avgPrice", limit_price))
+                                actual_qty = cum_qty if cum_qty > 0 else raw_qty
+                                filled = True
+                                bybit_success = True
+                                print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled/partially filled during cancel request at ${entry_price:.4f} (Qty: {actual_qty}).")
+                                break
                 else:
                     print(f"[{symbol} {iv}m API WARNING] Limit order placement failed: {order_res.get('retMsg')} (waiting 2s before retry)")
                     time.sleep(2)
                     
-            # Fallback to Market order if limit chases failed
+            # Fallback to Market order if limit chases failed (re-check WS fill cache first to prevent race condition)
+            if not bybit_success:
+                with _ws_filled_orders_lock:
+                    if bybit_order_id and bybit_order_id in _ws_filled_orders:
+                        bybit_success = True
+                        print(f"[{symbol} {iv}m API] Order fill confirmed in WS cache. Skipping market order fallback.")
+            
             if not bybit_success:
                 atr_norm = float(latest_candle.get("ATR_norm", 0.0))
                 if atr_norm >= 0.015:

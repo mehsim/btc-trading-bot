@@ -141,6 +141,7 @@ class EnsembleClassifier:
         coef = np.array(self.meta_coef_)
         intercept = np.array(self.meta_intercept_)
         
+        meta_clf.n_features_in_ = X_meta.shape[1]
         if coef.ndim == 1 or coef.shape[0] == 1:
             meta_clf.coef_ = coef.reshape(1, -1)
             meta_clf.intercept_ = intercept.reshape(-1)
@@ -309,9 +310,16 @@ def load_ensemble_classifier(prefix, n_features=54):
     from catboost import CatBoostClassifier
 
     lgb_clf = LGBMClassifier(objective="multiclass", num_class=3)
-    lgb_clf._Booster = lgb.Booster(model_file=f"{prefix}_lgb.txt")
+    booster_obj = lgb.Booster(model_file=f"{prefix}_lgb.txt")
+    lgb_clf._Booster = booster_obj
+    if hasattr(lgb_clf, "booster_"):
+        try:
+            lgb_clf.booster_ = booster_obj
+        except Exception:
+            pass
     lgb_clf.fitted_ = True
     lgb_clf._n_classes = 3
+    lgb_clf.classes_ = np.array([0, 1, 2])
     lgb_clf._classes = np.array([0, 1, 2])
     lgb_clf._n_features = n_features
     lgb_clf._n_features_in = n_features

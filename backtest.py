@@ -226,12 +226,15 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                     candles_elapsed = step
                     break
 
+        atr_norm_val = df.loc[i, "ATR_norm"] if "ATR_norm" in df.columns else 0.005
+        slippage = 0.0003 + (0.0007 if atr_norm_val >= 0.01 else 0.0)
+
         if ml_trend == "Bullish":
             gross_return = (exit_price - entry_price) / entry_price
         else:
             gross_return = (entry_price - exit_price) / entry_price
             
-        net_return = gross_return - fee_rate
+        net_return = gross_return - fee_rate - slippage
         
         equity_compounded = equity_compounded * (1.0 + net_return)
         equity_simple += net_return
