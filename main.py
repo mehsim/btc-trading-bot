@@ -40,6 +40,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import features as features_module
 import state_manager
+import risk_engine
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
@@ -7621,13 +7622,14 @@ def main():
                                         "tp_mult_ranging": 1.5,
                                         "tp_mult_trending": 2.5
                                     })
-                                    sl_multiplier = cfg["sl_mult"]
                                     adx_val = latest_candle.get("ADX", 0.0)
                                     if adx_val >= 20.0:
-                                        tp_multiplier_adjusted = cfg["tp_mult_trending"]
+                                        sl_multiplier = 2.0
+                                        tp_multiplier_adjusted = cfg.get("tp_mult_trending", 2.5)
                                     else:
-                                        tp_multiplier_adjusted = cfg["tp_mult_ranging"]
-                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Aligned multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x (from TIMEFRAME_CONFIG)")
+                                        sl_multiplier = 1.0
+                                        tp_multiplier_adjusted = cfg.get("tp_mult_ranging", 1.5)
+                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Regime Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
                                     
                                     # Maker execution: zero entry slippage for limit orders
                                     slippage_pct = 0.0
@@ -7835,8 +7837,6 @@ def main():
                                             scaled_leverage = round(min(lev_cap, max(leverage_val, needed_leverage)), 1)
                                             if scaled_leverage > leverage_val:
                                                 leverage_val = scaled_leverage
-                                                print(f"[{symbol} {iv}m Leverage Scaling] Increased leverage to {leverage_val}x to meet minimum order size within balance limits.")
-                                                
                                             # Recalculate margin after leverage scale-up
                                             required_margin = (qty_val * entry_price) / leverage_val
                                             if required_margin > current_bal * 0.95:
@@ -7847,6 +7847,19 @@ def main():
                                                 qty_val = float(qty_str)
                                                 raw_qty = qty_val
                                                 print(f"[{symbol} {iv}m Balance Guard] Downscaled order quantity to {qty_str} to fit within 90% of available balance (Margin: ${max_margin:.2f})")
+
+                                        # Pre-Trade Risk Checklist Check
+                                        active_trades_list = bot_state.get("trade_history", [])
+                                        df_dict = {symbol: df_completed}
+                                        passed_checklist, checklist_msg, dd_mult = risk_engine.evaluate_pre_trade_checklist(
+                                            symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict
+                                        )
+                                        print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
+                                        if not passed_checklist:
+                                            print(f"[{symbol} {iv}m Risk Checklist Block] Trade entry aborted.")
+                                            wallet_exceeded = True
+                                        else:
+                                            position_size_usd = position_size_usd * dd_mult
 
                                         # Set Bybit Leverage and Place Order if in live/testnet mode
                                         bybit_success = True

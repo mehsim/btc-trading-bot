@@ -62,6 +62,12 @@ def init_db():
                 stop_loss REAL,
                 atr_dollars REAL,
                 fill_pct REAL,
+                mae REAL,
+                mfe REAL,
+                duration_seconds REAL,
+                entry_heat REAL,
+                entry_drawdown_pct REAL,
+                entry_correlation REAL,
                 raw_data TEXT
             );
         """)
