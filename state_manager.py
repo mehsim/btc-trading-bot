@@ -14,8 +14,8 @@ class ObservedList(list):
         
     def extend(self, items):
         super().extend(items)
-        for item in items:
-            self._callback(self, item)
+        if items:
+            self._callback(self, items[-1])
 
 class StateManager:
     def __init__(self):
@@ -85,8 +85,10 @@ class StateManager:
         self._cache["fresh_reset_v3"] = database.get_setting("fresh_reset_v3", "False") == "True"
         
         # Load trade history and predictions into cache
-        self._cache["trade_history"] = database.get_trade_history()
-        self._cache["prediction_history"] = database.get_prediction_history()
+        raw_trades = database.get_trade_history()
+        raw_preds = database.get_prediction_history()
+        self._cache["trade_history"] = ObservedList(raw_trades, lambda lst, item: self._on_mutate_trade(item))
+        self._cache["prediction_history"] = ObservedList(raw_preds, lambda lst, item: self._on_mutate_prediction(item))
         
         for tf in ["1h", "2h", "4h", "6h"]:
             self._cache[f"active_trade_{tf}"] = database.get_active_trades(tf)
@@ -96,14 +98,14 @@ class StateManager:
             for k, v in self._cache.items():
                 try:
                     if not self._redis.exists(f"bot_state:{k}"):
-                        self._redis.set(f"bot_state:{k}", json.dumps(v))
+                        raw_v = list(v) if isinstance(v, ObservedList) else v
+                        self._redis.set(f"bot_state:{k}", json.dumps(raw_v))
                 except Exception as e:
                     print(f"[StateManager Redis Init Error] Failed to write {k} to Redis: {e}")
 
     def _on_mutate_trade(self, item):
         database.save_completed_trade(item)
         if self._redis:
-            # Sync mutated trade_history list back to Redis
             try:
                 raw_list = list(self._cache.get("trade_history", []))
                 self._redis.set("bot_state:trade_history", json.dumps(raw_list))
@@ -113,7 +115,6 @@ class StateManager:
     def _on_mutate_prediction(self, item):
         database.save_prediction(item)
         if self._redis:
-            # Sync mutated prediction_history list back to Redis
             try:
                 raw_list = list(self._cache.get("prediction_history", []))
                 self._redis.set("bot_state:prediction_history", json.dumps(raw_list))
@@ -122,13 +123,16 @@ class StateManager:
 
     def __getitem__(self, key):
         with self._lock:
+            if key in self._cache and isinstance(self._cache[key], ObservedList):
+                return self._cache[key]
+                
             val = None
             if self._redis:
                 try:
                     val_str = self._redis.get(f"bot_state:{key}")
                     if val_str is not None:
                         val = json.loads(val_str)
-                except Exception as e:
+                except Exception:
                     pass
             
             if val is None:

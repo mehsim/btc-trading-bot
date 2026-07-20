@@ -449,5 +449,16 @@ def run_backtest():
     print(fee_df.to_string(index=False))
     print("=" * 90 + "\n")
 
+    # Export backtest results to JSON for auditing and comparison
+    import json
+    export_data = {
+        "timestamp": datetime.now().isoformat(),
+        "scenarios": res_df.to_dict(orient="records"),
+        "fee_sensitivity": fee_results
+    }
+    with open("backtest_results.json", "w") as f:
+        json.dump(export_data, f, indent=2)
+    print("[Backtest] Results exported to backtest_results.json successfully.")
+
 if __name__ == "__main__":
     run_backtest()

@@ -6,11 +6,16 @@ import threading
 DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
 db_lock = threading.Lock()
 
+_thread_local = threading.local()
+
 def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.row_factory = sqlite3.Row
+    conn = getattr(_thread_local, "conn", None)
+    if conn is None:
+        conn = sqlite3.connect(DB_FILE, timeout=15)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.row_factory = sqlite3.Row
+        _thread_local.conn = conn
     return conn
 
 def init_db():

@@ -326,7 +326,6 @@ def add_features(df, fetch_calendar_callback=None):
         df[f"funding_acceleration_lag{lag}"] = df["funding_acceleration"].shift(lag)
         df[f"bid_ask_imbalance_ohlc_lag{lag}"] = df["bid_ask_imbalance_ohlc"].shift(lag)
 
-    df = add_news_proximity_feature(df, fetch_calendar_callback)
-    df.dropna(inplace=True)
+    df = df.bfill().ffill().fillna(0.0)
     df = df.copy()  # Defragment memory layout to silence PerformanceWarnings
     return df

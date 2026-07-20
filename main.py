@@ -2068,6 +2068,8 @@ def execute_bybit_order_ws_or_rest(endpoint, payload):
             start_t = time.time()
             while time.time() - start_t < timeout:
                 with _ws_responses_lock:
+                    if len(_ws_responses) > 500:
+                        _ws_responses.clear()
                     if req_id in _ws_responses:
                         resp = _ws_responses.pop(req_id)
                         print(f"[WebSocket Private Execution] Received response for reqId={req_id} retCode={resp.get('retCode')}")
@@ -6131,6 +6133,11 @@ def execute_bybit_trade_async(*args, **kwargs):
             active_execution_symbols.discard(symbol)
 
 def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key):
+    if latest_candle is None:
+        latest_candle = {}
+    if df_completed is None:
+        df_completed = pd.DataFrame()
+        
     bybit_success = True
     bybit_order_id = None
     bybit_scale_out_order_id = None
@@ -6671,6 +6678,8 @@ def main():
                             if pnl_usd < -closed_size:
                                 pnl_usd = -closed_size
                                 net_return_pct = -100.0
+                            else:
+                                net_return_pct = round((pnl_usd / closed_size) * 100.0, 2) if closed_size > 0 else 0.0
                             
                             # Save scaled out pnl
                             active_trade["scaled_out_pnl"] = pnl_usd
@@ -6721,6 +6730,8 @@ def main():
                             if pnl_usd < -closed_size:
                                 pnl_usd = -closed_size
                                 net_return_pct = -100.0
+                            else:
+                                net_return_pct = round((pnl_usd / closed_size) * 100.0, 2) if closed_size > 0 else 0.0
                             
                             # Save scaled out pnl
                             active_trade["scaled_out_pnl"] = pnl_usd
