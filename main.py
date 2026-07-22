@@ -204,6 +204,64 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10) -> float:
     except Exception:
         return 1.0
 
+def send_daily_summary():
+    """Run at 00:00 UTC daily to summarize 24h performance & health"""
+    try:
+        now_ts = time.time()
+        sec_24h = 24 * 3600.0
+        trade_history = bot_state.get("trade_history", [])
+        trades_24h = [t for t in trade_history if (now_ts - float(t.get("exit_time", 0.0))) <= sec_24h]
+        
+        trades_15m = [t for t in trades_24h if str(t.get("interval")) == "15"]
+        trades_30m = [t for t in trades_24h if str(t.get("interval")) == "30"]
+        
+        win_15m = sum(1 for t in trades_15m if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+        wr_15m = (win_15m / len(trades_15m) * 100.0) if trades_15m else 0.0
+        pnl_15m = sum(float(t.get("pnl_usd", 0.0)) for t in trades_15m)
+        
+        win_30m = sum(1 for t in trades_30m if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+        wr_30m = (win_30m / len(trades_30m) * 100.0) if trades_30m else 0.0
+        pnl_30m = sum(float(t.get("pnl_usd", 0.0)) for t in trades_30m)
+        
+        has_30m = os.path.exists("ensemble_trending_trend_30_xgb.json")
+        drift_res = mlops_engine.check_model_drift("15", trade_history, window=100)
+        drift_status = drift_res.get("status", "HEALTHY")
+        
+        current_eq = float(bot_state.get("simulated_balance", 80.0))
+        peak_eq = float(bot_state.get("peak_balance", current_eq))
+        dd_pct = ((peak_eq - current_eq) / peak_eq * 100.0) if peak_eq > 0 else 0.0
+        
+        filter_stats = bot_state.get("filter_stats", {})
+        
+        summary_msg = (
+            f"📊 *BTC TRADING BOT — DAILY SUMMARY* ({datetime.utcnow().strftime('%Y-%m-%d')})\n\n"
+            f"⚡ *15M Performance (24h)*:\n"
+            f"  • Trades: {len(trades_15m)}\n"
+            f"  • Win Rate: {wr_15m:.1f}%\n"
+            f"  • P&L: ${pnl_15m:+.2f}\n\n"
+            f"⏱️ *30M Performance (24h)*:\n"
+            f"  • Trades: {len(trades_30m)}\n"
+            f"  • Win Rate: {wr_30m:.1f}%\n"
+            f"  • P&L: ${pnl_30m:+.2f}\n\n"
+            f"🏥 *System Health*:\n"
+            f"  • 30M Model: {'✅ Dedicated' if has_30m else '⚠️ Fallback to 15M'}\n"
+            f"  • Drift Status: {drift_status}\n"
+            f"  • Equity: ${current_eq:.2f} (Peak: ${peak_eq:.2f})\n"
+            f"  • Drawdown: {dd_pct:.1f}%\n\n"
+            f"🛡️ *Active Filters (24h)*:\n"
+            f"  • Choppiness blocks: {filter_stats.get('chop_blocks', 0)}\n"
+            f"  • News blackouts: {filter_stats.get('news_blocks', 0)}\n"
+            f"  • Flash crash saves: {filter_stats.get('flash_saves', 0)}\n"
+            f"  • Liquidity skips: {filter_stats.get('liquidity_skips', 0)}\n"
+        )
+        send_telegram_alert(summary_msg)
+        filter_stats["chop_blocks"] = 0
+        filter_stats["news_blocks"] = 0
+        filter_stats["flash_saves"] = 0
+        filter_stats["liquidity_skips"] = 0
+    except Exception as err:
+        print(f"[Daily Summary Error] Failed to generate daily summary: {err}")
+
 class HTFTrendCache:
     def __init__(self):
         self._cache = {}
@@ -8369,6 +8427,10 @@ def main():
                     f"• *High-Conf Win Rate*: {drift_res.get('high_conf_wr', 0)*100:.1f}%\n"
                     f"• *Alerts*:\n{alert_text}"
                 )
+
+        # Daily Summary Trigger (00:00 UTC)
+        if current_hour_utc == 0 and datetime.utcnow().minute == 0:
+            send_daily_summary()
 
         time.sleep(10)
 
