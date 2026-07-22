@@ -3649,25 +3649,35 @@ def load_model_weights(iv):
             
     # Load
     try:
-        # Load selected features for both regimes
+        # Load selected features for both regimes (ensuring feature file matches model mtime)
         selected_features_filename = f"selected_features_{iv}.json"
         trending_features_filename = f"selected_features_{iv}_trending.json"
         ranging_features_filename = f"selected_features_{iv}_ranging.json"
+        model_trending_filename = f"ensemble_trending_trend_{iv}_xgb.json"
+        model_ranging_filename = f"ensemble_ranging_trend_{iv}_xgb.json"
         
         feat_trending = None
-        if os.path.exists(trending_features_filename):
-            with open(trending_features_filename, "r") as f:
-                feat_trending = json.load(f)
-        elif os.path.exists(selected_features_filename):
+        if os.path.exists(trending_features_filename) and os.path.exists(model_trending_filename):
+            if os.path.getmtime(trending_features_filename) >= os.path.getmtime(model_trending_filename) - 60:
+                with open(trending_features_filename, "r") as f:
+                    feat_trending = json.load(f)
+        if feat_trending is None and os.path.exists(selected_features_filename):
             with open(selected_features_filename, "r") as f:
+                feat_trending = json.load(f)
+        if feat_trending is None and os.path.exists(trending_features_filename):
+            with open(trending_features_filename, "r") as f:
                 feat_trending = json.load(f)
                 
         feat_ranging = None
-        if os.path.exists(ranging_features_filename):
-            with open(ranging_features_filename, "r") as f:
-                feat_ranging = json.load(f)
-        elif os.path.exists(selected_features_filename):
+        if os.path.exists(ranging_features_filename) and os.path.exists(model_ranging_filename):
+            if os.path.getmtime(ranging_features_filename) >= os.path.getmtime(model_ranging_filename) - 60:
+                with open(ranging_features_filename, "r") as f:
+                    feat_ranging = json.load(f)
+        if feat_ranging is None and os.path.exists(selected_features_filename):
             with open(selected_features_filename, "r") as f:
+                feat_ranging = json.load(f)
+        if feat_ranging is None and os.path.exists(ranging_features_filename):
+            with open(ranging_features_filename, "r") as f:
                 feat_ranging = json.load(f)
                 
         if feat_trending is None or feat_ranging is None:
