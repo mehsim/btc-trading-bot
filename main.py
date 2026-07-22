@@ -7509,8 +7509,13 @@ def main():
                         else:
                             X_live = latest_candle[features].values.reshape(1, -1)
 
-                        # Refined regime switching voting weights (Trending: CatBoost dominant; Ranging: LightGBM dominant)
-                        ensemble_weights = [0.3, 0.2, 0.5] if regime == "Trending" else [0.3, 0.5, 0.2]
+                        # Item A: Interval-Specific Ensemble Weights (CatBoost-heavy for 15M/30M noise)
+                        if str(iv) == "15":
+                            ensemble_weights = [0.25, 0.25, 0.50]
+                        elif str(iv) == "30":
+                            ensemble_weights = [0.30, 0.30, 0.40]
+                        else:
+                            ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
                         
                         try:
                             pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
@@ -7552,6 +7557,16 @@ def main():
                             max_conf = calibration["max_conf"]
                             calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
                             
+                        # Item D: Cross-Interval Correlation Penalty for 15M signals
+                        if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
+                            pred_30m = (bot_state.get("latest_prediction_30m") or {}).get("direction")
+                            pred_60m = (bot_state.get("latest_prediction_1h") or {}).get("direction")
+                            disagrees_30m = (pred_30m in ["Bullish", "Bearish"] and pred_30m != ml_trend)
+                            disagrees_60m = (pred_60m in ["Bullish", "Bearish"] and pred_60m != ml_trend)
+                            if disagrees_30m or disagrees_60m:
+                                calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
+                                print(f"[{symbol} 15m Cross-Interval Penalty] Contradicts HTF (30m: {pred_30m}, 1h: {pred_60m}). Calibrated confidence -10% -> {calibrated_confidence*100:.2f}%")
+
                         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
                         # Update global state prediction metrics for this timeframe
@@ -7570,30 +7585,22 @@ def main():
                         # Determine dynamic confidence threshold based on regime and volatility
                         atr_norm_val = latest_candle["ATR_norm"]
                         
-                        # 1. Regime-Specific Thresholds (Tailored for short TFs: 15m/30m)
-                        if str(iv) in ["15", "30"]:
-                            if "Trending" in regime_name:
-                                dynamic_conf_threshold = 0.55
-                            elif "Ranging" in regime_name:
-                                dynamic_conf_threshold = 0.52
-                            else:
-                                dynamic_conf_threshold = 0.54
+                        # Item B: Stricter Ranging Market Thresholds (Prevent false breakouts in chop)
+                        if str(iv) == "15":
+                            dynamic_conf_threshold = 0.58 if "Ranging" in regime_name else 0.55
+                        elif str(iv) == "30":
+                            dynamic_conf_threshold = 0.60 if "Ranging" in regime_name else 0.55
                         else:
-                            if "Trending" in regime_name:
-                                dynamic_conf_threshold = 0.65
-                            elif "Ranging" in regime_name:
-                                dynamic_conf_threshold = 0.55
-                            else:
-                                dynamic_conf_threshold = 0.58
+                            dynamic_conf_threshold = 0.58 if "Ranging" in regime_name else 0.65
                             
-                        # 2. High Volatility Adjustment (ATR > 0.015)
+                        # High Volatility Adjustment (ATR > 0.015)
                         if atr_norm_val > 0.015:
                             if str(iv) in ["15", "30"]:
-                                dynamic_conf_threshold = min(0.60, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold = min(0.62, dynamic_conf_threshold + 0.05)
                             else:
                                 dynamic_conf_threshold = 0.70
                             
-                        # 3. Recent 50-Trade Performance Decay Filter
+                        # Recent 50-Trade Performance Decay Filter
                         recent_trades = bot_state.get("trade_history", [])[-50:]
                         if len(recent_trades) >= 10:
                             win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
@@ -7602,7 +7609,7 @@ def main():
                                 dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.10)
                                 print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
                             
-                        # 3. Sentiment-Adaptive Adjustment
+                        # Sentiment-Adaptive Adjustment
                         with news_sentiment_lock:
                             current_sentiment = cached_news_sentiment
                         if current_sentiment == "Bullish":
@@ -7615,6 +7622,12 @@ def main():
                                 dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.03)
                             elif ml_trend == "Bullish":
                                 dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+
+                        # Item E: Asian Market Session Awareness (00:00 - 08:00 UTC)
+                        utc_hour_now = datetime.utcnow().hour
+                        if 0 <= utc_hour_now < 8:
+                            dynamic_conf_threshold += 0.05
+                            print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
                                 
                         # Enforce explicit interval-specific confidence floors
                         interval_conf_floors = {
