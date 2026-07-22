@@ -5509,10 +5509,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     ob_imbalance = ob_metrics["imbalance"]
     spread = ob_metrics["spread"]
     spread_pass = (spread <= 0.001)
-    if str(interval) in ["5", "15"]:
-        ob_pass = True
-        imbalance_detail = f"Weighted Imbalance: {ob_imbalance:+.2f} (Bypassed for short TF)"
-    elif ml_trend == "Bullish":
+    if ml_trend == "Bullish":
         ob_pass = (ob_imbalance >= -0.20)
         imbalance_detail = f"Weighted Imbalance: {ob_imbalance:+.2f} (>= -0.20, Safe)" if ob_pass else f"Weighted Imbalance: {ob_imbalance:+.2f} (< -0.20, Heavy Sell)"
     else:
@@ -7619,6 +7616,17 @@ def main():
                             elif ml_trend == "Bullish":
                                 dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
                                 
+                        # Enforce explicit interval-specific confidence floors
+                        interval_conf_floors = {
+                            "5": 0.52,
+                            "15": 0.55,
+                            "30": 0.58,
+                            "60": 0.60,
+                            "120": 0.62
+                        }
+                        floor_val = interval_conf_floors.get(str(iv), 0.55)
+                        dynamic_conf_threshold = max(floor_val, dynamic_conf_threshold)
+
                         print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
 
                         # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
