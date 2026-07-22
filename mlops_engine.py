@@ -232,7 +232,53 @@ class TradeOutcomeAnalyzer:
                 adjustments["session_bias"] = {best_sess: -0.03, worst_sess: +0.05}
                 print(f"[Self-Learning Auto-Tune] Session Bias for {interval}m: Boosted {best_sess} (-3% required), Penalized {worst_sess} (+5% required)")
 
+        # Bayesian Cold-Start Adjustment for Trades 3-9
+        bayesian_adj = get_bayesian_adjusted_threshold(interval, self.trade_db)
+        if bayesian_adj.get("ci_adjustment", 0) > 0 or bayesian_adj.get("confidence_boost", 0) > 0:
+            adjustments["bayesian_cold_start"] = bayesian_adj
+            print(f"[Self-Learning Auto-Tune] {bayesian_adj.get('note')}")
+
         return adjustments
+
+BAYESIAN_PRIORS = {
+    "15": {
+        "ci_threshold": 75.0,
+        "confidence_floor": 0.60,
+        "win_rate_prior": 0.65,
+        "trades_needed": 10,
+        "min_trades_guard": 3
+    },
+    "30": {
+        "ci_threshold": 75.0,
+        "confidence_floor": 0.62,
+        "win_rate_prior": 0.68,
+        "trades_needed": 10,
+        "min_trades_guard": 3
+    }
+}
+
+def get_bayesian_adjusted_threshold(interval: str, trade_db: list) -> dict:
+    """Use prior + likelihood for faster convergence during cold-start (trades 3-9)"""
+    prior = BAYESIAN_PRIORS.get(str(interval), BAYESIAN_PRIORS["15"])
+    recent = [t for t in trade_db if isinstance(t, dict) and str(t.get("interval")) == str(interval)]
+    
+    if len(recent) < prior["min_trades_guard"]:
+        return {"ci_adjustment": 0.0, "confidence_boost": 0.0, "note": "Cold-start: Guarding min trades (1-2)"}
+        
+    if len(recent) < prior["trades_needed"]:
+        observed_wins = sum(1 for t in recent if float(t.get("pnl_pct", 0.0)) > 0 or float(t.get("pnl_usd", 0.0)) > 0)
+        observed_wr = observed_wins / len(recent)
+        blended_wr = 0.70 * prior["win_rate_prior"] + 0.30 * observed_wr
+        
+        if blended_wr < (prior["win_rate_prior"] - 0.05):
+            return {
+                "ci_adjustment": +2.0,
+                "confidence_boost": +0.02,
+                "note": f"Cold-start Bayesian Prior: Blended WR {blended_wr*100:.1f}% < 60% -> Tightened filters (+2 CI, +2% Conf)"
+            }
+        return {"ci_adjustment": 0.0, "confidence_boost": 0.0, "note": f"Cold-start Bayesian Prior: Blended WR {blended_wr*100:.1f}% Healthy"}
+        
+    return {"ci_adjustment": 0.0, "confidence_boost": 0.0, "note": "Sufficient trade data (10+)"}
 
 def check_model_drift(interval: str, trade_history: list, window: int = 100) -> dict:
     """Detect prediction quality & calibration degradation across recent trade history"""

@@ -7839,6 +7839,12 @@ def main():
                         floor_val = interval_conf_floors.get(str(iv), 0.55)
                         dynamic_conf_threshold = max(floor_val, dynamic_conf_threshold)
 
+                        # Bayesian Cold-Start Adjustment (Trades 3-9)
+                        bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))
+                        if bayesian_res.get("confidence_boost", 0) > 0:
+                            dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + bayesian_res["confidence_boost"])
+                            print(f"[{symbol} {iv}m] {bayesian_res['note']} -> Threshold: {dynamic_conf_threshold*100:.2f}%")
+
                         print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
 
                         # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
