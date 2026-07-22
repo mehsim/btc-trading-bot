@@ -60,7 +60,7 @@ last_private_ws_update_time = 0.0
 # ==========================================
 # TIMING & API/PROXY HIT INTERVALS
 # ==========================================
-CANDLE_CHECK_WINDOW_MINS = int(os.environ.get("CANDLE_CHECK_WINDOW_MINS", "5"))
+CANDLE_CHECK_WINDOW_MINS = int(os.environ.get("CANDLE_CHECK_WINDOW_MINS", "15"))
 CANDLE_CHECK_INTERVAL_SECS = int(os.environ.get("CANDLE_CHECK_INTERVAL_SECS", "20"))
 BALANCE_UPDATE_INTERVAL_SECS = int(os.environ.get("BALANCE_UPDATE_INTERVAL_SECS", "120"))
 POSITION_SYNC_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_INTERVAL_SECS", "30.0"))
@@ -1443,7 +1443,7 @@ print("[System Debug] Importing data.py...")
 from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
 import xml.etree.ElementTree as ET
 print("[System Debug] Importing Flask...")
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response
 
 # ==========================================
 # WEB DASHBOARD CONFIGURATION & STATE
@@ -2588,7 +2588,7 @@ def get_status():
     # Thread-safe dictionary copy using the global bot_state_lock
     with bot_state_lock:
         state_copy = bot_state.copy()
-        for tf in ["1h", "2h", "4h", "6h"]:
+        for tf in ["15m", "30m", "1h", "2h"]:
             tf_key = f"active_trade_{tf}"
             if tf_key in state_copy and isinstance(state_copy[tf_key], list):
                 state_copy[tf_key] = list(state_copy[tf_key])
@@ -3342,7 +3342,11 @@ def api_backtest():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    resp = make_response(render_template("index.html"))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 def retrain_models_thread(is_manual=False):
     """
@@ -3609,7 +3613,7 @@ from ensemble import load_ensemble_classifier, load_ensemble_regressor
 models_by_interval = {}
 model_files_mtime = {}
 
-for iv in ["60", "120", "240", "360"]:
+for iv in ["15", "30", "60", "120"]:
     models_by_interval[iv] = {
         "trending": {
             "trend": None,
@@ -3722,7 +3726,7 @@ def load_model_weights(iv):
 
 def check_and_hot_reload_models():
     reloaded = []
-    for iv in ["60", "120", "240", "360"]:
+    for iv in ["15", "30", "60", "120"]:
         filenames = {
             "trending_trend": f"ensemble_trending_trend_{iv}_xgb.json",
             "trending_price": f"ensemble_trending_price_{iv}_xgb.json",
@@ -3746,7 +3750,7 @@ def check_and_hot_reload_models():
             load_model_weights(iv)
             try:
                 p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
-                tf_map_startup = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
                 tf_key = tf_map_startup[iv]
                 bot_state[f"calibration_{tf_key}"] = {
                     "p95": p95,
@@ -5187,7 +5191,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             df_1d = None
 
     weight_1d = 1
-    if str(interval) in ["5", "15"]:
+    if str(interval) in ["5", "15", "30"]:
         results["1d_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
     elif df_1d is None or len(df_1d) < 21:
         results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data", "weight": weight_1d}
@@ -5223,7 +5227,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             df_4h = None
 
     weight_4h = 1
-    if str(interval) in ["5", "15"]:
+    if str(interval) in ["5", "15", "30"]:
         results["4h_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
         results["4h_RSI"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
     elif df_4h is None or len(df_4h) < 21:
@@ -5259,6 +5263,31 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         max_score += weight_4h
         if rsi_4h_pass:
             total_score += weight_4h
+
+    # ======= CHECK 2.5: 1h Macro Trend Alignment for 15m/30m =======
+    if str(interval) in ["15", "30"]:
+        weight_1h_align = 1
+        regime_1h = bot_state.get("regime_1h", "Ranging")
+        pred_1h = bot_state.get("latest_prediction_1h") or {}
+        dir_1h = pred_1h.get("direction", "Neutral")
+        
+        if "Trending" in regime_1h and dir_1h in ["Bullish", "Bearish"]:
+            macro_pass = (ml_trend == dir_1h)
+            detail_1h = f"1h Macro Trend is {dir_1h} (Signal: {ml_trend})"
+            if not macro_pass:
+                hard_gate_failed = True
+        else:
+            macro_pass = True
+            detail_1h = f"1h Regime is {regime_1h} (Flexible Alignment)"
+            
+        results["1h_Macro_Alignment"] = {
+            "pass": macro_pass,
+            "detail": detail_1h,
+            "weight": weight_1h_align
+        }
+        max_score += weight_1h_align
+        if macro_pass:
+            total_score += weight_1h_align
 
     # ======= CHECK 3: 1h RSI (Weight: 2) =======
     weight_rsi = 2
@@ -5429,12 +5458,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= CHECK 12: Expected Price Change Threshold (Weight: 2) =======
     weight_exp = 2
     min_pct_map = {
-        "5": 0.10,
-        "15": 0.15,
+        "5": 0.08,
+        "15": 0.10,
+        "30": 0.15,
         "60": 0.25,   # 1h requires >= 0.25% change
-        "120": 0.35,  # 2h requires >= 0.35% change
-        "240": 0.50,  # 4h requires >= 0.50% change
-        "360": 0.65   # 6h requires >= 0.65% change
+        "120": 0.35   # 2h requires >= 0.35% change
     }
     req_pct = min_pct_map.get(str(interval), 0.25)
     change_pass = (expected_pct_change >= req_pct)
@@ -6426,7 +6454,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 def main():
     global live_price, last_ws_update_time
     # Load model weights here (deferred from module level)
-    for iv in ["60", "120", "240", "360"]:
+    for iv in ["15", "30", "60", "120"]:
         load_model_weights(iv)
     load_history()
     print(f"{SYMBOL} LIVE BOT RUNNING...")
@@ -6464,8 +6492,8 @@ def main():
     bot_state["live_price"] = live_price
 
     # Calculate calibration boundaries at startup for each interval
-    tf_map_startup = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-    for iv in ["60", "120", "240", "360"]:
+    tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
+    for iv in ["15", "30", "60", "120"]:
         if iv in models_by_interval:
             p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
             tf_key = tf_map_startup[iv]
@@ -6479,10 +6507,10 @@ def main():
     bot_state["status"] = "Running"
 
     last_processed_timestamps = {
+        "last_processed_15_ts": None,
+        "last_processed_30_ts": None,
         "last_processed_60_ts": None,
-        "last_processed_120_ts": None,
-        "last_processed_240_ts": None,
-        "last_processed_360_ts": None
+        "last_processed_120_ts": None
     }
     startup_check_done = False
     last_check_hour = -1
@@ -6523,10 +6551,10 @@ def main():
             continue
 
         # 2. Check Exits for each timeframe if a trade is active
-        tf_map = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+        tf_map = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
         active_trades_updated = False
         with active_trades_lock:
-            for iv in ["60", "120", "240", "360"]:
+            for iv in ["15", "30", "60", "120"]:
                 tf = tf_map[iv]
                 active_trade_key = f"active_trade_{tf}"
                 active_trades_list = bot_state.get(active_trade_key, [])
@@ -6713,12 +6741,15 @@ def main():
                             lev = active_trade.get("leverage", 1.0)
                             gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
                             taker_fee_cost = closed_size * lev * 0.00055  # exit side only
-                            pnl_usd = round(gross_pnl - taker_fee_cost, 2)
+                            from decimal import Decimal, ROUND_HALF_UP
+                            def _q2(v):
+                                return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                            pnl_usd = _q2(gross_pnl - taker_fee_cost)
                             if pnl_usd < -closed_size:
                                 pnl_usd = -closed_size
                                 net_return_pct = -100.0
                             else:
-                                net_return_pct = round((pnl_usd / closed_size) * 100.0, 2) if closed_size > 0 else 0.0
+                                net_return_pct = _q2((pnl_usd / closed_size) * 100.0) if closed_size > 0 else 0.0
                             
                             # Save scaled out pnl
                             active_trade["scaled_out_pnl"] = pnl_usd
@@ -7194,16 +7225,17 @@ def main():
         current_time_utc = datetime.utcnow()
         current_utc_hour = current_time_utc.hour
         current_utc_minute = current_time_utc.minute
+        current_15m_block = (current_utc_hour * 60 + current_utc_minute) // 15
         
-        # 1. Reset hourly state variables at a new UTC hour transition
-        if current_utc_hour != last_check_hour:
-            last_check_hour = current_utc_hour
+        # 1. Reset block state variables at a new 15-minute interval transition
+        if current_15m_block != last_check_hour:
+            last_check_hour = current_15m_block
             hour_check_complete = False
             completed_this_hour.clear()
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] New UTC hour detected ({current_utc_hour}). Resetting boundary check status.")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] New 15m boundary block detected ({current_utc_hour:02d}:{current_utc_minute:02d} UTC). Resetting check status.")
             
-        # 2. Determine if we are within the candle check window or if we are executing the startup check
-        is_in_check_window = (current_utc_minute < CANDLE_CHECK_WINDOW_MINS) or (not startup_check_done)
+        # 2. Determine if we are within the candle check window (first 4 minutes after boundary) or executing startup check
+        is_in_check_window = (current_utc_minute % 15 < CANDLE_CHECK_WINDOW_MINS) or (not startup_check_done)
         
         check_queue = []
         is_startup = not startup_check_done
@@ -7216,22 +7248,24 @@ def main():
                 if is_startup:
                     # Startup initial check: query all supported symbols for all intervals in parallel
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] Startup initial fast check: checking all {len(SUPPORTED_SYMBOLS)} symbols across all timeframes...")
-                    check_queue = [(symbol, iv) for iv in ["60", "120", "240", "360"] for symbol in SUPPORTED_SYMBOLS]
+                    check_queue = [(symbol, iv) for iv in ["15", "30", "60", "120"] for symbol in SUPPORTED_SYMBOLS]
                     startup_check_done = True
                 else:
-                    # Regular hour transition checks: check active intervals
-                    active_intervals = []
-                    for iv_q in ["60", "120", "240", "360"]:
-                        iv_hours = int(iv_q) // 60
-                        if current_utc_hour % iv_hours == 0:
-                            active_intervals.append(iv_q)
+                    # Regular transition checks: determine active intervals for this 15m boundary
+                    active_intervals = ["15"]
+                    if current_utc_minute // 15 % 2 == 0:
+                        active_intervals.append("30")
+                    if current_utc_minute < 15:
+                        active_intervals.append("60")
+                        if current_utc_hour % 2 == 0:
+                            active_intervals.append("120")
                     
                     # We check how many of the currently expected ones are completed
                     expected_pairs = [(symbol, iv) for iv in active_intervals for symbol in SUPPORTED_SYMBOLS]
                     missing_pairs = [pair for pair in expected_pairs if pair not in completed_this_hour]
                     
                     if not missing_pairs:
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] All active candle checks for UTC hour {current_utc_hour} completed successfully. Polling stopped.")
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] All active candle checks for {current_utc_hour:02d}:{current_utc_minute:02d} UTC boundary completed. Polling paused.")
                         hour_check_complete = True
                     else:
                         check_queue = missing_pairs
@@ -7283,6 +7317,14 @@ def main():
                 if last_processed_timestamps.get(last_ts_key_val) is not None:
                     if latest_completed_ts_val == last_processed_timestamps[last_ts_key_val]:
                         return sym, interval_val, df_raw_val, None
+                
+                # Fast check if candle is up to date before running heavy feature calculation
+                interval_ms_val = int(interval_val) * 60 * 1000
+                expected_start_ms_val = current_hour_ts - interval_ms_val
+                is_forced_val = interval_val in forced_intervals
+                is_up_to_date_val = (latest_completed_ts_val >= expected_start_ms_val) or is_startup or is_forced_val
+                if not is_up_to_date_val:
+                    return sym, interval_val, df_raw_val, None
                 
                 df_target_val = df_completed_val.copy()
                 if sym != "BTCUSDT":
@@ -7339,7 +7381,7 @@ def main():
                 continue
                 
             try:
-                df_completed = df.iloc[:-1].copy()
+                df_completed = df.copy()
                 latest_completed_ts = int(df_completed.iloc[-1]["timestamp"])
  
                 last_ts_key = f"last_processed_{symbol}_{iv}_ts"
@@ -7410,6 +7452,15 @@ def main():
                         
                         winning_class = int(np.argmax(probs))
                         
+                        # Directional Imbalance Override for short timeframes (15m/30m)
+                        if str(iv) in ["15", "30"] and winning_class == 1:
+                            if prob_bearish > 0 and (prob_bullish / prob_bearish >= 3.0) and (prob_bullish + prob_bearish >= 0.22):
+                                winning_class = 2  # Override Neutral to Bullish
+                                print(f"[{symbol} {iv}m Directional Ratio] Neutral overridden to Bullish (Bull: {prob_bullish*100:.1f}% vs Bear: {prob_bearish*100:.1f}%, Ratio: {prob_bullish/prob_bearish:.1f}x)")
+                            elif prob_bullish > 0 and (prob_bearish / prob_bullish >= 3.0) and (prob_bullish + prob_bearish >= 0.22):
+                                winning_class = 0  # Override Neutral to Bearish
+                                print(f"[{symbol} {iv}m Directional Ratio] Neutral overridden to Bearish (Bear: {prob_bearish*100:.1f}% vs Bull: {prob_bullish*100:.1f}%, Ratio: {prob_bearish/prob_bullish:.1f}x)")
+
                         if winning_class == 2:
                             ml_trend = "Bullish"
                             ml_confidence = prob_bullish
@@ -7450,17 +7501,28 @@ def main():
                         # Determine dynamic confidence threshold based on regime and volatility
                         atr_norm_val = latest_candle["ATR_norm"]
                         
-                        # 1. Regime-Specific Thresholds (Section 11.5)
-                        if "Trending" in regime_name:
-                            dynamic_conf_threshold = 0.65
-                        elif "Ranging" in regime_name:
-                            dynamic_conf_threshold = 0.55
+                        # 1. Regime-Specific Thresholds (Tailored for short TFs: 15m/30m)
+                        if str(iv) in ["15", "30"]:
+                            if "Trending" in regime_name:
+                                dynamic_conf_threshold = 0.55
+                            elif "Ranging" in regime_name:
+                                dynamic_conf_threshold = 0.52
+                            else:
+                                dynamic_conf_threshold = 0.54
                         else:
-                            dynamic_conf_threshold = 0.58
+                            if "Trending" in regime_name:
+                                dynamic_conf_threshold = 0.65
+                            elif "Ranging" in regime_name:
+                                dynamic_conf_threshold = 0.55
+                            else:
+                                dynamic_conf_threshold = 0.58
                             
                         # 2. High Volatility Adjustment (ATR > 0.015)
                         if atr_norm_val > 0.015:
-                            dynamic_conf_threshold = 0.70
+                            if str(iv) in ["15", "30"]:
+                                dynamic_conf_threshold = min(0.60, dynamic_conf_threshold + 0.05)
+                            else:
+                                dynamic_conf_threshold = 0.70
                             
                         # 3. Recent 50-Trade Performance Decay Filter
                         recent_trades = bot_state.get("trade_history", [])[-50:]

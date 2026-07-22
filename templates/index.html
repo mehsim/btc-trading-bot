@@ -1043,19 +1043,55 @@
                 </div>
             </div>
 
+            <!-- 15M Strategy Card -->
+            <div class="card" onclick="openActiveTradesModal('15m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                        <span>15M STRATEGY<span id="leverage-badge-15m" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
+                        <span id="regime-badge-15m" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                    </div>
+                    <div class="card-value" id="model-prediction-15m" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-15m" style="font-size: 11px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
+                        <div class="meter-bar" id="confidence-meter-bar-15m" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <div id="position-container-15m">
+                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 30M Strategy Card -->
+            <div class="card" onclick="openActiveTradesModal('30m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                        <span>30M STRATEGY<span id="leverage-badge-30m" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
+                        <span id="regime-badge-30m" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                    </div>
+                    <div class="card-value" id="model-prediction-30m" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-30m" style="font-size: 11px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
+                        <div class="meter-bar" id="confidence-meter-bar-30m" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <div id="position-container-30m">
+                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 1H Strategy Card -->
             <div class="card" onclick="openActiveTradesModal('1h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>1H STRATEGY<span id="leverage-badge-1h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-1h"
-                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-1h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 5px;">No Signal
-                    </div>
-                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px;">
-                        Calibrated Conf: 0%
-                    </div>
+                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px;">Calibrated Conf: 0%</div>
                     <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-1h" style="width: 0%;"></div>
                     </div>
@@ -1072,68 +1108,16 @@
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between;">
                         <span>2H STRATEGY<span id="leverage-badge-2h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-2h"
-                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-2h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-2h" style="font-size: 20px; margin-top: 5px;">No Signal
-                    </div>
-                    <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 11px;">
-                        Calibrated Conf: 0%
-                    </div>
+                    <div class="card-value" id="model-prediction-2h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 11px;">Calibrated Conf: 0%</div>
                     <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-2h" style="width: 0%;"></div>
                     </div>
                 </div>
                 <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
                     <div id="position-container-2h">
-                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 4H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('4h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
-                <div>
-                    <div class="card-title" style="display: flex; justify-content: space-between;">
-                        <span>4H STRATEGY<span id="leverage-badge-4h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-4h"
-                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
-                    </div>
-                    <div class="card-value" id="model-prediction-4h" style="font-size: 20px; margin-top: 5px;">No Signal
-                    </div>
-                    <div class="card-subtitle" id="model-details-subtitle-4h" style="font-size: 11px;">
-                        Calibrated Conf: 0%
-                    </div>
-                    <div class="meter-container" style="margin-top: 8px;">
-                        <div class="meter-bar" id="confidence-meter-bar-4h" style="width: 0%;"></div>
-                    </div>
-                </div>
-                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
-                    <div id="position-container-4h">
-                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 6H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('6h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
-                <div>
-                    <div class="card-title" style="display: flex; justify-content: space-between;">
-                        <span>6H STRATEGY<span id="leverage-badge-6h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-6h"
-                            style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
-                    </div>
-                    <div class="card-value" id="model-prediction-6h" style="font-size: 20px; margin-top: 5px;">No Signal
-                    </div>
-                    <div class="card-subtitle" id="model-details-subtitle-6h" style="font-size: 11px;">
-                        Calibrated Conf: 0%
-                    </div>
-                    <div class="meter-container" style="margin-top: 8px;">
-                        <div class="meter-bar" id="confidence-meter-bar-6h" style="width: 0%;"></div>
-                    </div>
-                </div>
-                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
-                    <div id="position-container-6h">
                         <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
                     </div>
                 </div>
@@ -1150,10 +1134,10 @@
                         style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                         <div class="section-title">📊 Pre-Trade Confluence Guard</div>
                         <div class="filter-tabs">
-                            <button class="tab-btn active" onclick="setConfluenceTimeframe('1h', this)">1H</button>
+                            <button class="tab-btn active" onclick="setConfluenceTimeframe('15m', this)">15M</button>
+                            <button class="tab-btn" onclick="setConfluenceTimeframe('30m', this)">30M</button>
+                            <button class="tab-btn" onclick="setConfluenceTimeframe('1h', this)">1H</button>
                             <button class="tab-btn" onclick="setConfluenceTimeframe('2h', this)">2H</button>
-                            <button class="tab-btn" onclick="setConfluenceTimeframe('4h', this)">4H</button>
-                            <button class="tab-btn" onclick="setConfluenceTimeframe('6h', this)">6H</button>
                         </div>
                     </div>
                     <div class="section-desc">
@@ -1272,10 +1256,10 @@
                 <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                     <div class="filter-tabs">
                         <button class="tab-btn active" onclick="setTradeTimeframeFilter('all', this)">All TFs</button>
+                        <button class="tab-btn" onclick="setTradeTimeframeFilter('15', this)">15M</button>
+                        <button class="tab-btn" onclick="setTradeTimeframeFilter('30', this)">30M</button>
                         <button class="tab-btn" onclick="setTradeTimeframeFilter('60', this)">1H</button>
                         <button class="tab-btn" onclick="setTradeTimeframeFilter('120', this)">2H</button>
-                        <button class="tab-btn" onclick="setTradeTimeframeFilter('240', this)">4H</button>
-                        <button class="tab-btn" onclick="setTradeTimeframeFilter('360', this)">6H</button>
                     </div>
                     <div class="filter-tabs">
                         <button class="tab-btn active" onclick="setTradeFilter('all', this)">All Status</button>
@@ -1311,6 +1295,18 @@
             <div class="tf-winrate-grid">
                 <div
                     style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">15M Win Rate</div>
+                    <div id="tf-winrate-15" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
+                    </div>
+                </div>
+                <div
+                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">30M Win Rate</div>
+                    <div id="tf-winrate-30" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
+                    </div>
+                </div>
+                <div
+                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
                     <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">1H Win Rate</div>
                     <div id="tf-winrate-60" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
                     </div>
@@ -1319,18 +1315,6 @@
                     style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
                     <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">2H Win Rate</div>
                     <div id="tf-winrate-120" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
-                    </div>
-                </div>
-                <div
-                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
-                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">4H Win Rate</div>
-                    <div id="tf-winrate-240" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
-                    </div>
-                </div>
-                <div
-                    style="flex:1; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; text-align:center;">
-                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 3px;">6H Win Rate</div>
-                    <div id="tf-winrate-360" style="font-size: 15px; font-weight: 800; color: var(--accent-purple);">—
                     </div>
                 </div>
             </div>
@@ -1427,7 +1411,7 @@
         }
 
         function forceCloseTrade(interval, symbol, tradeId) {
-            const tfMap = { '60': '1H', '120': '2H', '240': '4H', '360': '6H' };
+            const tfMap = { '15': '15M', '30': '30M', '60': '1H', '120': '2H' };
             const tfLabel = tfMap[interval] || interval;
             const symLabel = symbol ? symbol.replace("USDT", "") : "active";
             if (confirm(`Are you sure you want to manually close the ${tfLabel} ${symLabel} position?`)) {
@@ -1559,8 +1543,8 @@
         function renderTrades() {
             const tradesTbody = document.getElementById("trade-history-rows");
 
-            // Filter to show only 1h, 2h, 4h, and 6h trades
-            const validIntervals = ['60', '120', '240', '360'];
+            // Filter to show only 15m, 30m, 1h, and 2h trades
+            const validIntervals = ['15', '30', '60', '120'];
             let activeTradesOnly = allTrades.filter(t => validIntervals.includes(String(t.interval || '60')));
 
             if (activeTimeframeFilter !== 'all') {
@@ -1709,8 +1693,8 @@
 
             // Gather all active trades from activeTradesState
             let allActive = [];
-            const intervals = ["60", "120", "240", "360"];
-            const intervalLabelMap = {"60": "1H", "120": "2H", "240": "4H", "360": "6H"};
+            const intervals = ["15", "30", "60", "120"];
+            const intervalLabelMap = {"15": "15M", "30": "30M", "60": "1H", "120": "2H"};
 
             intervals.forEach(iv => {
                 const trades = activeTradesState[iv] || [];
@@ -1990,7 +1974,7 @@
 
                     // Per-TF Win Rates
                     const winByTf = data.win_rate_by_tf || {};
-                    [["60", "tf-winrate-60"], ["120", "tf-winrate-120"], ["240", "tf-winrate-240"], ["360", "tf-winrate-360"]].forEach(([k, id]) => {
+                    [["15", "tf-winrate-15"], ["30", "tf-winrate-30"], ["60", "tf-winrate-60"], ["120", "tf-winrate-120"]].forEach(([k, id]) => {
                         const el = document.getElementById(id);
                         if (el) {
                             const val = winByTf[k];
@@ -2054,18 +2038,18 @@
                     }
 
                     activeTradesState = {
+                        "15": data.active_trade_15m || [],
+                        "30": data.active_trade_30m || [],
                         "60": data.active_trade_1h || [],
-                        "120": data.active_trade_2h || [],
-                        "240": data.active_trade_4h || [],
-                        "360": data.active_trade_6h || []
+                        "120": data.active_trade_2h || []
                     };
 
                     if (document.getElementById("active-trades-modal") && document.getElementById("active-trades-modal").style.display === "flex") {
                         renderActiveTradesModalContent();
                     }
 
-                    // 3 & 4. Update Timeframe Strategies (1h, 2h, 4h, 6h)
-                    const timeframes = ["1h", "2h", "4h", "6h"];
+                    // 3 & 4. Update Timeframe Strategies (15m, 30m, 1h, 2h)
+                    const timeframes = ["15m", "30m", "1h", "2h"];
                     timeframes.forEach(tf => {
                         const regimeVal = data[`regime_${tf}`] || "Unknown";
                         const adxVal = data[`adx_${tf}`] || 0.00;
@@ -2589,7 +2573,7 @@
             }
         }
 
-        const tfIntervalMap = {"1h": "60", "2h": "120", "4h": "240", "6h": "360"};
+        const tfIntervalMap = {"15m": "15", "30m": "30", "1h": "60", "2h": "120"};
         let activeTradesModalTf = "";
 
         function openActiveTradesModal(tf) {

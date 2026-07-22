@@ -260,9 +260,11 @@ def add_features(df, fetch_calendar_callback=None):
     df["lower_wick_volume_ratio"] = lower_wick_vol / (lower_wick_vol.rolling(20).mean() + 1e-8)
     
     # Ensure source correlation features exist
-    for col in ["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi"]:
+    for col in ["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi", "hours_to_news"]:
         if col not in df.columns:
-            if "rsi" in col:
+            if "hours_to_news" in col:
+                df[col] = 999.0
+            elif "rsi" in col:
                 df[col] = 50.0
             elif "close" in col:
                 df[col] = df["close"]
@@ -325,6 +327,18 @@ def add_features(df, fetch_calendar_callback=None):
         df[f"oi_velocity_lag{lag}"] = df["oi_velocity"].shift(lag)
         df[f"funding_acceleration_lag{lag}"] = df["funding_acceleration"].shift(lag)
         df[f"bid_ask_imbalance_ohlc_lag{lag}"] = df["bid_ask_imbalance_ohlc"].shift(lag)
+        if "CVD_true" in df.columns:
+            df[f"CVD_true_lag{lag}"] = df["CVD_true"].shift(lag)
+        if "OFI_true" in df.columns:
+            df[f"OFI_true_lag{lag}"] = df["OFI_true"].shift(lag)
+        if "ob_imbalance_L2" in df.columns:
+            df[f"ob_imbalance_L2_lag{lag}"] = df["ob_imbalance_L2"].shift(lag)
+        if "ob_spread_L2" in df.columns:
+            df[f"ob_spread_L2_lag{lag}"] = df["ob_spread_L2"].shift(lag)
+        if "liq_long_1h" in df.columns:
+            df[f"liq_long_1h_lag{lag}"] = df["liq_long_1h"].shift(lag)
+        if "liq_short_1h" in df.columns:
+            df[f"liq_short_1h_lag{lag}"] = df["liq_short_1h"].shift(lag)
 
     df = df.bfill().ffill().fillna(0.0)
     df = df.copy()  # Defragment memory layout to silence PerformanceWarnings

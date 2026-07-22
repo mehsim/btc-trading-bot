@@ -5,6 +5,28 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 
+# MLflow Integration with Fallback
+try:
+    import mlflow
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    mlflow = None
+
+def init_mlflow(experiment_name: str = "BTC_Trading_Bot"):
+    """Initializes MLflow tracking URI and experiment."""
+    if not MLFLOW_AVAILABLE:
+        return False
+    try:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(experiment_name)
+        print(f"[MLflow] Initialized experiment '{experiment_name}' with tracking URI '{tracking_uri}'")
+        return True
+    except Exception as e:
+        print(f"[MLflow Warning] Failed to initialize MLflow: {e}")
+        return False
+
 # Model Registry Stages
 STAGE_STAGING = "Staging"
 STAGE_PRODUCTION = "Production"
@@ -14,6 +36,7 @@ class ModelRegistry:
     def __init__(self, registry_file: str = "model_registry.json"):
         self.registry_file = registry_file
         self.models = self._load()
+        init_mlflow()
 
     def _load(self) -> dict:
         if os.path.exists(self.registry_file):
@@ -46,6 +69,20 @@ class ModelRegistry:
             self.models["Archived"].append(record)
         self._save()
         print(f"[Model Registry] Registered {model_name} (Run ID: {run_id}) under stage '{stage}'")
+
+        # Sync to MLflow if available
+        if MLFLOW_AVAILABLE:
+            try:
+                active_run = mlflow.active_run()
+                if active_run:
+                    for metric_key, metric_val in metrics.items():
+                        if isinstance(metric_val, (int, float)):
+                            mlflow.log_metric(metric_key, float(metric_val))
+                    mlflow.set_tag("model_stage", stage)
+                    mlflow.set_tag("model_name", model_name)
+                    print(f"[MLflow Registry Sync] Synced model '{model_name}' metrics and stage '{stage}' to run {active_run.info.run_id}")
+            except Exception as ml_err:
+                print(f"[MLflow Registry Warning] Could not sync model to MLflow: {ml_err}")
 
 def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 10) -> float:
     """Calculates Population Stability Index (PSI) between baseline and target distributions."""
@@ -96,6 +133,16 @@ def generate_model_card(model_name: str, run_id: str, metrics: dict, feature_nam
     with open(card_path, "w") as f:
         json.dump(card_data, f, indent=2)
     print(f"[Model Card] Created model card at {card_path}")
+
+    # Log model card artifact to MLflow if active
+    if MLFLOW_AVAILABLE:
+        try:
+            if mlflow.active_run():
+                mlflow.log_artifact(card_path, artifact_path="model_cards")
+                print(f"[MLflow Artifact] Logged model card {card_path} to MLflow")
+        except Exception as ml_err:
+            print(f"[MLflow Artifact Warning] Could not log model card artifact: {ml_err}")
+
     return card_path
 
 model_registry = ModelRegistry()

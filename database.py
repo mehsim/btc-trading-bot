@@ -2,6 +2,17 @@ import sqlite3
 import os
 import json
 import threading
+from decimal import Decimal, ROUND_HALF_UP
+
+def round_monetary(val, decimals=4):
+    if val is None:
+        return 0.0
+    try:
+        d = Decimal(str(val))
+        fmt = "0." + "0" * decimals if decimals > 0 else "0"
+        return float(d.quantize(Decimal(fmt), rounding=ROUND_HALF_UP))
+    except Exception:
+        return round(float(val), decimals)
 
 DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
 db_lock = threading.Lock()

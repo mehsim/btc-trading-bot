@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import pandas as pd
 import numpy as np
 import joblib
@@ -24,6 +25,9 @@ import threading
 import requests
 import features as features_module
 from datetime import datetime, timedelta, timezone
+from mlops_engine import model_registry, MLFLOW_AVAILABLE
+if MLFLOW_AVAILABLE:
+    import mlflow
 
 # Dynamic GPU training hardware auto-detection
 GPU_XGB = False
@@ -86,6 +90,18 @@ economic_calendar_lock = threading.Lock()
 
 # Centralized timeframe parameters for training labels and live execution alignment
 TIMEFRAME_CONFIG = {
+    "15": {   # 15M Timeframe
+        "lookahead": 8,
+        "sl_mult": 0.85,
+        "tp_mult_ranging": 1.6,
+        "tp_mult_trending": 2.8
+    },
+    "30": {   # 30M Timeframe
+        "lookahead": 10,
+        "sl_mult": 0.80,
+        "tp_mult_ranging": 1.5,
+        "tp_mult_trending": 2.6
+    },
     "60": {   # 1H Timeframe
         "lookahead": 10,
         "sl_mult": 0.8,
@@ -97,18 +113,6 @@ TIMEFRAME_CONFIG = {
         "sl_mult": 0.75,
         "tp_mult_ranging": 1.4,
         "tp_mult_trending": 2.2
-    },
-    "240": {  # 4H Timeframe
-        "lookahead": 12,
-        "sl_mult": 0.7,
-        "tp_mult_ranging": 1.3,
-        "tp_mult_trending": 2.0
-    },
-    "360": {  # 6H Timeframe
-        "lookahead": 16,
-        "sl_mult": 0.65,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.8
     }
 }
 
@@ -395,7 +399,10 @@ def tune_triple_barrier_multipliers(df_coin, interval):
 def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if regime == "trending":
+        if str(globals().get("interval", "15")) in ["15", "30"]:
+            max_depth_min, max_depth_max = 3, 4
+            lr_min, lr_max = 0.02, 0.08
+        elif regime == "trending":
             max_depth_min, max_depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
         else:
@@ -428,7 +435,10 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if regime == "trending":
+        if str(globals().get("interval", "15")) in ["15", "30"]:
+            max_depth_min, max_depth_max = 3, 4
+            lr_min, lr_max = 0.02, 0.08
+        elif regime == "trending":
             max_depth_min, max_depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
         else:
@@ -460,7 +470,10 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if regime == "trending":
+        if str(globals().get("interval", "15")) in ["15", "30"]:
+            depth_min, depth_max = 3, 4
+            lr_min, lr_max = 0.02, 0.08
+        elif regime == "trending":
             depth_min, depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
         else:
@@ -704,6 +717,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print("Fitting RFECV model (this may take a few seconds)...")
         selector.fit(X_prelim, y_prelim)
         selected_features = [f for f, support in zip(features, selector.support_) if support]
+        from feature_pipeline import filter_multicollinear_features
+        selected_features = filter_multicollinear_features(df_sub, selected_features, threshold=0.85)
+        print(f"[Correlation Filter] Retained {len(selected_features)} uncorrelated features (threshold |r| <= 0.85).")
 
     # Force-protect domain-critical features from RFECV elimination
     protected = ["close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2"]
@@ -774,18 +790,28 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"Skipping {name} due to insufficient data.")
             return
 
+        if MLFLOW_AVAILABLE:
+            try:
+                if mlflow.active_run():
+                    mlflow.end_run()
+                mlflow.start_run(run_name=f"train_{interval}m_{name}")
+            except Exception:
+                pass
+
         features_filename = f"selected_features_{interval}_{name}.json"
         regime_features = []
         skip_rfecv = False
-        if os.path.exists(features_filename) and not globals().get("FORCE_RFECV", False):
-            try:
-                with open(features_filename, "r") as f:
-                    regime_features = json.load(f)
-                if len(regime_features) >= 15:
-                    print(f"[{name.upper()} regime] Reusing existing {len(regime_features)} features. Skipping RFECV.")
-                    skip_rfecv = True
-            except Exception as e:
-                print(f"[Warning] Failed to load {features_filename}: {e}. Running RFECV.")
+        if not globals().get("FORCE_RFECV", False):
+            target_file = features_filename if os.path.exists(features_filename) else f"selected_features_{interval}.json"
+            if os.path.exists(target_file):
+                try:
+                    with open(target_file, "r") as f:
+                        regime_features = json.load(f)
+                    if len(regime_features) >= 15:
+                        print(f"[{name.upper()} regime] Reusing existing {len(regime_features)} features from {target_file}. Skipping RFECV.")
+                        skip_rfecv = True
+                except Exception as e:
+                    print(f"[Warning] Failed to load {target_file}: {e}. Running RFECV.")
 
         if not skip_rfecv:
             from sklearn.feature_selection import RFECV
@@ -793,19 +819,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
             y_rfecv = df_regime["target_trend"]
             X_rfecv_prelim = df_regime[features]
             
-            if len(df_regime) > 25000:
-                df_sub = df_regime.sample(n=25000, random_state=42)
+            if len(df_regime) > 10000:
+                df_sub = df_regime.sample(n=10000, random_state=42)
                 X_rfecv_prelim = df_sub[features]
                 y_rfecv = df_sub["target_trend"]
                 
-            from xgboost import XGBClassifier
             estimator = XGBClassifier(
-                n_estimators=40,
+                n_estimators=30,
                 max_depth=3,
                 learning_rate=0.1,
                 random_state=42,
                 tree_method="hist",
-                n_jobs=-1
+                n_jobs=1
             )
             cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
             selector = RFECV(
@@ -814,7 +839,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 cv=cv_rfecv,
                 scoring="accuracy",
                 min_features_to_select=15,
-                n_jobs=-1
+                n_jobs=1
             )
             selector.fit(X_rfecv_prelim.values, y_rfecv.values)
             regime_features = [f for f, support in zip(features, selector.support_) if support]
@@ -966,7 +991,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             meta_model.fit(meta_X, meta_y)
             print("  Meta-Classifier trained successfully.")
         else:
-            meta_model.fit(X, np.ones(len(X)))
+            dummy_y = np.zeros(len(X), dtype=int)
+            meta_model.fit(X, dummy_y)
             print("  Warning: Insufficient samples for Meta-Classifier. Dummy classifier trained.")
             
         # Train Isotonic Regression Calibrator on validation predictions
@@ -1041,7 +1067,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
         )
         
         # Save models to disk using native text/JSON saving methods
-        import os
         from ensemble import load_ensemble_classifier, load_ensemble_regressor
         
         c_prefix_t = f"ensemble_{name}_trend_{interval}"
@@ -1103,8 +1128,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
             print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
+
+            model_registry.register_model(
+                run_id=f"train_{interval}m_{name}_{int(time.time())}",
+                model_name=f"ensemble_{name}_{interval}",
+                metrics={"val_accuracy": float(chal_acc) if 'chal_acc' in locals() else 0.0, "val_mae": float(chal_mae) if 'chal_mae' in locals() else 0.0},
+                stage="Production"
+            )
         else:
             print(f"  [Champion-Challenger] Champion model retained (Challenger did not show improvement).")
+
+        if MLFLOW_AVAILABLE:
+            try:
+                if mlflow.active_run():
+                    mlflow.end_run()
+            except Exception:
+                pass
 
     # Split dataset based on GMM Unsupervised Regime Classification
     from sklearn.mixture import GaussianMixture
@@ -1290,7 +1329,7 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
-    parser.add_argument("--interval", type=str, default="60", choices=["60", "120", "240", "360", "all"], help="Timeframe interval to train")
+    parser.add_argument("--interval", type=str, default="60", choices=["15", "30", "60", "120", "240", "360", "all"], help="Timeframe interval to train")
     parser.add_argument("--pages", type=int, default=20, help="Number of data pages to fetch from Bybit")
     parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
     parser.add_argument("--force-rfecv", action="store_true", help="Force running RFECV feature selection instead of reusing cached features")
@@ -1299,7 +1338,7 @@ if __name__ == "__main__":
     FORCE_RFECV = args.force_rfecv
 
     if args.interval == "all":
-        for iv in ["60", "120", "240", "360"]:
+        for iv in ["15", "30", "60", "120"]:
             print(f"\n==============================================")
             print(f"TRAINING FOR INTERVAL: {iv}")
             print(f"==============================================")

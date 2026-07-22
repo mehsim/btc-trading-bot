@@ -456,6 +456,22 @@ def run_backtest():
         "scenarios": res_df.to_dict(orient="records"),
         "fee_sensitivity": fee_results
     }
+    try:
+        from walk_forward_engine import run_walk_forward_backtest
+        wf_summary = run_walk_forward_backtest(df)
+        if wf_summary.get("status") == "success":
+            print("=" * 90)
+            print("WALK-FORWARD SLIDING WINDOW VALIDATION SUMMARY")
+            print("=" * 90)
+            print(f"Total Sliding Windows Evaluated: {wf_summary.get('window_count')}")
+            print(f"Mean Out-of-Sample Win Rate    : {wf_summary.get('mean_win_rate'):.2f}%")
+            print(f"Mean Out-of-Sample Return      : {wf_summary.get('mean_return'):+.2f}%")
+            print(f"Worst Out-of-Sample Drawdown   : {wf_summary.get('max_drawdown'):.2f}%")
+            print("=" * 90 + "\n")
+            export_data["walk_forward_validation"] = wf_summary
+    except Exception as wf_err:
+        print(f"[Walk-Forward Engine] Info: {wf_err}")
+
     with open("backtest_results.json", "w") as f:
         json.dump(export_data, f, indent=2)
     print("[Backtest] Results exported to backtest_results.json successfully.")

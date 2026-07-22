@@ -198,7 +198,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                     # Parse batch
                     for item in batch:
                         ts = float(item[0])
-                        if ts <= cache_max_ts:
+                        if ts < cache_max_ts:
                             stop_fetching = True
                             break
                         new_data.append(item)
@@ -316,8 +316,10 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             binance_interval = "1h"
             if str(interval) == "5":
                 binance_interval = "5m"
-            elif str(interval) == "15":
+            if str(interval) == "15":
                 binance_interval = "15m"
+            elif str(interval) == "30":
+                binance_interval = "30m"
             elif str(interval) == "60":
                 binance_interval = "1h"
             elif str(interval) == "120":

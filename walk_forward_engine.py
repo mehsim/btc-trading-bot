@@ -75,3 +75,52 @@ def export_trade_journal(trades: list, filename: str = "trade_journal.json"):
     with open(filename, "w") as f:
         json.dump({"timestamp": datetime.now().isoformat(), "trades": journal_entries}, f, indent=2)
     print(f"[Trade Journal] Exported {len(journal_entries)} trade entries to {filename}")
+
+def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, test_window_bars: int = 500, step_bars: int = 500) -> dict:
+    """
+    Executes expanding/sliding window Walk-Forward simulation.
+    Returns statistical summary of metrics across out-of-sample test windows.
+    """
+    if df is None or len(df) < (train_window_bars + test_window_bars):
+        return {"status": "insufficient_data", "window_count": 0}
+        
+    n = len(df)
+    window_results = []
+    
+    start_idx = 0
+    while start_idx + train_window_bars + test_window_bars <= n:
+        test_df = df.iloc[start_idx + train_window_bars : start_idx + train_window_bars + test_window_bars]
+        test_returns = test_df["close"].pct_change().dropna() * 100.0
+        win_rate = float((test_returns > 0).mean() * 100.0) if len(test_returns) > 0 else 0.0
+        
+        cum_ret = float(((1.0 + test_returns / 100.0).prod() - 1.0) * 100.0) if len(test_returns) > 0 else 0.0
+        
+        eq = np.cumprod(1.0 + test_returns / 100.0)
+        peak = np.maximum.accumulate(eq)
+        dd = (peak - eq) / peak * 100.0
+        max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
+        
+        window_results.append({
+            "window_start": int(test_df.iloc[0]["timestamp"]),
+            "window_end": int(test_df.iloc[-1]["timestamp"]),
+            "win_rate": win_rate,
+            "cum_return": cum_ret,
+            "max_drawdown": max_dd
+        })
+        
+        start_idx += step_bars
+        
+    win_rates = [w["win_rate"] for w in window_results]
+    returns = [w["cum_return"] for w in window_results]
+    drawdowns = [w["max_drawdown"] for w in window_results]
+    
+    summary = {
+        "status": "success",
+        "window_count": len(window_results),
+        "mean_win_rate": float(np.mean(win_rates)) if win_rates else 0.0,
+        "mean_return": float(np.mean(returns)) if returns else 0.0,
+        "max_drawdown": float(np.max(drawdowns)) if drawdowns else 0.0,
+        "windows": window_results
+    }
+    return summary
+

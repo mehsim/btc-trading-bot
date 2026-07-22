@@ -13,4 +13,5 @@ lightgbm
 catboost
 PySocks
 aiohttp
-redis
+redis
+mlflow
