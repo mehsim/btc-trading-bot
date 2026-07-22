@@ -311,7 +311,12 @@ def add_features(df, fetch_calendar_callback=None):
         df[f"volatility_gk_lag{lag}"] = df["volatility_gk"].shift(lag)
         df[f"volatility_vts_lag{lag}"] = df["volatility_vts"].shift(lag)
 
-    # Advanced Microstructure Features
+    # Advanced Microstructure Features (VWAP & VWAP Deviation)
+    cum_vol = df["volume"].cumsum() + 1e-8
+    cum_pv = (df["close"] * df["volume"]).cumsum()
+    df["VWAP"] = cum_pv / cum_vol
+    df["vwap_deviation"] = (df["close"] - df["VWAP"]) / (df["VWAP"] + 1e-8)
+    
     dp_ret = df["close"].pct_change(1).fillna(0.0)
     autocov = dp_ret.rolling(24).cov(dp_ret.shift(1)).fillna(0.0)
     df["roll_spread"] = 2.0 * np.sqrt(np.maximum(0.0, -autocov))
@@ -322,6 +327,7 @@ def add_features(df, fetch_calendar_callback=None):
     
     # Lag advanced microstructure features
     for lag in [1, 2]:
+        df[f"vwap_deviation_lag{lag}"] = df["vwap_deviation"].shift(lag)
         df[f"roll_spread_lag{lag}"] = df["roll_spread"].shift(lag)
         df[f"leverage_divergence_lag{lag}"] = df["leverage_divergence"].shift(lag)
         df[f"oi_velocity_lag{lag}"] = df["oi_velocity"].shift(lag)

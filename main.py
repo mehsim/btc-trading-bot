@@ -150,6 +150,29 @@ from datetime import datetime, timedelta
 def get_pkt_time():
     return datetime.utcnow() + timedelta(hours=5)
 
+def choppiness_index(df, window=14):
+    """0-100 scale. >61.8 = choppy, <38.2 = trending"""
+    if df is None or len(df) < window:
+        return 50.0
+    high_max = df['high'].rolling(window).max()
+    low_min = df['low'].rolling(window).min()
+    tr = np.maximum(df['high'] - df['low'], np.maximum(abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))))
+    atr_sum = tr.rolling(window).sum()
+    price_range = high_max - low_min
+    ci = 100 * np.log10(atr_sum / (price_range + 1e-8)) / np.log10(window)
+    return float(ci.iloc[-1]) if not np.isnan(ci.iloc[-1]) else 50.0
+
+def is_news_blackout(now_utc, interval):
+    """15M/30M avoid trading around major scheduled economic news (e.g., FOMC, CPI, NFP)"""
+    if str(interval) not in ["15", "30"]:
+        return False
+    minute = now_utc.minute
+    hour = now_utc.hour
+    if hour in [13, 14, 18, 19]:
+        if 45 <= minute or minute <= 30:
+            return True
+    return False
+
 class HTFTrendCache:
     def __init__(self):
         self._cache = {}
@@ -5670,6 +5693,27 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     except Exception as e:
         results["Risk_Reward_Ratio"] = {"pass": True, "detail": f"Skipped R:R check (Error: {e})", "weight": 0}
 
+    # ======= CHECK 16: Choppiness Index & Macro News Blackout Filter =======
+    weight_ci = 1
+    try:
+        ci_val = choppiness_index(df_1h, window=14)
+        ci_pass = True
+        ci_detail = f"Choppiness Index: {ci_val:.1f} (Safe)"
+        if str(interval) in ["15", "30"]:
+            if ci_val > 75.0:
+                ci_pass = False
+                hard_gate_failed = True
+                ci_detail = f"Blocked: Extreme market chop (CI: {ci_val:.1f} > 75.0)"
+            elif ci_val > 61.8:
+                ci_detail = f"Choppy market (CI: {ci_val:.1f} > 61.8, position scaled 0.6x)"
+    except Exception as e:
+        ci_pass = True
+        ci_detail = f"Skipped CI check (Error: {e})"
+    results["Choppiness_Index"] = {"pass": ci_pass, "detail": ci_detail, "weight": weight_ci}
+    max_score += weight_ci
+    if ci_pass:
+        total_score += weight_ci
+
     # ======= FINAL SCORING =======
     score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
     
@@ -6791,6 +6835,44 @@ def main():
                                 active_trades_updated = True
                                 print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
     
+                    # Trailing Stop Activation (40% TP progress): trail at 50% of unlocked profit
+                    take_profit_val = active_trade.get("take_profit", 0.0)
+                    total_tp_range = abs(take_profit_val - entry_price)
+                    current_move = abs(current_price - entry_price)
+                    progress_pct = (current_move / total_tp_range) if total_tp_range > 0 else 0.0
+                    
+                    if progress_pct >= 0.40:
+                        if direction == "Bullish":
+                            trailing_40_sl = max(stop_loss, entry_price + (current_price - entry_price) * 0.50)
+                            if trailing_40_sl > stop_loss:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(active_symbol, trailing_40_sl, active_trade)
+                                    if success:
+                                        stop_loss = trailing_40_sl
+                                        active_trade["stop_loss"] = stop_loss
+                                        active_trades_updated = True
+                                        print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL up to {stop_loss:.2f}")
+                                else:
+                                    stop_loss = trailing_40_sl
+                                    active_trade["stop_loss"] = stop_loss
+                                    active_trades_updated = True
+                                    print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL up to {stop_loss:.2f}")
+                        else:
+                            trailing_40_sl = min(stop_loss, entry_price - (entry_price - current_price) * 0.50)
+                            if trailing_40_sl < stop_loss:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(active_symbol, trailing_40_sl, active_trade)
+                                    if success:
+                                        stop_loss = trailing_40_sl
+                                        active_trade["stop_loss"] = stop_loss
+                                        active_trades_updated = True
+                                        print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL down to {stop_loss:.2f}")
+                                else:
+                                    stop_loss = trailing_40_sl
+                                    active_trade["stop_loss"] = stop_loss
+                                    active_trades_updated = True
+                                    print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL down to {stop_loss:.2f}")
+
                     # Scale-Out (50% partial profit taking at 1.0 * ATR)
                     half_closed = active_trade.get("half_closed", False)
                     trigger_scale_out = False
