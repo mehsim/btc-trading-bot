@@ -146,3 +146,38 @@ def generate_model_card(model_name: str, run_id: str, metrics: dict, feature_nam
     return card_path
 
 model_registry = ModelRegistry()
+
+from collections import defaultdict
+
+class IntervalPerformanceTracker:
+    def __init__(self):
+        self.metrics = defaultdict(lambda: {
+            "predictions": [],
+            "accuracy": 0.0
+        })
+
+    def log_prediction(self, interval: str, prediction: str, confidence: float, actual_outcome: str):
+        interval_key = str(interval)
+        self.metrics[interval_key]["predictions"].append({
+            "prediction": prediction,
+            "confidence": confidence,
+            "actual": actual_outcome,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+    def calculate_interval_accuracy(self, interval: str, window: int = 100) -> float:
+        preds = self.metrics[str(interval)]["predictions"][-window:]
+        if len(preds) < 10:
+            return None
+        correct = sum(1 for p in preds if p["prediction"] == p["actual"])
+        acc = round(correct / len(preds), 4)
+        self.metrics[str(interval)]["accuracy"] = acc
+        return acc
+
+    def should_retrain_interval(self, interval: str) -> bool:
+        accuracy = self.calculate_interval_accuracy(interval)
+        if accuracy is not None and accuracy < 0.50:
+            return True
+        return False
+
+global_interval_tracker = IntervalPerformanceTracker()

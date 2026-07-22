@@ -21,7 +21,20 @@ from core import (
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
 
-def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002):
+INTERVAL_SLIPPAGE = {
+    "5": 0.0005,   # 0.05% base slippage for 5m
+    "15": 0.0004,  # 0.04% base slippage for 15m
+    "30": 0.00035, # 0.035% base slippage for 30m
+    "60": 0.0003,  # 0.03% base slippage for 60m
+    "120": 0.0003  # 0.03% base slippage for 120m
+}
+
+def calculate_backtest_slippage(interval: str, atr_norm: float) -> float:
+    base = INTERVAL_SLIPPAGE.get(str(interval), 0.0003)
+    volatility_premium = 0.0010 if atr_norm >= 0.01 else 0.0
+    return base + volatility_premium
+
+def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60"):
     trades = []
     equity_compounded = 100.0
     equity_simple = 0.0

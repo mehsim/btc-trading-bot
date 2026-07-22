@@ -3,6 +3,51 @@ import pandas as pd
 import time
 import json
 
+INTERVAL_MAX_POSITION_PCT = {
+    "5": 0.05,
+    "15": 0.08,   # 8% max for 15m
+    "30": 0.10,   # 10% max for 30m
+    "60": 0.15,   # 15% max for 60m
+    "120": 0.15   # 15% max for 120m
+}
+
+MAX_SYMBOL_EXPOSURE_PCT = 0.20   # Max 20% total balance in one symbol across all intervals
+
+def check_interval_position_limit(interval: str, proposed_size: float, balance: float) -> float:
+    max_pct = INTERVAL_MAX_POSITION_PCT.get(str(interval), 0.15)
+    max_size = balance * max_pct
+    return min(proposed_size, max_size)
+
+def check_symbol_total_exposure(symbol: str, active_trades: list, proposed_size: float, balance: float) -> float:
+    current_exposure = sum(
+        float(t.get("position_size_usd", 0.0))
+        for t in active_trades
+        if isinstance(t, dict) and t.get("symbol") == symbol
+    )
+    max_exposure = balance * MAX_SYMBOL_EXPOSURE_PCT
+    available = max(0.0, max_exposure - current_exposure)
+    return min(proposed_size, available)
+
+def calculate_per_interval_kelly(interval: str, trade_history: list) -> float:
+    interval_trades = [
+        t for t in trade_history 
+        if isinstance(t, dict) and str(t.get("interval")) == str(interval)
+    ]
+    if len(interval_trades) < 10:
+        return 0.10   # Default half-kelly fallback
+    
+    wins = [t for t in interval_trades if float(t.get("pnl_usd", 0.0)) > 0 or t.get("success") is True]
+    losses = [t for t in interval_trades if float(t.get("pnl_usd", 0.0)) <= 0 or t.get("success") is False]
+    
+    win_rate = len(wins) / len(interval_trades)
+    avg_win = np.mean([abs(float(t.get("pnl_usd", 1.0))) for t in wins]) if wins else 1.0
+    avg_loss = np.mean([abs(float(t.get("pnl_usd", 1.0))) for t in losses]) if losses else 1.0
+    
+    payoff_ratio = avg_win / avg_loss if avg_loss > 0 else 1.0
+    full_kelly = win_rate - ((1.0 - win_rate) / payoff_ratio) if payoff_ratio > 0 else 0.0
+    half_kelly = max(0.0, min(full_kelly * 0.5, 0.15))
+    return half_kelly
+
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:
     if peak_equity <= 0:
         return 1.0
@@ -78,17 +123,23 @@ def check_margin_utilization(used_margin: float, total_equity: float) -> str:
         return "WARNING_ALERT"
     return "NORMAL"
 
-def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict) -> tuple:
+def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60") -> tuple:
     equity = float(bot_state.get("simulated_balance", 80.0))
     peak_equity = float(bot_state.get("peak_balance", equity))
     
+    # 0. Check interval position cap & total symbol exposure cap
+    capped_size = check_interval_position_limit(interval, position_size_usd, equity)
+    capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
+    if capped_size < 1.0: # Below minimum trade size ($1)
+        return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0
+        
     # 1. Drawdown scaling check
     dd_mult = calculate_drawdown_multiplier(equity, peak_equity)
     if dd_mult == 0.0:
         return False, "REJECTED: Circuit breaker active (>=20% Drawdown)", 0.0
     
     # 2. Portfolio heat check
-    heat_safe, heat_pct = check_portfolio_heat(active_trades, position_size_usd, leverage_val, equity)
+    heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity)
     if not heat_safe:
         return False, f"REJECTED: Portfolio heat ({heat_pct:.1f}%) exceeds 300% cap", dd_mult
     
@@ -97,4 +148,4 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
     if corr_val > 0.7:
         return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult
         
-    return True, f"APPROVED: Risk checklist passed (Drawdown Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Max Corr: {corr_val:.2f})", dd_mult
+    return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Drawdown Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Max Corr: {corr_val:.2f})", dd_mult

@@ -10,10 +10,24 @@ from mlops_engine import model_registry, calculate_psi, generate_model_card, STA
 if MLFLOW_AVAILABLE:
     import mlflow
 
+RETRAIN_INTERVAL_DAYS = {
+    "15": 3,   # Retrain 15m every 3 days
+    "30": 5,   # Retrain 30m every 5 days
+    "60": 7,   # Retrain 60m every 7 days
+    "120": 7   # Retrain 120m every 7 days
+}
+
 class AutomatedRetrainTrigger:
     def __init__(self):
         self.last_retrain_time = time.time()
         self.last_data_count = 0
+
+    def check_triggers_by_interval(self, interval: str, current_data_len: int, live_sharpe: float = 1.0, current_psi: float = 0.0) -> tuple:
+        now = time.time()
+        max_days = RETRAIN_INTERVAL_DAYS.get(str(interval), 7)
+        if now - self.last_retrain_time >= max_days * 86400:
+            return True, f"Schedule Trigger ({max_days} Days Elapsed for {interval}m)"
+        return self.check_triggers(current_data_len, live_sharpe, current_psi)
 
     def check_triggers(self, current_data_len: int, live_sharpe: float = 1.0, current_psi: float = 0.0) -> tuple:
         now = time.time()

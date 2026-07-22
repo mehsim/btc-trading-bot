@@ -138,6 +138,46 @@ from datetime import datetime, timedelta
 def get_pkt_time():
     return datetime.utcnow() + timedelta(hours=5)
 
+class HTFTrendCache:
+    def __init__(self):
+        self._cache = {}
+        self.ttl = {"60": 300, "240": 900}
+        self._lock = threading.Lock()
+
+    def get_trend(self, symbol: str, interval: str) -> tuple:
+        key = (symbol, str(interval))
+        now = datetime.utcnow()
+        with self._lock:
+            if key in self._cache:
+                cached = self._cache[key]
+                age = (now - cached["timestamp"]).total_seconds()
+                if age < self.ttl.get(str(interval), 300):
+                    return cached["ema9"], cached["ema21"]
+        
+        try:
+            df = get_history(symbol=symbol, interval=str(interval), limit=100)
+            if df is not None and len(df) >= 21:
+                df_completed = df.iloc[:-1].copy()
+                ema9 = float(EMAIndicator(df_completed["close"], window=9).ema_indicator().iloc[-1])
+                ema21 = float(EMAIndicator(df_completed["close"], window=21).ema_indicator().iloc[-1])
+                with self._lock:
+                    self._cache[key] = {"ema9": ema9, "ema21": ema21, "timestamp": now}
+                return ema9, ema21
+        except Exception as e:
+            print(f"[HTFTrendCache Error] Failed to fetch {symbol} {interval}m: {e}")
+            
+        return 0.0, 0.0
+
+    def invalidate(self, symbol: str = None):
+        with self._lock:
+            if symbol:
+                for iv in ["60", "240"]:
+                    self._cache.pop((symbol, iv), None)
+            else:
+                self._cache.clear()
+
+global_htf_trend_cache = HTFTrendCache()
+
 def execute_telegram_api_call(method: str, payload: dict) -> dict:
     """Helper to send POST requests to Telegram API using proxy routing."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
