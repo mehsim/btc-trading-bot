@@ -33,8 +33,12 @@ def calculate_per_interval_kelly(interval: str, trade_history: list) -> float:
         t for t in trade_history 
         if isinstance(t, dict) and str(t.get("interval")) == str(interval)
     ]
-    if len(interval_trades) < 10:
-        return 0.10   # Default half-kelly fallback
+    min_trades = {"5": 20, "15": 15, "30": 12, "60": 10, "120": 10}
+    min_req = min_trades.get(str(interval), 10)
+    
+    if len(interval_trades) < min_req:
+        defaults = {"5": 0.08, "15": 0.10, "30": 0.12, "60": 0.15, "120": 0.15}
+        return defaults.get(str(interval), 0.10)
     
     wins = [t for t in interval_trades if float(t.get("pnl_usd", 0.0)) > 0 or t.get("success") is True]
     losses = [t for t in interval_trades if float(t.get("pnl_usd", 0.0)) <= 0 or t.get("success") is False]
@@ -45,7 +49,7 @@ def calculate_per_interval_kelly(interval: str, trade_history: list) -> float:
     
     payoff_ratio = avg_win / avg_loss if avg_loss > 0 else 1.0
     full_kelly = win_rate - ((1.0 - win_rate) / payoff_ratio) if payoff_ratio > 0 else 0.0
-    half_kelly = max(0.0, min(full_kelly * 0.5, 0.15))
+    half_kelly = max(0.0, min(full_kelly * 0.5, 0.20))
     return half_kelly
 
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:

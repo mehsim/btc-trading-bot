@@ -8,6 +8,18 @@ SYMBOL = "BTCUSDT"
 INTERVAL = "60"
 
 TIMEFRAME_CONFIG = {
+    "15": {   # 15M Timeframe
+        "lookahead": 8,
+        "sl_mult": 0.85,
+        "tp_mult_ranging": 1.6,
+        "tp_mult_trending": 2.8
+    },
+    "30": {   # 30M Timeframe
+        "lookahead": 10,
+        "sl_mult": 0.80,
+        "tp_mult_ranging": 1.5,
+        "tp_mult_trending": 2.6
+    },
     "60": {
         "lookahead": 10,
         "sl_mult": 1.5,

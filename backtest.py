@@ -13,13 +13,21 @@ from core import (
     add_features,
     calibrate_confidence,
     calculate_historical_thresholds,
-    SYMBOL,
-    INTERVAL,
-    features,
-    TIMEFRAME_CONFIG
-)
-from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator
+import argparse
+
+parser = argparse.ArgumentParser(description="BTC Trading Bot Backtester")
+parser.add_argument("--interval", default="60", choices=["15", "30", "60", "120", "240", "360"], help="Trading interval in minutes")
+parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol")
+parser.add_argument("--fee-rate", type=float, default=0.002, help="Trading fee rate")
+parser.add_argument("--min-confidence", type=float, default=0.70, help="Minimum confidence threshold")
+parser.add_argument("--pages", type=int, default=40, help="History pages count")
+
+args, _ = parser.parse_known_args()
+INTERVAL = args.interval
+SYMBOL = args.symbol
+FEE_RATE = args.fee_rate
+MIN_CONFIDENCE = args.min_confidence
+PAGES = args.pages
 
 INTERVAL_SLIPPAGE = {
     "5": 0.0005,   # 0.05% base slippage for 5m

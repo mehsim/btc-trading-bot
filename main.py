@@ -68,6 +68,18 @@ POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTE
 
 # Centralized timeframe parameters for training labels and live execution alignment
 TIMEFRAME_CONFIG = {
+    "15": {   # 15M Timeframe
+        "lookahead": 8,
+        "sl_mult": 0.85,
+        "tp_mult_ranging": 1.6,
+        "tp_mult_trending": 2.8
+    },
+    "30": {   # 30M Timeframe
+        "lookahead": 10,
+        "sl_mult": 0.80,
+        "tp_mult_ranging": 1.5,
+        "tp_mult_trending": 2.6
+    },
     "60": {   # 1H Timeframe
         "lookahead": 10,
         "sl_mult": 1.5,
@@ -3671,13 +3683,18 @@ for iv in ["15", "30", "60", "120"]:
     }
 
 def load_model_weights(iv):
+    load_iv = iv
+    if iv == "30" and not os.path.exists(f"ensemble_trending_trend_{iv}_xgb.json"):
+        print(f"[Model Load Warning] 30M models not found on disk, falling back to 15M models for interval 30")
+        load_iv = "15"
+
     prefixes = {
-        "trending_trend": f"ensemble_trending_trend_{iv}",
-        "trending_price": f"ensemble_trending_price_{iv}",
-        "ranging_trend": f"ensemble_ranging_trend_{iv}",
-        "ranging_price": f"ensemble_ranging_price_{iv}",
-        "trending_meta": f"meta_trending_trend_{iv}.json",
-        "ranging_meta": f"meta_ranging_trend_{iv}.json"
+        "trending_trend": f"ensemble_trending_trend_{load_iv}",
+        "trending_price": f"ensemble_trending_price_{load_iv}",
+        "ranging_trend": f"ensemble_ranging_trend_{load_iv}",
+        "ranging_price": f"ensemble_ranging_price_{load_iv}",
+        "trending_meta": f"meta_trending_trend_{load_iv}.json",
+        "ranging_meta": f"meta_ranging_trend_{load_iv}.json"
     }
     
     # Update modification times
@@ -5241,8 +5258,27 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             df_1d = None
 
     weight_1d = 1
-    if str(interval) in ["5", "15", "30"]:
+    if str(interval) in ["5", "15"]:
         results["1d_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
+    elif str(interval) == "30":
+        weight_1d = 0.5
+        if df_1d is None or len(df_1d) < 21:
+            results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data", "weight": weight_1d}
+            max_score += weight_1d
+        else:
+            df_1d_completed = df_1d.iloc[:-1].copy()
+            ema9_1d = EMAIndicator(df_1d_completed["close"], window=9).ema_indicator().iloc[-1]
+            ema21_1d = EMAIndicator(df_1d_completed["close"], window=21).ema_indicator().iloc[-1]
+            trend_1d = "Bullish" if ema9_1d > ema21_1d else "Bearish"
+            trend_1d_pass = (ml_trend == "Bullish" and trend_1d == "Bullish") or (ml_trend == "Bearish" and trend_1d == "Bearish")
+            results["1d_Trend"] = {
+                "pass": trend_1d_pass,
+                "detail": f"1d Trend is {trend_1d} (Soft Gate for 30M)",
+                "weight": weight_1d
+            }
+            max_score += weight_1d
+            if trend_1d_pass:
+                total_score += weight_1d
     elif df_1d is None or len(df_1d) < 21:
         results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data", "weight": weight_1d}
         max_score += weight_1d
@@ -5448,12 +5484,16 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= CHECK 9: Fee Coverage (Weight: 2) =======
     weight_fee = 2
     atr_norm_val = df_1h["ATR_norm"].iloc[-1]
-    if str(interval) in ["5", "15"]:
-        fee_pass = (atr_norm_val >= 0.0010)
-        req_str = ">= 0.10%"
-    else:
-        fee_pass = (atr_norm_val >= 0.0015)
-        req_str = ">= 0.15%"
+    fee_thresholds = {
+        "5": 0.0015,   # 0.15%
+        "15": 0.0015,  # 0.15% — RAISED from 0.10% to cover roundtrip fees + slippage
+        "30": 0.0015,  # 0.15%
+        "60": 0.0015,  # 0.15%
+        "120": 0.0020  # 0.20%
+    }
+    threshold = fee_thresholds.get(str(interval), 0.0015)
+    fee_pass = (atr_norm_val >= threshold)
+    req_str = f">= {threshold*100:.2f}%"
     results["Fee_Coverage"] = {
         "pass": fee_pass,
         "detail": f"ATR Volatility: {atr_norm_val*100:.3f}% (Req {req_str} to cover roundtrip Spot fees)",
@@ -5490,7 +5530,6 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         total_score += weight_ob
 
     # ======= CHECK 11: News Sentiment (Hard Gate & Direction Lock) =======
-    # Dynamic Sentiment Lock: Hard block trades contradicting general news sentiment (e.g. Bullish models blocked on Bearish news)
     is_opposed = (ml_trend == "Bullish" and news_sentiment == "Bearish") or (ml_trend == "Bearish" and news_sentiment == "Bullish")
     news_pass = not is_opposed
     if is_opposed:
@@ -5508,11 +5547,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= CHECK 12: Expected Price Change Threshold (Weight: 2) =======
     weight_exp = 2
     min_pct_map = {
-        "5": 0.08,
-        "15": 0.10,
-        "30": 0.15,
-        "60": 0.25,   # 1h requires >= 0.25% change
-        "120": 0.35   # 2h requires >= 0.35% change
+        "5": 0.15,     # Was 0.08%
+        "15": 0.18,    # Was 0.10% — must cover costs + profit margin
+        "30": 0.20,    # Was 0.15%
+        "60": 0.25,    # 1h requires >= 0.25% change
+        "120": 0.35    # 2h requires >= 0.35% change
     }
     req_pct = min_pct_map.get(str(interval), 0.25)
     change_pass = (expected_pct_change >= req_pct)
@@ -5525,62 +5564,53 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if change_pass:
         total_score += weight_exp
 
-    # ======= CHECK 13: Multi-Timeframe Trend Enforcer (HTF Gate - Weight: 2, Hard Gate for 5m/15m) =======
+    # ======= CHECK 13: Multi-Timeframe Trend Enforcer (Graduated HTF Gate) =======
     weight_align = 2
     trend_align_pass = True
     align_detail = "Aligned with dominant trend"
     if str(interval) in ["5", "15"]:
         try:
-            # 1. Fetch 1h trend
-            df_1h_align = get_history(symbol=symbol, interval="60", limit=100)
-            ema9_1h, ema21_1h = None, None
-            if df_1h_align is not None and len(df_1h_align) >= 21:
-                df_1h_align_completed = df_1h_align.iloc[:-1].copy()
-                ema9_1h = EMAIndicator(df_1h_align_completed["close"], window=9).ema_indicator().iloc[-1]
-                ema21_1h = EMAIndicator(df_1h_align_completed["close"], window=21).ema_indicator().iloc[-1]
-
-            # 2. Fetch/Retrieve 4h trend
-            if df_4h is None:
-                try:
-                    df_4h = get_history(symbol=symbol, interval="240", limit=100)
-                except Exception as e:
-                    print(f"Error fetching 4h history for HTF Gate: {e}")
-            
-            ema9_4h, ema21_4h = None, None
-            if df_4h is not None and len(df_4h) >= 21:
-                df_4h_completed = df_4h.iloc[:-1].copy()
-                ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator().iloc[-1]
-                ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator().iloc[-1]
-
-            # 3. Check alignment
-            if ema9_1h is not None and ema21_1h is not None and ema9_4h is not None and ema21_4h is not None:
+            ema9_1h, ema21_1h = global_htf_trend_cache.get_trend(symbol, "60")
+            ema9_4h, ema21_4h = global_htf_trend_cache.get_trend(symbol, "240")
+            if ema9_1h > 0 and ema21_1h > 0 and ema9_4h > 0 and ema21_4h > 0:
                 trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
                 trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
-                
                 if ml_trend == "Bullish":
                     if trend_1h == "Bullish" and trend_4h == "Bullish":
-                        align_detail = "Aligned with 1h Bullish and 4h Bullish trends"
+                        align_detail = "Aligned with 1H Bullish and 4H Bullish trends"
                     else:
                         trend_align_pass = False
                         hard_gate_failed = True
-                        align_detail = f"Blocked (HTF Gate: Bullish signal contradicts 1h {trend_1h} or 4h {trend_4h} trend)"
+                        align_detail = f"Blocked (HTF Gate: Bullish signal contradicts 1H {trend_1h} or 4H {trend_4h} trend)"
                 elif ml_trend == "Bearish":
                     if trend_1h == "Bearish" and trend_4h == "Bearish":
-                        align_detail = "Aligned with 1h Bearish and 4h Bearish trends"
+                        align_detail = "Aligned with 1H Bearish and 4H Bearish trends"
                     else:
                         trend_align_pass = False
                         hard_gate_failed = True
-                        align_detail = f"Blocked (HTF Gate: Bearish signal contradicts 1h {trend_1h} or 4h {trend_4h} trend)"
-                else:
-                    align_detail = f"Neutral ML trend, HTF check not applicable"
-            else:
-                trend_align_pass = False
-                hard_gate_failed = True
-                align_detail = "Could not calculate 1h/4h EMA trends (HTF Gate Blocked)"
+                        align_detail = f"Blocked (HTF Gate: Bearish signal contradicts 1H {trend_1h} or 4H {trend_4h} trend)"
         except Exception as e:
-            trend_align_pass = False
-            hard_gate_failed = True
-            align_detail = f"Error in HTF Gate alignment check: {e} (HTF Gate Blocked)"
+            align_detail = f"HTF Gate error: {e}"
+    elif str(interval) == "30":
+        weight_align = 1.5
+        try:
+            ema9_1h, ema21_1h = global_htf_trend_cache.get_trend(symbol, "60")
+            ema9_4h, ema21_4h = global_htf_trend_cache.get_trend(symbol, "240")
+            if ema9_1h > 0 and ema21_1h > 0:
+                trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
+                trend_4h = "Bullish" if (ema9_4h > 0 and ema9_4h > ema21_4h) else "Bearish"
+                if ml_trend == "Bullish" and trend_1h != "Bullish":
+                    trend_align_pass = False
+                    hard_gate_failed = True
+                    align_detail = f"Blocked: 30M Bullish vs 1H {trend_1h}"
+                elif ml_trend == "Bearish" and trend_1h != "Bearish":
+                    trend_align_pass = False
+                    hard_gate_failed = True
+                    align_detail = f"Blocked: 30M Bearish vs 1H {trend_1h}"
+                else:
+                    align_detail = f"Aligned with 1H {trend_1h} (4H: {trend_4h}, info only)"
+        except Exception as e:
+            align_detail = f"HTF Gate error: {e}"
     else:
         align_detail = f"1h/4h intervals are already dominant or equal"
     
@@ -7502,15 +7532,7 @@ def main():
                         
                         winning_class = int(np.argmax(probs))
                         
-                        # Directional Imbalance Override for short timeframes (15m/30m)
-                        if str(iv) in ["15", "30"] and winning_class == 1:
-                            if prob_bearish > 0 and (prob_bullish / prob_bearish >= 3.0) and (prob_bullish + prob_bearish >= 0.22):
-                                winning_class = 2  # Override Neutral to Bullish
-                                print(f"[{symbol} {iv}m Directional Ratio] Neutral overridden to Bullish (Bull: {prob_bullish*100:.1f}% vs Bear: {prob_bearish*100:.1f}%, Ratio: {prob_bullish/prob_bearish:.1f}x)")
-                            elif prob_bullish > 0 and (prob_bearish / prob_bullish >= 3.0) and (prob_bullish + prob_bearish >= 0.22):
-                                winning_class = 0  # Override Neutral to Bearish
-                                print(f"[{symbol} {iv}m Directional Ratio] Neutral overridden to Bearish (Bear: {prob_bearish*100:.1f}% vs Bull: {prob_bullish*100:.1f}%, Ratio: {prob_bearish/prob_bullish:.1f}x)")
-
+                        # Neutral predictions are respected without artificial directional override
                         if winning_class == 2:
                             ml_trend = "Bullish"
                             ml_confidence = prob_bullish
