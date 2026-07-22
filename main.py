@@ -173,6 +173,37 @@ def is_news_blackout(now_utc, interval):
             return True
     return False
 
+def check_flash_crash(symbol: str, max_drop_pct: float = 3.0, window_minutes: int = 5) -> bool:
+    """Block 15M/30M entries if price dropped >3% in last 5 minutes"""
+    try:
+        df_1m = get_history(symbol=symbol, interval="1", limit=window_minutes + 2)
+        if df_1m is None or len(df_1m) < window_minutes:
+            return False
+        recent_high = df_1m["high"].iloc[-window_minutes:].max()
+        current_low = df_1m["low"].iloc[-1]
+        drop_pct = ((recent_high - current_low) / (recent_high + 1e-8)) * 100.0
+        return drop_pct > max_drop_pct
+    except Exception:
+        return False
+
+def get_funding_adjustment(symbol: str, direction: str, funding_rate: float) -> float:
+    """Bias confidence toward funded side (+0.03 boost) and penalize expensive side (-0.05)"""
+    if funding_rate < -0.001:  # -0.1% funding: shorts get paid yield
+        return +0.03 if direction == "Bearish" else -0.05
+    elif funding_rate > 0.001: # +0.1% funding: longs get paid yield
+        return +0.03 if direction == "Bullish" else -0.05
+    return 0.0
+
+def get_liquidity_score(symbol: str, orderbook_depth: int = 10) -> float:
+    """Score 0-1 based on L2 orderbook depth"""
+    try:
+        ob = get_orderbook_imbalance(symbol=symbol)
+        depth_est = ob.get("total_depth", 500000000)
+        score = min(float(depth_est) / 500000000.0, 1.0)
+        return max(0.1, score)
+    except Exception:
+        return 1.0
+
 class HTFTrendCache:
     def __init__(self):
         self._cache = {}
@@ -7839,12 +7870,22 @@ def main():
                         utc_hour = datetime.utcnow().hour
                         in_session = True
 
+                        flash_crash_active = check_flash_crash(symbol, max_drop_pct=3.0, window_minutes=5) if str(iv) in ["15", "30"] else False
+                        liq_score = get_liquidity_score(symbol)
+                        low_liquidity = (str(iv) in ["15", "30"] and liq_score < 0.3)
+
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
                         elif bot_state.get("circuit_breaker_active", False):
                             status_msg = "Skipped (Circuit Breaker)"
                             print(f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
+                        elif flash_crash_active:
+                            status_msg = "Skipped (Flash Crash Block)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: Flash crash detected (>3.0% drop in last 5 minutes).")
+                        elif low_liquidity:
+                            status_msg = "Skipped (Low Liquidity)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: Insufficient L2 orderbook liquidity (Score: {liq_score:.2f} < 0.30).")
                         elif already_active:
                             status_msg = "Skipped (Already Active)"
                             print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
@@ -8313,6 +8354,20 @@ def main():
                     f"• *Interval*: {iv}m\n"
                     f"• *Error*: {str(e)}\n"
                     f"• *Detail*: Failed during signal processing cycle."
+                )
+
+        # Model Drift Check (every 4 hours)
+        current_hour_utc = datetime.utcnow().hour
+        if current_hour_utc % 4 == 0 and datetime.utcnow().minute == 0:
+            drift_res = mlops_engine.check_model_drift("15", bot_state.get("trade_history", []), window=100)
+            if drift_res.get("status") == "ALERT":
+                alert_text = "\n".join(drift_res.get("alerts", []))
+                send_telegram_alert(
+                    f"🚨 *MODEL DRIFT ALERT DETECTED* 🚨\n"
+                    f"• *Interval*: 15m\n"
+                    f"• *Accuracy*: {drift_res.get('accuracy', 0)*100:.1f}%\n"
+                    f"• *High-Conf Win Rate*: {drift_res.get('high_conf_wr', 0)*100:.1f}%\n"
+                    f"• *Alerts*:\n{alert_text}"
                 )
 
         time.sleep(10)

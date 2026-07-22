@@ -234,5 +234,34 @@ class TradeOutcomeAnalyzer:
 
         return adjustments
 
+def check_model_drift(interval: str, trade_history: list, window: int = 100) -> dict:
+    """Detect prediction quality & calibration degradation across recent trade history"""
+    recent = [t for t in trade_history if isinstance(t, dict) and str(t.get("interval")) == str(interval)][-window:]
+    if len(recent) < 20:
+        return {"status": "INSUFFICIENT_DATA", "accuracy": 0.0, "alerts": []}
+    
+    correct = sum(1 for t in recent if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+    accuracy = round(correct / len(recent), 4)
+    
+    high_conf = [t for t in recent if float(t.get("confidence", t.get("calibrated_confidence", 0.0))) >= 0.75]
+    if high_conf:
+        high_conf_wins = sum(1 for t in high_conf if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+        high_conf_wr = round(high_conf_wins / len(high_conf), 4)
+    else:
+        high_conf_wr = 0.0
+        
+    alerts = []
+    if accuracy < 0.45:
+        alerts.append(f"MODEL_DEGRADED: Accuracy {accuracy*100:.1f}% < 45%")
+    if high_conf and high_conf_wr < 0.55:
+        alerts.append(f"CALIBRATION_DRIFT: High-confidence win rate {high_conf_wr*100:.1f}% < 55%")
+        
+    return {
+        "status": "ALERT" if alerts else "HEALTHY",
+        "accuracy": accuracy,
+        "high_conf_wr": high_conf_wr,
+        "alerts": alerts
+    }
+
 trade_outcome_analyzer = TradeOutcomeAnalyzer()
 global_interval_tracker = IntervalPerformanceTracker()
