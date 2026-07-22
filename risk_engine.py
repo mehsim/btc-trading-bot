@@ -153,3 +153,16 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult
         
     return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Drawdown Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Max Corr: {corr_val:.2f})", dd_mult
+
+def get_volatility_regime_multiplier(atr_norm: float, interval: str) -> float:
+    """Dynamically adjust position size based on ATR volatility regime"""
+    if str(interval) in ["15", "30"]:
+        if atr_norm > 0.02:           # Extreme volatility (>2% per candle)
+            return 0.5                  # Cut size in half for safety
+        elif atr_norm > 0.015:        # High volatility
+            return 0.7
+        elif 0.005 <= atr_norm <= 0.012: # Sweet spot for 15M/30M trend efficiency
+            return 1.2                  # Boost size by +20%
+        elif atr_norm < 0.003:        # Flat chop / dead market
+            return 0.3                  # Heavy reduction
+    return 1.0

@@ -7586,10 +7586,27 @@ def main():
                             print(f"[{symbol} {iv}m Warning] Models are not loaded (None). Skipping signal evaluation.")
                             continue
                             
+                        # Session-Based Feature Weighting (Asian vs London vs NY)
+                        utc_hour_sess = datetime.utcnow().hour
+                        session_name = "asian" if 0 <= utc_hour_sess < 8 else ("london" if 8 <= utc_hour_sess < 16 else "ny")
+                        session_weights = {
+                            "asian": {"vwap_deviation": 1.3, "ATR_norm": 1.2, "volume_ratio": 1.2, "RSI": 0.8, "MACD_diff": 0.8},
+                            "london": {"EMA9_to_EMA21": 1.3, "ADX": 1.2, "BB_pct": 0.7},
+                            "ny": {"return_5m_lag1": 1.3, "return_5m_lag2": 1.2, "close_to_Kalman": 0.8}
+                        }.get(session_name, {})
+                        
+                        latest_candle_weighted = latest_candle.copy()
+                        for feat_name, w_mult in session_weights.items():
+                            if feat_name in latest_candle_weighted:
+                                try:
+                                    latest_candle_weighted[feat_name] = float(latest_candle_weighted[feat_name]) * w_mult
+                                except Exception:
+                                    pass
+
                         if feat_list is not None:
-                            X_live = latest_candle[feat_list].values.reshape(1, -1)
+                            X_live = latest_candle_weighted[feat_list].values.reshape(1, -1)
                         else:
-                            X_live = latest_candle[features].values.reshape(1, -1)
+                            X_live = latest_candle_weighted[features].values.reshape(1, -1)
 
                         # Item A: Interval-Specific Ensemble Weights (CatBoost-heavy for 15M/30M noise)
                         if str(iv) == "15":
@@ -7639,15 +7656,26 @@ def main():
                             max_conf = calibration["max_conf"]
                             calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
                             
-                        # Item D: Cross-Interval Correlation Penalty for 15M signals
+                        # Item D: Exponential Time-Decayed Cross-Interval Penalty for 15M signals
                         if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
-                            pred_30m = (bot_state.get("latest_prediction_30m") or {}).get("direction")
-                            pred_60m = (bot_state.get("latest_prediction_1h") or {}).get("direction")
-                            disagrees_30m = (pred_30m in ["Bullish", "Bearish"] and pred_30m != ml_trend)
-                            disagrees_60m = (pred_60m in ["Bullish", "Bearish"] and pred_60m != ml_trend)
-                            if disagrees_30m or disagrees_60m:
-                                calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
-                                print(f"[{symbol} 15m Cross-Interval Penalty] Contradicts HTF (30m: {pred_30m}, 1h: {pred_60m}). Calibrated confidence -10% -> {calibrated_confidence*100:.2f}%")
+                            pred_30m_dict = bot_state.get("latest_prediction_30m") or {}
+                            pred_60m_dict = bot_state.get("latest_prediction_1h") or {}
+                            
+                            now_time_sec = time.time()
+                            total_decay_penalty = 0.0
+                            
+                            for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
+                                p_dir = pred_dict.get("direction")
+                                p_ts = pred_dict.get("timestamp", now_time_sec)
+                                if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
+                                    age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
+                                    decay = 0.5 ** (age_mins / 30.0)
+                                    total_decay_penalty += 0.10 * decay
+                                    
+                            if total_decay_penalty > 0:
+                                total_decay_penalty = min(0.15, total_decay_penalty)
+                                calibrated_confidence = max(0.0, calibrated_confidence - total_decay_penalty)
+                                print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction penalty (-{total_decay_penalty*100:.1f}%). Calibrated conf -> {calibrated_confidence*100:.2f}%")
 
                         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
@@ -7974,6 +8002,11 @@ def main():
                                     
                                     # Covariance multiplier to account for existing correlations
                                     position_size_usd = position_size_usd * cov_multiplier
+                                    
+                                    # Volatility Regime Sizing Multiplier (Sweet spot 1.2x boost, extreme vol 0.5x, flat chop 0.3x)
+                                    vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
+                                    position_size_usd = position_size_usd * vol_regime_mult
+                                    print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
                                     
                                     # CVaR (Expected Shortfall) Risk Constraint
                                     try:

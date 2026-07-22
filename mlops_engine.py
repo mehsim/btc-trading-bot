@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import threading
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -180,4 +181,58 @@ class IntervalPerformanceTracker:
             return True
         return False
 
+class TradeOutcomeAnalyzer:
+    def __init__(self):
+        self.trade_db = []
+        self._lock = threading.Lock()
+
+    def log_trade_outcome(self, interval: str, direction: str, confidence: float, ci_val: float, session: str, pnl_pct: float, exit_reason: str):
+        with self._lock:
+            self.trade_db.append({
+                "timestamp": datetime.utcnow().isoformat(),
+                "interval": str(interval),
+                "direction": direction,
+                "confidence": confidence,
+                "choppiness_index": ci_val,
+                "session": session,
+                "pnl_pct": pnl_pct,
+                "exit_reason": exit_reason
+            })
+            if len(self.trade_db) > 200:
+                self.trade_db = self.trade_db[-200:]
+
+    def analyze_and_auto_tune(self, interval: str, n_trades: int = 50) -> dict:
+        with self._lock:
+            recent = [t for t in self.trade_db if t["interval"] == str(interval)][-n_trades:]
+        if len(recent) < 10:
+            return {}
+
+        winners = [t for t in recent if t["pnl_pct"] > 0]
+        losers = [t for t in recent if t["pnl_pct"] <= 0]
+        
+        adjustments = {}
+        if winners and losers:
+            avg_ci_win = float(np.mean([t["choppiness_index"] for t in winners]))
+            avg_ci_loss = float(np.mean([t["choppiness_index"] for t in losers]))
+            if avg_ci_loss > avg_ci_win + 5.0:
+                adjustments["ci_adjustment"] = +3.0
+                print(f"[Self-Learning Auto-Tune] Raised CI threshold for {interval}m by +3.0 (Loss CI: {avg_ci_loss:.1f} > Win CI: {avg_ci_win:.1f})")
+
+        session_rates = {}
+        for sess in ["asian", "london", "ny"]:
+            sess_trades = [t for t in recent if t["session"] == sess]
+            if len(sess_trades) >= 5:
+                wr = sum(1 for t in sess_trades if t["pnl_pct"] > 0) / len(sess_trades)
+                session_rates[sess] = wr
+
+        if len(session_rates) >= 2:
+            best_sess = max(session_rates, key=session_rates.get)
+            worst_sess = min(session_rates, key=session_rates.get)
+            if session_rates[best_sess] - session_rates[worst_sess] > 0.15:
+                adjustments["session_bias"] = {best_sess: -0.03, worst_sess: +0.05}
+                print(f"[Self-Learning Auto-Tune] Session Bias for {interval}m: Boosted {best_sess} (-3% required), Penalized {worst_sess} (+5% required)")
+
+        return adjustments
+
+trade_outcome_analyzer = TradeOutcomeAnalyzer()
 global_interval_tracker = IntervalPerformanceTracker()
