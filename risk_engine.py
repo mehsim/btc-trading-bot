@@ -7,8 +7,8 @@ INTERVAL_MAX_POSITION_PCT = {
     "5": 0.05,
     "15": 0.08,   # 8% max for 15m
     "30": 0.10,   # 10% max for 30m
-    "60": 0.15,   # 15% max for 60m
-    "120": 0.15   # 15% max for 120m
+    "60": 0.20,   # 20% max for 60m (optimized Half-Kelly)
+    "120": 0.20   # 20% max for 120m (optimized Half-Kelly)
 }
 
 MAX_SYMBOL_EXPOSURE_PCT = 0.20   # Max 20% total balance in one symbol across all intervals
