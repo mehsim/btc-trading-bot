@@ -1295,7 +1295,7 @@ def start_telegram_command_listener():
                                 "text": "⏳ Generating 24h performance & health summary report...",
                                 "parse_mode": "Markdown"
                             })
-                            send_daily_summary(chat_id=sender_chat_id)
+                            threading.Thread(target=send_daily_summary, args=(sender_chat_id,), daemon=True).start()
                             continue
 
                         if text == "/active":
