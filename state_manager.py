@@ -167,8 +167,8 @@ class StateManager:
             self._cache[key] = value
             
             # Persist to database if it's one of the persistent keys
-            if key in ["active_trade_1h", "active_trade_2h", "active_trade_4h", "active_trade_6h"]:
-                tf = key.split("_")[-1]
+            if key.startswith("active_trade_"):
+                tf = key.replace("active_trade_", "")
                 database.save_active_trades(tf, raw_value)
             elif key in ["simulated_balance", "bot_running", "fresh_reset_v3"]:
                 database.set_setting(key, str(raw_value))

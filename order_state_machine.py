@@ -40,9 +40,9 @@ idempotency_cache = IdempotencyCache(ttl_seconds=60.0)
 
 def generate_client_order_id(symbol: str, side: str) -> str:
     ts = int(time.time() * 1000)
-    nonce = str(uuid.uuid4())[:6]
-    clean_sym = symbol.replace("/", "").replace("-", "")
-    cl_id = f"BOT_{clean_sym}{side.upper()}{ts}_{nonce}"
+    nonce = str(uuid.uuid4())[:4]
+    clean_sym = symbol.replace("/", "").replace("-", "").replace("USDT", "")[:8]
+    cl_id = f"B_{clean_sym}_{side.upper()[0]}_{ts}_{nonce}"[:36]
     idempotency_cache.add(cl_id)
     return cl_id
 
