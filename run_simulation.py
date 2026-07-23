@@ -130,19 +130,35 @@ def main():
     pred_change = pred_pct * latest_close
     predicted_price = latest_close + pred_change
     probs = active_model_trend.predict_proba(X_live)[0]
-    if len(probs) >= 3:
-        pred_class = int(np.argmax(probs))
-        class_map = {0: "Bearish", 1: "Neutral", 2: "Bullish"}
-        ml_trend = class_map.get(pred_class, "Neutral")
-        ml_confidence = float(probs[pred_class])
-    else:
-        prob_bullish = float(probs[1]) if len(probs) > 1 else float(probs[0])
-        if prob_bullish >= 0.50:
-            ml_trend = "Bullish"
-            ml_confidence = prob_bullish
-        else:
+    winning_class = int(np.argmax(probs))
+    prob_bearish = float(probs[0])
+    prob_neutral = float(probs[1])
+    prob_bullish = float(probs[2])
+    dir_total = prob_bearish + prob_bullish
+    
+    # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
+    if str(INTERVAL) in ["15", "30"] and dir_total >= 0.10:
+        norm_bear = prob_bearish / dir_total
+        norm_bull = prob_bullish / dir_total
+        
+        if norm_bear >= 0.70 and prob_bearish >= 0.12:
             ml_trend = "Bearish"
-            ml_confidence = 1.0 - prob_bullish
+            ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.4)))
+        elif norm_bull >= 0.70 and prob_bullish >= 0.12:
+            ml_trend = "Bullish"
+            ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.4)))
+        else:
+            ml_trend = "Neutral"
+            ml_confidence = prob_neutral
+    elif winning_class == 2:
+        ml_trend = "Bullish"
+        ml_confidence = prob_bullish
+    elif winning_class == 0:
+        ml_trend = "Bearish"
+        ml_confidence = prob_bearish
+    else:
+        ml_trend = "Neutral"
+        ml_confidence = prob_neutral
 
     calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
     expected_pct_change = (abs(pred_change) / latest_close) * 100
