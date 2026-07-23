@@ -1770,6 +1770,8 @@ def save_history():
         try:
             dir_name = os.path.dirname(HISTORY_FILE)
             temp_file = os.path.join(dir_name, "dashboard_history_temp.json") if dir_name else "dashboard_history_temp.json"
+            with open(temp_file, "w") as f:
+                json.dump(data, f, indent=2)
             os.replace(temp_file, HISTORY_FILE)
             
             # Persist active trades to SQLite database
