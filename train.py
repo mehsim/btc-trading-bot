@@ -19,7 +19,7 @@ from lightgbm import LGBMClassifier, LGBMRegressor
 from catboost import CatBoostClassifier, CatBoostRegressor
 
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, mean_absolute_error
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, mean_absolute_error
 from data import get_history, merge_derivatives_sentiment_features
 import threading
 import requests
@@ -427,7 +427,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         model = create_model(XGBClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
-        return accuracy_score(y_val, preds)
+        return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=30)
     return study.best_params
@@ -462,7 +462,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         model = create_model(LGBMClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
-        return accuracy_score(y_val, preds)
+        return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=30)
     return study.best_params
@@ -491,7 +491,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         model = create_model(CatBoostClassifier, params)
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
-        return accuracy_score(y_val, preds)
+        return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=30)
     return study.best_params
@@ -1095,20 +1095,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 # Evaluate champion on the last validation fold
                 champ_pred_t = champion_t.predict(X_val)
                 champ_pred_p = champion_p.predict(X_val)
-                champ_acc = accuracy_score(y_val_t, champ_pred_t)
+                champ_acc = balanced_accuracy_score(y_val_t, champ_pred_t)
                 champ_mae = mean_absolute_error(y_val_p, champ_pred_p)
                 
                 # Evaluate challenger on the last validation fold
                 chal_pred_t = final_ensemble_t.predict(X_val)
                 chal_pred_p = final_ensemble_p.predict(X_val)
-                chal_acc = accuracy_score(y_val_t, chal_pred_t)
+                chal_acc = balanced_accuracy_score(y_val_t, chal_pred_t)
                 chal_mae = mean_absolute_error(y_val_p, chal_pred_p)
                 
                 print(f"  [Champion-Challenger] Validation Comparison for {name.upper()}:")
-                print(f"    - Classifier Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
+                print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
                 
-                # Update if accuracy is strictly better, or equal accuracy with lower MAE
+                # Update if balanced accuracy is strictly better, or equal balanced accuracy with lower MAE
                 if chal_acc > champ_acc:
                     should_save = True
                 elif chal_acc == champ_acc and chal_mae < champ_mae:
