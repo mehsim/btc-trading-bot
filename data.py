@@ -79,7 +79,7 @@ def init_db():
         # Migration for existing databases
         for col in ["ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"]:
             try:
-                cursor.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
+                conn.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
             except Exception:
                 pass
         conn.commit()

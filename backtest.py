@@ -9,7 +9,7 @@ from ta.trend import EMAIndicator, ADXIndicator
 from ta.momentum import RSIIndicator
 
 # Add workspace path to python path
-sys.path.append("/Users/mehsimkhurshid/Downloads/btc-trading-bot")
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from data import get_history, merge_derivatives_sentiment_features
 from core import (
     add_features,
