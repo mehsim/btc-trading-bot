@@ -365,6 +365,17 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             resp = requests.post(url, json=payload, headers=headers, timeout=20, proxies=proxies_dict, verify=True)
             if resp.status_code == 200:
                 return resp.json()
+            elif resp.status_code == 400 and payload.get("parse_mode"):
+                # Fallback to plain text if Markdown entity parsing failed
+                plain_payload = dict(payload)
+                plain_payload.pop("parse_mode", None)
+                try:
+                    resp_plain = requests.post(url, json=plain_payload, headers=headers, timeout=20, proxies=proxies_dict, verify=True)
+                    if resp_plain.status_code == 200:
+                        return resp_plain.json()
+                except Exception:
+                    pass
+            print(f"[Telegram API Error] method={method} status={resp.status_code}: {resp.text}")
             return {}
         except Exception as e:
             err_str = str(e).lower()
