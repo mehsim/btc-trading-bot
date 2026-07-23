@@ -274,12 +274,12 @@ def add_triple_barrier_labels(df, interval):
     n_samples = len(df)
     labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral
     
-    # Load optimized barriers if available globally, else default to timeframe config
-    cfg = OPTIMIZED_BARRIERS if OPTIMIZED_BARRIERS else TIMEFRAME_CONFIG.get(str(interval), {
-        "lookahead": 10,
-        "sl_mult": 0.8,
-        "tp_mult_ranging": 1.5,
-        "tp_mult_trending": 2.5
+    # Always enforce centralized TIMEFRAME_CONFIG for balanced label generation
+    cfg = TIMEFRAME_CONFIG.get(str(interval), {
+        "lookahead": 12,
+        "sl_mult": 0.75,
+        "tp_mult_ranging": 1.2,
+        "tp_mult_trending": 1.3
     })
     
     lookahead = cfg.get("lookahead", 10)
