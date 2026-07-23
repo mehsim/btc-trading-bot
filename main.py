@@ -204,8 +204,8 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10) -> float:
     except Exception:
         return 1.0
 
-def send_daily_summary():
-    """Run at 00:00 UTC daily to summarize 24h performance & health"""
+def send_daily_summary(chat_id=None):
+    """Run at 00:00 UTC daily (or on-demand via Telegram) to summarize 24h performance & health"""
     try:
         now_ts = time.time()
         sec_24h = 24 * 3600.0
@@ -269,11 +269,20 @@ def send_daily_summary():
             f"  • Flash crash saves: {filter_stats.get('flash_saves', 0)}\n"
             f"  • Liquidity skips: {filter_stats.get('liquidity_skips', 0)}\n"
         )
-        send_telegram_alert(summary_msg)
-        filter_stats["chop_blocks"] = 0
-        filter_stats["news_blocks"] = 0
-        filter_stats["flash_saves"] = 0
-        filter_stats["liquidity_skips"] = 0
+        
+        target_chat_id = chat_id if chat_id else os.environ.get("TELEGRAM_CHAT_ID", "8957269359")
+        execute_telegram_api_call("sendMessage", {
+            "chat_id": target_chat_id,
+            "text": summary_msg,
+            "parse_mode": "Markdown"
+        })
+        
+        # If sending for daily midnight reset, reset filter stats
+        if not chat_id:
+            filter_stats["chop_blocks"] = 0
+            filter_stats["news_blocks"] = 0
+            filter_stats["flash_saves"] = 0
+            filter_stats["liquidity_skips"] = 0
     except Exception as err:
         print(f"[Daily Summary Error] Failed to generate daily summary: {err}")
 
@@ -1286,7 +1295,7 @@ def start_telegram_command_listener():
                                 "text": "⏳ Generating 24h performance & health summary report...",
                                 "parse_mode": "Markdown"
                             })
-                            send_daily_summary()
+                            send_daily_summary(chat_id=sender_chat_id)
                             continue
 
                         if text == "/active":
