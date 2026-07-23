@@ -102,10 +102,12 @@ class EnsembleClassifier:
                 
                 meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
                 meta_clf.fit(X_meta, y_val, sample_weight=val_decay_weights)
+                self.meta_clf = meta_clf
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
                 print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully with time-decay weights (leak-free).")
             except Exception as e:
+                self.meta_clf = None
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
                 
         # Now refit base models on the ENTIRE dataset for live trading
@@ -136,6 +138,12 @@ class EnsembleClassifier:
         # Stack probabilities for prediction
         X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])
         
+        if getattr(self, "meta_clf", None) is not None:
+            try:
+                return self.meta_clf.predict_proba(X_meta)
+            except Exception:
+                pass
+
         from sklearn.linear_model import LogisticRegression
         meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
         coef = np.array(self.meta_coef_)

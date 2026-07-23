@@ -6,8 +6,8 @@ import requests
 import re
 
 def send_telegram_alert(message):
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "8957269359")
     if not token or not chat_id:
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -25,7 +25,7 @@ def main():
     print("[retrain_worker] Starting weekly model retraining...")
     send_telegram_alert("🔄 *MODEL RETRAINING STARTED* 🔄\n• Weekly retraining script has started on Singapore instance.\n• Main execution bot continues running normally.")
 
-    intervals = ["60", "120", "240", "360"]
+    intervals = ["15", "30", "60", "120", "240", "360"]
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
     env["MKL_NUM_THREADS"] = "1"

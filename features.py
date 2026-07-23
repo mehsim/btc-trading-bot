@@ -89,6 +89,19 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
 
 def add_features(df, fetch_calendar_callback=None):
     df = df.copy()
+    
+    # Ensure source derivative & sentiment columns exist with proper defaults if not merged
+    if "open_interest" not in df.columns:
+        df["open_interest"] = 0.0
+    if "funding_rate" not in df.columns:
+        df["funding_rate"] = 0.0
+    if "fear_greed" not in df.columns:
+        df["fear_greed"] = 50.0
+    if "oi_change_1h" not in df.columns:
+        df["oi_change_1h"] = 0.0
+    if "oi_change_4h" not in df.columns:
+        df["oi_change_4h"] = 0.0
+        
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
     macd = MACD(df["close"])
     df["MACD_diff"] = macd.macd_diff() / (df["close"] + 1e-8)
@@ -151,21 +164,24 @@ def add_features(df, fetch_calendar_callback=None):
     df["ROC_10"] = df["close"].pct_change(10)
     
     # BTC correlation return and lags
-    df["btc_return_5m"] = df["close_btc"].pct_change(1)
+    btc_close_series = df["btc_close"] if "btc_close" in df.columns else (df["close_btc"] if "close_btc" in df.columns else df["close"])
+    btc_vol_series = df["btc_volume"] if "btc_volume" in df.columns else df["volume"]
+    
+    df["btc_return_5m"] = btc_close_series.pct_change(1)
     for lag in [1, 2, 3]:
         df[f"btc_return_5m_lag{lag}"] = df["btc_return_5m"].shift(lag)
         
     # Cross-Asset Lead-Lag Correlation Features
     df["return_5m"] = df["close"].pct_change(1)
     df["return_1h"] = df["close"].pct_change(12)
-    df["btc_return_1h"] = df["close_btc"].pct_change(12)
+    df["btc_return_1h"] = btc_close_series.pct_change(12)
     df["return_4h"] = df["close"].pct_change(48)
-    df["btc_return_4h"] = df["close_btc"].pct_change(48)
+    df["btc_return_4h"] = btc_close_series.pct_change(48)
     
     df["lead_lag_diff_5m"] = (df["return_5m"] - df["btc_return_5m"]).fillna(0.0)
     df["lead_lag_diff_1h"] = (df["return_1h"] - df["btc_return_1h"]).fillna(0.0)
     df["lead_lag_diff_4h"] = (df["return_4h"] - df["btc_return_4h"]).fillna(0.0)
-    df["volume_ratio_to_btc"] = (df["volume"] / (df["btc_volume"] + 1e-8)).fillna(0.0)
+    df["volume_ratio_to_btc"] = (df["volume"] / (btc_vol_series + 1e-8)).fillna(0.0)
     
     for lag in [1, 2]:
         df[f"lead_lag_diff_5m_lag{lag}"] = df["lead_lag_diff_5m"].shift(lag).fillna(0.0)

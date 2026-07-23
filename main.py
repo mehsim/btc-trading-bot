@@ -1725,9 +1725,15 @@ def save_history():
         try:
             dir_name = os.path.dirname(HISTORY_FILE)
             temp_file = os.path.join(dir_name, "dashboard_history_temp.json") if dir_name else "dashboard_history_temp.json"
-            with open(temp_file, "w") as f:
-                json.dump(data, f)
             os.replace(temp_file, HISTORY_FILE)
+            
+            # Persist active trades to SQLite database
+            try:
+                import database
+                for tf_key in ["1h", "2h", "4h", "6h"]:
+                    database.save_active_trades(tf_key, bot_state.get(f"active_trade_{tf_key}", []))
+            except Exception as db_sync_err:
+                print(f"[Database Sync Warning] Failed to persist active trades to SQLite: {db_sync_err}")
                 
             # If running on Hugging Face and write token is available, backup to HF Dataset
             token = os.environ.get("HF_TOKEN") or os.environ.get("token")
@@ -4998,6 +5004,8 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
                 last_calendar_fetch = now_ts
                 print(f"[News/Sentiment] Cached {len(economic_calendar_cache)} high-impact calendar events.")
                 return economic_calendar_cache
+            else:
+                print(f"[News/Sentiment Warning] Finnhub returned status {resp.status_code}. Caching fallback.")
         except Exception as e:
             print(f"[News/Sentiment] Error caching economic calendar: {e}")
         
@@ -6183,6 +6191,11 @@ def sync_active_positions_from_bybit():
             # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
             recovered = 0
             for symbol, pos in open_positions.items():
+                with active_execution_lock:
+                    in_active_execution = symbol in active_execution_symbols
+                if in_active_execution:
+                    print(f"[Crash Recovery] Skipped recovery scan for {symbol} — trade is currently being executed async.")
+                    continue
                 if symbol not in matched_symbols:
                     avg_price = float(pos.get("avgPrice", "0"))
                     liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
@@ -6595,7 +6608,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         return
         
     if bybit_success:
-        actual_size_usd = float(position_size_usd) * (actual_qty / raw_qty) if raw_qty > 0 else float(position_size_usd)
+        actual_notional_val = float(actual_qty * entry_price)
+        actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
+        actual_size_usd = actual_margin_usd
         active_trade = {
             "trade_id": f"{symbol}_{trade_uuid}",
             "bybit_order_id": bybit_order_id,
@@ -6646,7 +6661,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             f"• *Stop Loss*: ${float(stop_loss_price):.4f}\n"
             f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
             f"• *Leverage*: {leverage_val:.1f}x\n"
-            f"• *Position Size*: ${actual_size_usd:.2f} (Value: ${actual_qty * entry_price:.2f})\n"
+            f"• *Position Size (Margin)*: ${actual_margin_usd:.2f} (Value: ${actual_notional_val:.2f})\n"
             f"• *Execution Mode*: {TRADE_MODE.upper()}"
         )
         print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
@@ -6822,7 +6837,19 @@ def main():
                                         else:
                                             print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
                                 else:
-                                    bybit_scaled_out = True
+                                    # Fallback if no scale-out order ID is attached: require price to have actually reached scale-out target
+                                    atr_d = active_trade.get("atr_dollars", 0.015 * entry_price)
+                                    reached_scale_target = False
+                                    if direction == "Bullish" and active_trade.get("highest_price", entry_price) >= entry_price + 1.0 * atr_d:
+                                        reached_scale_target = True
+                                    elif direction == "Bearish" and active_trade.get("lowest_price", entry_price) <= entry_price - 1.0 * atr_d:
+                                        reached_scale_target = True
+                                        
+                                    if reached_scale_target:
+                                        bybit_scaled_out = True
+                                    else:
+                                        # Reset original_qty to current_qty to prevent continuous false scale-out triggers
+                                        active_trade["original_qty"] = current_qty
     
                     # Trailing stop and break-even variables
                     atr_dollars = active_trade.get("atr_dollars", 50.0)
@@ -6906,7 +6933,8 @@ def main():
                                 
                         # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
                         if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
-                            target_sl = min(stop_loss, entry_price)
+                            fee_buffer = entry_price * 0.0005
+                            target_sl = min(stop_loss, entry_price + fee_buffer)
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
                                 if success:
@@ -7398,15 +7426,19 @@ def main():
 
         # --- Daily Drawdown Circuit Breaker & Profit Goal ---
         today = get_pkt_time().day
+        current_equity_val = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
+        if current_equity_val <= 0:
+            current_equity_val = float(bot_state.get("simulated_balance", 80.0))
+
         if bot_state["daily_drawdown_reset_day"] != today:
-            bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 80.0)
+            bot_state["daily_drawdown_start_balance"] = current_equity_val
             bot_state["daily_drawdown_reset_day"] = today
             bot_state["circuit_breaker_active"] = False
             bot_state["daily_goal_reached"] = False
             print(f"[Circuit Breaker] Daily reset (PKT). Start balance: ${bot_state['daily_drawdown_start_balance']:.2f}")
         else:
             start_bal = bot_state["daily_drawdown_start_balance"]
-            curr_bal = bot_state.get("simulated_balance", start_bal)
+            curr_bal = current_equity_val
             daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
             daily_profit = curr_bal - start_bal
             # Enable Daily Drawdown Circuit Breaker at 7%
@@ -8083,7 +8115,7 @@ def main():
                                     is_golden_hour = 18 <= current_hour_pkt < 21
                                     
                                     # Pre-calculate active trade stats needed for dynamic sizing
-                                    total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                                    total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["5m", "15m", "30m", "60m", "120m", "240m", "360m"] for t in bot_state.get(f"active_trade_{tf_key}", []))
                                     current_bal = bot_state.get("simulated_balance", 80.0)
                                     if TRADE_MODE != "simulation":
                                         real_bal = get_real_bybit_balance_cached(force=True)
@@ -8269,35 +8301,38 @@ def main():
                                         # Pre-Trade Risk Checklist Check
                                         active_trades_list = bot_state.get("trade_history", [])
                                         df_dict = {symbol: df_completed}
-                                        passed_checklist, checklist_msg, dd_mult = risk_engine.evaluate_pre_trade_checklist(
-                                            symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict
+                                        passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
+                                            symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv)
                                         )
                                         print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
-                                        if not passed_checklist:
+                                        if not passed_checklist or wallet_exceeded:
                                             print(f"[{symbol} {iv}m Risk Checklist Block] Trade entry aborted.")
                                             wallet_exceeded = True
+                                            bybit_success = False
                                         else:
-                                            position_size_usd = position_size_usd * dd_mult
+                                            position_size_usd = capped_size * dd_mult
 
-                                        # Set Bybit Leverage and Place Order if in live/testnet mode
-                                        bybit_success = True
-                                        bybit_order_id = None
-                                        bybit_scale_out_order_id = None
-                                        
-                                        if TRADE_MODE != "simulation":
-                                            # Live trading execution offloaded to background thread to minimize latency
-                                            just_opened_symbols.add(symbol)
-                                            with active_execution_lock:
-                                                active_execution_symbols.add(symbol)
-                                            threading.Thread(
-                                                target=execute_bybit_trade_async,
-                                                args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key),
-                                                daemon=True
-                                            ).start()
-                                            bybit_success = False # Skip the simulation path for this trade
+                                            # Set Bybit Leverage and Place Order if in live/testnet mode
+                                            bybit_success = True
+                                            bybit_order_id = None
+                                            bybit_scale_out_order_id = None
+                                            
+                                            if TRADE_MODE != "simulation":
+                                                # Live trading execution offloaded to background thread to minimize latency
+                                                just_opened_symbols.add(symbol)
+                                                with active_execution_lock:
+                                                    active_execution_symbols.add(symbol)
+                                                threading.Thread(
+                                                    target=execute_bybit_trade_async,
+                                                    args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key),
+                                                    daemon=True
+                                                ).start()
+                                                bybit_success = False # Skip the simulation path for this trade
 
                                         if bybit_success:
-                                            actual_size_usd = float(position_size_usd) * (actual_qty / raw_qty) if raw_qty > 0 else float(position_size_usd)
+                                            actual_notional_val = float(actual_qty * entry_price)
+                                            actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
+                                            actual_size_usd = actual_margin_usd
                                             active_trade = {
                                                 "trade_id": f"{symbol}_{trade_uuid}",
                                                 "bybit_order_id": bybit_order_id,
@@ -8339,7 +8374,7 @@ def main():
                                                 f"• *Stop Loss*: ${float(stop_loss_price):.4f}\n"
                                                 f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
                                                 f"• *Leverage*: {leverage_val:.1f}x\n"
-                                                f"• *Position Size*: ${actual_size_usd:.2f} (Value: ${actual_qty * entry_price:.2f})\n"
+                                                f"• *Position Size (Margin)*: ${actual_margin_usd:.2f} (Value: ${actual_notional_val:.2f})\n"
                                                 f"• *Execution Mode*: {TRADE_MODE.upper()}"
                                             )
                                             

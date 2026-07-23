@@ -199,7 +199,14 @@ def get_prediction_history(limit=500):
             cursor = conn.cursor()
             cursor.execute("SELECT raw_data FROM predictions ORDER BY timestamp DESC LIMIT ?;", (limit,))
             rows = cursor.fetchall()
-            return [json.loads(row[0]) for row in rows][::-1]  # Return in chronological order
+            res = []
+            for row in rows:
+                if row[0]:
+                    try:
+                        res.append(json.loads(row[0]))
+                    except Exception:
+                        pass
+            return res[::-1]  # Return in chronological order
         except Exception as e:
             print(f"[Database Error] Failed to fetch prediction history: {e}")
             return []
@@ -237,7 +244,14 @@ def get_trade_history(limit=500):
             cursor = conn.cursor()
             cursor.execute("SELECT raw_data FROM completed_trades ORDER BY exit_time DESC LIMIT ?;", (limit,))
             rows = cursor.fetchall()
-            return [json.loads(row[0]) for row in rows][::-1]  # Return in chronological order
+            res = []
+            for row in rows:
+                if row[0]:
+                    try:
+                        res.append(json.loads(row[0]))
+                    except Exception:
+                        pass
+            return res[::-1]  # Return in chronological order
         except Exception as e:
             print(f"[Database Error] Failed to fetch trade history: {e}")
             return []

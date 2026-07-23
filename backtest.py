@@ -5,6 +5,8 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from ta.trend import EMAIndicator, ADXIndicator
+from ta.momentum import RSIIndicator
 
 # Add workspace path to python path
 sys.path.append("/Users/mehsimkhurshid/Downloads/btc-trading-bot")
@@ -13,6 +15,8 @@ from core import (
     add_features,
     calibrate_confidence,
     calculate_historical_thresholds,
+    features
+)
 import argparse
 
 parser = argparse.ArgumentParser(description="BTC Trading Bot Backtester")
@@ -50,29 +54,43 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     max_drawdown = 0.0
     
     import json
-    selected_features_filename = f"selected_features_{INTERVAL}.json"
+    feat_trending = None
+    feat_ranging = None
+    selected_features_filename = f"selected_features_{interval}.json"
     if os.path.exists(selected_features_filename):
         with open(selected_features_filename, "r") as f:
-            selected_features = json.load(f)
-    else:
-        selected_features = features
-    X_matrix = df[selected_features].values
+            feat_dict = json.load(f)
+            if isinstance(feat_dict, dict):
+                feat_trending = feat_dict.get("trending")
+                feat_ranging = feat_dict.get("ranging")
+            elif isinstance(feat_dict, list):
+                feat_trending = feat_dict
+                feat_ranging = feat_dict
+                
+    if feat_trending is None:
+        feat_trending = features
+    if feat_ranging is None:
+        feat_ranging = features
+
+    X_matrix_trending = df[feat_trending].values
+    X_matrix_ranging = df[feat_ranging].values
 
     i = 3
     total_candles = len(df)
     while i < total_candles - 1:
-        row_X = X_matrix[i].reshape(1, -1)
         adx_val = df.loc[i, "ADX"]
-        
         close_price = df.loc[i, "close"]
+        
         if adx_val >= 20.0:
+            row_X = X_matrix_trending[i].reshape(1, -1)
             pred_pct = float(models_trending["price"].predict(row_X)[0])
-            pred_change = pred_pct * close_price
             probs = models_trending["trend"].predict_proba(row_X)[0]
         else:
+            row_X = X_matrix_ranging[i].reshape(1, -1)
             pred_pct = float(models_ranging["price"].predict(row_X)[0])
-            pred_change = pred_pct * close_price
             probs = models_ranging["trend"].predict_proba(row_X)[0]
+
+        pred_change = pred_pct * close_price
 
         winning_class = int(np.argmax(probs))
         if winning_class == 2:
@@ -294,11 +312,14 @@ def run_backtest():
         from ensemble import load_ensemble_classifier, load_ensemble_regressor
         import json
         selected_features_filename = f"selected_features_{INTERVAL}.json"
+        n_features = len(features)
         if os.path.exists(selected_features_filename):
             with open(selected_features_filename, "r") as f:
-                n_features = len(json.load(f))
-        else:
-            n_features = len(features)
+                f_data = json.load(f)
+                if isinstance(f_data, dict):
+                    n_features = len(f_data.get("trending", features))
+                elif isinstance(f_data, list):
+                    n_features = len(f_data)
 
         models_trending = {
             "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", n_features),
@@ -412,13 +433,14 @@ def run_backtest():
     }
 
     results = []
-    for name, params in scenarios.items():
+    for name, cfg in scenarios.items():
         t_count, win_rate, pf, mdd, ret = run_single_backtest(
             df, models_trending, models_ranging, p95, max_conf,
-            min_confidence=params["min_confidence"],
-            use_regressor_fee_check=params["use_regressor_fee_check"],
-            require_trend_alignment=params["require_trend_alignment"],
-            fee_rate=0.002
+            min_confidence=cfg["min_confidence"],
+            use_regressor_fee_check=cfg["use_regressor_fee_check"],
+            require_trend_alignment=cfg["require_trend_alignment"],
+            fee_rate=0.002,
+            interval=INTERVAL
         )
         results.append({
             "Scenario": name,

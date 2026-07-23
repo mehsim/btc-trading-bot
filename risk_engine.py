@@ -128,31 +128,33 @@ def check_margin_utilization(used_margin: float, total_equity: float) -> str:
     return "NORMAL"
 
 def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60") -> tuple:
-    equity = float(bot_state.get("simulated_balance", 80.0))
+    equity = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
+    if equity <= 0:
+        equity = float(bot_state.get("simulated_balance", 80.0))
     peak_equity = float(bot_state.get("peak_balance", equity))
     
     # 0. Check interval position cap & total symbol exposure cap
     capped_size = check_interval_position_limit(interval, position_size_usd, equity)
     capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
     if capped_size < 1.0: # Below minimum trade size ($1)
-        return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0
+        return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0, 0.0
         
     # 1. Drawdown scaling check
     dd_mult = calculate_drawdown_multiplier(equity, peak_equity)
     if dd_mult == 0.0:
-        return False, "REJECTED: Circuit breaker active (>=20% Drawdown)", 0.0
+        return False, "REJECTED: Circuit breaker active (>=20% Drawdown)", 0.0, 0.0
     
     # 2. Portfolio heat check
     heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity)
     if not heat_safe:
-        return False, f"REJECTED: Portfolio heat ({heat_pct:.1f}%) exceeds 300% cap", dd_mult
+        return False, f"REJECTED: Portfolio heat ({heat_pct:.1f}%) exceeds 300% cap", dd_mult, 0.0
     
     # 3. Correlation check
     corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict)
     if corr_val > 0.7:
-        return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult
+        return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult, 0.0
         
-    return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Drawdown Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Max Corr: {corr_val:.2f})", dd_mult
+    return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Drawdown Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
 
 def get_volatility_regime_multiplier(atr_norm: float, interval: str) -> float:
     """Dynamically adjust position size based on ATR volatility regime"""

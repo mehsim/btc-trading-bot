@@ -12,18 +12,23 @@ class OrderState(Enum):
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
 
+import threading
+
 class IdempotencyCache:
     def __init__(self, ttl_seconds: float = 60.0):
         self.ttl = ttl_seconds
         self._cache = {}
+        self._lock = threading.Lock()
 
     def is_duplicate(self, client_order_id: str) -> bool:
-        self._clean()
-        return client_order_id in self._cache
+        with self._lock:
+            self._clean()
+            return client_order_id in self._cache
 
     def add(self, client_order_id: str):
-        self._clean()
-        self._cache[client_order_id] = time.time()
+        with self._lock:
+            self._clean()
+            self._cache[client_order_id] = time.time()
 
     def _clean(self):
         now = time.time()
