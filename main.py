@@ -1326,10 +1326,16 @@ def start_telegram_command_listener():
                                         leverage = t.get("leverage", 1.0)
                                         size_usd = t.get("position_size_usd", 0.0)
                                         
-                                        change_pct = ((current_p - entry_p) / entry_p) * 100.0 if entry_p > 0 else 0.0
-                                        raw_pnl = change_pct if direction == "Bullish" else -change_pct
-                                        pnl_pct = raw_pnl * leverage
-                                        pnl_usd = size_usd * (pnl_pct / 100.0)
+                                        if t.get("bybit_unrealized_pnl") is not None and t.get("bybit_unrealized_pnl") != "":
+                                            pnl_usd = float(t.get("bybit_unrealized_pnl"))
+                                            pnl_pct = (pnl_usd / size_usd) * 100.0 if size_usd > 0 else 0.0
+                                        else:
+                                            change_pct = ((current_p - entry_p) / entry_p) * 100.0 if entry_p > 0 else 0.0
+                                            raw_pnl = change_pct if direction == "Bullish" else -change_pct
+                                            gross_pnl_usd = size_usd * (raw_pnl * leverage / 100.0)
+                                            fee_cost = size_usd * leverage * 0.00055 * 2.0  # 0.055% taker fee round-trip
+                                            pnl_usd = gross_pnl_usd - fee_cost
+                                            pnl_pct = (pnl_usd / size_usd) * 100.0 if size_usd > 0 else 0.0
                                         
                                         active_trades_summary.append(
                                             f"💼 *{symbol} ({tf_key.upper()})*\n"
@@ -1339,7 +1345,7 @@ def start_telegram_command_listener():
                                             f"• *Investment*: ${size_usd:.2f} (Value: ${size_usd * leverage:.2f})\n"
                                             f"• *Price*: ${current_p:.2f} (Entry: ${entry_p:.2f})\n"
                                             f"• *TP / SL*: ${take_profit:.2f} / ${stop_loss:.2f}\n"
-                                            f"• *PnL*: {pnl_usd:+.2f} ({pnl_pct:+.2f}%)\n"
+                                            f"• *Net PnL*: {pnl_usd:+.2f} ({pnl_pct:+.2f}%)\n"
                                         )
                             
                             if active_trades_summary:

@@ -22,12 +22,13 @@ else
     echo "✅ Disk Space: ${DISK_USAGE}% used (Normal)"
 fi
 
-# 3. Model files check
-MODEL_COUNT=$(ls /home/ubuntu/btc-trading-bot/ensemble_*_30_*.json 2>/dev/null | wc -l)
-if [ "$MODEL_COUNT" -ge 12 ]; then
-    echo "✅ 30M Models: COMPLETE ($MODEL_COUNT/12 files present)"
+# 3. Model files check (15M & 30M)
+MODEL_COUNT_15=$(ls /home/ubuntu/btc-trading-bot/ensemble_*_15_*.json 2>/dev/null | wc -l)
+MODEL_COUNT_30=$(ls /home/ubuntu/btc-trading-bot/ensemble_*_30_*.json 2>/dev/null | wc -l)
+if [ "$MODEL_COUNT_15" -ge 12 ] && [ "$MODEL_COUNT_30" -ge 12 ]; then
+    echo "✅ 15M & 30M Models: COMPLETE (15M: $MODEL_COUNT_15, 30M: $MODEL_COUNT_30 files present)"
 else
-    echo "⚠️ 30M Models: INCOMPLETE ($MODEL_COUNT/12 files present)"
+    echo "⚠️ Model Files Check: 15M ($MODEL_COUNT_15/12), 30M ($MODEL_COUNT_30/12)"
 fi
 
 # 4. Recent error log check (last 7 days)

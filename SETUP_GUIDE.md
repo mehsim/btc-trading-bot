@@ -55,12 +55,12 @@ cat << 'EOF' > .env
 TELEGRAM_BOT_TOKEN=8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY
 TELEGRAM_CHAT_ID=8957269359,8827929671
 
-# Bybit API Credentials (Required for Live Trading & Live Wallet Balance)
-BYBIT_API_KEY=your_bybit_api_key_here
-BYBIT_API_SECRET=your_bybit_api_secret_here
+# Bybit API Credentials (Live Trading & Wallet Equity Sync)
+BYBIT_API_KEY=r02Fp8h4mmaREFT93l
+BYBIT_API_SECRET=tphjX8d4vwmDi1mxHJScEIBFJjn7wWf6K8ot
 
 # Bot Mode: 'simulation' (Paper Trading) or 'live' (Real Trading)
-TRADE_MODE=simulation
+TRADE_MODE=live
 
 # News & Sentiment API Key (Optional)
 FINNHUB_TOKEN=free
