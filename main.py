@@ -7827,16 +7827,16 @@ def main():
                         dir_total = prob_bearish + prob_bullish
                         
                         # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
-                        if str(iv) in ["15", "30"] and dir_total >= 0.10:
+                        if str(iv) in ["15", "30"] and dir_total >= 0.05:
                             norm_bear = prob_bearish / dir_total
                             norm_bull = prob_bullish / dir_total
                             
-                            if norm_bear >= 0.70 and prob_bearish >= 0.12:
+                            if norm_bear >= 0.55 and prob_bearish >= 0.05:
                                 ml_trend = "Bearish"
-                                ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.4)))
-                            elif norm_bull >= 0.70 and prob_bullish >= 0.12:
+                                ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.3)))
+                            elif norm_bull >= 0.55 and prob_bullish >= 0.05:
                                 ml_trend = "Bullish"
-                                ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.4)))
+                                ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.3)))
                             else:
                                 ml_trend = "Neutral"
                                 ml_confidence = prob_neutral
