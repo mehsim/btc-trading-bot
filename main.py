@@ -7851,10 +7851,12 @@ def main():
                             ml_confidence = prob_neutral
 
                         # Apply Isotonic Regression probability calibration if available
+                        calibrated_confidence = ml_confidence
                         calibrator = models_tf["trending"]["calibrator"] if regime == "Trending" else models_tf["ranging"]["calibrator"]
                         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
                             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
                             print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Calibrated: {calibrated_confidence*100:.2f}%")
+                        else:
                             # Fallback to piecewise linear calibration
                             tf_cal_key = f"calibration_{iv}m" if f"calibration_{iv}m" in bot_state else f"calibration_{tf}"
                             calibration = bot_state.get(tf_cal_key) or bot_state.get("calibration_15m") or {"p95": 0.55, "max_conf": 0.75}
