@@ -8386,7 +8386,7 @@ def main():
                                                 print(f"[{symbol} {iv}m Balance Guard] Downscaled order quantity to {qty_str} to fit within 90% of available balance (Margin: ${max_margin:.2f})")
 
                                         # Pre-Trade Risk Checklist Check
-                                        active_trades_list = bot_state.get("trade_history", [])
+                                        active_trades_list = [t for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])]
                                         df_dict = {symbol: df_completed}
                                         passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
                                             symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv)
