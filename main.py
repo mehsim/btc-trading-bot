@@ -1,7 +1,7 @@
 print("[System Debug] main.py global execution started.")
 import sys
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 class CircularLogBuffer:
     def __init__(self, capacity=100):
@@ -7940,7 +7940,7 @@ def main():
                                 dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
 
                         # Item E: Asian Market Session Awareness (00:00 - 08:00 UTC)
-                        utc_hour_now = datetime.utcnow().hour
+                        utc_hour_now = datetime.now(timezone.utc).hour
                         if 0 <= utc_hour_now < 8:
                             dynamic_conf_threshold += 0.05
                             print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
