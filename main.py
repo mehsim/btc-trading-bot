@@ -210,45 +210,60 @@ def send_daily_summary():
         now_ts = time.time()
         sec_24h = 24 * 3600.0
         trade_history = bot_state.get("trade_history", [])
-        trades_24h = [t for t in trade_history if (now_ts - float(t.get("exit_time", 0.0))) <= sec_24h]
         
-        trades_15m = [t for t in trades_24h if str(t.get("interval")) == "15"]
-        trades_30m = [t for t in trades_24h if str(t.get("interval")) == "30"]
+        trades_24h = []
+        for t in trade_history:
+            try:
+                exit_t = float(t.get("exit_time", 0.0))
+                if (now_ts - exit_t) <= sec_24h:
+                    trades_24h.append(t)
+            except Exception:
+                pass
         
-        win_15m = sum(1 for t in trades_15m if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
-        wr_15m = (win_15m / len(trades_15m) * 100.0) if trades_15m else 0.0
-        pnl_15m = sum(float(t.get("pnl_usd", 0.0)) for t in trades_15m)
+        # Summarize across all active timeframes
+        tf_summaries = []
+        total_pnl_24h = 0.0
+        total_trades_24h = len(trades_24h)
         
-        win_30m = sum(1 for t in trades_30m if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
-        wr_30m = (win_30m / len(trades_30m) * 100.0) if trades_30m else 0.0
-        pnl_30m = sum(float(t.get("pnl_usd", 0.0)) for t in trades_30m)
+        for iv in ["15", "30", "60", "120", "240", "360"]:
+            iv_trades = [t for t in trades_24h if str(t.get("interval")) == str(iv)]
+            if not iv_trades:
+                continue
+            wins = sum(1 for t in iv_trades if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+            wr = (wins / len(iv_trades) * 100.0) if iv_trades else 0.0
+            pnl = sum(float(t.get("pnl_usd", 0.0)) for t in iv_trades)
+            total_pnl_24h += pnl
+            tf_summaries.append(f"  • *{iv}M*: {len(iv_trades)} trades | Win Rate: {wr:.1f}% | P&L: ${pnl:+.2f}")
+            
+        tf_text = "\n".join(tf_summaries) if tf_summaries else "  • No closed trades in last 24h"
         
         has_30m = os.path.exists("ensemble_trending_trend_30_xgb.json")
         drift_res = mlops_engine.check_model_drift("15", trade_history, window=100)
         drift_status = drift_res.get("status", "HEALTHY")
         
-        current_eq = float(bot_state.get("simulated_balance", 80.0))
+        current_eq = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
+        if current_eq <= 0:
+            current_eq = float(bot_state.get("simulated_balance", 80.0))
+            
         peak_eq = float(bot_state.get("peak_balance", current_eq))
+        if current_eq > peak_eq:
+            peak_eq = current_eq
+            bot_state["peak_balance"] = peak_eq
+            
         dd_pct = ((peak_eq - current_eq) / peak_eq * 100.0) if peak_eq > 0 else 0.0
-        
         filter_stats = bot_state.get("filter_stats", {})
         
         summary_msg = (
             f"📊 *BTC TRADING BOT — DAILY SUMMARY* ({datetime.utcnow().strftime('%Y-%m-%d')})\n\n"
-            f"⚡ *15M Performance (24h)*:\n"
-            f"  • Trades: {len(trades_15m)}\n"
-            f"  • Win Rate: {wr_15m:.1f}%\n"
-            f"  • P&L: ${pnl_15m:+.2f}\n\n"
-            f"⏱️ *30M Performance (24h)*:\n"
-            f"  • Trades: {len(trades_30m)}\n"
-            f"  • Win Rate: {wr_30m:.1f}%\n"
-            f"  • P&L: ${pnl_30m:+.2f}\n\n"
-            f"🏥 *System Health*:\n"
-            f"  • 30M Model: {'✅ Dedicated' if has_30m else '⚠️ Fallback to 15M'}\n"
-            f"  • Drift Status: {drift_status}\n"
-            f"  • Equity: ${current_eq:.2f} (Peak: ${peak_eq:.2f})\n"
-            f"  • Drawdown: {dd_pct:.1f}%\n\n"
-            f"🛡️ *Active Filters (24h)*:\n"
+            f"💰 *Overall 24h Result*: *${total_pnl_24h:+.2f}* ({total_trades_24h} trades)\n\n"
+            f"⏱️ *Performance by Timeframe*:\n"
+            f"{tf_text}\n\n"
+            f"🏥 *System Health & Equity*:\n"
+            f"  • Live Equity: *${current_eq:.2f}* (Peak: ${peak_eq:.2f})\n"
+            f"  • Current Drawdown: {dd_pct:.1f}%\n"
+            f"  • Model Drift Status: {drift_status}\n"
+            f"  • 30M Model: {'✅ Dedicated' if has_30m else '⚠️ Fallback to 15M'}\n\n"
+            f"🛡️ *Active Protection Filters (24h)*:\n"
             f"  • Choppiness blocks: {filter_stats.get('chop_blocks', 0)}\n"
             f"  • News blackouts: {filter_stats.get('news_blocks', 0)}\n"
             f"  • Flash crash saves: {filter_stats.get('flash_saves', 0)}\n"
@@ -550,6 +565,7 @@ def start_telegram_command_listener():
         commands_payload = {
             "commands": [
                 {"command": "active", "description": "View all active open trades"},
+                {"command": "summary", "description": "View 24h performance & health summary report"},
                 {"command": "balance", "description": "View account/wallet balance"},
                 {"command": "profit", "description": "View profit/loss stats of all days"},
                 {"command": "skipped", "description": "View recently skipped/filtered trades"},
@@ -1263,6 +1279,15 @@ def start_telegram_command_listener():
                                             })
                                         threading.Thread(target=_run_confluence_bg, args=(sender_chat_id, target_sym, tf_mapping[tf_str]), daemon=True).start()
                                     continue
+
+                        if text in ["/summary", "/report"]:
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": "⏳ Generating 24h performance & health summary report...",
+                                "parse_mode": "Markdown"
+                            })
+                            send_daily_summary()
+                            continue
 
                         if text == "/active":
                             active_trades_summary = []
@@ -3737,6 +3762,30 @@ def run_daily_backup_scheduler():
                     print(f"[Backup Scheduler Warning] S3 upload failed (boto3 or credentials missing): {s3_err}")
         except Exception as e:
             print(f"[Backup Scheduler Error] Daily backup failed: {e}")
+
+def run_daily_summary_scheduler():
+    """
+    Background scheduler that guarantees daily 00:00:00 UTC report execution.
+    Calculates time to UTC midnight, sleeps, and sends Telegram daily digest.
+    """
+    print("[Daily Summary Scheduler] Dedicated 00:00 UTC summary report scheduler started.")
+    while True:
+        try:
+            now_gm = time.gmtime()
+            today_date_str = time.strftime("%Y-%m-%d", now_gm)
+            # Sleep until next midnight UTC
+            seconds_to_midnight = 86400 - (now_gm.tm_hour * 3600 + now_gm.tm_min * 60 + now_gm.tm_sec)
+            time.sleep(max(1, seconds_to_midnight))
+            
+            with bot_state_lock:
+                last_date = bot_state.get("last_daily_summary_date", "")
+                if last_date != today_date_str:
+                    bot_state["last_daily_summary_date"] = today_date_str
+                    print(f"[Daily Summary Scheduler] Midnight UTC detected ({today_date_str}). Sending daily summary...")
+                    send_daily_summary()
+        except Exception as e:
+            print(f"[Daily Summary Scheduler Error] Exception in scheduler loop: {e}")
+            time.sleep(60)
 
 def run_rolling_retrain_scheduler():
     """
@@ -8469,10 +8518,6 @@ def main():
                     f"• *Alerts*:\n{alert_text}"
                 )
 
-        # Daily Summary Trigger (00:00 UTC)
-        if current_hour_utc == 0 and datetime.utcnow().minute == 0:
-            send_daily_summary()
-
         time.sleep(10)
 
 def run_order_flow_persister():
@@ -8563,5 +8608,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_funding_rate_arbitrage_monitor, daemon=True).start()
     # Start daily database and trade journal backup thread
     threading.Thread(target=run_daily_backup_scheduler, daemon=True).start()
+    # Start daily 00:00 UTC performance summary report thread
+    threading.Thread(target=run_daily_summary_scheduler, daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()
