@@ -7800,11 +7800,11 @@ def main():
                         else:
                             X_live = latest_candle_weighted[features].values.reshape(1, -1)
 
-                        # Item A: Interval-Specific Ensemble Weights (CatBoost-heavy for 15M/30M noise)
+                        # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
                         if str(iv) == "15":
-                            ensemble_weights = [0.25, 0.25, 0.50]
+                            ensemble_weights = [0.10, 0.45, 0.45]
                         elif str(iv) == "30":
-                            ensemble_weights = [0.30, 0.30, 0.40]
+                            ensemble_weights = [0.15, 0.42, 0.43]
                         else:
                             ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
                         
