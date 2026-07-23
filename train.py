@@ -91,16 +91,16 @@ economic_calendar_lock = threading.Lock()
 # Centralized timeframe parameters for training labels and live execution alignment
 TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe
-        "lookahead": 8,
-        "sl_mult": 0.85,
-        "tp_mult_ranging": 1.6,
-        "tp_mult_trending": 2.8
+        "lookahead": 12,
+        "sl_mult": 0.75,
+        "tp_mult_ranging": 1.2,
+        "tp_mult_trending": 1.3
     },
     "30": {   # 30M Timeframe
-        "lookahead": 10,
+        "lookahead": 12,
         "sl_mult": 0.80,
-        "tp_mult_ranging": 1.5,
-        "tp_mult_trending": 2.6
+        "tp_mult_ranging": 1.3,
+        "tp_mult_trending": 1.5
     },
     "60": {   # 1H Timeframe
         "lookahead": 10,
