@@ -7855,11 +7855,11 @@ def main():
                         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
                             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
                             print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Calibrated: {calibrated_confidence*100:.2f}%")
-                        else:
                             # Fallback to piecewise linear calibration
-                            calibration = bot_state[f"calibration_{tf}"]
-                            p95 = calibration["p95"]
-                            max_conf = calibration["max_conf"]
+                            tf_cal_key = f"calibration_{iv}m" if f"calibration_{iv}m" in bot_state else f"calibration_{tf}"
+                            calibration = bot_state.get(tf_cal_key) or bot_state.get("calibration_15m") or {"p95": 0.55, "max_conf": 0.75}
+                            p95 = calibration.get("p95", 0.55)
+                            max_conf = calibration.get("max_conf", 0.75)
                             calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
                             
                         # Item D: Exponential Time-Decayed Cross-Interval Penalty for 15M signals
