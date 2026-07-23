@@ -8041,14 +8041,14 @@ def main():
                             already_active = True
                             active_on_tf = "current_cycle"
                         else:
-                            for tf_key in ["1h", "2h", "4h", "6h"]:
+                            for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
                                 if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
                                     already_active = True
                                     active_on_tf = tf_key
                                     break
                         
                         # Session Filter: temporarily allow 24-hour trading
-                        utc_hour = datetime.utcnow().hour
+                        utc_hour = datetime.now(timezone.utc).hour
                         in_session = True
 
                         flash_crash_active = check_flash_crash(symbol, max_drop_pct=3.0, window_minutes=5) if str(iv) in ["15", "30"] else False
