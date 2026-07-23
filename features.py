@@ -342,26 +342,27 @@ def add_features(df, fetch_calendar_callback=None):
     df["bid_ask_imbalance_ohlc"] = (df["close"] - df["low"]) / (high_low_range) - 0.5
     
     # Lag advanced microstructure features
+    new_lag_cols = {}
     for lag in [1, 2]:
-        df[f"vwap_deviation_lag{lag}"] = df["vwap_deviation"].shift(lag)
-        df[f"roll_spread_lag{lag}"] = df["roll_spread"].shift(lag)
-        df[f"leverage_divergence_lag{lag}"] = df["leverage_divergence"].shift(lag)
-        df[f"oi_velocity_lag{lag}"] = df["oi_velocity"].shift(lag)
-        df[f"funding_acceleration_lag{lag}"] = df["funding_acceleration"].shift(lag)
-        df[f"bid_ask_imbalance_ohlc_lag{lag}"] = df["bid_ask_imbalance_ohlc"].shift(lag)
+        new_lag_cols[f"vwap_deviation_lag{lag}"] = df["vwap_deviation"].shift(lag)
+        new_lag_cols[f"roll_spread_lag{lag}"] = df["roll_spread"].shift(lag)
+        new_lag_cols[f"leverage_divergence_lag{lag}"] = df["leverage_divergence"].shift(lag)
+        new_lag_cols[f"oi_velocity_lag{lag}"] = df["oi_velocity"].shift(lag)
+        new_lag_cols[f"funding_acceleration_lag{lag}"] = df["funding_acceleration"].shift(lag)
+        new_lag_cols[f"bid_ask_imbalance_ohlc_lag{lag}"] = df["bid_ask_imbalance_ohlc"].shift(lag)
         if "CVD_true" in df.columns:
-            df[f"CVD_true_lag{lag}"] = df["CVD_true"].shift(lag)
+            new_lag_cols[f"CVD_true_lag{lag}"] = df["CVD_true"].shift(lag)
         if "OFI_true" in df.columns:
-            df[f"OFI_true_lag{lag}"] = df["OFI_true"].shift(lag)
+            new_lag_cols[f"OFI_true_lag{lag}"] = df["OFI_true"].shift(lag)
         if "ob_imbalance_L2" in df.columns:
-            df[f"ob_imbalance_L2_lag{lag}"] = df["ob_imbalance_L2"].shift(lag)
+            new_lag_cols[f"ob_imbalance_L2_lag{lag}"] = df["ob_imbalance_L2"].shift(lag)
         if "ob_spread_L2" in df.columns:
-            df[f"ob_spread_L2_lag{lag}"] = df["ob_spread_L2"].shift(lag)
+            new_lag_cols[f"ob_spread_L2_lag{lag}"] = df["ob_spread_L2"].shift(lag)
         if "liq_long_1h" in df.columns:
-            df[f"liq_long_1h_lag{lag}"] = df["liq_long_1h"].shift(lag)
+            new_lag_cols[f"liq_long_1h_lag{lag}"] = df["liq_long_1h"].shift(lag)
         if "liq_short_1h" in df.columns:
-            df[f"liq_short_1h_lag{lag}"] = df["liq_short_1h"].shift(lag)
+            new_lag_cols[f"liq_short_1h_lag{lag}"] = df["liq_short_1h"].shift(lag)
 
+    df = pd.concat([df, pd.DataFrame(new_lag_cols, index=df.index)], axis=1)
     df = df.bfill().ffill().fillna(0.0)
-    df = df.copy()  # Defragment memory layout to silence PerformanceWarnings
     return df
