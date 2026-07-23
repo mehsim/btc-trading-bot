@@ -2,6 +2,18 @@ import pandas as pd
 import numpy as np
 import sys
 import os
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import joblib
 import requests
 from datetime import datetime
@@ -15,15 +27,38 @@ class DualLogger(object):
         self.log = open(filepath, "a", encoding="utf-8")
 
     def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
+        try:
+            self.terminal.write(message)
+        except UnicodeEncodeError:
+            try:
+                encoding = getattr(self.terminal, "encoding", "utf-8") or "utf-8"
+                safe_msg = message.encode(encoding, errors="replace").decode(encoding, errors="replace")
+                self.terminal.write(safe_msg)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        try:
+            self.log.write(message)
+        except Exception:
+            pass
 
     def flush(self):
-        self.terminal.flush()
-        self.log.flush()
+        try:
+            self.terminal.flush()
+        except Exception:
+            pass
+        try:
+            self.log.flush()
+        except Exception:
+            pass
 
     def close(self):
-        self.log.close()
+        try:
+            self.log.close()
+        except Exception:
+            pass
 
 # Redirect stdout to both console and simulation_log.txt
 log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simulation_log.txt")

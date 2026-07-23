@@ -1,5 +1,21 @@
-print("[System Debug] main.py global execution started.")
 import sys
+import os
+
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
+# Reconfigure stdout/stderr to UTF-8 to prevent 'charmap' / cp1252 UnicodeEncodeError on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+print("[System Debug] main.py global execution started.")
 import re
 from datetime import datetime, timezone
 
@@ -10,17 +26,38 @@ class CircularLogBuffer:
         self.original_stdout = sys.stdout
         
     def write(self, message):
-        self.original_stdout.write(message)
-        if message.strip():
-            # Strip ANSI escape codes to keep logs clean in Telegram
-            clean_msg = re.sub(r'\x1b\[[0-9;]*[mK]', '', message.strip())
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            self.logs_list.append(f"[{timestamp}] {clean_msg}")
-            if len(self.logs_list) > self.capacity:
-                self.logs_list.pop(0)
+        try:
+            self.original_stdout.write(message)
+        except UnicodeEncodeError:
+            try:
+                encoding = getattr(self.original_stdout, "encoding", "utf-8") or "utf-8"
+                if isinstance(message, bytes):
+                    safe_msg = message.decode(encoding, errors="replace")
+                else:
+                    safe_msg = message.encode(encoding, errors="replace").decode(encoding, errors="replace")
+                self.original_stdout.write(safe_msg)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        try:
+            str_msg = message.decode("utf-8", errors="replace") if isinstance(message, bytes) else str(message)
+            if str_msg.strip():
+                # Strip ANSI escape codes to keep logs clean in Telegram
+                clean_msg = re.sub(r'\x1b\[[0-9;]*[mK]', '', str_msg.strip())
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                self.logs_list.append(f"[{timestamp}] {clean_msg}")
+                if len(self.logs_list) > self.capacity:
+                    self.logs_list.pop(0)
+        except Exception:
+            pass
                 
     def flush(self):
-        self.original_stdout.flush()
+        try:
+            self.original_stdout.flush()
+        except Exception:
+            pass
 
     def __getattr__(self, name):
         return getattr(self.original_stdout, name)
@@ -6789,7 +6826,7 @@ def main():
 
     print(f"Initial price loaded: {live_price:.2f}")
     print(f"\n==================================================")
-    print(f"👉 Local Web Dashboard is running at http://localhost:5001")
+    print(f"[+] Local Web Dashboard is running at http://localhost:5001")
     print(f"==================================================\n")
     bot_state["live_price"] = live_price
 
@@ -8612,15 +8649,27 @@ def safe_main():
             main()
         except Exception as e:
             import traceback
-            traceback_str = traceback.format_exc()
-            traceback.print_exc()
-            print(f"CRITICAL ERROR in main loop: {e}")
-            send_telegram_alert(
-                f"🔴 *CRITICAL RUNTIME ERROR* 🔴\n"
-                f"• *Error*: {str(e)}\n"
-                f"• *Action*: Restarting main bot loop...\n\n"
-                f"```\n{traceback_str[:300]}...\n```"
-            )
+            try:
+                traceback_str = traceback.format_exc()
+            except Exception:
+                traceback_str = str(e)
+            try:
+                traceback.print_exc()
+            except Exception:
+                pass
+            try:
+                print(f"CRITICAL ERROR in main loop: {e}")
+            except Exception:
+                pass
+            try:
+                send_telegram_alert(
+                    f"🔴 *CRITICAL RUNTIME ERROR* 🔴\n"
+                    f"• *Error*: {str(e)}\n"
+                    f"• *Action*: Restarting main bot loop...\n\n"
+                    f"```\n{traceback_str[:300]}...\n```"
+                )
+            except Exception:
+                pass
             time.sleep(15)  # wait before restarting main
 
 if __name__ == "__main__":
