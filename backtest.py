@@ -93,15 +93,34 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         pred_change = pred_pct * close_price
 
         winning_class = int(np.argmax(probs))
-        if winning_class == 2:
+        prob_bearish = float(probs[0])
+        prob_neutral = float(probs[1])
+        prob_bullish = float(probs[2])
+        dir_total = prob_bearish + prob_bullish
+        
+        # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
+        if str(interval) in ["15", "30"] and dir_total >= 0.10:
+            norm_bear = prob_bearish / dir_total
+            norm_bull = prob_bullish / dir_total
+            
+            if norm_bear >= 0.70 and prob_bearish >= 0.12:
+                ml_trend = "Bearish"
+                ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.4)))
+            elif norm_bull >= 0.70 and prob_bullish >= 0.12:
+                ml_trend = "Bullish"
+                ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.4)))
+            else:
+                ml_trend = "Neutral"
+                ml_confidence = prob_neutral
+        elif winning_class == 2:
             ml_trend = "Bullish"
-            ml_confidence = float(probs[2])
+            ml_confidence = prob_bullish
         elif winning_class == 0:
             ml_trend = "Bearish"
-            ml_confidence = float(probs[0])
+            ml_confidence = prob_bearish
         else:
             ml_trend = "Neutral"
-            ml_confidence = float(probs[1])
+            ml_confidence = prob_neutral
 
         # Skip Neutral trades
         if ml_trend == "Neutral":
