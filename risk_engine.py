@@ -81,9 +81,12 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
     if "close" not in df_dict[symbol].columns or len(df_dict[symbol]) < 20:
         return 0.0
     
-    target_df = df_dict[symbol]
+    target_df = df_dict[symbol].copy()
     if "timestamp" in target_df.columns:
-        target_s = target_df.set_index("timestamp")["close"].pct_change().dropna().iloc[-100:]
+        first_ts = target_df["timestamp"].iloc[0]
+        unit_str = "ms" if first_ts > 1e11 else "s"
+        target_df["dt"] = pd.to_datetime(target_df["timestamp"], unit=unit_str, errors="coerce")
+        target_s = target_df.set_index("dt")["close"].pct_change().dropna().iloc[-100:]
     else:
         target_s = target_df["close"].pct_change().dropna().iloc[-100:]
     max_corr = 0.0
@@ -92,10 +95,13 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
         if isinstance(pos, dict):
             pos_symbol = pos.get("symbol")
             if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
-                pos_df = df_dict[pos_symbol]
-                if "close" in pos_df.columns:
+                pos_df = df_dict[pos_symbol].copy()
+                if "close" in pos_df.columns and len(pos_df) >= 20:
                     if "timestamp" in pos_df.columns:
-                        other_s = pos_df.set_index("timestamp")["close"].pct_change().dropna().iloc[-100:]
+                        first_ts_other = pos_df["timestamp"].iloc[0]
+                        unit_other = "ms" if first_ts_other > 1e11 else "s"
+                        pos_df["dt"] = pd.to_datetime(pos_df["timestamp"], unit=unit_other, errors="coerce")
+                        other_s = pos_df.set_index("dt")["close"].pct_change().dropna().iloc[-100:]
                     else:
                         other_s = pos_df["close"].pct_change().dropna().iloc[-100:]
                     combined = pd.concat([target_s, other_s], axis=1).dropna()
