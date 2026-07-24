@@ -81,16 +81,24 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
     if "close" not in df_dict[symbol].columns or len(df_dict[symbol]) < 20:
         return 0.0
     
-    target_returns = df_dict[symbol]["close"].pct_change().dropna().iloc[-100:]
+    target_df = df_dict[symbol]
+    if "timestamp" in target_df.columns:
+        target_s = target_df.set_index("timestamp")["close"].pct_change().dropna().iloc[-100:]
+    else:
+        target_s = target_df["close"].pct_change().dropna().iloc[-100:]
     max_corr = 0.0
     
     for pos in open_positions:
         if isinstance(pos, dict):
             pos_symbol = pos.get("symbol")
             if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
-                if "close" in df_dict[pos_symbol].columns:
-                    other_returns = df_dict[pos_symbol]["close"].pct_change().dropna().iloc[-100:]
-                    combined = pd.concat([target_returns, other_returns], axis=1).dropna()
+                pos_df = df_dict[pos_symbol]
+                if "close" in pos_df.columns:
+                    if "timestamp" in pos_df.columns:
+                        other_s = pos_df.set_index("timestamp")["close"].pct_change().dropna().iloc[-100:]
+                    else:
+                        other_s = pos_df["close"].pct_change().dropna().iloc[-100:]
+                    combined = pd.concat([target_s, other_s], axis=1).dropna()
                     if len(combined) >= 20:
                         corr_matrix = combined.corr()
                         if corr_matrix.shape == (2, 2):

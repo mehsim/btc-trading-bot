@@ -26,10 +26,15 @@ def intelligent_data_imputation(df: pd.DataFrame) -> pd.DataFrame:
     for ext_col in ["news_sentiment", "funding_rate"]:
         if ext_col in df_imp.columns:
             s = df_imp[ext_col].copy()
-            for idx in range(1, len(s)):
-                if pd.isna(s.iloc[idx]):
-                    s.iloc[idx] = s.iloc[idx-1] * 0.95
-            df_imp[ext_col] = s.fillna(0.0)
+            valid_mask = s.notna()
+            if valid_mask.any():
+                ffill_s = s.ffill()
+                cum_group = valid_mask.cumsum()
+                gap_count = s.groupby(cum_group).cumcount()
+                decay_factor = 0.95 ** gap_count
+                df_imp[ext_col] = (ffill_s * decay_factor).fillna(0.0)
+            else:
+                df_imp[ext_col] = 0.0
             
     return df_imp.bfill().fillna(0.0)
 

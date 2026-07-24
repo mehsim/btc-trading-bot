@@ -28,18 +28,18 @@ class CircularLogBuffer:
     def write(self, message):
         try:
             self.original_stdout.write(message)
-        except UnicodeEncodeError:
+        except Exception:
             try:
-                encoding = getattr(self.original_stdout, "encoding", "utf-8") or "utf-8"
-                if isinstance(message, bytes):
-                    safe_msg = message.decode(encoding, errors="replace")
+                if hasattr(self.original_stdout, "buffer"):
+                    msg_str = str(message) if not isinstance(message, str) else message
+                    self.original_stdout.buffer.write(msg_str.encode("utf-8", errors="replace"))
                 else:
-                    safe_msg = message.encode(encoding, errors="replace").decode(encoding, errors="replace")
-                self.original_stdout.write(safe_msg)
+                    enc = getattr(self.original_stdout, "encoding", "ascii") or "ascii"
+                    msg_str = str(message) if not isinstance(message, str) else message
+                    safe_str = msg_str.encode(enc, errors="replace").decode(enc, errors="replace")
+                    self.original_stdout.write(safe_str)
             except Exception:
                 pass
-        except Exception:
-            pass
 
         try:
             str_msg = message.decode("utf-8", errors="replace") if isinstance(message, bytes) else str(message)
@@ -552,7 +552,8 @@ def run_manual_confluence_report(symbol, interval):
             ml_confidence = float(probs[1])
             
         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+            iso_val = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+            calibrated_confidence = max(ml_confidence, iso_val) if str(iv) in ["15", "30"] else iso_val
         else:
             calibration = bot_state.get(f"calibration_{iv.replace('60','1h').replace('120','2h').replace('240','4h').replace('360','6h')}", {"p95": 0.8, "max_conf": 0.95})
             calibrated_confidence = calibrate_confidence(ml_confidence, calibration["p95"], calibration["max_conf"])
@@ -611,7 +612,115 @@ def start_telegram_command_listener():
     pending_auth = {} # {sender_chat_id: {"code": str, "step": str, "timestamp": float}}
     pending_confluence = {} # {sender_chat_id: {"step": str, "symbol": str, "timestamp": float}}
     pending_manual_trade = {} # {sender_chat_id: {"step": str, "timestamp": float}}
- 
+    pending_skipped = {} # {sender_chat_id: {"step": str, "timestamp": float}}
+
+    TF_MAP_SKIPPED = {
+        "15": "15", "15m": "15", "15min": "15", "15-min": "15", "15 min": "15",
+        "30": "30", "30m": "30", "30min": "30", "30-min": "30", "30 min": "30",
+        "60": "60", "1h": "60", "1hr": "60", "1-hr": "60", "1 hour": "60",
+        "120": "120", "2h": "120", "2hr": "120", "2-hr": "120", "2 hour": "120"
+    }
+    TF_DISPLAY = {
+        "15": "15m",
+        "30": "30m",
+        "60": "1h",
+        "120": "2h"
+    }
+
+    def get_skipped_trades_report(target_iv):
+        tf_disp = TF_DISPLAY.get(str(target_iv), f"{target_iv}m")
+        with bot_state_lock:
+            all_preds = list(bot_state.get("prediction_history", []))
+            
+            # Fall back to database if in-memory history has few/no records for target interval
+            tf_preds = [
+                p for p in all_preds 
+                if str(p.get("interval", "")).replace("m", "") == str(target_iv).replace("m", "")
+            ]
+            if len(tf_preds) < 10:
+                try:
+                    import database
+                    db_preds = database.get_prediction_history(limit=500)
+                    if db_preds:
+                        existing_keys = {(p.get("symbol"), p.get("candle_timestamp"), str(p.get("interval"))) for p in all_preds}
+                        for p in db_preds:
+                            k = (p.get("symbol"), p.get("candle_timestamp"), str(p.get("interval")))
+                            if k not in existing_keys:
+                                all_preds.append(p)
+                                existing_keys.add(k)
+                        tf_preds = [
+                            p for p in all_preds 
+                            if str(p.get("interval", "")).replace("m", "") == str(target_iv).replace("m", "")
+                        ]
+                except Exception as e:
+                    print(f"[Skipped Report] DB fallback error: {e}")
+            
+            if not tf_preds:
+                return f"ℹ️ *No prediction history found for the {tf_disp} timeframe.*"
+                
+            candle_timestamps = [p.get("candle_timestamp") for p in tf_preds if p.get("candle_timestamp") is not None]
+            if not candle_timestamps:
+                return f"ℹ️ *No candle timestamp data found for the {tf_disp} timeframe.*"
+                
+            latest_candle_ts = max(candle_timestamps)
+            candle_dt_str = datetime.fromtimestamp(latest_candle_ts / 1000.0, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            
+            # Filter skipped trades for the latest opened/evaluated candle
+            latest_skipped = [
+                p for p in tf_preds 
+                if p.get("candle_timestamp") == latest_candle_ts 
+                and p.get("status", "").startswith("Skipped (") 
+                and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]
+            ]
+            
+            is_previous_candle = False
+            # Only check immediately preceding candle (within 2 hours max) if latest candle had 0 skipped trades
+            if not latest_skipped:
+                two_hours_ms = 2 * 3600 * 1000
+                recent_skipped_preds = [
+                    p for p in tf_preds 
+                    if p.get("status", "").startswith("Skipped (") 
+                    and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]
+                    and (latest_candle_ts - p.get("candle_timestamp", 0)) <= two_hours_ms
+                ]
+                if recent_skipped_preds:
+                    latest_skipped_ts = max(p.get("candle_timestamp", 0) for p in recent_skipped_preds)
+                    latest_skipped = [p for p in recent_skipped_preds if p.get("candle_timestamp") == latest_skipped_ts]
+                    candle_dt_str = datetime.fromtimestamp(latest_skipped_ts / 1000.0, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    is_previous_candle = True
+                    
+            if not latest_skipped:
+                return (
+                    f"🚫 *SKIPPED TRADES — {tf_disp.upper()} TIMEFRAME* 🚫\n\n"
+                    f"📅 *Latest Opened Candle*: `{candle_dt_str}`\n"
+                    f"ℹ️ *No skipped trades logged on the latest open candle.*\n\n"
+                    f"_All signals on this timeframe were either Neutral or executed successfully._"
+                )
+                
+            header_note = " (Previous Candle with Skipped Signals)" if is_previous_candle else " (Latest Opened Candle)"
+            report_lines = [
+                f"🚫 *SKIPPED TRADES — {tf_disp.upper()} TIMEFRAME* 🚫\n",
+                f"📅 *Candle Time*: `{candle_dt_str}`{header_note}\n"
+            ]
+            
+            for p in latest_skipped:
+                symbol = p.get("symbol", "N/A")
+                direction = p.get("direction", "N/A")
+                status = p.get("status", "").replace("Skipped (", "").replace(")", "")
+                conf = p.get("calibrated_confidence", 0.0)
+                ref_p = p.get("ref_price", 0.0)
+                thresh = p.get("dynamic_threshold", 0.60)
+                
+                detail_line = f"• *{symbol}* | Signal: *{direction}*\n"
+                detail_line += f"  - *Reason*: `{status.upper()}`\n"
+                detail_line += f"  - *Confidence*: `{conf*100:.1f}%` (Threshold: `{thresh*100:.1f}%`)\n"
+                if ref_p > 0:
+                    detail_line += f"  - *Price at Evaluation*: `${ref_p:.2f}`\n"
+                    
+                report_lines.append(detail_line)
+                
+            return "\n".join(report_lines)
+
     def listener_loop():
         offset = 0
         init_res = execute_telegram_api_call("getUpdates", {"limit": 1})
@@ -1337,6 +1446,64 @@ def start_telegram_command_listener():
                                         threading.Thread(target=_run_confluence_bg, args=(sender_chat_id, target_sym, tf_mapping[tf_str]), daemon=True).start()
                                     continue
 
+                        # Handle skipped interactive flow logic resets
+                        if text in ["/cancel", "/add_user", "/confluence", "/skipped"] and sender_chat_id in pending_skipped:
+                            pending_skipped.pop(sender_chat_id, None)
+
+                        if sender_chat_id in pending_skipped:
+                            flow = pending_skipped[sender_chat_id]
+                            if time.time() - flow["timestamp"] > 300:
+                                pending_skipped.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Session expired.* Please start over by sending /skipped.",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+
+                            if text == "/cancel":
+                                pending_skipped.pop(sender_chat_id, None)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "❌ *Operation cancelled.*",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
+                                })
+                                continue
+
+                            if text.startswith("/"):
+                                pending_skipped.pop(sender_chat_id, None)
+                            else:
+                                clean_tf = text.lower().strip()
+                                tf_code = TF_MAP_SKIPPED.get(clean_tf)
+                                if not tf_code:
+                                    tf_keyboard = [
+                                        [{"text": "15min"}, {"text": "30min"}],
+                                        [{"text": "1hr"}, {"text": "2hr"}],
+                                        [{"text": "/cancel"}]
+                                    ]
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": "❌ *Unsupported timeframe.*\n\nPlease select one of the supported timeframes below:",
+                                        "parse_mode": "Markdown",
+                                        "reply_markup": {
+                                            "keyboard": tf_keyboard,
+                                            "resize_keyboard": True,
+                                            "one_time_keyboard": True
+                                        }
+                                    })
+                                else:
+                                    pending_skipped.pop(sender_chat_id, None)
+                                    rep_text = get_skipped_trades_report(tf_code)
+                                    execute_telegram_api_call("sendMessage", {
+                                        "chat_id": sender_chat_id,
+                                        "text": rep_text,
+                                        "parse_mode": "Markdown",
+                                        "reply_markup": {"remove_keyboard": True}
+                                    })
+                                continue
+
                         if text in ["/summary", "/report"]:
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
@@ -1483,43 +1650,39 @@ def start_telegram_command_listener():
                                 "parse_mode": "Markdown"
                             })
                             
-                        elif text == "/skipped":
-                            skipped_summary = []
-                            with bot_state_lock:
-                                preds = [p for p in bot_state.get("prediction_history", []) 
-                                         if p.get("status", "").startswith("Skipped (") 
-                                         and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]]
+                        elif text.startswith("/skipped"):
+                            parts = text.split()
+                            target_tf_code = None
+                            if len(parts) > 1:
+                                target_tf_code = TF_MAP_SKIPPED.get(parts[1].lower().strip())
                                 
-                                # Sort by timestamp descending
-                                preds = sorted(preds, key=lambda x: x.get("timestamp", 0.0), reverse=True)
-                                
-                                # Take top 5
-                                for p in preds[:5]:
-                                    symbol = p.get("symbol")
-                                    iv = p.get("interval")
-                                    direction = p.get("direction")
-                                    status = p.get("status", "").replace("Skipped (", "").replace(")", "")
-                                    conf = p.get("calibrated_confidence", 0.0)
-                                    ts = p.get("timestamp", 0.0)
-                                    time_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
-                                    
-                                    skipped_summary.append(
-                                        f"🚫 *{symbol} ({iv}m)* | signal: {direction}\n"
-                                        f"• *Filter*: {status.upper()}\n"
-                                        f"• *Confidence*: {conf*100:.1f}%\n"
-                                        f"• *Time*: {time_str}"
-                                    )
-                                    
-                            if skipped_summary:
-                                reply_text = "🚫 *LATEST FILTERED/SKIPPED SIGNALS* 🚫\n\n" + "\n\n".join(skipped_summary)
+                            if target_tf_code:
+                                rep_text = get_skipped_trades_report(target_tf_code)
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": rep_text,
+                                    "parse_mode": "Markdown"
+                                })
                             else:
-                                reply_text = "ℹ️ *No skipped trades logged recently.*"
-                                
-                            execute_telegram_api_call("sendMessage", {
-                                "chat_id": sender_chat_id,
-                                "text": reply_text,
-                                "parse_mode": "Markdown"
-                            })
+                                pending_skipped[sender_chat_id] = {
+                                    "step": "awaiting_timeframe",
+                                    "timestamp": time.time()
+                                }
+                                tf_keyboard = [
+                                    [{"text": "15min"}, {"text": "30min"}],
+                                    [{"text": "1hr"}, {"text": "2hr"}],
+                                    [{"text": "/cancel"}]
+                                ]
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": "⏱️ *Select Timeframe*\n\nWhich timeframe's skipped trades would you like to view?",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {
+                                        "keyboard": tf_keyboard,
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                })
                             
                         elif text == "/add_user":
                             import random
@@ -1803,6 +1966,8 @@ def save_history():
             "simulated_balance": bot_state["simulated_balance"],
             "trade_history": bot_state["trade_history"],
             "prediction_history": bot_state["prediction_history"],
+            "active_trade_15m": bot_state.get("active_trade_15m", []),
+            "active_trade_30m": bot_state.get("active_trade_30m", []),
             "active_trade_1h": bot_state.get("active_trade_1h", []),
             "active_trade_2h": bot_state.get("active_trade_2h", []),
             "active_trade_4h": bot_state.get("active_trade_4h", []),
@@ -1820,7 +1985,7 @@ def save_history():
             # Persist active trades to SQLite database
             try:
                 import database
-                for tf_key in ["1h", "2h", "4h", "6h"]:
+                for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
                     database.save_active_trades(tf_key, bot_state.get(f"active_trade_{tf_key}", []))
             except Exception as db_sync_err:
                 print(f"[Database Sync Warning] Failed to persist active trades to SQLite: {db_sync_err}")
@@ -1950,52 +2115,53 @@ def load_history():
         except Exception as hf_err:
             print(f"[Sync] Could not restore history from HF Dataset (normal if first run): {hf_err}")
 
-    # 2. Sync from Hugging Face Space if running locally (not in Space environment itself)
+    # 2. Sync from AWS Server API if running locally
     elif not space_id:
         try:
-            target_space = os.environ.get("TARGET_HF_SPACE") or "mehsimleo/btc-trading-bot"
-            if "/" in target_space:
-                username, space_name = target_space.split("/")
-                space_url = f"https://{username}-{space_name.replace('_', '-')}.hf.space/api/status"
-            else:
-                space_url = f"https://{target_space.replace('_', '-')}.hf.space/api/status"
-            print(f"Syncing: Attempting to pull latest history from Hugging Face Space API ({space_url})...")
-            resp = requests.get(space_url, timeout=5)
+            aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or "http://47.129.153.199"
+            if not aws_host.startswith("http://") and not aws_host.startswith("https://"):
+                aws_host = f"http://{aws_host}"
+            sync_url = f"{aws_host.rstrip('/')}/api/status"
+            print(f"Syncing: Attempting to pull latest history from AWS Server API ({sync_url})...")
+            resp = requests.get(sync_url, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
-                hf_trades = data.get("trade_history", [])
-                hf_predictions = data.get("prediction_history", [])
-                hf_balance = data.get("simulated_balance", 80.0)
+                remote_trades = data.get("trade_history", [])
+                remote_predictions = data.get("prediction_history", [])
+                remote_balance = data.get("simulated_balance", 80.0)
                 
-                # Filter out old 5m and 15m intervals
-                hf_trades = [t for t in hf_trades if str(t.get("interval", "60")) not in ["5", "15"]]
-                hf_predictions = [p for p in hf_predictions if str(p.get("interval", "60")) not in ["5", "15"]]
+                # Filter out old 5m intervals
+                remote_trades = [t for t in remote_trades if str(t.get("interval", "60")) != "5"]
+                remote_predictions = [p for p in remote_predictions if str(p.get("interval", "60")) != "5"]
                 
-                if len(hf_trades) > 0 or len(hf_predictions) > 0:
-                    bot_state["simulated_balance"] = hf_balance
-                    bot_state["trade_history"] = hf_trades
-                    bot_state["prediction_history"] = hf_predictions
+                if len(remote_trades) > 0 or len(remote_predictions) > 0:
+                    bot_state["simulated_balance"] = remote_balance
+                    bot_state["trade_history"] = remote_trades
+                    bot_state["prediction_history"] = remote_predictions
+                    bot_state["active_trade_15m"] = data.get("active_trade_15m", [])
+                    bot_state["active_trade_30m"] = data.get("active_trade_30m", [])
                     bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
                     bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
                     bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                     
                     # Migrate legacy active trades
-                    for tf_key in ["1h", "2h", "4h", "6h"]:
+                    for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
                         migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                         
                     bot_state["bot_running"] = data.get("bot_running", True)
                     bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
-                    print(f"Sync Success: Loaded {len(hf_trades)} trades and {len(hf_predictions)} predictions from Hugging Face Space.")
+                    print(f"Sync Success: Loaded {len(remote_trades)} trades and {len(remote_predictions)} predictions from AWS Server ({sync_url}).")
                     
                     # Startup Balance Audit
-                    active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                    active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
                     print(f"[Startup Sync Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
                     
                     save_history()
                     return
         except Exception as e:
-            print(f"HF Space Sync: Could not fetch from Hugging Face Space: {e}")
+            print(f"AWS Sync: Could not fetch from AWS Server: {e}")
+
 
     # 2. Local/Persistent history fallback load
     if os.path.exists(HISTORY_FILE):
@@ -2003,34 +2169,46 @@ def load_history():
             with open(HISTORY_FILE, "r") as f:
                 data = json.load(f)
                 bot_state["simulated_balance"] = data.get("simulated_balance", 80.0)
-                bot_state["trade_history"] = [t for t in data.get("trade_history", []) if str(t.get("interval", "60")) not in ["5", "15"]]
+                bot_state["trade_history"] = [t for t in data.get("trade_history", []) if str(t.get("interval", "60")) != "5"]
                 for t in bot_state["trade_history"]:
                     if "interval" not in t:
                         t["interval"] = "60"
-                bot_state["prediction_history"] = [p for p in data.get("prediction_history", []) if str(p.get("interval", "60")) not in ["5", "15"]]
+                bot_state["prediction_history"] = [p for p in data.get("prediction_history", []) if str(p.get("interval", "60")) != "5"]
                 for p in bot_state["prediction_history"]:
                     if "interval" not in p:
                         p["interval"] = "60"
                 
                 # Load active trades
+                bot_state["active_trade_15m"] = data.get("active_trade_15m", [])
+                bot_state["active_trade_30m"] = data.get("active_trade_30m", [])
                 bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
                 bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
                 bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                 
                 # Migrate legacy active trades
-                for tf_key in ["1h", "2h", "4h", "6h"]:
+                for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
                     migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                     
                 bot_state["bot_running"] = data.get("bot_running", True)
                 bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
-                print(f"Loaded {len(bot_state['trade_history'])} trades and {len(bot_state['prediction_history'])} predictions from {HISTORY_FILE}")
                 
-                # Startup Balance Audit
-                active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
-                print(f"[Startup Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
+                active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                print(f"[Local Sync Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
+                return
         except Exception as e:
-            print(f"Error loading history from disk: {e}")
+            print(f"Error loading local history: {e}")
+
+    # Fallback default initial state
+    bot_state["simulated_balance"] = 80.0
+    bot_state["trade_history"] = []
+    bot_state["prediction_history"] = []
+    bot_state["active_trade_15m"] = []
+    bot_state["active_trade_30m"] = []
+    bot_state["active_trade_1h"] = []
+    bot_state["active_trade_2h"] = []
+    bot_state["active_trade_4h"] = []
+    bot_state["active_trade_6h"] = []
 
     # Force auto-reset if it's the first time running this updated version
     if not bot_state.get("fresh_reset_v3", False):
@@ -2039,6 +2217,8 @@ def load_history():
         bot_state["daily_drawdown_start_balance"] = 80.0
         bot_state["trade_history"] = []
         bot_state["prediction_history"] = []
+        bot_state["active_trade_15m"] = []
+        bot_state["active_trade_30m"] = []
         bot_state["active_trade_1h"] = []
         bot_state["active_trade_2h"] = []
         bot_state["active_trade_4h"] = []
@@ -5594,8 +5774,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         if "Trending" in regime_1h and dir_1h in ["Bullish", "Bearish"]:
             macro_pass = (ml_trend == dir_1h)
             detail_1h = f"1h Macro Trend is {dir_1h} (Signal: {ml_trend})"
-            if not macro_pass:
-                hard_gate_failed = True
+            # Soft check: deduct score instead of hard-gating scalps
         else:
             macro_pass = True
             detail_1h = f"1h Regime is {regime_1h} (Flexible Alignment)"
@@ -5612,7 +5791,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # ======= CHECK 3: 1h RSI (Weight: 2) =======
     weight_rsi = 2
     rsi_1h = df_1h["RSI"].iloc[-1]
-    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h", "5": "5m", "15": "15m"}
+    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h", "5": "5m", "15": "15m", "30": "30m"}
     tf_label = tf_map_local.get(str(interval), "1h")
     if ml_trend == "Bullish":
         rsi_1h_pass = (rsi_1h < 62.0)
@@ -6308,7 +6487,7 @@ def sync_active_positions_from_bybit():
                 with active_execution_lock:
                     in_active_execution = symbol in active_execution_symbols
                 if in_active_execution:
-                    print(f"[Crash Recovery] Skipped recovery scan for {symbol} — trade is currently being executed async.")
+                    print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
                     continue
                 if symbol not in matched_symbols:
                     avg_price = float(pos.get("avgPrice", "0"))
@@ -6423,7 +6602,7 @@ def sync_active_positions_from_bybit():
                         for k in ["1h", "2h", "4h", "6h"]
                     )
                     if already_in_any_tf:
-                        print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} — already tracked in an active timeframe.")
+                        print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe.")
                         continue
                     active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
                     if not isinstance(active_trades_list, list):
@@ -7560,13 +7739,13 @@ def main():
                 if not bot_state.get("circuit_breaker_active", False):
                     send_telegram_alert(f"⚠️ *DAILY DRAWDOWN CIRCUIT BREAKER* ⚠️\n• Start Balance: ${start_bal:.2f}\n• Current Balance: ${curr_bal:.2f}\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (>= 7%)\n• *Trading Halted* until reset.")
                 bot_state["circuit_breaker_active"] = True
-                print(f"[Circuit Breaker] TRIGGERED — Daily drawdown is {daily_dd_pct:.2f}% (>= 7.0%). Trading halted.")
+                print(f"[Circuit Breaker] TRIGGERED - Daily drawdown is {daily_dd_pct:.2f}% (>= 7.0%). Trading halted.")
             else:
                 bot_state["circuit_breaker_active"] = False
             if daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
                 bot_state["daily_goal_reached"] = True
                 send_telegram_alert(f"🎉 *DAILY PROFIT GOAL REACHED* 🎉\n• Daily Profit: *${daily_profit:.2f}* (Goal: $1,000)\n• Current Account Value: ${curr_bal:.2f}\n• Continuing trading to maximize gains.")
-                print(f"[Daily Goal] REACHED — daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
+                print(f"[Daily Goal] REACHED - daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
             elif daily_profit < 1000.0:
                 bot_state["daily_goal_reached"] = False
 
@@ -7870,16 +8049,20 @@ def main():
                         dir_total = prob_bearish + prob_bullish
                         
                         # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
-                        if str(iv) in ["15", "30"] and dir_total >= 0.05:
-                            norm_bear = prob_bearish / dir_total
-                            norm_bull = prob_bullish / dir_total
-                            
-                            if norm_bear >= 0.55 and prob_bearish >= 0.05:
-                                ml_trend = "Bearish"
-                                ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.3)))
-                            elif norm_bull >= 0.55 and prob_bullish >= 0.05:
-                                ml_trend = "Bullish"
-                                ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.3)))
+                        if str(iv) in ["15", "30"]:
+                            if dir_total > 0:
+                                norm_bear = prob_bearish / dir_total
+                                norm_bull = prob_bullish / dir_total
+                                
+                                if norm_bear >= 0.52:
+                                    ml_trend = "Bearish"
+                                    ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
+                                elif norm_bull >= 0.52:
+                                    ml_trend = "Bullish"
+                                    ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
+                                else:
+                                    ml_trend = "Neutral"
+                                    ml_confidence = prob_neutral
                             else:
                                 ml_trend = "Neutral"
                                 ml_confidence = prob_neutral
@@ -7897,7 +8080,8 @@ def main():
                         calibrated_confidence = ml_confidence
                         calibrator = models_tf["trending"]["calibrator"] if regime == "Trending" else models_tf["ranging"]["calibrator"]
                         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-                            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+                            iso_val = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+                            calibrated_confidence = max(ml_confidence, iso_val) if str(iv) in ["15", "30"] else iso_val
                             print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Calibrated: {calibrated_confidence*100:.2f}%")
                         else:
                             # Fallback to piecewise linear calibration
@@ -7921,10 +8105,10 @@ def main():
                                 if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
                                     age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
                                     decay = 0.5 ** (age_mins / 30.0)
-                                    total_decay_penalty += 0.10 * decay
+                                    total_decay_penalty += 0.03 * decay
                                     
                             if total_decay_penalty > 0:
-                                total_decay_penalty = min(0.15, total_decay_penalty)
+                                total_decay_penalty = min(0.04, total_decay_penalty)
                                 calibrated_confidence = max(0.0, calibrated_confidence - total_decay_penalty)
                                 print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction penalty (-{total_decay_penalty*100:.1f}%). Calibrated conf -> {calibrated_confidence*100:.2f}%")
 
@@ -8000,6 +8184,12 @@ def main():
                         }
                         floor_val = interval_conf_floors.get(str(iv), 0.55)
                         dynamic_conf_threshold = max(floor_val, dynamic_conf_threshold)
+
+                        # Cap threshold for short scalp timeframes (15m/30m) to prevent filter stacking
+                        if str(iv) == "15":
+                            dynamic_conf_threshold = min(0.56, dynamic_conf_threshold)
+                        elif str(iv) == "30":
+                            dynamic_conf_threshold = min(0.58, dynamic_conf_threshold)
 
                         # Bayesian Cold-Start Adjustment (Trades 3-9)
                         bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))
@@ -8245,7 +8435,7 @@ def main():
                                     is_golden_hour = 18 <= current_hour_pkt < 21
                                     
                                     # Pre-calculate active trade stats needed for dynamic sizing
-                                    total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["5m", "15m", "30m", "60m", "120m", "240m", "360m"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                                    total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
                                     current_bal = bot_state.get("simulated_balance", 80.0)
                                     if TRADE_MODE != "simulation":
                                         real_bal = get_real_bybit_balance_cached(force=True)
@@ -8431,12 +8621,23 @@ def main():
                                         # Pre-Trade Risk Checklist Check
                                         active_trades_list = [t for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])]
                                         df_dict = {symbol: df_completed}
+                                        for t in active_trades_list:
+                                            pos_sym = t.get("symbol")
+                                            if pos_sym and pos_sym != symbol and pos_sym not in df_dict:
+                                                try:
+                                                    df_pos = get_history(symbol=pos_sym, interval=str(iv), limit=100)
+                                                    if df_pos is not None and not df_pos.empty:
+                                                        df_dict[pos_sym] = df_pos
+                                                except Exception:
+                                                    pass
                                         passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
                                             symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv)
                                         )
                                         print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
                                         if not passed_checklist or wallet_exceeded:
                                             print(f"[{symbol} {iv}m Risk Checklist Block] Trade entry aborted.")
+                                            if not passed_checklist:
+                                                status_msg = "Skipped (Risk Checklist Block)"
                                             wallet_exceeded = True
                                             bybit_success = False
                                         else:

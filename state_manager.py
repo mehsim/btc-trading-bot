@@ -175,6 +175,9 @@ class StateManager:
 
     def get(self, key, default=None):
         with self._lock:
+            if key in self._cache and isinstance(self._cache[key], ObservedList):
+                return self._cache[key]
+                
             val = None
             if self._redis:
                 try:
