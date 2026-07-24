@@ -15,10 +15,14 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-print("[System Debug] main.py global execution started.")
 import re
 from datetime import datetime, timezone
 from kelly_tracker import global_kelly_tracker
+from volatility_clusterer import volatility_clusterer
+from gmm_trail import gmm_trailing_engine
+from garch_monitor import garch_vol_monitor
+from news_monitor import news_monitor
+from decay_calibrator import decay_calibrator
 
 class CircularLogBuffer:
     def __init__(self, capacity=100):
@@ -7159,28 +7163,20 @@ def main():
                         trailing_multiplier = 1.0
                     else:
                         current_adx = bot_state.get(f"adx_{tf}", 20.0)
-                        if current_adx >= 25.0:
-                            trailing_multiplier = 1.50
-                        elif current_adx < 18.0:
-                            trailing_multiplier = 0.90
-                        else:
-                            trailing_multiplier = 1.25
+                        # Rule 6: GMM-based continuous ADX trailing multiplier
+                        trailing_multiplier = gmm_trailing_engine.calculate_gmm_trailing_multiplier(current_adx)
 
-                    # 🥉 Upgrade 3: Time-Decayed Trailing Tightening (past 4.0 hours)
+                    # Rule 2: Adaptive Time-Decayed Trailing Tightening (per timeframe calibration)
                     entry_time_ms = active_trade.get("entry_time")
                     if entry_time_ms:
                         trade_age_hours = max(0.0, (time.time() - (entry_time_ms / 1000.0)) / 3600.0)
-                        if trade_age_hours > 4.0:
-                            decay_rate = min(0.30, 0.05 * ((trade_age_hours - 4.0) / 2.0))
+                        start_decay_h, decay_rate_unit = decay_calibrator.get_decay_start_and_rate(tf)
+                        if trade_age_hours > start_decay_h:
+                            decay_rate = min(0.30, decay_rate_unit * ((trade_age_hours - start_decay_h) / 2.0))
                             trailing_multiplier = trailing_multiplier * (1.0 - decay_rate)
 
-                    # 🥈 Upgrade 2: Adaptive Asset-Class Minimum Percentage Floor for Break-Even Guard
-                    if active_symbol in ["BTCUSDT", "ETHUSDT"]:
-                        min_pct_floor = 0.0050  # 0.50% Majors
-                    elif active_symbol in ["SOLUSDT", "AVAXUSDT", "BNBUSDT", "XRPUSDT", "NEARUSDT", "LINKUSDT", "DOTUSDT", "LTCUSDT", "DOGEUSDT", "ADAUSDT"]:
-                        min_pct_floor = 0.0080  # 0.80% Mid-caps
-                    else:
-                        min_pct_floor = 0.0120  # 1.20% Altcoins
+                    # Rule 1: Dynamic Parkinson Volatility K-Means Asset-Class Floor
+                    min_pct_floor = volatility_clusterer.get_symbol_break_even_floor(active_symbol)
                     
                     be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
                     required_be_dist = max(be_mult * atr_dollars, entry_price * min_pct_floor)
@@ -7785,34 +7781,50 @@ def main():
             curr_bal = current_equity_val
             daily_dd_pct = (start_bal - curr_bal) / start_bal * 100 if start_bal > 0 else 0
             daily_profit = curr_bal - start_bal
-            # Enable Daily Drawdown Circuit Breaker at 7%
-            if daily_dd_pct >= 7.0:
+            
+            # Rule 3: GARCH-scaled Dynamic Daily Circuit Breaker
+            btc_returns = None
+            if "df_dict" in locals() and isinstance(df_dict, dict) and "BTCUSDT" in df_dict:
+                btc_df = df_dict["BTCUSDT"]
+                if isinstance(btc_df, pd.DataFrame) and "close" in btc_df.columns:
+                    btc_returns = btc_df["close"].pct_change()
+
+            dynamic_halt_pct = garch_vol_monitor.get_dynamic_circuit_breaker_pct(btc_returns)
+            
+            if daily_dd_pct >= dynamic_halt_pct:
                 if not bot_state.get("circuit_breaker_active", False):
-                    send_telegram_alert(f"⚠️ *DAILY DRAWDOWN CIRCUIT BREAKER* ⚠️\n• Start Balance: ${start_bal:.2f}\n• Current Balance: ${curr_bal:.2f}\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (>= 7%)\n• *Trading Halted* until reset.")
+                    send_telegram_alert(f"⚠️ *DYNAMIC GARCH CIRCUIT BREAKER* ⚠️\n• Start Balance: ${start_bal:.2f}\n• Current Balance: ${curr_bal:.2f}\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (>= {dynamic_halt_pct:.2f}% GARCH limit)\n• *Trading Halted* until reset.")
                 bot_state["circuit_breaker_active"] = True
-                print(f"[Circuit Breaker] TRIGGERED - Daily drawdown is {daily_dd_pct:.2f}% (>= 7.0%). Trading halted.")
+                print(f"[Circuit Breaker] TRIGGERED - Daily drawdown is {daily_dd_pct:.2f}% (>= {dynamic_halt_pct:.2f}% GARCH limit). Trading halted.")
             else:
                 bot_state["circuit_breaker_active"] = False
-            if daily_profit >= 1000.0 and not bot_state.get("daily_goal_reached", False):
+
+            # Rule 4: Rolling 5.0% Equity Target (replaces static $1000)
+            rolling_equity_goal = max(100.0, curr_bal * 0.05)
+            if daily_profit >= rolling_equity_goal and not bot_state.get("daily_goal_reached", False):
                 bot_state["daily_goal_reached"] = True
-                send_telegram_alert(f"🎉 *DAILY PROFIT GOAL REACHED* 🎉\n• Daily Profit: *${daily_profit:.2f}* (Goal: $1,000)\n• Current Account Value: ${curr_bal:.2f}\n• Continuing trading to maximize gains.")
-                print(f"[Daily Goal] REACHED - daily profit of ${daily_profit:.2f} >= $1000. Continuing trading to maximize gains (no maximum limit).")
-            elif daily_profit < 1000.0:
+                send_telegram_alert(f"🎉 *ROLLING EQUITY GOAL REACHED* 🎉\n• Daily Profit: *${daily_profit:.2f}* (5% Equity Target: ${rolling_equity_goal:.2f})\n• Current Account Value: ${curr_bal:.2f}\n• Continuing trading to maximize gains.")
+                print(f"[Daily Goal] REACHED - daily profit of ${daily_profit:.2f} >= ${rolling_equity_goal:.2f} (5% target). Continuing trading.")
+            elif daily_profit < rolling_equity_goal:
                 bot_state["daily_goal_reached"] = False
 
-        # --- High-Impact News Window Guard ---
+        # --- Rule 5: Impact-Weighted News Window Guard ---
         def is_high_impact_news_window():
-            """Returns True if within 15 minutes of a known high-impact event (CPI, FOMC, NFP)."""
+            """Rule 5: Impact-Weighted News Blackout (15m, 30m, 45m)."""
+            news_active, news_reason = news_monitor.get_news_blackout_status()
+            if news_active:
+                return True, news_reason
+
             try:
                 now_utc = datetime.utcnow()
                 events = fetch_economic_calendar_cached()
                 for ev_time in events:
                     diff = abs((now_utc - ev_time).total_seconds())
-                    if diff <= 900:  # 15 minute window
+                    if diff <= 1800:  # 30 minute fallback window
                         return True, "High-Impact Economic Event"
             except Exception:
                 pass
-            return False, None
+            return False, ""
 
         # --- Consecutive Losses Cooldown Circuit Breaker ---
         def is_symbol_interval_cooling_off(symbol, interval):
