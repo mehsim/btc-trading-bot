@@ -18,6 +18,7 @@ if hasattr(sys.stderr, "reconfigure"):
 print("[System Debug] main.py global execution started.")
 import re
 from datetime import datetime, timezone
+from kelly_tracker import global_kelly_tracker
 
 class CircularLogBuffer:
     def __init__(self, capacity=100):
@@ -7575,6 +7576,9 @@ def main():
                         if realized_pnl < -position_size_usd:
                             realized_pnl = -position_size_usd
                             net_return_pct = -100.0
+                        
+                        # Log trade into KellyTracker for dynamic Quarter-Kelly sizing
+                        global_kelly_tracker.log_trade(active_symbol, str(iv), realized_pnl, net_return_pct)
                         
                         # Aggregate PnL and size for trade history logging if scaled out
                         original_size = float(active_trade.get("original_size", position_size_usd))
