@@ -16,6 +16,7 @@ if hasattr(sys.stderr, "reconfigure"):
         pass
 
 import re
+import numpy as np
 from datetime import datetime, timezone
 from kelly_tracker import global_kelly_tracker
 from volatility_clusterer import volatility_clusterer
