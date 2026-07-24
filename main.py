@@ -7185,8 +7185,9 @@ def main():
                                     active_trades_updated = True
                                     print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
                         
-                        # Break-Even Guard: if price goes up by 0.5 * ATR, move SL to entry
-                        if not break_even_triggered and current_price >= entry_price + 0.5 * atr_dollars:
+                        # Break-Even Guard: 0.65 ATR for scalps (15m/30m), 0.85 ATR for swing timeframes (1h, 2h, 4h, 6h)
+                        be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
+                        if not break_even_triggered and current_price >= entry_price + be_mult * atr_dollars:
                             target_sl = max(stop_loss, entry_price)
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
@@ -7196,14 +7197,14 @@ def main():
                                     stop_loss = target_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                                    print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
                             else:
                                 break_even_triggered = True
                                 active_trade["break_even_triggered"] = True
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = stop_loss
                                 active_trades_updated = True
-                                print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                                print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
                     else:
                         if current_price < lowest_price:
                             lowest_price = current_price
@@ -7224,8 +7225,9 @@ def main():
                                     active_trades_updated = True
                                     print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
                                 
-                        # Break-Even Guard: if price goes down by 0.5 * ATR, move SL to entry
-                        if not break_even_triggered and current_price <= entry_price - 0.5 * atr_dollars:
+                        # Break-Even Guard: 0.65 ATR for scalps (15m/30m), 0.85 ATR for swing timeframes (1h, 2h, 4h, 6h)
+                        be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
+                        if not break_even_triggered and current_price <= entry_price - be_mult * atr_dollars:
                             fee_buffer = entry_price * 0.0005
                             target_sl = min(stop_loss, entry_price + fee_buffer)
                             if TRADE_MODE != "simulation":
@@ -7236,14 +7238,14 @@ def main():
                                     stop_loss = target_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                                    print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
                             else:
                                 break_even_triggered = True
                                 active_trade["break_even_triggered"] = True
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = stop_loss
                                 active_trades_updated = True
-                                print(f"[{iv}m Break-Even Guard] Triggered! SL moved to entry price: {entry_price:.2f}")
+                                print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
     
                     # Trailing Stop Activation (40% TP progress): trail at 50% of unlocked profit
                     take_profit_val = active_trade.get("take_profit", 0.0)
