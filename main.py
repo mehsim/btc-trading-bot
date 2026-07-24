@@ -6919,6 +6919,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "atr_dollars": float(atr_dollars),
             "highest_price": float(entry_price),
             "lowest_price": float(entry_price),
+            "swing_low_3b": float(df_completed["low"].tail(3).min()) if (df_completed is not None and not df_completed.empty and "low" in df_completed.columns) else float(entry_price),
+            "swing_high_3b": float(df_completed["high"].tail(3).max()) if (df_completed is not None and not df_completed.empty and "high" in df_completed.columns) else float(entry_price),
             "break_even_triggered": False,
             "half_closed": False,
             "original_size": float(position_size_usd),
@@ -7152,7 +7154,6 @@ def main():
                     position_size_usd = active_trade.get("position_size_usd", 100.0)
     
                     # Volatility-Scaled Trailing Stops: multiplier is dynamic based on current ADX
-                    # If the position has scaled out (half closed), we use a tighter trailing stop of 1.0 * ATR
                     if active_trade.get("half_closed", False):
                         trailing_multiplier = 1.0
                     else:
@@ -7163,14 +7164,40 @@ def main():
                             trailing_multiplier = 0.90
                         else:
                             trailing_multiplier = 1.25
-    
+
+                    # 🥉 Upgrade 3: Time-Decayed Trailing Tightening (past 4.0 hours)
+                    entry_time_ms = active_trade.get("entry_time")
+                    if entry_time_ms:
+                        trade_age_hours = max(0.0, (time.time() - (entry_time_ms / 1000.0)) / 3600.0)
+                        if trade_age_hours > 4.0:
+                            decay_rate = min(0.30, 0.05 * ((trade_age_hours - 4.0) / 2.0))
+                            trailing_multiplier = trailing_multiplier * (1.0 - decay_rate)
+
+                    # 🥈 Upgrade 2: Adaptive Asset-Class Minimum Percentage Floor for Break-Even Guard
+                    if active_symbol in ["BTCUSDT", "ETHUSDT"]:
+                        min_pct_floor = 0.0050  # 0.50% Majors
+                    elif active_symbol in ["SOLUSDT", "AVAXUSDT", "BNBUSDT", "XRPUSDT", "NEARUSDT", "LINKUSDT", "DOTUSDT", "LTCUSDT", "DOGEUSDT", "ADAUSDT"]:
+                        min_pct_floor = 0.0080  # 0.80% Mid-caps
+                    else:
+                        min_pct_floor = 0.0120  # 1.20% Altcoins
+                    
+                    be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
+                    required_be_dist = max(be_mult * atr_dollars, entry_price * min_pct_floor)
+
                     # Update trailing stop peak prices
                     if direction == "Bullish":
                         if current_price > highest_price:
                             highest_price = current_price
                             active_trade["highest_price"] = highest_price
-                            # Trailing Stop: Trails highest price by dynamic multiplier
-                            potential_sl = highest_price - trailing_multiplier * atr_dollars
+                            
+                            # 🥇 Upgrade 1: Hybrid Structure-Based Swing Trail (ATR + 3-bar Swing Low)
+                            atr_sl = highest_price - trailing_multiplier * atr_dollars
+                            swing_low_3b = active_trade.get("swing_low_3b")
+                            if swing_low_3b is not None and swing_low_3b > 0:
+                                potential_sl = max(atr_sl, min(highest_price - 0.001 * entry_price, swing_low_3b))
+                            else:
+                                potential_sl = atr_sl
+
                             if potential_sl > stop_loss:
                                 if TRADE_MODE != "simulation":
                                     success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
@@ -7178,16 +7205,15 @@ def main():
                                         stop_loss = potential_sl
                                         active_trade["stop_loss"] = stop_loss
                                         active_trades_updated = True
-                                        print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                        print(f"[{iv}m Hybrid Swing Trail] Moved SL up to {stop_loss:.2f} (highest: {highest_price:.2f}, mult: {trailing_multiplier:.2f}x)")
                                 else:
                                     stop_loss = potential_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Trailing Stop] Moved SL up to {stop_loss:.2f} (trailing highest: {highest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                    print(f"[{iv}m Hybrid Swing Trail] Moved SL up to {stop_loss:.2f} (highest: {highest_price:.2f}, mult: {trailing_multiplier:.2f}x)")
                         
-                        # Break-Even Guard: 0.65 ATR for scalps (15m/30m), 0.85 ATR for swing timeframes (1h, 2h, 4h, 6h)
-                        be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
-                        if not break_even_triggered and current_price >= entry_price + be_mult * atr_dollars:
+                        # Break-Even Guard with Adaptive Floor
+                        if not break_even_triggered and current_price >= entry_price + required_be_dist:
                             target_sl = max(stop_loss, entry_price)
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
@@ -7197,20 +7223,27 @@ def main():
                                     stop_loss = target_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
+                                    print(f"[{iv}m Break-Even Guard] Triggered ({required_be_dist:.2f} dist)! SL moved to entry price: {entry_price:.2f}")
                             else:
                                 break_even_triggered = True
                                 active_trade["break_even_triggered"] = True
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = stop_loss
                                 active_trades_updated = True
-                                print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
+                                print(f"[{iv}m Break-Even Guard] Triggered ({required_be_dist:.2f} dist)! SL moved to entry price: {entry_price:.2f}")
                     else:
                         if current_price < lowest_price:
                             lowest_price = current_price
                             active_trade["lowest_price"] = lowest_price
-                            # Trailing Stop: Trails lowest price by dynamic multiplier
-                            potential_sl = lowest_price + trailing_multiplier * atr_dollars
+                            
+                            # 🥇 Upgrade 1: Hybrid Structure-Based Swing Trail (ATR + 3-bar Swing High)
+                            atr_sl = lowest_price + trailing_multiplier * atr_dollars
+                            swing_high_3b = active_trade.get("swing_high_3b")
+                            if swing_high_3b is not None and swing_high_3b > 0:
+                                potential_sl = min(atr_sl, max(lowest_price + 0.001 * entry_price, swing_high_3b))
+                            else:
+                                potential_sl = atr_sl
+
                             if potential_sl < stop_loss:
                                 if TRADE_MODE != "simulation":
                                     success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
@@ -7218,16 +7251,15 @@ def main():
                                         stop_loss = potential_sl
                                         active_trade["stop_loss"] = stop_loss
                                         active_trades_updated = True
-                                        print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                        print(f"[{iv}m Hybrid Swing Trail] Moved SL down to {stop_loss:.2f} (lowest: {lowest_price:.2f}, mult: {trailing_multiplier:.2f}x)")
                                 else:
                                     stop_loss = potential_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Trailing Stop] Moved SL down to {stop_loss:.2f} (trailing lowest: {lowest_price:.2f}, multiplier: {trailing_multiplier}x)")
+                                    print(f"[{iv}m Hybrid Swing Trail] Moved SL down to {stop_loss:.2f} (lowest: {lowest_price:.2f}, mult: {trailing_multiplier:.2f}x)")
                                 
-                        # Break-Even Guard: 0.65 ATR for scalps (15m/30m), 0.85 ATR for swing timeframes (1h, 2h, 4h, 6h)
-                        be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
-                        if not break_even_triggered and current_price <= entry_price - be_mult * atr_dollars:
+                        # Break-Even Guard with Adaptive Floor
+                        if not break_even_triggered and current_price <= entry_price - required_be_dist:
                             fee_buffer = entry_price * 0.0005
                             target_sl = min(stop_loss, entry_price + fee_buffer)
                             if TRADE_MODE != "simulation":
@@ -7238,14 +7270,14 @@ def main():
                                     stop_loss = target_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
+                                    print(f"[{iv}m Break-Even Guard] Triggered ({required_be_dist:.2f} dist)! SL moved to entry price: {entry_price:.2f}")
                             else:
                                 break_even_triggered = True
                                 active_trade["break_even_triggered"] = True
                                 stop_loss = target_sl
                                 active_trade["stop_loss"] = stop_loss
                                 active_trades_updated = True
-                                print(f"[{iv}m Break-Even Guard] Triggered ({be_mult} ATR)! SL moved to entry price: {entry_price:.2f}")
+                                print(f"[{iv}m Break-Even Guard] Triggered ({required_be_dist:.2f} dist)! SL moved to entry price: {entry_price:.2f}")
     
                     # Trailing Stop Activation (40% TP progress): trail at 50% of unlocked profit
                     take_profit_val = active_trade.get("take_profit", 0.0)
