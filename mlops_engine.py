@@ -92,6 +92,9 @@ def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 1
     
     quantiles = np.linspace(0, 100, num_buckets + 1)
     buckets = np.percentile(baseline, quantiles)
+    buckets = np.unique(buckets)
+    if len(buckets) < 2:
+        return 0.0
     buckets[0] -= 1e-5
     buckets[-1] += 1e-5
     
@@ -161,12 +164,15 @@ class IntervalPerformanceTracker:
     def log_prediction(self, interval: str, prediction: str, confidence: float, actual_outcome: str):
         interval_key = str(interval)
         with self._lock:
-            self.metrics[interval_key]["predictions"].append({
+            preds = self.metrics[interval_key]["predictions"]
+            preds.append({
                 "prediction": prediction,
                 "confidence": confidence,
                 "actual": actual_outcome,
                 "timestamp": datetime.utcnow().isoformat()
             })
+            if len(preds) > 500:
+                self.metrics[interval_key]["predictions"] = preds[-500:]
 
     def calculate_interval_accuracy(self, interval: str, window: int = 100) -> float:
         with self._lock:
