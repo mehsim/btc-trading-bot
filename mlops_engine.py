@@ -290,14 +290,22 @@ def get_bayesian_adjusted_threshold(interval: str, trade_db: list) -> dict:
         
     return {"ci_adjustment": 0.0, "confidence_boost": 0.0, "note": "Sufficient trade data (10+)"}
 
+from drift_detector import cusum_drift_detector
+
 def check_model_drift(interval: str, trade_history: list, window: int = 100) -> dict:
-    """Detect prediction quality & calibration degradation across recent trade history"""
+    """Rule 24: Detect prediction quality degradation using CUSUM Statistical Process Control."""
     recent = [t for t in trade_history if isinstance(t, dict) and str(t.get("interval")) == str(interval)][-window:]
     if len(recent) < 20:
         return {"status": "INSUFFICIENT_DATA", "accuracy": 0.0, "alerts": []}
     
     correct = sum(1 for t in recent if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
     accuracy = round(correct / len(recent), 4)
+
+    # Log latest outcome into CUSUM drift detector
+    latest_trade = recent[-1]
+    latest_outcome = 1 if (latest_trade.get("success") is True or float(latest_trade.get("pnl_usd", 0.0)) > 0) else 0
+    latest_conf = float(latest_trade.get("confidence", 0.70))
+    is_cusum_drift, s_high, err_rate = cusum_drift_detector.update(latest_outcome, latest_conf)
     
     high_conf = [t for t in recent if float(t.get("confidence", t.get("calibrated_confidence", 0.0))) >= 0.75]
     if high_conf:
@@ -307,17 +315,16 @@ def check_model_drift(interval: str, trade_history: list, window: int = 100) -> 
         high_conf_wr = 0.0
         
     alerts = []
-    if accuracy < 0.45:
-        alerts.append(f"MODEL_DEGRADED: Accuracy {accuracy*100:.1f}% < 45%")
-    if high_conf and high_conf_wr < 0.55:
-        alerts.append(f"CALIBRATION_DRIFT: High-confidence win rate {high_conf_wr*100:.1f}% < 55%")
+    if is_cusum_drift:
+        alerts.append(f"CUSUM Concept Drift Detected! S_high={s_high:.2f} >= 5.0 (Error rate: {err_rate*100:.1f}%)")
+    elif accuracy < 0.45:
+        alerts.append(f"Low overall accuracy ({accuracy*100:.1f}% < 45%)")
         
-    return {
-        "status": "ALERT" if alerts else "HEALTHY",
-        "accuracy": accuracy,
-        "high_conf_wr": high_conf_wr,
-        "alerts": alerts
-    }
+    if high_conf and high_conf_wr < 0.55:
+        alerts.append(f"High confidence win rate degraded ({high_conf_wr*100:.1f}% < 55%)")
+        
+    status = "DEGRADED" if alerts else "HEALTHY"
+    return {"status": status, "accuracy": accuracy, "high_conf_wr": high_conf_wr, "cusum_drift": is_cusum_drift, "alerts": alerts}
 
 trade_outcome_analyzer = TradeOutcomeAnalyzer()
 global_interval_tracker = IntervalPerformanceTracker()

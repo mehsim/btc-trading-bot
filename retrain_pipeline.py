@@ -29,24 +29,29 @@ class AutomatedRetrainTrigger:
             return True, f"Schedule Trigger ({max_days} Days Elapsed for {interval}m)"
         return self.check_triggers(current_data_len, live_sharpe, current_psi)
 
-    def check_triggers(self, current_data_len: int, live_sharpe: float = 1.0, current_psi: float = 0.0) -> tuple:
+    def check_triggers(self, current_data_len: int, live_sharpe: float = 1.0, current_psi: float = 0.0, is_cusum_drift: bool = False) -> tuple:
+        """Rule 27: On-demand event-driven retraining triggered by PSI > 0.25 or CUSUM drift."""
         now = time.time()
         triggered = False
         reason = "No Retrain Triggered"
         
-        # 1. Schedule Trigger: 7 days elapsed
-        if now - self.last_retrain_time >= 7 * 86400:
-            triggered, reason = True, "Schedule Trigger (7 Days Elapsed)"
+        # 1. Rule 27: Event-driven CUSUM Drift Trigger
+        if is_cusum_drift:
+            triggered, reason = True, "Event-Driven Trigger (CUSUM Concept Drift Fired)"
+
+        # 2. Rule 27: Event-driven PSI Trigger (PSI > 0.25)
+        elif current_psi > 0.25:
+            triggered, reason = True, f"Event-Driven Trigger (PSI Distribution Shift {current_psi:.3f} > 0.25)"
             
-        # 2. Performance Trigger: Sharpe ratio < 0.5
+        # 3. Performance Trigger: Sharpe ratio < 0.5
         elif live_sharpe < 0.5:
             triggered, reason = True, f"Performance Trigger (Live Sharpe {live_sharpe:.2f} < 0.50)"
             
-        # 3. Drift Trigger: PSI > 0.20
-        elif current_psi > 0.20:
-            triggered, reason = True, f"Drift Trigger (PSI {current_psi:.3f} > 0.20)"
+        # 4. Fallback Schedule Trigger: 7 days elapsed (max 7-day fallback guard)
+        elif now - self.last_retrain_time >= 7 * 86400:
+            triggered, reason = True, "Fallback Schedule Trigger (7 Days Elapsed)"
             
-        # 4. Data Accumulation Trigger: 30+ days of new data (approx 720 1h candles)
+        # 5. Data Accumulation Trigger: 30+ days of new data (approx 720 1h candles)
         elif self.last_data_count > 0 and (current_data_len - self.last_data_count) >= 720:
             triggered, reason = True, "Data Trigger (30+ Days of New Data Accumulated)"
 
