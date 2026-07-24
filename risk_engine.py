@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 from kelly_tracker import global_kelly_tracker
 from portfolio_risk import portfolio_risk_engine
 

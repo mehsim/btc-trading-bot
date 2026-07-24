@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 from sentiment_decay import sentiment_decay_engine
 
 def handle_feature_outliers(df: pd.DataFrame, window: int = 30) -> pd.DataFrame:
