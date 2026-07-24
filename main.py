@@ -7449,19 +7449,24 @@ def main():
                     
                     if TRADE_MODE != "simulation":
                         if bybit_closed:
-                            if bybit_realized_pnl is not None:
-                                if bybit_realized_pnl >= 0:
-                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
-                                else:
-                                    exit_reason = "STOP LOSS HIT [FAIL]"
+                            actual_exit = bybit_exit_price if bybit_exit_price is not None else current_price
+                            tp_hit = (actual_exit >= take_profit) if direction == "Bullish" else (actual_exit <= take_profit)
+                            sl_hit = (actual_exit <= stop_loss) if direction == "Bullish" else (actual_exit >= stop_loss)
+                            atr_ref = active_trade.get("atr_dollars") or (entry_price * 0.01)
+                            be_hit = abs(actual_exit - entry_price) < (0.25 * atr_ref)
+                            
+                            is_profit = (bybit_realized_pnl >= 0) if (bybit_realized_pnl is not None) else ((actual_exit - entry_price > 0) if direction == "Bullish" else (actual_exit - entry_price < 0))
+                            
+                            if tp_hit:
+                                exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+                            elif half_closed or active_trade.get("break_even_triggered"):
+                                exit_reason = "TRAILING STOP / BREAK-EVEN HIT [SUCCESS]" if is_profit else "STOP LOSS HIT [FAIL]"
+                            elif be_hit:
+                                exit_reason = "BREAK-EVEN EXIT [SUCCESS]" if is_profit else "STOP LOSS HIT [FAIL]"
+                            elif is_profit:
+                                exit_reason = "PROFITABLE EXIT [SUCCESS]"
                             else:
-                                actual_exit_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                                actual_change = actual_exit_price - entry_price
-                                is_profit = actual_change > 0 if direction == "Bullish" else actual_change < 0
-                                if is_profit:
-                                    exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "TAKE PROFIT HIT [SUCCESS]"
-                                else:
-                                    exit_reason = "STOP LOSS HIT [FAIL]"
+                                exit_reason = "STOP LOSS HIT [FAIL]"
                         elif exit_reason is not None:
                             # Cancel scale-out limit order if it exists
                             scale_out_id = active_trade.get("bybit_scale_out_order_id")
