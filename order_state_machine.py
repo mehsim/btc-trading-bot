@@ -14,6 +14,8 @@ class OrderState(Enum):
 
 import threading
 
+from api_telemetry import global_api_telemetry
+
 class IdempotencyCache:
     def __init__(self, ttl_seconds: float = 60.0):
         self.ttl = ttl_seconds
@@ -32,6 +34,8 @@ class IdempotencyCache:
 
     def _clean(self):
         now = time.time()
+        _, _, dynamic_ttl = global_api_telemetry.get_telemetry_params()
+        self.ttl = dynamic_ttl
         expired = [k for k, t in self._cache.items() if now - t > self.ttl]
         for k in expired:
             del self._cache[k]
@@ -46,8 +50,12 @@ def generate_client_order_id(symbol: str, side: str) -> str:
     idempotency_cache.add(cl_id)
     return cl_id
 
-def calculate_exponential_backoff_with_jitter(attempt: int, base_delay: float = 0.5, max_delay: float = 30.0, jitter_pct: float = 0.20) -> float:
-    delay = min(max_delay, base_delay * (2 ** attempt))
+def calculate_exponential_backoff_with_jitter(attempt: int, base_delay: float = None, max_delay: float = None, jitter_pct: float = 0.20) -> float:
+    dyn_base, dyn_max, _ = global_api_telemetry.get_telemetry_params()
+    eff_base = base_delay if base_delay is not None else dyn_base
+    eff_max = max_delay if max_delay is not None else dyn_max
+
+    delay = min(eff_max, eff_base * (2 ** attempt))
     jitter = delay * jitter_pct * (random.random() * 2 - 1) # ±20% jitter
     return max(0.1, delay + jitter)
 

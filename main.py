@@ -7280,43 +7280,51 @@ def main():
                                 active_trades_updated = True
                                 print(f"[{iv}m Break-Even Guard] Triggered ({required_be_dist:.2f} dist)! SL moved to entry price: {entry_price:.2f}")
     
-                    # Trailing Stop Activation (40% TP progress): trail at 50% of unlocked profit
+                    # Rule 10: ATR Fibonacci Step-Lock (38.2% -> lock 25%, 50% -> lock 40%, 61.8% -> lock 55%)
                     take_profit_val = active_trade.get("take_profit", 0.0)
                     total_tp_range = abs(take_profit_val - entry_price)
                     current_move = abs(current_price - entry_price)
                     progress_pct = (current_move / total_tp_range) if total_tp_range > 0 else 0.0
                     
-                    if progress_pct >= 0.40:
+                    locked_pct = 0.0
+                    if progress_pct >= 0.618:
+                        locked_pct = 0.55
+                    elif progress_pct >= 0.50:
+                        locked_pct = 0.40
+                    elif progress_pct >= 0.382:
+                        locked_pct = 0.25
+                        
+                    if locked_pct > 0.0:
                         if direction == "Bullish":
-                            trailing_40_sl = max(stop_loss, entry_price + (current_price - entry_price) * 0.50)
-                            if trailing_40_sl > stop_loss:
+                            fib_sl = max(stop_loss, entry_price + (current_price - entry_price) * locked_pct)
+                            if fib_sl > stop_loss:
                                 if TRADE_MODE != "simulation":
-                                    success = update_bybit_stop_loss(active_symbol, trailing_40_sl, active_trade)
+                                    success = update_bybit_stop_loss(active_symbol, fib_sl, active_trade)
                                     if success:
-                                        stop_loss = trailing_40_sl
+                                        stop_loss = fib_sl
                                         active_trade["stop_loss"] = stop_loss
                                         active_trades_updated = True
-                                        print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL up to {stop_loss:.2f}")
+                                        print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
                                 else:
-                                    stop_loss = trailing_40_sl
+                                    stop_loss = fib_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL up to {stop_loss:.2f}")
+                                    print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
                         else:
-                            trailing_40_sl = min(stop_loss, entry_price - (entry_price - current_price) * 0.50)
-                            if trailing_40_sl < stop_loss:
+                            fib_sl = min(stop_loss, entry_price - (entry_price - current_price) * locked_pct)
+                            if fib_sl < stop_loss:
                                 if TRADE_MODE != "simulation":
-                                    success = update_bybit_stop_loss(active_symbol, trailing_40_sl, active_trade)
+                                    success = update_bybit_stop_loss(active_symbol, fib_sl, active_trade)
                                     if success:
-                                        stop_loss = trailing_40_sl
+                                        stop_loss = fib_sl
                                         active_trade["stop_loss"] = stop_loss
                                         active_trades_updated = True
-                                        print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL down to {stop_loss:.2f}")
+                                        print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
                                 else:
-                                    stop_loss = trailing_40_sl
+                                    stop_loss = fib_sl
                                     active_trade["stop_loss"] = stop_loss
                                     active_trades_updated = True
-                                    print(f"[{iv}m Trailing 40% TP] Progress {progress_pct*100:.1f}% >= 40%. Moved SL down to {stop_loss:.2f}")
+                                    print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
 
                     # Scale-Out (50% partial profit taking at 1.0 * ATR)
                     half_closed = active_trade.get("half_closed", False)
