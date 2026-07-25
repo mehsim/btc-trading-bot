@@ -120,6 +120,21 @@ def init_db():
             );
         """)
         
+        # 8. Create Pending Pain Checks Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_pain_checks (
+                trade_id TEXT PRIMARY KEY,
+                symbol TEXT,
+                entry_price REAL,
+                exit_price REAL,
+                take_profit REAL,
+                stop_loss REAL,
+                exit_time REAL,
+                direction TEXT,
+                reason TEXT
+            );
+        """)
+        
         conn.commit()
         
         # 5. Check if migration from JSON is needed
@@ -213,6 +228,51 @@ def get_prediction_history(limit=500):
         finally:
             conn.close()
 
+def save_pending_pain_check(trade):
+    t_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(trade.get('exit_time', 0))}"
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            conn.execute("""
+                INSERT OR REPLACE INTO pending_pain_checks (
+                    trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (
+                t_id, trade.get("symbol"), trade.get("entry_price"), trade.get("exit_price"),
+                trade.get("take_profit"), trade.get("stop_loss"), trade.get("exit_time"),
+                trade.get("direction"), trade.get("reason")
+            ))
+            conn.commit()
+        except Exception as e:
+            print(f"[Database Error] Failed to save pending pain check: {e}")
+        finally:
+            conn.close()
+
+def get_pending_pain_checks():
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason FROM pending_pain_checks;")
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"[Database Error] Failed to fetch pending pain checks: {e}")
+            return []
+        finally:
+            conn.close()
+
+def delete_pending_pain_check(trade_id):
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            conn.execute("DELETE FROM pending_pain_checks WHERE trade_id = ?;", (trade_id,))
+            conn.commit()
+        except Exception as e:
+            print(f"[Database Error] Failed to delete pending pain check {trade_id}: {e}")
+        finally:
+            conn.close()
+
 def save_completed_trade(trade):
     t_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(trade.get('exit_time', 0))}"
     with db_lock:
@@ -236,6 +296,11 @@ def save_completed_trade(trade):
             print(f"[Database Error] Failed to save completed trade: {e}")
         finally:
             conn.close()
+            
+    reason_str = str(trade.get("reason", "")).upper()
+    if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
+        save_pending_pain_check(trade)
+
 
 def get_trade_history(limit=500):
     with db_lock:

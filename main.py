@@ -1,9 +1,10 @@
 import sys
 import os
+import time
+import json
+import re
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
-
-# Reconfigure stdout/stderr to UTF-8 to prevent 'charmap' / cp1252 UnicodeEncodeError on Windows
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -15,7 +16,6 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-import re
 import numpy as np
 from datetime import datetime, timezone
 from kelly_tracker import global_kelly_tracker
@@ -24,6 +24,190 @@ from gmm_trail import gmm_trailing_engine
 from garch_monitor import garch_vol_monitor
 from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
+from pain_feedback import pain_feedback
+import database
+
+ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
+
+# === FIX 1, 2, 3: TRADE STRUCTURE & RISK SANITIZATION GATE ===
+MAX_RR_RATIO = {
+    "5m": 3.0,
+    "15": 4.0, "15m": 4.0,
+    "30": 5.0, "30m": 5.0,
+    "60": 6.0, "1h": 6.0,
+    "120": 8.0, "2h": 8.0,
+    "240": 8.0, "4h": 8.0,
+    "360": 8.0, "6h": 8.0
+}
+
+MIN_RR_RATIO = {
+    "5m": 1.8,
+    "15": 2.0, "15m": 2.0,
+    "30": 2.5, "30m": 2.5,
+    "60": 3.0, "1h": 3.0,
+    "120": 4.0, "2h": 4.0,
+    "240": 4.0, "4h": 4.0,
+    "360": 4.0, "6h": 4.0
+}
+
+def compute_be_trigger_distance(atr_dollars, leverage, interval, mfe_trigger_atr_multiple, entry_price=0.0, min_pct_floor=0.0):
+    """
+    FIX 2: Compute minimum favorable move before break-even activates.
+    Enforces a minimum 1.0x ATR distance for leverage > 10x to prevent premature BE chop-outs.
+    """
+    base_be_dist = max(mfe_trigger_atr_multiple * atr_dollars, entry_price * min_pct_floor)
+    if leverage > 10.0:
+        min_be_dist = 1.0 * atr_dollars
+        final_be_dist = max(base_be_dist, min_be_dist)
+        return final_be_dist
+    return base_be_dist
+
+def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, leverage, interval, symbol, direction):
+    """
+    UNIVERSAL TRADE STRUCTURE SANITIZER: Pre-flight gate before order placement.
+    Validates & adjusts R:R ratio, minimum stop width, and leverage compatibility.
+    Returns: (is_valid, adjusted_dict, log_reason_str)
+    """
+    stop_dist = abs(entry_price - stop_price)
+    tp_dist = abs(tp_price - entry_price)
+    
+    adjusted = {
+        "stop_price": stop_price,
+        "tp_price": tp_price,
+        "leverage": leverage,
+        "stop_dist": stop_dist,
+        "tp_dist": tp_dist
+    }
+    logs = []
+    
+    # 1. Enforce minimum stop width for ALL trades
+    min_stop = atr_dollars * 1.0 if leverage > 10.0 else atr_dollars * 0.75
+    if stop_dist < min_stop:
+        if leverage > 10.0:
+            adjusted["leverage"] = 10.0
+            logs.append(f"[LEVERAGE_CAPPED] {symbol} {interval} leverage reduced from {leverage:.1f}x to 10.0x & SL widened from ${stop_dist:.4f} to 1.0x ATR (${min_stop:.4f})")
+        else:
+            logs.append(f"[STOP_WIDENED] {symbol} {interval} SL widened from ${stop_dist:.4f} to 0.75x ATR (${min_stop:.4f})")
+            
+        required_stop = min_stop
+        if direction == "Bearish":
+            adjusted["stop_price"] = entry_price + required_stop
+        else:
+            adjusted["stop_price"] = entry_price - required_stop
+        adjusted["stop_dist"] = required_stop
+
+    # 2. Universal R:R Ratio Capping by timeframe (Max Cap)
+    iv_str = str(interval).replace("m", "")
+    max_rr = MAX_RR_RATIO.get(str(interval), MAX_RR_RATIO.get(iv_str, 4.0))
+    current_rr = adjusted["tp_dist"] / adjusted["stop_dist"] if adjusted["stop_dist"] > 0 else 0.0
+    
+    if current_rr > max_rr:
+        max_allowed_tp_dist = adjusted["stop_dist"] * max_rr
+        if direction == "Bearish":
+            adjusted["tp_price"] = entry_price - max_allowed_tp_dist
+        else:
+            adjusted["tp_price"] = entry_price + max_allowed_tp_dist
+        adjusted["tp_dist"] = max_allowed_tp_dist
+        current_rr = max_rr
+        logs.append(f"[TP_CAPPED_UNIVERSAL] {symbol} {interval} R:R capped from {tp_dist/adjusted['stop_dist']:.1f}:1 to {max_rr:.1f}:1 (TP dist reduced from ${tp_dist:.4f} to ${max_allowed_tp_dist:.4f})")
+        
+    # 3. Minimum R:R Ratio Floor Gate (Reject trades below minimum viable R:R)
+    min_rr = MIN_RR_RATIO.get(str(interval), MIN_RR_RATIO.get(iv_str, 2.0))
+    if current_rr < min_rr:
+        logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1")
+        return False, adjusted, "; ".join(logs)
+        
+    return True, adjusted, "; ".join(logs) if logs else "OK"
+
+class AdaptiveVolumeGate:
+    def __init__(self, lookback_days=30, optimization_window=500):
+        self.lookback_days = lookback_days
+        self.optimization_window = optimization_window
+        self.threshold_cache = {}
+        self.last_optimized = {}
+
+    def get_volume_percentile(self, symbol, kline_df=None):
+        try:
+            if kline_df is not None and "volume" in kline_df.columns and len(kline_df) >= 10:
+                volumes = kline_df["volume"].values
+                current_vol = volumes[-1]
+                percentile = float(np.mean(volumes <= current_vol))
+                return percentile
+        except Exception:
+            pass
+        return 1.0
+
+    def optimize_threshold(self, symbol):
+        try:
+            trades = database.get_trade_history(limit=self.optimization_window)
+            sym_trades = [t for t in trades if isinstance(t, dict) and t.get("symbol") == symbol]
+            if len(sym_trades) < 20:
+                return 0.25
+            
+            best_threshold = 0.25
+            best_profit = -float('inf')
+            for threshold in np.arange(0.10, 0.51, 0.05):
+                allowed = [t for t in sym_trades if t.get("raw_data") and json.loads(t["raw_data"]).get("vol_pctile", 1.0) >= threshold]
+                if len(allowed) < 5:
+                    continue
+                pnl_sum = sum(float(t.get("pnl_usd", 0.0)) for t in allowed)
+                if pnl_sum > best_profit:
+                    best_profit = pnl_sum
+                    best_threshold = threshold
+            self.threshold_cache[symbol] = float(best_threshold)
+            self.last_optimized[symbol] = time.time()
+            return float(best_threshold)
+        except Exception:
+            return 0.25
+
+    def check(self, symbol, kline_df=None):
+        current_pct = self.get_volume_percentile(symbol, kline_df=kline_df)
+        last_opt = self.last_optimized.get(symbol, 0)
+        if time.time() - last_opt > 86400 * 7 or symbol not in self.threshold_cache:
+            threshold = self.optimize_threshold(symbol)
+        else:
+            threshold = self.threshold_cache[symbol]
+            
+        if current_pct < threshold:
+            return False, f"VOLUME_GATE_BLOCKED: {symbol} 4H volume at {current_pct:.1%} (Threshold: {threshold:.1%})", current_pct
+        return True, f"VOLUME_GATE_PASSED: {symbol} 4H volume at {current_pct:.1%}", current_pct
+
+class MFEBreakEvenTrigger:
+    def __init__(self, lookback_trades=150, min_sample_size=15):
+        self.lookback_trades = lookback_trades
+        self.min_sample_size = min_sample_size
+        self.trigger_cache = {}
+
+    def get_trigger_multiple(self, symbol, timeframe="60"):
+        key = (symbol, str(timeframe))
+        if key in self.trigger_cache:
+            return self.trigger_cache[key]
+            
+        try:
+            trades = database.get_trade_history(limit=self.lookback_trades)
+            sym_winning_trades = [
+                t for t in trades
+                if isinstance(t, dict) and t.get("symbol") == symbol and float(t.get("pnl_usd", 0.0)) > 0
+            ]
+            mfe_ratios = []
+            for t in sym_winning_trades:
+                atr = float(t.get("atr_dollars", 0.0))
+                if atr > 0:
+                    raw = json.loads(t.get("raw_data", "{}")) if t.get("raw_data") else {}
+                    mfe_val = float(raw.get("mfe", 0.0))
+                    if mfe_val > 0:
+                        mfe_ratios.append(mfe_val / atr)
+            if len(mfe_ratios) >= self.min_sample_size:
+                trig = float(np.percentile(mfe_ratios, 25))
+                trig = float(np.clip(trig, 0.8, 2.0))
+                self.trigger_cache[key] = trig
+                return trig
+        except Exception:
+            pass
+        return 0.85 if str(timeframe) not in ["15", "30"] else 0.65
+
+adaptive_volume_gate = AdaptiveVolumeGate()
+mfe_be_trigger = MFEBreakEvenTrigger()
 
 class CircularLogBuffer:
     def __init__(self, capacity=100):
@@ -1522,7 +1706,7 @@ def start_telegram_command_listener():
                         if text == "/active":
                             active_trades_summary = []
                             with active_trades_lock:
-                                for tf_key in ["1h", "2h", "4h", "6h"]:
+                                for tf_key in ACTIVE_TRADE_TF_KEYS:
                                     trades = bot_state.get(f"active_trade_{tf_key}", [])
                                     for t in trades:
                                         symbol = t.get("symbol")
@@ -1763,7 +1947,7 @@ def start_telegram_command_listener():
                         elif text == "/clean_duplicates":
                             cleaned_count = 0
                             with active_trades_lock:
-                                for tf_key in ["1h", "2h", "4h", "6h"]:
+                                for tf_key in ACTIVE_TRADE_TF_KEYS:
                                     trades = bot_state.get(f"active_trade_{tf_key}", [])
                                     seen_symbols = set()
                                     unique_trades = []
@@ -1991,7 +2175,7 @@ def save_history():
             # Persist active trades to SQLite database
             try:
                 import database
-                for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                for tf_key in ACTIVE_TRADE_TF_KEYS:
                     database.save_active_trades(tf_key, bot_state.get(f"active_trade_{tf_key}", []))
             except Exception as db_sync_err:
                 print(f"[Database Sync Warning] Failed to persist active trades to SQLite: {db_sync_err}")
@@ -2152,7 +2336,7 @@ def load_history():
                     bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                     
                     # Migrate legacy active trades
-                    for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                    for tf_key in ACTIVE_TRADE_TF_KEYS:
                         migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                         
                     bot_state["bot_running"] = data.get("bot_running", True)
@@ -2160,7 +2344,7 @@ def load_history():
                     print(f"Sync Success: Loaded {len(remote_trades)} trades and {len(remote_predictions)} predictions from AWS Server ({sync_url}).")
                     
                     # Startup Balance Audit
-                    active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                    active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ACTIVE_TRADE_TF_KEYS for t in bot_state.get(f"active_trade_{tf_key}", []))
                     print(f"[Startup Sync Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
                     
                     save_history()
@@ -2193,13 +2377,13 @@ def load_history():
                 bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
                 
                 # Migrate legacy active trades
-                for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                for tf_key in ACTIVE_TRADE_TF_KEYS:
                     migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                     
                 bot_state["bot_running"] = data.get("bot_running", True)
                 bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                 
-                active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ACTIVE_TRADE_TF_KEYS for t in bot_state.get(f"active_trade_{tf_key}", []))
                 print(f"[Local Sync Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
                 return
         except Exception as e:
@@ -3015,7 +3199,7 @@ def get_health():
         
     active_count = 0
     with bot_state_lock:
-        for tf in ["1h", "2h", "4h", "6h"]:
+        for tf in ACTIVE_TRADE_TF_KEYS:
             active_count += len(bot_state.get(f"active_trade_{tf}", []))
             
     return jsonify({
@@ -3034,7 +3218,7 @@ def get_status():
     # Thread-safe dictionary copy using the global bot_state_lock
     with bot_state_lock:
         state_copy = bot_state.copy()
-        for tf in ["15m", "30m", "1h", "2h"]:
+        for tf in ACTIVE_TRADE_TF_KEYS:
             tf_key = f"active_trade_{tf}"
             if tf_key in state_copy and isinstance(state_copy[tf_key], list):
                 state_copy[tf_key] = list(state_copy[tf_key])
@@ -3076,7 +3260,15 @@ def force_close_trade():
     interval = str(data.get("interval", ""))
     symbol = str(data.get("symbol", "")).upper()
     
-    tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+    tf_map_local = {
+        "5": "5m", "5m": "5m",
+        "15": "15m", "15m": "15m",
+        "30": "30m", "30m": "30m",
+        "60": "1h", "1h": "1h",
+        "120": "2h", "2h": "2h",
+        "240": "4h", "4h": "4h",
+        "360": "6h", "6h": "6h"
+    }
     tf = tf_map_local.get(interval)
     if not tf:
         return jsonify({"status": "error", "message": "Invalid interval specified."}), 400
@@ -3339,7 +3531,7 @@ def close_all_trades_internal(exit_reason):
             
     # 2. Iterate and clear all local active trades from bot_state
     with active_trades_lock:
-        for tf_key in ["1h", "2h", "4h", "6h"]:
+        for tf_key in ACTIVE_TRADE_TF_KEYS:
             active_trade_key = f"active_trade_{tf_key}"
             active_trades = bot_state.get(active_trade_key, [])
             if not isinstance(active_trades, list):
@@ -4014,7 +4206,22 @@ def run_daily_backup_scheduler():
         except Exception as e:
             print(f"[Backup Scheduler Error] Daily backup failed: {e}")
 
+def run_pain_feedback_verifier():
+    """
+    Background worker that runs hourly to verify whether closed pain trades hit TP within 24h post-exit.
+    """
+    print("[Pain Feedback Verifier] Hourly 24h post-exit verification scheduler started.")
+    while True:
+        try:
+            time.sleep(3600)  # Check hourly
+            from data import get_history
+            pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
+        except Exception as e:
+            print(f"[Pain Feedback Verifier Error] Exception in verification loop: {e}")
+
+
 def run_daily_summary_scheduler():
+
     """
     Background scheduler that guarantees daily 00:00:00 UTC report execution.
     Calculates time to UTC midnight, sleeps, and sends Telegram daily digest.
@@ -4270,7 +4477,7 @@ def run_fallback_price_updater():
         try:
             now = time.time()
             ws_active = ws_connected and (now - last_ws_update_time < 30)
-            has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+            has_active_trades = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ACTIVE_TRADE_TF_KEYS)
 
             # Adaptive interval: 20s if WS down with trades, 60s if WS down idle, 900s if WS up
             if not ws_active:
@@ -5571,7 +5778,7 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
 
     # Collect active trades from all timeframes
     open_trades = []
-    for tf_key in ["1h", "2h", "4h", "6h"]:
+    for tf_key in ACTIVE_TRADE_TF_KEYS:
         open_trades.extend(bot_state.get(f"active_trade_{tf_key}", []))
 
     if not open_trades:
@@ -6308,7 +6515,7 @@ def sync_active_positions_from_bybit():
         with active_trades_lock:
             matched_symbols = set()
             
-            for tf_key in ["1h", "2h", "4h", "6h"]:
+            for tf_key in ACTIVE_TRADE_TF_KEYS:
                 current_trades = bot_state.get(f"active_trade_{tf_key}", [])
                 if not isinstance(current_trades, list):
                     current_trades = []
@@ -6390,7 +6597,7 @@ def sync_active_positions_from_bybit():
                         # Proportional Unrealized PnL calculation
                         try:
                             same_symbol_trades = []
-                            for tf_check in ["1h", "2h", "4h", "6h"]:
+                            for tf_check in ACTIVE_TRADE_TF_KEYS:
                                 for t_item in bot_state.get(f"active_trade_{tf_check}", []):
                                     if t_item.get("symbol") == symbol:
                                         same_symbol_trades.append(t_item)
@@ -6564,7 +6771,7 @@ def sync_active_positions_from_bybit():
                             if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
                                 token_val_not_used = None
                                 matched_tf_interval = p.get("interval", "60")
-                                tf_map_inv = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                                tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
                                 matched_tf = tf_map_inv.get(matched_tf_interval, "1h")
                                 matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
                                 break
@@ -6605,7 +6812,7 @@ def sync_active_positions_from_bybit():
                     # Cross-timeframe duplicate guard: skip if symbol already active in ANY timeframe
                     already_in_any_tf = any(
                         any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
-                        for k in ["1h", "2h", "4h", "6h"]
+                        for k in ACTIVE_TRADE_TF_KEYS
                     )
                     if already_in_any_tf:
                         print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe.")
@@ -6721,7 +6928,8 @@ def execute_bybit_trade_async(*args, **kwargs):
         with active_execution_lock:
             active_execution_symbols.discard(symbol)
 
-def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key):
+def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False):
+
     if latest_candle is None:
         latest_candle = {}
     if df_completed is None:
@@ -6937,8 +7145,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "confidence": float(calibrated_confidence),
             "qty": float(actual_qty),
             "original_qty": float(actual_qty),
-            "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
+            "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0,
+            "oversized": bool(is_oversized)
         }
+
         
         with active_trades_lock:
             current_trades = bot_state.get(active_trade_key, [])
@@ -7049,7 +7259,7 @@ def main():
         current_time = time.time()
         
         # Sync active positions from Bybit periodically to save proxy bandwidth
-        has_active_positions = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ["1h", "2h", "4h", "6h"])
+        has_active_positions = any(len(bot_state.get(f"active_trade_{tf}", [])) > 0 for tf in ACTIVE_TRADE_TF_KEYS)
         sync_interval = POSITION_SYNC_INTERVAL_SECS if has_active_positions else POSITION_SYNC_IDLE_INTERVAL_SECS
         
         if (current_time - last_position_sync_time >= sync_interval):
@@ -7176,11 +7386,11 @@ def main():
                             decay_rate = min(0.30, decay_rate_unit * ((trade_age_hours - start_decay_h) / 2.0))
                             trailing_multiplier = trailing_multiplier * (1.0 - decay_rate)
 
-                    # Rule 1: Dynamic Parkinson Volatility K-Means Asset-Class Floor
-                    min_pct_floor = volatility_clusterer.get_symbol_break_even_floor(active_symbol)
-                    
-                    be_mult = 0.65 if str(iv) in ["15", "30"] else 0.85
-                    required_be_dist = max(be_mult * atr_dollars, entry_price * min_pct_floor)
+                    # Auto-Calibrated Stop Floor & MFE-Based Break-Even Trigger (Hardened for high leverage)
+                    min_pct_floor = risk_engine.auto_stop_floor.get_floor(active_symbol, database_module=database) if hasattr(risk_engine, 'auto_stop_floor') else volatility_clusterer.get_symbol_break_even_floor(active_symbol)
+                    be_mult = mfe_be_trigger.get_trigger_multiple(active_symbol, timeframe=str(iv))
+                    trade_leverage = float(active_trade.get("leverage", 1.0))
+                    required_be_dist = compute_be_trigger_distance(atr_dollars, trade_leverage, iv, be_mult, entry_price, min_pct_floor)
 
                     # Update trailing stop peak prices
                     if direction == "Bullish":
@@ -7360,8 +7570,10 @@ def main():
                             else:
                                 net_return_pct = _q2((pnl_usd / closed_size) * 100.0) if closed_size > 0 else 0.0
                             
-                            # Save scaled out pnl
+                            # Save scaled out pnl and execution metadata
                             active_trade["scaled_out_pnl"] = pnl_usd
+                            active_trade["scale_out_price"] = current_price
+                            active_trade["scaled_out_margin"] = closed_size
                             
                             # Refund closed size + PnL to wallet balance (only in simulation)
                             if TRADE_MODE == "simulation":
@@ -7412,8 +7624,10 @@ def main():
                             else:
                                 net_return_pct = round((pnl_usd / closed_size) * 100.0, 2) if closed_size > 0 else 0.0
                             
-                            # Save scaled out pnl
+                            # Save scaled out pnl and execution metadata
                             active_trade["scaled_out_pnl"] = pnl_usd
+                            active_trade["scale_out_price"] = current_price
+                            active_trade["scaled_out_margin"] = closed_size
                             
                             # Refund closed size + PnL to wallet balance (only in simulation)
                             if TRADE_MODE == "simulation":
@@ -7650,6 +7864,31 @@ def main():
                         # Log to trade journal CSV
                         log_trade_journal(bot_state["trade_history"][-1])
                         
+                        # Build Scale-Out details block if trade was half-closed
+                        scale_out_block = ""
+                        if active_trade.get("half_closed", False):
+                            stage1_price = float(active_trade.get("scale_out_price", entry_price))
+                            stage1_margin = float(active_trade.get("scaled_out_margin", original_size / 2.0))
+                            stage1_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
+                            
+                            stage2_price = actual_price
+                            stage2_margin = float(position_size_usd)
+                            stage2_pnl = float(realized_pnl)
+                            
+                            stage2_name = "Trailing Stop Hit" if "TRAILING" in str(exit_reason).upper() else "Take Profit Hit" if "TAKE PROFIT" in str(exit_reason).upper() else "Final Exit"
+                            
+                            scale_out_block = (
+                                f"\n\n🥞 *Scale-Out Execution Details*\n"
+                                f"• *Stage 1: Partial Profit Locked (50% Scale-Out)*\n"
+                                f"  - Target Price: `${stage1_price:.4f}`\n"
+                                f"  - Returned Margin: `${stage1_margin:.2f}`\n"
+                                f"  - PnL Realized: *${stage1_pnl:+.2f}*\n"
+                                f"• *Stage 2: {stage2_name} (Remaining 50%)*\n"
+                                f"  - Exit Price: `${stage2_price:.4f}`\n"
+                                f"  - Returned Margin: `${stage2_margin:.2f}`\n"
+                                f"  - PnL Realized: *${stage2_pnl:+.2f}*"
+                            )
+
                         if total_pnl > 0:
                             exit_header = "🚀 *TAKE PROFIT HIT* 🚀" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 *TRAILING STOP HIT (PROFITABLE)* 📈" if "TRAILING" in str(exit_reason).upper() else "🎉 *TRADE CLOSED WITH PROFIT* 🎉"
                             send_telegram_alert(
@@ -7657,11 +7896,12 @@ def main():
                                 f"• *Asset*: {active_symbol}\n"
                                 f"• *Interval*: {iv}m\n"
                                 f"• *Direction*: {direction}\n"
-                                f"• *Entry Price*: ${entry_price:.2f}\n"
-                                f"• *Exit Price*: ${actual_price:.2f}\n"
+                                f"• *Entry Price*: ${entry_price:.4f}\n"
+                                f"• *Exit Price*: ${actual_price:.4f}\n"
                                 f"• *Realized PnL*: *${total_pnl:+.2f}* (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
                                 f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
                                 f"• *New Balance*: ${new_bal:.2f}"
+                                f"{scale_out_block}"
                             )
                         else:
                             send_telegram_alert(
@@ -7670,10 +7910,11 @@ def main():
                                 f"• *Interval*: {iv}m\n"
                                 f"• *Direction*: {direction}\n"
                                 f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
-                                f"• *Entry Price*: ${entry_price:.2f}\n"
-                                f"• *Exit Price*: ${actual_price:.2f}\n"
+                                f"• *Entry Price*: ${entry_price:.4f}\n"
+                                f"• *Exit Price*: ${actual_price:.4f}\n"
                                 f"• *Realized PnL*: ${total_pnl:+.2f} (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
                                 f"• *New Balance*: ${new_bal:.2f}"
+                                f"{scale_out_block}"
                             )
                         
                         
@@ -8476,21 +8717,16 @@ def main():
                                         # Scale SL down by up to 30% for maximum confidence trades
                                         sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
                                         
-                                    min_sl_pct = 1.0 if symbol == "BTCUSDT" else (1.5 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 2.0)
-                                    min_sl_dist = entry_price * (min_sl_pct / 100.0)
-                                    raw_sl_dist = max(sl_multiplier_adjusted * atr_dollars, min_sl_dist)
+                                    raw_sl_dist = risk_engine.calculate_final_stop_distance(
+                                        entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
+                                    )
                                     
-                                    min_tp_dist = entry_price * 0.015
                                     if ml_trend == "Bullish":
                                         stop_loss_price = entry_price - raw_sl_dist
-                                        atr_tp_price = entry_price + tp_change
-                                        est_tp_price = estimate_liquidation_pool(df, "Bullish", entry_price)
-                                        take_profit_price = max(entry_price + min_tp_dist, min(est_tp_price, entry_price + 1.5 * tp_change))
+                                        take_profit_price = entry_price + tp_change
                                     else:
                                         stop_loss_price = entry_price + raw_sl_dist
-                                        atr_tp_price = entry_price - tp_change
-                                        est_tp_price = estimate_liquidation_pool(df, "Bearish", entry_price)
-                                        take_profit_price = min(entry_price - min_tp_dist, max(est_tp_price, entry_price - 1.5 * tp_change))
+                                        take_profit_price = entry_price - tp_change
                                     print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
 
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
@@ -8631,14 +8867,35 @@ def main():
                                         if 18 <= current_hour_pkt < 21:
                                             leverage_val *= 2.0
                                             lev_cap *= 2.0
-                                            print(f"[{symbol} {iv}m Golden Hour Boost] 18:00 - 21:00 PKT: Doubled leverage target to {leverage_val:.1f}x and cap to {lev_cap:.1f}x")
-                                            
                                         # Sharpe-Adaptive Leverage Multiplier (Dynamic drawdown safety)
                                         sharpe_mult = calculate_recent_performance_leverage_multiplier(days=7)
                                         leverage_val = leverage_val * sharpe_mult
                                         lev_cap = lev_cap * sharpe_mult
                                             
                                         leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
+
+                                        # === FIX 1 & 3: COMBINED PRE-FLIGHT ENTRY VALIDATION ===
+                                        is_valid, adjusted_struct, struct_log = validate_trade_structure(
+                                            entry_price=entry_price,
+                                            stop_price=stop_loss_price,
+                                            tp_price=take_profit_price,
+                                            atr_dollars=atr_dollars,
+                                            leverage=leverage_val,
+                                            interval=iv,
+                                            symbol=symbol,
+                                            direction=ml_trend
+                                        )
+                                        if not is_valid:
+                                            print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Trade submission aborted: {struct_log}")
+                                            status_msg = "Skipped (Min R:R Floor Reject)"
+                                            continue
+
+                                        if struct_log != "OK":
+                                            print(f"[{symbol} {iv}m Pre-Flight Audit] {struct_log}")
+
+                                        stop_loss_price = adjusted_struct["stop_price"]
+                                        take_profit_price = adjusted_struct["tp_price"]
+                                        leverage_val = adjusted_struct["leverage"]
 
                                         cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
                                         lookahead = cfg.get("lookahead", 10)
@@ -8650,7 +8907,12 @@ def main():
                                         raw_qty = leveraged_size / entry_price
                                         qty_str = format_bybit_qty(symbol, raw_qty)
                                         qty_val = float(qty_str)
-                                        
+                                         
+                                        original_notional = qty_val * entry_price
+                                        original_stop_dist = abs(entry_price - stop_loss_price)
+                                        original_risk_usd = (original_notional / entry_price) * original_stop_dist
+                                        is_oversized_trade = False
+
                                         # Enforce minimum order value of 5.0 USDT (using 5.1 USDT as buffer)
                                         min_order_value = 5.1
                                         if qty_val * entry_price < min_order_value:
@@ -8662,25 +8924,45 @@ def main():
                                                 qty_str = format_bybit_qty(symbol, qty_val)
                                                 qty_val = float(qty_str)
                                                 raw_qty = qty_val
-                                                print(f"[{symbol} {iv}m API] Enforced minimum order value. Adjusted quantity to {qty_str} (Value: ${qty_val * entry_price:.2f})")
+                                                
+                                            scaled_notional = qty_val * entry_price
+                                            
+                                            # Priority 1: Tighten stop distance proportionally to keep dollar risk constant
+                                            scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
+                                            new_stop_dist = original_stop_dist * scale_ratio
+                                            
+                                            if str(ml_trend).upper() == "LONG":
+                                                new_sl_price = entry_price - new_stop_dist
+                                            else:
+                                                new_sl_price = entry_price + new_stop_dist
+                                                
+                                            scaled_risk_usd = (scaled_notional / entry_price) * new_stop_dist
+                                            
+                                            # Priority 2: Hard Cap - Never exceed 110% of approved original risk
+                                            if scaled_risk_usd > original_risk_usd * 1.10:
+                                                print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed 110% of approved risk (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
+                                                status_msg = "Skipped (Exceeds 110% Risk Cap)"
+                                                wallet_exceeded = True
+                                            else:
+                                                stop_loss_price = new_sl_price
+                                                is_oversized_trade = True
+                                                print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Tightened SL from ${original_stop_dist:.2f} to ${new_stop_dist:.2f} to keep risk constant at ${scaled_risk_usd:.2f}.")
 
-                                        # Balance Guard: if required margin exceeds 90% of available balance, dynamically scale up leverage
+                                        # Priority 3: Balance Guard - Remove auto-leverage escalation. If margin doesn't fit within 90% of balance, reject trade.
                                         required_margin = (qty_val * entry_price) / leverage_val
-                                        if TRADE_MODE != "simulation" and required_margin > current_bal * 0.9:
-                                            needed_leverage = (qty_val * entry_price) / (current_bal * 0.9)
-                                            scaled_leverage = round(min(lev_cap, max(leverage_val, needed_leverage)), 1)
-                                            if scaled_leverage > leverage_val:
-                                                leverage_val = scaled_leverage
-                                            # Recalculate margin after leverage scale-up
-                                            required_margin = (qty_val * entry_price) / leverage_val
-                                            if required_margin > current_bal * 0.95:
-                                                # Downscale quantity to fit 90% of available balance
-                                                max_margin = current_bal * 0.90
-                                                new_raw_qty = (max_margin * leverage_val) / entry_price
-                                                qty_str = format_bybit_qty(symbol, new_raw_qty)
-                                                qty_val = float(qty_str)
-                                                raw_qty = qty_val
-                                                print(f"[{symbol} {iv}m Balance Guard] Downscaled order quantity to {qty_str} to fit within 90% of available balance (Margin: ${max_margin:.2f})")
+                                        if not wallet_exceeded and required_margin > current_bal * 0.90:
+                                            print(f"[{symbol} {iv}m Margin Guard] REJECTED: Required margin (${required_margin:.2f}) exceeds 90% of available wallet balance (${current_bal:.2f}). Trade entry aborted.")
+                                            status_msg = "Skipped (Exceeds Wallet Margin)"
+                                            wallet_exceeded = True
+
+                                        # Adaptive Volume Gate Check
+                                        vol_pass, vol_msg, vol_pctile = adaptive_volume_gate.check(symbol, kline_df=df_completed)
+                                        print(f"[{symbol} {iv}m Volume Gate] {vol_msg}")
+                                        if not vol_pass:
+                                            print(f"[{symbol} {iv}m Volume Gate Block] Trade entry aborted.")
+                                            status_msg = "Skipped (Volume Gate Block)"
+                                            wallet_exceeded = True
+                                            bybit_success = False
 
                                         # Pre-Trade Risk Checklist Check
                                         active_trades_list = [t for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])]
@@ -8719,7 +9001,7 @@ def main():
                                                     active_execution_symbols.add(symbol)
                                                 threading.Thread(
                                                     target=execute_bybit_trade_async,
-                                                    args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key),
+                                                    args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade),
                                                     daemon=True
                                                 ).start()
                                                 bybit_success = False # Skip the simulation path for this trade
@@ -8968,5 +9250,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_backup_scheduler, daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread
     threading.Thread(target=run_daily_summary_scheduler, daemon=True).start()
+    # Start pain feedback 24h post-exit verifier thread
+    threading.Thread(target=run_pain_feedback_verifier, daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()

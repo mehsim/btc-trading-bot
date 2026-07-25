@@ -90,7 +90,7 @@ class StateManager:
         self._cache["trade_history"] = ObservedList(raw_trades, lambda lst, item: self._on_mutate_trade(item))
         self._cache["prediction_history"] = ObservedList(raw_preds, lambda lst, item: self._on_mutate_prediction(item))
         
-        for tf in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+        for tf in ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]:
             self._cache[f"active_trade_{tf}"] = database.get_active_trades(tf)
 
         # Initialize defaults to Redis

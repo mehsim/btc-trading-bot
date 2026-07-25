@@ -2,8 +2,84 @@ import numpy as np
 import pandas as pd
 from kelly_tracker import global_kelly_tracker
 from portfolio_risk import portfolio_risk_engine
+from pain_feedback import pain_feedback
+
+class AutoStopFloor:
+    def __init__(self, lookback_trades=200, min_sample_size=10):
+        self.lookback_trades = lookback_trades
+        self.min_sample_size = min_sample_size
+        self.floor_cache = {}
+
+    def compute_optimal_floor(self, symbol, database_module=None):
+        pain_adjusted = pain_feedback.get_effective_floor(symbol)
+        if pain_adjusted is not None:
+            return pain_adjusted
+
+        if database_module and hasattr(database_module, 'get_trade_history'):
+            try:
+                trades = database_module.get_trade_history(limit=self.lookback_trades)
+                pain_trades = [t for t in trades if isinstance(t, dict) and t.get('symbol') == symbol and t.get('reason') and ('STOP LOSS' in t['reason'] or 'BREAK-EVEN' in t['reason'])]
+                if len(pain_trades) >= self.min_sample_size:
+                    required_floors = []
+                    for t in pain_trades:
+                        entry = t.get('entry_price', 0)
+                        exit_p = t.get('exit_price', 0)
+                        if entry and entry > 0:
+                            adv = abs(exit_p - entry) / entry
+                            required_floors.append(adv * 1.2)
+                    if required_floors:
+                        opt_floor = float(np.percentile(required_floors, 75))
+                        return max(0.005, min(opt_floor, 0.020))
+            except Exception as e:
+                pass
+        return 0.008
+
+    def get_floor(self, symbol, database_module=None):
+        pain_adjusted = pain_feedback.get_effective_floor(symbol)
+        if pain_adjusted is not None:
+            return pain_adjusted
+        return self.compute_optimal_floor(symbol, database_module=database_module)
+
+class WickBufferCalculator:
+    def __init__(self, lookback_bars=50):
+        self.lookback_bars = lookback_bars
+
+    def get_buffer_distance(self, entry_price: float, df: pd.DataFrame = None) -> float:
+        if df is None or df.empty or len(df) < 10:
+            return entry_price * 0.004
+        
+        wick_pcts = []
+        recent_df = df.tail(self.lookback_bars)
+        for _, bar in recent_df.iterrows():
+            body_top = max(bar['open'], bar['close'])
+            body_bottom = min(bar['open'], bar['close'])
+            close_p = bar['close'] if bar['close'] > 0 else 1.0
+            
+            upper_wick = (bar['high'] - body_top) / close_p
+            lower_wick = (body_bottom - bar['low']) / close_p
+            wick_pcts.extend([upper_wick, lower_wick])
+            
+        if not wick_pcts:
+            return entry_price * 0.004
+            
+        expected_wick_pct = float(np.percentile(wick_pcts, 75))
+        expected_wick_pct = max(0.001, min(expected_wick_pct, 0.015))
+        return entry_price * expected_wick_pct * 2.0
+
+auto_stop_floor = AutoStopFloor()
+wick_buffer_calc = WickBufferCalculator()
+
+def calculate_final_stop_distance(entry_price: float, atr_dollar: float, symbol: str, df: pd.DataFrame = None, gmm_multiplier: float = 1.5, database_module=None) -> float:
+    atr_stop = gmm_multiplier * atr_dollar
+    min_floor_pct = auto_stop_floor.get_floor(symbol, database_module=database_module)
+    min_floor_dist = entry_price * min_floor_pct
+    wick_dist = wick_buffer_calc.get_buffer_distance(entry_price, df=df)
+    
+    final_stop = max(atr_stop, min_floor_dist, wick_dist)
+    return final_stop
 
 INTERVAL_MAX_POSITION_PCT = {
+
     "5": 0.05,
     "15": 0.08,   # 8% max for 15m
     "30": 0.10,   # 10% max for 30m
@@ -138,8 +214,10 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
     # 0. Check interval position cap & total symbol exposure cap
     capped_size = check_interval_position_limit(interval, position_size_usd, equity)
     capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
-    if capped_size < 1.0: # Below minimum trade size ($1)
+    leveraged_notional = capped_size * max(1.0, leverage_val)
+    if capped_size < 0.20 or leveraged_notional < 1.0: # Below minimum viable trade margin/notional
         return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0, 0.0
+
         
     # 1. Continuous Sigmoid Drawdown scaling check
     dd_mult = calculate_drawdown_multiplier(equity, peak_equity)
