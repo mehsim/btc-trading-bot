@@ -96,8 +96,9 @@ def main():
         interval = t['interval']
         direction = t['direction']
         entry_price = t['ref_price']
-        entry_time_sec = t['timestamp']
-        entry_time_ms = entry_time_sec * 1000
+        ts_raw = t['timestamp']
+        entry_time_ms = int(ts_raw) if ts_raw > 1e11 else int(ts_raw * 1000)
+
         
         atr = calculate_atr_at_time(kline_conn, symbol, interval, entry_time_ms)
         if atr == 0.0:
