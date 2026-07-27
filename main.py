@@ -8400,7 +8400,7 @@ def main():
                         
                         # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
                         if str(iv) in ["15", "30"]:
-                            if dir_total > 0:
+                            if dir_total >= 0.15:
                                 norm_bear = prob_bearish / dir_total
                                 norm_bull = prob_bullish / dir_total
                                 
@@ -8416,6 +8416,7 @@ def main():
                             else:
                                 ml_trend = "Neutral"
                                 ml_confidence = prob_neutral
+
                         elif winning_class == 2:
                             ml_trend = "Bullish"
                             ml_confidence = prob_bullish
