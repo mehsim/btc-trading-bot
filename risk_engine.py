@@ -134,13 +134,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
         return 0.0
     
     target_df = df_dict[symbol].copy()
-    if "timestamp" in target_df.columns:
-        first_ts = target_df["timestamp"].iloc[0]
-        unit_str = "ms" if first_ts > 1e11 else "s"
-        target_df["dt"] = pd.to_datetime(target_df["timestamp"], unit=unit_str, errors="coerce")
-        target_s = target_df.set_index("dt")["close"].pct_change().dropna().iloc[-100:]
-    else:
-        target_s = target_df["close"].pct_change().dropna().iloc[-100:]
+    target_s = target_df["close"].pct_change().dropna().tail(100).reset_index(drop=True)
     max_corr = 0.0
     
     for pos in open_positions:
@@ -149,13 +143,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
             if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
                 pos_df = df_dict[pos_symbol].copy()
                 if "close" in pos_df.columns and len(pos_df) >= 20:
-                    if "timestamp" in pos_df.columns:
-                        first_ts_other = pos_df["timestamp"].iloc[0]
-                        unit_other = "ms" if first_ts_other > 1e11 else "s"
-                        pos_df["dt"] = pd.to_datetime(pos_df["timestamp"], unit=unit_other, errors="coerce")
-                        other_s = pos_df.set_index("dt")["close"].pct_change().dropna().iloc[-100:]
-                    else:
-                        other_s = pos_df["close"].pct_change().dropna().iloc[-100:]
+                    other_s = pos_df["close"].pct_change().dropna().tail(100).reset_index(drop=True)
                     combined = pd.concat([target_s, other_s], axis=1).dropna()
                     if len(combined) >= 20:
                         corr_matrix = combined.corr()
@@ -167,6 +155,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
     return max_corr
 
 def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: pd.DataFrame = None) -> tuple:
+
     """Rule 14: 99% 1-day Parametric VaR Heat Cap (Max 5% equity VaR)."""
     if total_equity <= 0:
         return False, 0.0
