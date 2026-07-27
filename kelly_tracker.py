@@ -6,6 +6,11 @@ from typing import Dict, List, Tuple
 
 KELLY_DATA_FILE = "kelly_trade_history.json"
 
+def _normalize_tf(tf_str: str) -> str:
+    s = str(tf_str or "").lower().strip()
+    mapping = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240", "60": "60", "120": "120", "15": "15", "30": "30"}
+    return mapping.get(s, s)
+
 class KellyTracker:
     def __init__(self, data_file: str = KELLY_DATA_FILE):
         self.data_file = data_file
@@ -40,7 +45,11 @@ class KellyTracker:
                 "pnl_usd": float(pnl_usd),
                 "return_pct": float(return_pct)
             })
-        self.save_history()
+            try:
+                with open(self.data_file, "w") as f:
+                    json.dump(self.history[-1000:], f, indent=2)
+            except Exception as e:
+                print(f"[KellyTracker Error] Failed to save trade history: {e}")
 
     def compute_kelly_fraction(self, timeframe: str = None, min_trades: int = 10, max_kelly_cap: float = 0.25) -> float:
         """
@@ -51,13 +60,15 @@ class KellyTracker:
         """
         with self.lock:
             if timeframe:
-                filtered = [t for t in self.history if t.get("timeframe") == timeframe]
+                norm_target = _normalize_tf(timeframe)
+                filtered = [t for t in self.history if _normalize_tf(t.get("timeframe")) == norm_target]
             else:
                 filtered = self.history
 
             if len(filtered) < min_trades:
                 # Default safety fallback if not enough trade history accumulated
                 return 0.10
+
 
             returns = [t["return_pct"] for t in filtered[-100:]]
             wins = [r for r in returns if r > 0]
