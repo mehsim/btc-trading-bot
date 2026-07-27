@@ -108,11 +108,12 @@ def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 1
     buckets[0] -= 1e-5
     buckets[-1] += 1e-5
     
-    base_counts, _ = np.histogram(baseline, bins=buckets)
-    target_counts, _ = np.histogram(target, bins=buckets)
+    base_counts, _ = np.histogram(b_clean, bins=buckets)
+    target_counts, _ = np.histogram(t_clean, bins=buckets)
     
-    base_pct = base_counts / len(baseline)
-    target_pct = target_counts / len(target)
+    base_pct = base_counts / len(b_clean)
+    target_pct = target_counts / len(t_clean)
+
     
     # Avoid zero division
     base_pct = np.where(base_pct == 0, 0.0001, base_pct)
