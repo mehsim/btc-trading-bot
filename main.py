@@ -372,10 +372,11 @@ import joblib
 print("[System Debug] pandas/numpy/joblib imported.")
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 def get_pkt_time():
-    return datetime.utcnow() + timedelta(hours=5)
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5)
+
 
 def choppiness_index(df, window=14):
     """0-100 scale. >61.8 = choppy, <38.2 = trending"""
@@ -2566,7 +2567,7 @@ def bybit_post_request(endpoint, payload):
         
     offset = get_bybit_time_offset()
     timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "30000"
+    recv_window = "5000"
     
     payload_str = json.dumps(payload)
     val_str = timestamp + api_key + recv_window + payload_str
@@ -2845,7 +2846,7 @@ def bybit_get_request(endpoint, query_params):
         
     offset = get_bybit_time_offset()
     timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "30000"
+    recv_window = "5000"
     
     query_string = urllib.parse.urlencode(query_params)
     

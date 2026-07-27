@@ -8,8 +8,10 @@ import numpy as np
 from dotenv import load_dotenv
 load_dotenv()
 
-TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
+raw_trade_mode = os.environ.get("TRADE_MODE", "simulation").lower()
+TRADE_MODE = raw_trade_mode if raw_trade_mode in ["live", "testnet", "simulation"] else "simulation"
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
+
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.db")
 db_write_lock = threading.Lock()
