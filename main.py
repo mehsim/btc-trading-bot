@@ -3249,6 +3249,16 @@ def get_health():
         "last_candle_close": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(last_ws_update_time)) if last_ws_update_time > 0 else "N/A"
     })
 
+@app.route("/metrics")
+def prometheus_metrics():
+    with bot_state_lock:
+        sim_bal = float(bot_state.get("simulated_balance", 80.0))
+        active_count = sum(len(bot_state.get(f"active_trade_{tf}", [])) for tf in ACTIVE_TRADE_TF_KEYS)
+    uptime = int(time.time() - startup_time)
+    metrics_str = f"# HELP btc_bot_simulated_balance Simulated account cash balance in USD\n# TYPE btc_bot_simulated_balance gauge\nbtc_bot_simulated_balance {sim_bal:.2f}\n# HELP btc_bot_active_trades Count of currently active open trades\n# TYPE btc_bot_active_trades gauge\nbtc_bot_active_trades {active_count}\n# HELP btc_bot_uptime_seconds Total runtime of bot service in seconds\n# TYPE btc_bot_uptime_seconds counter\nbtc_bot_uptime_seconds {uptime}\n"
+    return metrics_str, 200, {'Content-Type': 'text/plain; version=0.0.4'}
+
+
 @app.route("/api/status")
 def get_status():
     # Thread-safe dictionary copy using the global bot_state_lock

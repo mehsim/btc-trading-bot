@@ -31,9 +31,15 @@ class PortfolioRiskEngine:
         if sub_returns.empty or len(sub_returns) < 10:
             return 0.0, 0.0, True
 
-        cov_matrix = sub_returns.cov().values
+        try:
+            from sklearn.covariance import LedoitWolf
+            cov_matrix = LedoitWolf().fit(sub_returns.values).covariance_
+        except Exception:
+            cov_matrix = sub_returns.cov().values
+
         port_variance = float(np.dot(weight_vector.T, np.dot(cov_matrix, weight_vector)))
         port_std_dev = float(np.sqrt(max(1e-8, port_variance)))
+
 
         var_dollars = float(self.z_score * port_std_dev * portfolio_val)
         var_pct_equity = float(var_dollars / total_equity)

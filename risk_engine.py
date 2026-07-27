@@ -109,15 +109,28 @@ def calculate_per_interval_kelly(interval: str, trade_history: list = None) -> f
     return global_kelly_tracker.compute_kelly_fraction(timeframe=str(interval), min_trades=10, max_kelly_cap=0.20)
 
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:
-    """Rule 15: Continuous Sigmoid Drawdown Curve with 20% Hard Halt."""
+    """Continuous Sigmoid & Exponential Drawdown Penalty: dd_penalty = exp(-5 * DD). Hard halt at 20% DD."""
     if peak_equity <= 0 or current_equity <= 0:
         return 1.0
-    drawdown_pct = (peak_equity - current_equity) / peak_equity * 100.0
-    if drawdown_pct >= 20.0:
-        return 0.0  # Circuit breaker hard halt
-    # Sigmoid decay centered at 12.5% drawdown
-    sigmoid_mult = 1.0 / (1.0 + np.exp(10.0 * (drawdown_pct - 12.5) / 20.0))
-    return float(np.clip(sigmoid_mult, 0.05, 1.0))
+    dd_fraction = max(0.0, (peak_equity - current_equity) / peak_equity)
+    if dd_fraction >= 0.20:
+        return 0.0  # Hard halt at 20% drawdown
+    penalty = float(np.exp(-5.0 * dd_fraction))
+    return float(np.clip(penalty, 0.05, 1.0))
+
+def get_regime_sizing_multiplier(regime_name: str) -> float:
+    """Regime Position Sizing Multiplier: Trending (1.2x), Ranging (0.8x), Chop/Crisis (0.3x)."""
+    if not regime_name:
+        return 1.0
+    r = regime_name.lower()
+    if "trending" in r:
+        return 1.2
+    elif "ranging" in r:
+        return 0.8
+    elif "chop" in r or "crisis" in r:
+        return 0.3
+    return 1.0
+
 
 def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr: float, target_atr: float = 0.005, min_lev: float = 1.0, max_lev: float = 10.0) -> float:
     if current_atr <= 0:
