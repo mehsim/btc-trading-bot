@@ -854,49 +854,33 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     
     return df
 
-def classify_market_regime(df_history, interval=None):
+def classify_market_regime(df_history: pd.DataFrame, interval: str = None) -> str:
     """
-    Unsupervised regime classification using a Gaussian Mixture Model (GMM).
-    Returns 'Trending' or 'Ranging' based on recent volatility (ATR_norm) and trend strength (ADX).
+    4-Regime Classification:
+    1. High Vol, Trending (Breakout)
+    2. Low Vol, Trending (Trend Following)
+    3. Low Vol, Ranging (Mean Reversion)
+    4. High Vol, Ranging (Chop - Avoid Trading)
     """
-    from sklearn.mixture import GaussianMixture
-    import numpy as np
-    import os
-    import joblib
-    
-    # Require ATR_norm and ADX columns
-    if "ATR_norm" not in df_history.columns or "ADX" not in df_history.columns:
-        # Fallback if indicators are not yet calculated
-        return "Ranging"
-        
+    if "ATR_norm" not in df_history.columns or "ADX" not in df_history.columns or len(df_history) < 20:
+        return "Low Vol, Ranging"
+
     df_clean = df_history[["ATR_norm", "ADX"]].dropna()
-    features_gmm = df_clean.values
-    if len(features_gmm) == 0:
-        return "Ranging"
+    if len(df_clean) == 0:
+        return "Low Vol, Ranging"
 
-    # Try loading pre-trained GMM for this interval
-    gmm = None
-    if interval:
-        gmm_path = f"gmm_regime_{interval}.pkl"
-        if os.path.exists(gmm_path):
-            try:
-                gmm = joblib.load(gmm_path)
-            except Exception as load_err:
-                print(f"[GMM Load Warning] Failed to load pre-trained GMM: {load_err}")
+    latest_atr = df_clean["ATR_norm"].iloc[-1]
+    latest_adx = df_clean["ADX"].iloc[-1]
+    atr_median = float(df_clean["ATR_norm"].median())
 
-    if gmm is not None:
-        try:
-            # Use pre-trained GMM for predictions
-            regimes = gmm.predict(features_gmm)
-            # Component with highest mean ATR_norm is Trending
-            trending_component = np.argmax(gmm.means_[:, 0])
-            latest_regime = regimes[-1]
-            return "Trending" if latest_regime == trending_component else "Ranging"
-        except Exception as pred_err:
-            print(f"[GMM Prediction Warning] Fallback due to error: {pred_err}")
+    is_high_vol = latest_atr > atr_median
+    is_trending = latest_adx >= 20.0
 
-    # Fallback if no pre-trained model is available or load failed: use non-look-ahead ADX threshold
-    if not df_history.empty and "ADX" in df_history.columns:
-        adx = df_history["ADX"].iloc[-1]
-        return "Trending" if adx >= 20.0 else "Ranging"
-    return "Ranging"
+    if is_high_vol and is_trending:
+        return "High Vol, Trending"
+    elif not is_high_vol and is_trending:
+        return "Low Vol, Trending"
+    elif not is_high_vol and not is_trending:
+        return "Low Vol, Ranging"
+    else:
+        return "High Vol, Ranging"
