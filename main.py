@@ -693,9 +693,11 @@ def run_manual_confluence_report(symbol, interval):
             df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=300)
             if df_btc is not None and len(df_btc) > 0:
                 df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-                df_raw = pd.merge(df_raw, df_btc_sub, on="timestamp", how="inner")
+                df_raw = pd.merge(df_raw, df_btc_sub, on="timestamp", how="left")
+                df_raw["close_btc"] = df_raw["close_btc"].ffill().bfill().fillna(df_raw["close"])
             else:
                 df_raw["close_btc"] = df_raw["close"]
+
                 
         df_raw = merge_derivatives_sentiment_features(df_raw, symbol=symbol, interval=interval)
         df_features = add_features(df_raw)
