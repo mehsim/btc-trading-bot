@@ -22,8 +22,9 @@ def validate_price(price: float, default_price: float = 0.0) -> float:
     """Validates and ensures non-negative, finite price values."""
     try:
         val = float(price)
-        if val < 0.0 or np.isnan(val) or np.isinf(val):
+        if val <= 0.0 or np.isnan(val) or np.isinf(val):
             return float(default_price)
+
         return val
     except Exception:
         return float(default_price)
