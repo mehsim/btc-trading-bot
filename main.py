@@ -6368,9 +6368,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
         
-    # Pro-Level Meta-Labeling Gate: Approved if predicted probability of success >= 60% AND 1d/4h trend gates pass
+    # Pro-Level Meta-Labeling Gate: Approved if predicted probability of success >= 60%, 1d/4h trend gates pass, AND traditional score >= 75% with no hard gate failures
     trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True)
-    approved = (calibrated_confidence >= 0.60) and trend_gates_passed
+    approved = (calibrated_confidence >= 0.60) and trend_gates_passed and traditional_approved
+
 
     # Add score summary to results
     results["_Score_Summary"] = {
