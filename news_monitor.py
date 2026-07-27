@@ -23,8 +23,11 @@ class EconomicNewsMonitor:
         now = time.time()
         for event in self.scheduled_events:
             event_ts = float(event.get("timestamp", 0))
+            if event_ts > 1e11:
+                event_ts /= 1000.0
             impact = int(event.get("impact", 1))
             title = str(event.get("title", "Economic News"))
+
 
             if "FOMC" in title.upper() or "NFP" in title.upper() or "PAYROLL" in title.upper():
                 impact = 3
