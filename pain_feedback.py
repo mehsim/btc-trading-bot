@@ -61,29 +61,34 @@ class PainFeedbackLoop:
             
             adj = self.adjustments[symbol]
 
-        try:
-            applied_at = datetime.fromisoformat(adj['applied_at'])
-            if applied_at.tzinfo is None:
-                applied_at = applied_at.replace(tzinfo=timezone.utc)
-        except Exception:
-            return None
+            try:
+                applied_at = datetime.fromisoformat(adj['applied_at'])
+                if applied_at.tzinfo is None:
+                    applied_at = applied_at.replace(tzinfo=timezone.utc)
+            except Exception:
+                return None
+                
+            days_since = (datetime.now(timezone.utc) - applied_at).total_seconds() / 86400.0
+            decay_days = adj.get('decay_days', 30)
             
-        days_since = (datetime.now(timezone.utc) - applied_at).total_seconds() / 86400.0
-        decay_days = adj.get('decay_days', 30)
-        
-        if days_since >= decay_days:
-            # Expired, remove adjustment
-            del self.adjustments[symbol]
-            self.save_state()
-            return None
-        
-        # Linear decay back to base
-        decay_progress = days_since / float(decay_days)
-        base = adj.get('base_floor', 0.008)
-        adjusted = adj.get('adjusted_floor', 0.015)
-        
-        effective = adjusted - (adjusted - base) * decay_progress
-        return effective
+            if days_since >= decay_days:
+                # Expired, remove adjustment safely
+                del self.adjustments[symbol]
+                try:
+                    with open(self.state_file, 'w') as f:
+                        json.dump(self.adjustments, f, indent=2)
+                except Exception as e:
+                    print(f"[PainFeedbackLoop] Error saving state file: {e}")
+                return None
+            
+            # Linear decay back to base
+            decay_progress = days_since / float(decay_days)
+            base = adj.get('base_floor', 0.008)
+            adjusted = adj.get('adjusted_floor', 0.015)
+            
+            effective = adjusted - (adjusted - base) * decay_progress
+            return effective
+
 
     def verify_pending_pain_trades(self, database_module=None, fetch_kline_func=None):
         """Asynchronously verify 24h post-exit whether closed trades reached TP after being stopped out."""
