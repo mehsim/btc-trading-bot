@@ -56,10 +56,11 @@ class PortfolioRiskEngine:
         if returns_df is None or returns_df.empty:
             return 0.0, True
 
-        all_candidate_positions = open_positions + [{"symbol": candidate_symbol, "position_size_usd": candidate_size_usd}]
-        symbols = list(set([p.get("symbol") for p in all_candidate_positions if p.get("symbol") in returns_df.columns]))
+        cand_sym_set = {p.get("symbol") for p in all_candidate_positions}
+        symbols = [col for col in returns_df.columns if col in cand_sym_set]
         if candidate_symbol not in symbols:
             return 0.0, True
+
 
         sub_returns = returns_df[symbols].dropna()
         if len(sub_returns) < 10:

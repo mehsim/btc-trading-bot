@@ -2,6 +2,8 @@ import numpy as np
 import threading
 from typing import Dict, List, Tuple
 
+from collections import deque
+
 class CUSUMDriftDetector:
     def __init__(self, threshold_H: float = 5.0, allowance_K: float = 0.15, target_error_mu: float = 0.35):
         self.threshold_H = threshold_H  # Decision threshold
@@ -10,7 +12,7 @@ class CUSUMDriftDetector:
         self.lock = threading.Lock()
         self.S_high: float = 0.0
         self.S_low: float = 0.0
-        self.error_stream: List[float] = []
+        self.error_stream = deque(maxlen=200)
 
     def update(self, actual_outcome: int, predicted_confidence: float) -> Tuple[bool, float, float]:
         """
@@ -24,10 +26,8 @@ class CUSUMDriftDetector:
             # Error = 1.0 if loss, 0.0 if win
             error_val = 1.0 - float(actual_outcome)
             self.error_stream.append(error_val)
-            if len(self.error_stream) > 200:
-                self.error_stream.pop(0)
-
             recent_error_rate = float(np.mean(self.error_stream)) if self.error_stream else self.target_error_mu
+
             
             # Upper CUSUM accumulator for detecting degradation in accuracy against target baseline
             self.S_high = max(0.0, self.S_high + (error_val - self.target_error_mu - self.allowance_K))
