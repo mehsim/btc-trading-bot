@@ -2104,6 +2104,19 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def require_ip_whitelist(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        allowed_ips = os.environ.get("ALLOWED_DASHBOARD_IPS", "").strip()
+        if allowed_ips:
+            ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
+            client_ip = request.remote_addr
+            if client_ip not in ip_list and client_ip != "127.0.0.1":
+                return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 @app.route("/killswitch", methods=["GET", "POST"])
 @require_api_key
 def killswitch_endpoint():
