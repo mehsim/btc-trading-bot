@@ -7,13 +7,16 @@ from typing import Dict, Any, Optional
 cached_telegram_token = None
 cached_chat_ids = None
 
+from secret_manager import get_secure_env
+
 def get_telegram_config():
     global cached_telegram_token, cached_chat_ids
     if cached_telegram_token is not None and cached_chat_ids is not None:
         return cached_telegram_token, cached_chat_ids
 
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_ids_str = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    token = get_secure_env("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_ids_str = get_secure_env("TELEGRAM_CHAT_ID", "").strip()
+
 
     chat_ids = []
     if chat_ids_str:
