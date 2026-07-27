@@ -8970,10 +8970,11 @@ def main():
                                             scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
                                             new_stop_dist = original_stop_dist * scale_ratio
                                             
-                                            if str(ml_trend).upper() == "LONG":
+                                            if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
                                                 new_sl_price = entry_price - new_stop_dist
                                             else:
                                                 new_sl_price = entry_price + new_stop_dist
+
                                                 
                                             scaled_risk_usd = (scaled_notional / entry_price) * new_stop_dist
                                             
