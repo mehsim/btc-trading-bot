@@ -159,7 +159,12 @@ class EnsembleClassifier:
                 three_probs = np.zeros((binary_probs.shape[0], 3))
                 three_probs[:, 0] = binary_probs[:, 0]
                 three_probs[:, 2] = binary_probs[:, 1]
+                three_probs[:, 1] = np.maximum(0.0, 1.0 - (three_probs[:, 0] + three_probs[:, 2]))
+                row_sums = three_probs.sum(axis=1, keepdims=True)
+                row_sums[row_sums == 0] = 1.0
+                three_probs = three_probs / row_sums
                 return three_probs
+
             except Exception:
                 w = np.array(self.weights, dtype=float)
                 w = w / np.sum(w)
