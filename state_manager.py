@@ -109,28 +109,24 @@ class StateManager:
                 except Exception as e:
                     print(f"[StateManager Redis Init Error] Failed to write {k} to Redis: {e}")
 
-    def _on_mutate_trade(self, item):
+    def _on_mutate_trade(self, *args):
+        item = args[-1] if args else None
         if isinstance(item, list):
             for t in item:
                 if isinstance(t, dict):
                     database.save_completed_trade(t)
         elif isinstance(item, dict):
             database.save_completed_trade(item)
-            
-        if self._redis:
-            try:
-                raw_list = list(self._cache.get("trade_history", []))
-                self._redis.set("bot_state:trade_history", json.dumps(raw_list))
-            except Exception as e:
-                print(f"[StateManager Redis Error] Failed to sync trade_history mutation: {e}")
 
-    def _on_mutate_prediction(self, item):
+    def _on_mutate_prediction(self, *args):
+        item = args[-1] if args else None
         if isinstance(item, list):
             for p in item:
                 if isinstance(p, dict):
                     database.save_prediction(p)
         elif isinstance(item, dict):
             database.save_prediction(item)
+
             
         if self._redis:
             try:
