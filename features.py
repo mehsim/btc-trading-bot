@@ -292,7 +292,8 @@ def add_features(df, fetch_calendar_callback=None):
     for col in ["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi", "hours_to_news"]:
         if col not in df.columns:
             if "hours_to_news" in col:
-                df[col] = 999.0
+                df[col] = 72.0
+
             elif "rsi" in col:
                 df[col] = 50.0
             elif "close" in col:
