@@ -2154,7 +2154,8 @@ def save_history():
                         break
                 if not duplicate:
                     deduped.append(t)
-            bot_state["trade_history"] = deduped
+            bot_state["trade_history"] = deduped[-1000:]
+
 
         # Cap prediction history at 500 entries
         if len(bot_state["prediction_history"]) > 500:
