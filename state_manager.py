@@ -245,3 +245,6 @@ class StateManager:
     def save_prediction(self, pred):
         with self._lock:
             database.save_prediction(pred)
+
+state_manager = StateManager()
+

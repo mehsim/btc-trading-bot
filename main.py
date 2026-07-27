@@ -24,8 +24,9 @@ from gmm_trail import gmm_trailing_engine
 from garch_monitor import garch_vol_monitor
 from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
-from pain_feedback import pain_feedback
+from secret_manager import get_secure_env
 from bybit_client import (
+
     bybit_get_request,
     bybit_post_request,
     get_real_bybit_balance_cached,
@@ -2112,7 +2113,7 @@ from functools import wraps
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        expected_key = os.environ.get("DASHBOARD_API_KEY", "").strip()
+        expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
         if expected_key:
             client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
             if not client_key or client_key.strip() != expected_key:
@@ -2123,14 +2124,19 @@ def require_api_key(f):
 def require_ip_whitelist(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        allowed_ips = os.environ.get("ALLOWED_DASHBOARD_IPS", "").strip()
+        allowed_ips = get_secure_env("ALLOWED_DASHBOARD_IPS", "").strip()
         if allowed_ips:
             ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-            client_ip = request.remote_addr
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                client_ip = forwarded.split(",")[0].strip()
+            else:
+                client_ip = request.headers.get("X-Real-IP", request.remote_addr)
             if client_ip not in ip_list and client_ip != "127.0.0.1":
                 return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
         return f(*args, **kwargs)
     return decorated_function
+
 
 
 @app.route("/killswitch", methods=["GET", "POST"])
@@ -3277,15 +3283,6 @@ def get_health():
         "active_trades": active_count,
         "last_candle_close": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(last_ws_update_time)) if last_ws_update_time > 0 else "N/A"
     })
-
-@app.route("/metrics")
-def prometheus_metrics():
-    with bot_state_lock:
-        sim_bal = float(bot_state.get("simulated_balance", 80.0))
-        active_count = sum(len(bot_state.get(f"active_trade_{tf}", [])) for tf in ACTIVE_TRADE_TF_KEYS)
-    uptime = int(time.time() - startup_time)
-    metrics_str = f"# HELP btc_bot_simulated_balance Simulated account cash balance in USD\n# TYPE btc_bot_simulated_balance gauge\nbtc_bot_simulated_balance {sim_bal:.2f}\n# HELP btc_bot_active_trades Count of currently active open trades\n# TYPE btc_bot_active_trades gauge\nbtc_bot_active_trades {active_count}\n# HELP btc_bot_uptime_seconds Total runtime of bot service in seconds\n# TYPE btc_bot_uptime_seconds counter\nbtc_bot_uptime_seconds {uptime}\n"
-    return metrics_str, 200, {'Content-Type': 'text/plain; version=0.0.4'}
 
 
 @app.route("/api/status")
