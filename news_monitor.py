@@ -32,12 +32,14 @@ class EconomicNewsMonitor:
             if "FOMC" in title.upper() or "NFP" in title.upper() or "PAYROLL" in title.upper():
                 impact = 3
 
-            blackout_duration_sec = impact * 15 * 60  # 15m, 30m, 45m
+            blackout_duration_sec = impact * 15 * 60  # 15m, 30m, 45m total window
+            half_window_sec = blackout_duration_sec / 2.0
             time_diff = abs(now - event_ts)
 
-            if time_diff <= blackout_duration_sec:
-                mins_left = round((blackout_duration_sec - time_diff) / 60.0, 1)
+            if time_diff <= half_window_sec:
+                mins_left = round((half_window_sec - time_diff) / 60.0, 1)
                 return True, f"NEWS BLACKOUT ACTIVE: '{title}' (Impact Level {impact}, {mins_left}m window remaining)"
+
 
         return False, "NO_NEWS_BLACKOUT"
 
