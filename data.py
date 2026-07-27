@@ -76,12 +76,14 @@ def init_db():
                 UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
             )
         """)
-        # Migration for existing databases
+        # Migration for existing databases (C11: SQL injection pattern prevention)
+        import re
         for col in ["ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"]:
-            try:
-                conn.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
-            except Exception:
-                pass
+            if re.match(r'^[a-zA-Z0-9_]+$', col):
+                try:
+                    conn.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
+                except Exception:
+                    pass
         conn.commit()
         conn.close()
         _db_initialized = True

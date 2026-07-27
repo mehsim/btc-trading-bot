@@ -20,15 +20,20 @@ class ObservedList(list):
 
 class StateManager:
     def __init__(self):
+        import os
         self._lock = threading.RLock()
         self._redis = None
         try:
-            self._redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+            redis_pass = os.environ.get("REDIS_PASSWORD", None)
+            redis_host = os.environ.get("REDIS_HOST", "localhost")
+            redis_port = int(os.environ.get("REDIS_PORT", 6379))
+            self._redis = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_pass, decode_responses=True)
             self._redis.ping()
-            print("[StateManager] Connected to local Redis server.")
+            print("[StateManager] Connected to Redis server with authentication.")
         except Exception as e:
             print(f"[StateManager Warning] Could not connect to Redis: {e}. Falling back to memory-only state.")
             self._redis = None
+
 
         self._cache = {
             "live_price": None,

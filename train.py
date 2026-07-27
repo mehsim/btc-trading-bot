@@ -217,7 +217,11 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
             return economic_calendar_cache
             
         try:
-            finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
+            finnhub_token = os.environ.get("FINNHUB_TOKEN", "").strip()
+            if not finnhub_token or finnhub_token == "free":
+                return []
+
+
             now = datetime.now(timezone.utc)
             if start_ts_ms:
                 from_dt = datetime.fromtimestamp(start_ts_ms / 1000.0, timezone.utc)

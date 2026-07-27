@@ -2326,7 +2326,10 @@ def load_history():
     # 2. Sync from AWS Server API if running locally
     elif not space_id:
         try:
-            aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or "http://47.129.153.199"
+            server_ip_default = os.environ.get("SERVER_IP", "127.0.0.1")
+            aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or f"http://{server_ip_default}"
+
+
             if not aws_host.startswith("http://") and not aws_host.startswith("https://"):
                 aws_host = f"http://{aws_host}"
             sync_url = f"{aws_host.rstrip('/')}/api/status"
@@ -2727,57 +2730,67 @@ def get_bybit_min_qty_step(symbol):
 _ws_responses = {}
 _ws_responses_lock = threading.Lock()
 
+_order_exec_lock = threading.Lock()
+
 def execute_bybit_order_ws_or_rest(endpoint, payload):
     global private_ws_connected, active_private_ws
-    # Add clientOrderId (orderLinkId) for request deduplication on order creation
+    import uuid
+    # C7: Add unique clientOrderId (orderLinkId) for request deduplication
     if endpoint == "/v5/order/create" and "orderLinkId" not in payload:
-        payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}"
+        payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         
     op_map = {
         "/v5/order/create": "order.create",
         "/v5/order/cancel": "order.cancel"
     }
     op = op_map.get(endpoint)
-    if op and private_ws_connected and active_private_ws:
-        req_id = f"req_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}"
-        ws_payload = {
-            "op": op,
-            "reqId": req_id,
-            "args": [payload]
-        }
-        try:
-            print(f"[WebSocket Private Execution] Sending {op} reqId={req_id}")
-            active_private_ws.send(json.dumps(ws_payload))
-            
-            # Wait for response (increased timeout to 4.0s for high volatility/latency resilience)
-            timeout = 4.0 # 4,000ms
-            start_t = time.time()
-            while time.time() - start_t < timeout:
-                with _ws_responses_lock:
-                    if len(_ws_responses) > 500:
-                        _ws_responses.clear()
-                    if req_id in _ws_responses:
-                        resp = _ws_responses.pop(req_id)
-                        print(f"[WebSocket Private Execution] Received response for reqId={req_id} retCode={resp.get('retCode')}")
-                        return resp
-                time.sleep(0.01) # 10ms
-            print(f"[WebSocket Private Execution Warning] Timeout waiting for reqId={req_id}. Falling back to REST...")
-        except Exception as e:
-            print(f"[WebSocket Private Execution Error] {e}. Falling back to REST...")
-            
-    # Fallback to standard REST API request
-    return bybit_post_request(endpoint, payload)
+    
+    with _order_exec_lock:
+        if op and private_ws_connected and active_private_ws:
+            req_id = f"req_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:4]}"
+            ws_payload = {
+                "op": op,
+                "reqId": req_id,
+                "args": [payload]
+            }
+            try:
+                print(f"[WebSocket Private Execution] Sending {op} reqId={req_id}")
+                active_private_ws.send(json.dumps(ws_payload))
+                
+                # Wait for response (timeout 4.0s for high volatility/latency resilience)
+                timeout = 4.0
+                start_t = time.time()
+                while time.time() - start_t < timeout:
+                    with _ws_responses_lock:
+                        if len(_ws_responses) > 500:
+                            _ws_responses.clear()
+                        if req_id in _ws_responses:
+                            resp = _ws_responses.pop(req_id)
+                            print(f"[WebSocket Private Execution] Received response for reqId={req_id} retCode={resp.get('retCode')}")
+                            return resp
+                    time.sleep(0.01)
+                print(f"[WebSocket Private Execution Warning] Timeout waiting for reqId={req_id}. Falling back to REST...")
+            except Exception as e:
+                print(f"[WebSocket Private Execution Error] {e}. Falling back to REST...")
+                
+        # C8: Atomic Fallback to standard REST API request
+        return bybit_post_request(endpoint, payload)
 
-def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False):
+
+def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False, order_type="Market"):
+    # C1: Configurable order type & price bound slippage control
+    order_type_str = "Limit" if (order_type == "Limit" and price is not None) else "Market"
     payload = {
         "category": "linear",
         "symbol": symbol,
         "side": side,
-        "orderType": "Market", # Market order ensures instant execution
+        "orderType": order_type_str,
         "qty": str(qty),
-        "timeInForce": "IOC",
+        "timeInForce": "GTC" if order_type_str == "Limit" else "IOC",
         "positionIdx": 0
     }
+    if price is not None:
+        payload["price"] = format_bybit_price(symbol, price)
     if reduce_only:
         payload["reduceOnly"] = True
     if sl:
@@ -2787,6 +2800,7 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_on
         
     res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
+
 
 def get_bybit_order_details(symbol, order_id):
     params = {
@@ -3514,20 +3528,15 @@ def close_all_trades_internal(exit_reason):
     # 1. Direct Bybit Fail-safe Panic Close
     if TRADE_MODE != "simulation":
         try:
-            print("[Panic Close All] Cancelling ALL pending limit and conditional orders on Bybit...")
-            # Cancel all USDT-settled orders globally
-            cancel_usdt_res = bybit_post_request("/v5/order/cancel-all", {
-                "category": "linear",
-                "settleCoin": "USDT"
-            })
-            print(f"[Panic Close All] Cancel USDT orders response: {cancel_usdt_res.get('retMsg')}")
-            
-            # Cancel all USDC-settled orders globally
-            cancel_usdc_res = bybit_post_request("/v5/order/cancel-all", {
-                "category": "linear",
-                "settleCoin": "USDC"
-            })
-            print(f"[Panic Close All] Cancel USDC orders response: {cancel_usdc_res.get('retMsg')}")
+            print("[Panic Close All] Cancelling bot-managed pending orders on Bybit...")
+            tracked_symbols = SYMBOLS if isinstance(SYMBOLS, list) else [SYMBOL]
+            for s in tracked_symbols:
+                cancel_res = bybit_post_request("/v5/order/cancel-all", {
+                    "category": "linear",
+                    "symbol": s
+                })
+                print(f"[Panic Close All] Scoped cancel orders response for {s}: {cancel_res.get('retMsg')}")
+
             
             print("[Panic Close All] Querying all active positions on Bybit to close them...")
             bybit_positions = get_all_bybit_positions()
@@ -4303,7 +4312,9 @@ def run_flask():
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5001))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    flask_host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    app.run(host=flask_host, port=port, debug=False, use_reloader=False)
+
 
 # =========================
 # CONFIGURATION
