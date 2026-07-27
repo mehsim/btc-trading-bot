@@ -85,12 +85,14 @@ class PortfolioRiskEngine:
 
         try:
             cov = returns_df.cov()
-            eigenvalues, _ = np.linalg.eig(cov)
+            eigenvalues, _ = np.linalg.eigh(cov.values)
+            eigenvalues = np.real(eigenvalues)
             eigenvalues = np.sort(eigenvalues)[::-1]
-            total_var = np.sum(eigenvalues)
+            total_var = float(np.sum(eigenvalues))
             pc1_share = float(eigenvalues[0] / total_var) if total_var > 0 else 0.50
             return {"pc1_explained_variance": pc1_share}
         except Exception:
             return {"pc1_explained_variance": 0.50}
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
