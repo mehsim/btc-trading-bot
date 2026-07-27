@@ -29,11 +29,12 @@ class GMMTrailingEngine:
         """
         if not self.is_fitted or current_adx is None or np.isnan(current_adx) or current_adx <= 0:
             # Fallback step rules if GMM is not fitted yet
-            if current_adx and current_adx >= 25.0:
+            if current_adx is not None and current_adx >= 25.0:
                 return 1.50
-            elif current_adx and current_adx < 18.0:
+            elif current_adx is not None and current_adx < 18.0:
                 return 0.90
             return 1.25
+
 
 
         probs = self.gmm.predict_proba([[current_adx]])[0]
