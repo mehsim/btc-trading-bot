@@ -75,14 +75,26 @@ def main():
 
         pred_change = float(active_model_price.predict(X_live)[0])
         predicted_price = float(candle["close"]) + pred_change
-        prob_bullish = float(active_model_trend.predict_proba(X_live)[0][1])
-
-        if prob_bullish >= 0.50:
-            ml_trend = "Bullish"
-            ml_confidence = prob_bullish
+        probs = active_model_trend.predict_proba(X_live)[0]
+        if len(probs) >= 3:
+            prob_bearish = float(probs[0])
+            prob_neutral = float(probs[1])
+            prob_bullish = float(probs[2])
+            if prob_bullish >= prob_bearish:
+                ml_trend = "Bullish"
+                ml_confidence = prob_bullish
+            else:
+                ml_trend = "Bearish"
+                ml_confidence = prob_bearish
         else:
-            ml_trend = "Bearish"
-            ml_confidence = 1.0 - prob_bullish
+            prob_bullish = float(probs[1]) if len(probs) > 1 else float(probs[0])
+            if prob_bullish >= 0.50:
+                ml_trend = "Bullish"
+                ml_confidence = prob_bullish
+            else:
+                ml_trend = "Bearish"
+                ml_confidence = 1.0 - prob_bullish
+
 
         calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
         expected_pct_change = (abs(pred_change) / candle["close"]) * 100
