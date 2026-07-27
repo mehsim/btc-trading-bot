@@ -58,8 +58,9 @@ class ModelRegistry:
             "model_name": model_name,
             "metrics": metrics,
             "stage": stage,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
         if stage == STAGE_PRODUCTION:
             if self.models["Production"]:
                 self.models["Archived"].append(self.models["Production"])
