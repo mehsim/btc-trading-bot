@@ -95,12 +95,14 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         c3 = df_1h.iloc[-3]
         is_red = [c1["close"] < c1["open"], c2["close"] < c2["open"], c3["close"] < c3["open"]]
         is_green = [c1["close"] > c1["open"], c2["close"] > c2["open"], c3["close"] > c3["open"]]
-        if ml_trend == "Bullish":
+        is_bullish = ml_trend in ["Bullish", "BUY", "LONG", "UP"]
+        if is_bullish:
             candle_pass = not all(is_red)
             detail_msg = "Safe (No consecutive 3 red candles)" if candle_pass else "Blocked (Knife Falling: 3 consecutive red candles)"
         else:
             candle_pass = not all(is_green)
             detail_msg = "Safe (No consecutive 3 green candles)" if candle_pass else "Blocked (Rocket Rising: 3 consecutive green candles)"
+
     except Exception as e:
         candle_pass = True
         detail_msg = f"Skipped ({e})"
