@@ -87,11 +87,21 @@ class ModelRegistry:
 
 def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 10) -> float:
     """Calculates Population Stability Index (PSI) between baseline and target distributions."""
-    if len(baseline) == 0 or len(target) == 0:
+    if baseline is None or target is None:
+        return 0.0
+    
+    b_arr = np.asarray(baseline, dtype=float)
+    t_arr = np.asarray(target, dtype=float)
+    
+    b_clean = b_arr[~np.isnan(b_arr)]
+    t_clean = t_arr[~np.isnan(t_arr)]
+    
+    if len(b_clean) == 0 or len(t_clean) == 0:
         return 0.0
     
     quantiles = np.linspace(0, 100, num_buckets + 1)
-    buckets = np.percentile(baseline, quantiles)
+    buckets = np.percentile(b_clean, quantiles)
+
     buckets = np.unique(buckets)
     if len(buckets) < 2:
         return 0.0
