@@ -789,8 +789,7 @@ def start_telegram_command_listener():
         
     # Build list of allowed chat IDs (support comma-separated string)
     allowed_chat_ids = [cid.strip() for cid in raw_chat_id.split(",") if cid.strip()]
-    if "8827929671" not in allowed_chat_ids:
-        allowed_chat_ids.append("8827929671")
+
         
     # Load dynamically authorized chat IDs
     with bot_state_lock:
@@ -2088,10 +2087,26 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
     except Exception as err:
         print(f"[Kill Switch Error] Failed executing emergency close: {err}")
 
+from functools import wraps
+
+
+def require_api_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        expected_key = os.environ.get("DASHBOARD_API_KEY", "").strip()
+        if expected_key:
+            client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
+            if not client_key or client_key.strip() != expected_key:
+                return jsonify({"error": "Unauthorized", "message": "Missing or invalid X-API-KEY header."}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route("/killswitch", methods=["GET", "POST"])
+@require_api_key
 def killswitch_endpoint():
     trigger_emergency_kill_switch("HTTP /killswitch Request")
     return jsonify({"status": "KILL_SWITCH_ACTIVATED", "message": "All orders cancelled and bot halted."})
+
 
 cached_news_sentiment = "Neutral"
 cached_news_titles = []
@@ -3239,6 +3254,7 @@ def get_status():
     return jsonify(state_copy)
 
 @app.route("/api/terminate", methods=["POST"])
+@require_api_key
 def terminate_bot():
     import os
     import signal
@@ -3247,6 +3263,7 @@ def terminate_bot():
     return jsonify({"status": "terminating"})
 
 @app.route("/api/retrain", methods=["POST"])
+@require_api_key
 def trigger_retrain():
     started = retrain_models_thread(is_manual=True)
     if started:
@@ -3255,7 +3272,9 @@ def trigger_retrain():
         return jsonify({"status": "ignored", "message": "Optimization already in progress."}), 409
 
 @app.route("/api/close_trade", methods=["POST"])
+@require_api_key
 def force_close_trade():
+
     data = request.json or {}
     interval = str(data.get("interval", ""))
     symbol = str(data.get("symbol", "")).upper()
@@ -3636,6 +3655,7 @@ def close_all_trades_internal(exit_reason):
     return closed_count
 
 @app.route("/api/close_all_trades", methods=["POST"])
+@require_api_key
 def force_close_all_trades():
     closed_count = close_all_trades_internal("Manual Exit (Force Closed All)")
     if closed_count > 0:
@@ -3644,6 +3664,7 @@ def force_close_all_trades():
         return jsonify({"status": "success", "message": "No active open trades found to close."})
 
 @app.route("/api/toggle_bot", methods=["POST"])
+@require_api_key
 def toggle_bot():
     current_status = bot_state.get("bot_running", True)
     new_status = not current_status
@@ -3660,6 +3681,7 @@ def toggle_bot():
     return jsonify({"status": "success", "bot_running": new_status, "message": message})
 
 @app.route("/api/reset_circuit_breaker", methods=["POST"])
+@require_api_key
 def reset_circuit_breaker():
     bot_state["circuit_breaker_active"] = False
     bot_state["daily_drawdown_start_balance"] = bot_state.get("simulated_balance", 80.0)
@@ -3667,6 +3689,7 @@ def reset_circuit_breaker():
     return jsonify({"status": "success", "message": "Daily drawdown circuit breaker successfully reset. Trading resumed!"})
 
 @app.route("/api/clear_history", methods=["POST"])
+@require_api_key
 def clear_history_endpoint():
     bot_state["trade_history"] = []
     bot_state["prediction_history"] = []
@@ -3684,6 +3707,7 @@ def clear_history_endpoint():
     return jsonify({"status": "success", "message": "All completed trades and prediction history have been successfully cleared from the backend and Hugging Face Dataset space. Simulated balance has been reset to $80.00."})
 
 @app.route("/api/test_email", methods=["POST"])
+@require_api_key
 def test_email_endpoint():
     resend_key = os.getenv("RESEND_API_KEY", "")
     if resend_key:
@@ -4825,14 +4849,21 @@ def start_ws():
             )
             active_public_ws = ws
             import ssl
+            ssl_opts = {"cert_reqs": ssl.CERT_REQUIRED}
+            try:
+                import certifi
+                ssl_opts["ca_certs"] = certifi.where()
+            except Exception:
+                pass
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,
                 proxy_type=proxy_type_str,
-                sslopt={"cert_reqs": ssl.CERT_NONE}
+                sslopt=ssl_opts
             )
+
         except Exception as e:
             print(f"[WebSocket run_forever exception] {e}")
         ws_connected = False
@@ -4971,14 +5002,21 @@ def start_private_ws():
             )
             active_private_ws = ws
             import ssl
+            ssl_opts_priv = {"cert_reqs": ssl.CERT_REQUIRED}
+            try:
+                import certifi
+                ssl_opts_priv["ca_certs"] = certifi.where()
+            except Exception:
+                pass
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,
                 proxy_type=proxy_type_str,
-                sslopt={"cert_reqs": ssl.CERT_NONE}
+                sslopt=ssl_opts_priv
             )
+
         except Exception as e:
             print(f"[WebSocket Private run_forever exception] {e}")
         private_ws_connected = False
