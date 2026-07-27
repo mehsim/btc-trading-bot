@@ -14,8 +14,9 @@ def run_monte_carlo_bootstrap(returns: list, num_simulations: int = 10000) -> di
     
     for _ in range(num_simulations):
         sampled = np.random.choice(ret_arr, size=n_trades, replace=True)
-        equity_curve = np.cumprod(1.0 + sampled / 100.0)
+        equity_curve = np.cumprod(np.maximum(0.01, 1.0 + sampled / 100.0))
         final_ret = (equity_curve[-1] - 1.0) * 100.0
+
         
         peak = np.maximum.accumulate(equity_curve)
         dd = (peak - equity_curve) / peak * 100.0

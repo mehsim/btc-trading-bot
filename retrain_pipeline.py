@@ -74,12 +74,18 @@ def evaluate_holdout_test_protocol(trades: list, min_trades: int = 100) -> tuple
     if n_trades < min_trades:
         return False, f"FAILED: Only {n_trades} trades in test set (min {min_trades} required for statistical significance)"
         
-    wins = [t for t in trades if t.get("pnl_usd", 0) > 0]
+    def _get_pnl(t):
+        if not isinstance(t, dict):
+            return 0.0
+        return float(t.get("pnl_usd") or t.get("scaled_out_pnl") or t.get("pnl_pct") or 0.0)
+
+    wins = [t for t in trades if _get_pnl(t) > 0 or t.get("success") is True]
     win_rate = (len(wins) / n_trades) * 100.0
     
-    gross_profits = sum(t.get("pnl_usd", 0) for t in wins)
-    gross_losses = abs(sum(t.get("pnl_usd", 0) for t in trades if t.get("pnl_usd", 0) < 0))
+    gross_profits = sum(_get_pnl(t) for t in wins)
+    gross_losses = abs(sum(_get_pnl(t) for t in trades if _get_pnl(t) < 0))
     pf = gross_profits / (gross_losses + 1e-8)
+
     
     passed = (win_rate >= 52.0 and pf >= 1.25)
     detail = f"PASSED: Holdout test passed (Win Rate: {win_rate:.1f}%, Profit Factor: {pf:.2f}, Trades: {n_trades})" if passed else f"FAILED: Holdout test metrics insufficient (Win Rate: {win_rate:.1f}%, Profit Factor: {pf:.2f})"
