@@ -275,9 +275,15 @@ def get_bayesian_adjusted_threshold(interval: str, trade_db: list) -> dict:
     if len(recent) < prior["min_trades_guard"]:
         return {"ci_adjustment": 0.0, "confidence_boost": 0.0, "note": "Cold-start: Guarding min trades (1-2)"}
         
-    if len(recent) < prior["trades_needed"]:
-        observed_wins = sum(1 for t in recent if float(t.get("pnl_pct", 0.0)) > 0 or float(t.get("pnl_usd", 0.0)) > 0)
+        observed_wins = sum(
+            1 for t in recent
+            if float(t.get("pnl_pct") or 0.0) > 0 
+            or float(t.get("pnl_usd") or 0.0) > 0 
+            or float(t.get("scaled_out_pnl") or 0.0) > 0
+            or t.get("success") is True
+        )
         observed_wr = observed_wins / len(recent)
+
         blended_wr = 0.70 * prior["win_rate_prior"] + 0.30 * observed_wr
         
         if blended_wr < (prior["win_rate_prior"] - 0.05):
