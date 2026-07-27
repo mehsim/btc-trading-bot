@@ -7767,9 +7767,9 @@ def main():
             # Inject to queue
             check_queue.extend([(symbol, iv_hr) for iv_hr in reloaded_intervals for symbol in SUPPORTED_SYMBOLS])
         
-        # Calculate expected timestamp boundary
-        current_hour_dt = datetime(current_time_utc.year, current_time_utc.month, current_time_utc.day, current_time_utc.hour)
+        current_hour_dt = datetime(current_time_utc.year, current_time_utc.month, current_time_utc.day, current_time_utc.hour, tzinfo=timezone.utc)
         current_hour_ts = int(current_hour_dt.timestamp() * 1000)
+
         
         htf_cache = {}
         fetched_data = {}
