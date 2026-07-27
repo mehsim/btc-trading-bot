@@ -172,9 +172,10 @@ def main():
     dir_total = prob_bearish + prob_bullish
     
     # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
-    if str(INTERVAL) in ["15", "30"] and dir_total >= 0.10:
+    if str(INTERVAL) in ["15", "30"] and dir_total > 1e-6:
         norm_bear = prob_bearish / dir_total
         norm_bull = prob_bullish / dir_total
+
         
         if norm_bear >= 0.70 and prob_bearish >= 0.12:
             ml_trend = "Bearish"
