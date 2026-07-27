@@ -2912,7 +2912,10 @@ def get_bybit_closed_pnl(symbol, limit=1):
 
 def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms):
     """Retrieve all closed PnL records for a symbol from entry_time_ms to now and sum them up."""
+    if not entry_time_ms or float(entry_time_ms) <= 0:
+        entry_time_ms = int((time.time() - 86400) * 1000)
     res = bybit_get_request("/v5/position/closed-pnl", {"category": "linear", "symbol": symbol, "limit": "50"})
+
     if res.get("retCode") == 0:
         pnl_list = res.get("result", {}).get("list", [])
         total_pnl = 0.0

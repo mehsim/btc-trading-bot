@@ -19,10 +19,15 @@ class TimeDecayCalibrator:
                 tf_trades = [t for t in trade_history if str(t.get("timeframe", t.get("interval"))) == tf]
                 durations = []
                 for t in tf_trades:
-                    entry = t.get("entry_time")
-                    exit = t.get("exit_time")
-                    if entry and exit and exit > entry:
+                    entry = float(t.get("entry_time") or 0)
+                    exit = float(t.get("exit_time") or 0)
+                    if entry > 1e11:
+                        entry /= 1000.0
+                    if exit > 1e11:
+                        exit /= 1000.0
+                    if entry > 0 and exit > entry:
                         durations.append((exit - entry) / 3600.0)
+
 
                 if len(durations) >= 10:
                     self.median_durations_hours[tf] = float(np.median(durations))
