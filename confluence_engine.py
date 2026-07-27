@@ -3,7 +3,9 @@ import time
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple
-from ta.trend import EMAIndicator, RSIIndicator
+from ta.trend import EMAIndicator
+from ta.momentum import RSIIndicator
+
 
 def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58, get_history_fn=None, get_orderbook_fn=None, choppiness_fn=None, bot_state_dict=None, global_htf_cache=None):
     """

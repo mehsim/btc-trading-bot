@@ -25,9 +25,23 @@ from garch_monitor import garch_vol_monitor
 from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 from pain_feedback import pain_feedback
-import database
+from bybit_client import (
+    bybit_get_request,
+    bybit_post_request,
+    get_real_bybit_balance_cached,
+    get_all_bybit_positions,
+    place_bybit_order,
+    format_bybit_price,
+    get_bybit_time_offset,
+    execute_bybit_order_ws_or_rest
+)
+from confluence_engine import check_pre_trade_confluence
+from telegram_bot import send_telegram_alert, execute_telegram_api_call
+from websocket_client import init_bybit_websocket_listeners, get_ws_status
+from dashboard_routes import dashboard_bp
 
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
+
 
 # === FIX 1, 2, 3: TRADE STRUCTURE & RISK SANITIZATION GATE ===
 MAX_RR_RATIO = {
@@ -2057,6 +2071,8 @@ from flask import Flask, jsonify, render_template, request, make_response
 # ==========================================
 app = Flask(__name__, template_folder="templates")
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.register_blueprint(dashboard_bp)
+
 bot_logs = []
 logs_lock = threading.Lock()
 retraining_lock = threading.Lock()
