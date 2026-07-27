@@ -91,7 +91,9 @@ def calculate_historical_thresholds(model_trend, interval):
         
         if df_target is not None and len(df_target) > 0 and df_btc is not None and len(df_btc) > 0:
             df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-            df = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
+            df = pd.merge(df_target, df_btc_sub, on="timestamp", how="left")
+            df["close_btc"] = df["close_btc"].ffill().bfill().fillna(df["close"])
+
             if len(df) > 0:
                 df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
                 df = add_features(df)
