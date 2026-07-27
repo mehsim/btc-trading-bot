@@ -55,10 +55,12 @@ class PainFeedbackLoop:
 
     def get_effective_floor(self, symbol):
         """Get floor with pain adjustment applied, decayed over time."""
-        if symbol not in self.adjustments:
-            return None
-        
-        adj = self.adjustments[symbol]
+        with pain_lock:
+            if symbol not in self.adjustments:
+                return None
+            
+            adj = self.adjustments[symbol]
+
         try:
             applied_at = datetime.fromisoformat(adj['applied_at'])
             if applied_at.tzinfo is None:

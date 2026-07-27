@@ -231,8 +231,13 @@ def add_features(df, fetch_calendar_callback=None):
                 conn, params=(sym,)
             )
         if not of_df.empty:
-            of_df["timestamp"] = (of_df["timestamp"] * 1000).astype("int64")
+            first_ts = float(of_df["timestamp"].iloc[0])
+            if first_ts < 1e11:
+                of_df["timestamp"] = (of_df["timestamp"] * 1000).astype("int64")
+            else:
+                of_df["timestamp"] = of_df["timestamp"].astype("int64")
             of_df = of_df.rename(columns={"timestamp": "datetime"})
+
             # Align without look-ahead using pd.merge_asof (direction="backward")
             ts_series = df["timestamp"] if "timestamp" in df.columns else df.index.astype("int64")
             df["_ts"] = ts_series
