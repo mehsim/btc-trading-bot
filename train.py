@@ -246,10 +246,11 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
                     if any(kw.lower() in ev.get("event", "").lower() for kw in high_impact):
                         ev_time_str = ev.get("time", "")
                         try:
-                            ev_time = datetime.strptime(ev_time_str, "%Y-%m-%d %H:%M:%S")
+                            ev_time = pd.to_datetime(ev_time_str).tz_localize(None)
                             filtered_events.append(ev_time)
                         except Exception:
                             pass
+
                 economic_calendar_cache = sorted(filtered_events)
                 print(f"[News/Sentiment] Cached {len(economic_calendar_cache)} high-impact calendar events.")
                 return economic_calendar_cache
