@@ -73,7 +73,15 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
         
     df_dt = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
     hours_to_news_list = []
-    events_utc = [pd.Timestamp(ev).tz_localize("UTC") for ev in events]
+    events_utc = []
+    for ev in events:
+        ts = pd.Timestamp(ev)
+        if ts.tz is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        events_utc.append(ts)
+
     
     for current_time in df_dt:
         idx = bisect.bisect_left(events_utc, current_time)
