@@ -15,8 +15,15 @@ class Event:
 
 class AsyncEventBus:
     def __init__(self):
-        self.queue = asyncio.Queue()
+        self._queue = None
         self._handlers = {}
+
+    @property
+    def queue(self):
+        if self._queue is None:
+            self._queue = asyncio.Queue()
+        return self._queue
+
 
     def subscribe(self, event_type: str, handler):
         if event_type not in self._handlers:
