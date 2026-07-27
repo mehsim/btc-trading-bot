@@ -95,9 +95,12 @@ def get_bybit_time_offset() -> int:
     return 0
 
 
+from secret_manager import get_secure_env
+
 def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    api_key = os.getenv("BYBIT_API_KEY", "").strip()
-    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+    api_key = get_secure_env("BYBIT_API_KEY", "").strip()
+    api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
+
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
@@ -152,8 +155,9 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
 
 
 def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, Any]:
-    api_key = os.getenv("BYBIT_API_KEY", "").strip()
-    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+    api_key = get_secure_env("BYBIT_API_KEY", "").strip()
+    api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
+
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
