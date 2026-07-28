@@ -1215,14 +1215,19 @@ def start_telegram_command_listener():
                                 
                                 execute_telegram_api_call("sendMessage", {
                                     "chat_id": sender_chat_id,
-                                    "text": "Enter or select the *Leverage* (e.g., 5 or 10):",
+                                    "text": "Enter or select the *Leverage* (1x to 100x, e.g. 10, 25, 50):",
                                     "parse_mode": "Markdown",
                                     "reply_markup": {
-                                        "keyboard": [[{"text": "1x"}, {"text": "2x"}, {"text": "5x"}, {"text": "10x"}], [{"text": "/cancel"}]],
+                                        "keyboard": [
+                                            [{"text": "5x"}, {"text": "10x"}, {"text": "15x"}, {"text": "20x"}],
+                                            [{"text": "25x"}, {"text": "50x"}, {"text": "75x"}, {"text": "100x"}],
+                                            [{"text": "/cancel"}]
+                                        ],
                                         "resize_keyboard": True,
                                         "one_time_keyboard": True
                                     }
                                 })
+
                                 continue
                                 
                             # 5. Leverage Step
