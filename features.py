@@ -444,7 +444,10 @@ def add_candlestick_patterns(df):
     res["cdl_marubozu_bear"] = np.where(is_red & (u_wick <= 0.02 * rng) & (l_wick <= 0.02 * rng), -1, 0)
 
     def _shift(arr, n):
-        return pd.Series(arr).shift(n).fillna(0.0).values
+        s = pd.Series(arr).shift(n)
+        if s.dtype == bool or np.issubdtype(s.dtype, np.bool_) or isinstance(arr.iloc[0] if hasattr(arr, 'iloc') else arr[0], (bool, np.bool_)):
+            return s.fillna(False).astype(bool).values
+        return s.fillna(0.0).values
 
     # 2-candle patterns
     prev_o, prev_c = _shift(o, 1), _shift(c, 1)
