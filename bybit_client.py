@@ -281,4 +281,4 @@ def get_real_bybit_balance_cached(force: bool = False):
                 _real_balance_cache = total_equity
                 _last_real_balance_sync = now
             return total_equity
-    return _real_balance_cache if _real_balance_cache is not None else 80.0
+    return _real_balance_cache
