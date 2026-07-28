@@ -418,5 +418,69 @@ def add_features(df, fetch_calendar_callback=None):
             new_lag_cols[f"liq_short_1h_lag{lag}"] = df["liq_short_1h"].shift(lag)
 
     df = pd.concat([df, pd.DataFrame(new_lag_cols, index=df.index)], axis=1)
+    df = add_candlestick_patterns(df)
     df = df.bfill().ffill().fillna(0.0)
     return df
+
+def add_candlestick_patterns(df):
+    o, h, l, c = df["open"].values, df["high"].values, df["low"].values, df["close"].values
+    n = len(df)
+    body = np.abs(c - o)
+    rng = np.maximum(h - l, 1e-8)
+    u_wick = h - np.maximum(o, c)
+    l_wick = np.minimum(o, c) - l
+    is_green = c > o
+    is_red = c < o
+
+    res = {}
+    res["cdl_hammer"] = np.where((l_wick >= 2 * body) & (u_wick <= 0.1 * rng) & (body / rng > 0.05), 1, 0)
+    res["cdl_hanging_man"] = np.where((l_wick >= 2 * body) & (u_wick <= 0.1 * rng) & (df["close"] > df["EMA_21"]), -1, 0)
+    res["cdl_shooting_star"] = np.where((u_wick >= 2 * body) & (l_wick <= 0.1 * rng) & (body / rng > 0.05), -1, 0)
+    res["cdl_inv_hammer"] = np.where((u_wick >= 2 * body) & (l_wick <= 0.1 * rng) & (df["close"] < df["EMA_21"]), 1, 0)
+    res["cdl_doji"] = np.where(body / rng <= 0.1, 1, 0)
+    res["cdl_gravestone_doji"] = np.where((body / rng <= 0.1) & (u_wick >= 0.7 * rng), -1, 0)
+    res["cdl_dragonfly_doji"] = np.where((body / rng <= 0.1) & (l_wick >= 0.7 * rng), 1, 0)
+    res["cdl_spinning_top"] = np.where((body / rng <= 0.3) & (u_wick >= 0.3 * rng) & (l_wick >= 0.3 * rng), 1, 0)
+    res["cdl_marubozu_bull"] = np.where(is_green & (u_wick <= 0.02 * rng) & (l_wick <= 0.02 * rng), 1, 0)
+    res["cdl_marubozu_bear"] = np.where(is_red & (u_wick <= 0.02 * rng) & (l_wick <= 0.02 * rng), -1, 0)
+
+    # 2-candle patterns
+    prev_o, prev_c = np.roll(o, 1), np.roll(c, 1)
+    prev_red, prev_green = prev_c < prev_o, prev_c > prev_o
+    res["cdl_bullish_engulfing"] = np.where(prev_red & is_green & (c >= prev_o) & (o <= prev_c), 1, 0)
+    res["cdl_bearish_engulfing"] = np.where(prev_green & is_red & (c <= prev_o) & (o >= prev_c), -1, 0)
+    res["cdl_bullish_harami"] = np.where(prev_red & is_green & (o >= prev_c) & (c <= prev_o), 1, 0)
+    res["cdl_bearish_harami"] = np.where(prev_green & is_red & (o <= prev_c) & (c >= prev_o), -1, 0)
+    res["cdl_tweezer_top"] = np.where((np.abs(h - np.roll(h, 1)) / h <= 0.001) & is_red & prev_green, -1, 0)
+    res["cdl_tweezer_bottom"] = np.where((np.abs(l - np.roll(l, 1)) / l <= 0.001) & is_green & prev_red, 1, 0)
+    res["cdl_piercing_line"] = np.where(prev_red & is_green & (o < np.roll(l, 1)) & (c >= prev_c + 0.5 * np.abs(prev_c - prev_o)), 1, 0)
+    res["cdl_dark_cloud_cover"] = np.where(prev_green & is_red & (o > np.roll(h, 1)) & (c <= prev_c - 0.5 * np.abs(prev_c - prev_o)), -1, 0)
+    res["cdl_inside_bar"] = np.where((h <= np.roll(h, 1)) & (l >= np.roll(l, 1)), 1, 0)
+
+    # 3-candle patterns
+    p2_o, p2_c = np.roll(o, 2), np.roll(c, 2)
+    p2_red, p2_green = p2_c < p2_o, p2_c > p2_o
+    mid_small = np.abs(prev_c - prev_o) / np.maximum(np.roll(h, 1) - np.roll(l, 1), 1e-8) <= 0.3
+    res["cdl_morning_star"] = np.where(p2_red & mid_small & is_green & (c >= p2_c + 0.5 * np.abs(p2_c - p2_o)), 1, 0)
+    res["cdl_evening_star"] = np.where(p2_green & mid_small & is_red & (c <= p2_c - 0.5 * np.abs(p2_c - p2_o)), -1, 0)
+    res["cdl_morning_doji_star"] = np.where(p2_red & (res["cdl_doji"] == 1) & is_green, 1, 0)
+    res["cdl_evening_doji_star"] = np.where(p2_green & (res["cdl_doji"] == 1) & is_red, -1, 0)
+
+    c1_g, c2_g, c3_g = is_green, np.roll(is_green, 1), np.roll(is_green, 2)
+    c1_r, c2_r, c3_r = is_red, np.roll(is_red, 1), np.roll(is_red, 2)
+    res["cdl_three_white_soldiers"] = np.where(c1_g & c2_g & c3_g & (c > prev_c) & (prev_c > p2_c), 1, 0)
+    res["cdl_three_black_crows"] = np.where(c1_r & c2_r & c3_r & (c < prev_c) & (prev_c < p2_c), -1, 0)
+    res["cdl_three_inside_up"] = np.where(p2_red & (res["cdl_bullish_harami"] == 1) & is_green & (c > p2_o), 1, 0)
+    res["cdl_three_inside_down"] = np.where(p2_green & (res["cdl_bearish_harami"] == 1) & is_red & (c < p2_o), -1, 0)
+
+    # 5-candle patterns
+    p4_green, p4_red = np.roll(is_green, 4), np.roll(is_red, 4)
+    res["cdl_rising_three"] = np.where(p4_green & is_green & c1_r & c2_r & c3_r & (c > np.roll(h, 4)), 1, 0)
+    res["cdl_falling_three"] = np.where(p4_red & is_red & c1_g & c2_g & c3_g & (c < np.roll(l, 4)), -1, 0)
+    res["cdl_abandoned_baby_bull"] = np.where(p2_red & (res["cdl_doji"] == 1) & is_green & (np.roll(l, 1) > np.roll(h, 2)) & (l > np.roll(h, 1)), 1, 0)
+
+    # Set initial 5 rows to 0 due to rolling
+    pattern_df = pd.DataFrame(res, index=df.index)
+    pattern_df.iloc[:5] = 0
+    return pd.concat([df, pattern_df], axis=1)
+

@@ -121,7 +121,7 @@ TIMEFRAME_CONFIG = {
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-PAGES = 40  # 40 pages of candles provides ~40,000 candles (larger balanced dataset size)
+PAGES = 15  # 15 pages ~15,000 candles — optimized for fast AWS 1GB retraining (<5 min per interval)
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
 # Feature list matches train.py and main.py
@@ -201,6 +201,19 @@ for lag in [1, 2]:
 
 # Garman-Klass Volatility features
 features.extend(["volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"])
+
+# Candlestick Pattern features (30 patterns)
+cdl_features = [
+    "cdl_hammer", "cdl_hanging_man", "cdl_shooting_star", "cdl_inv_hammer", "cdl_doji",
+    "cdl_gravestone_doji", "cdl_dragonfly_doji", "cdl_spinning_top", "cdl_marubozu_bull", "cdl_marubozu_bear",
+    "cdl_bullish_engulfing", "cdl_bearish_engulfing", "cdl_bullish_harami", "cdl_bearish_harami",
+    "cdl_tweezer_top", "cdl_tweezer_bottom", "cdl_piercing_line", "cdl_dark_cloud_cover", "cdl_inside_bar",
+    "cdl_morning_star", "cdl_evening_star", "cdl_morning_doji_star", "cdl_evening_doji_star",
+    "cdl_three_white_soldiers", "cdl_three_black_crows", "cdl_three_inside_up", "cdl_three_inside_down",
+    "cdl_rising_three", "cdl_falling_three", "cdl_abandoned_baby_bull"
+]
+features.extend(cdl_features)
+
 
 # Cross-Asset Lead-Lag Correlation features
 features.extend(["lead_lag_diff_5m", "lead_lag_diff_1h", "lead_lag_diff_4h", "volume_ratio_to_btc"])
@@ -438,7 +451,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=10)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -473,7 +486,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=10)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -502,7 +515,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=10)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -532,7 +545,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=10)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -678,8 +691,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
             for col in ["target_price_change", "target_trend"]:
                 if col not in live_df.columns:
                     live_df[col] = 0
+            # Fix duplicate columns before concat
+            df = df.loc[:, ~df.columns.duplicated()]
+            live_df = live_df.loc[:, ~live_df.columns.duplicated()]
+            # Align columns — only keep columns present in main df
+            shared_cols = [c for c in df.columns if c in live_df.columns]
+            live_df = live_df[shared_cols]
             df = pd.concat([df, live_df], ignore_index=True)
             print(f"[Live Feedback] Training dataset expanded to {len(df)} rows.")
+
 
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
