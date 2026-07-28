@@ -83,6 +83,8 @@ def calibrate_confidence(raw_conf, p95, max_conf):
     return min(100.0, max(50.0, calibrated)) / 100.0
 
 def calculate_historical_thresholds(model_trend, interval):
+    if model_trend is None:
+        return 0.55, 0.75
     print(f"Fetching historical data to calibrate confidence percentiles (last 5,000 candles for {SYMBOL} + BTCUSDT on {interval}m interval)...")
     try:
         from data import get_history, merge_derivatives_sentiment_features

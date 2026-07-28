@@ -5926,6 +5926,8 @@ def get_orderbook_imbalance(symbol=None):
 # CONFIDENCE CALIBRATION & HISTORICAL STATS
 # ==========================================
 def calculate_historical_thresholds(model_trend, interval):
+    if model_trend is None:
+        return 0.55, 0.75
     print(f"Fetching historical data to calibrate confidence percentiles (last 5,000 candles for {SYMBOL} + BTCUSDT on {interval}m interval)...")
     try:
         df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=5)
