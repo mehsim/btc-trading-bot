@@ -111,7 +111,8 @@ class SignalEvaluator:
             self.update_confluence_results(tf_key, df, symbol)
 
         except Exception as e:
-            print(f"[SignalEvaluator Error] Exception evaluating {interval}m: {e}")
+            import traceback
+            print(f"[SignalEvaluator Error] Exception evaluating {interval}m: {e}\n{traceback.format_exc()}")
 
     def update_confluence_results(self, tf_key, df, symbol):
         last_row = df.iloc[-1]
