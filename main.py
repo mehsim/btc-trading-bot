@@ -2057,7 +2057,9 @@ def start_telegram_command_listener():
                                 cpu_pct = psutil.cpu_percent(interval=0.2)
                                 mem = psutil.virtual_memory()
                                 cpu_str = f"{cpu_pct:.1f}%"
-                                ram_str = f"{mem.percent:.1f}% ({mem.used // (1024*1024)}MB / {mem.total // (1024*1024)}MB)"
+                                # Linux virtual_memory().percent includes OS page cache. Calculate true application RAM usage:
+                                true_used_pct = (1.0 - (mem.available / mem.total)) * 100.0
+                                ram_str = f"{true_used_pct:.1f}% (Avail: {mem.available // (1024*1024)}MB / {mem.total // (1024*1024)}MB)"
                             except Exception:
                                 load1, load5, _ = os.getloadavg() if hasattr(os, 'getloadavg') else (0, 0, 0)
                                 cpu_str = f"Load: {load1:.2f}, {load5:.2f}"
