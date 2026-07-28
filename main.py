@@ -5953,7 +5953,11 @@ def calculate_historical_thresholds(model_trend, interval):
                 if selected_features_list is not None:
                     X_hist = df[selected_features_list].values
                 else:
-                    X_hist = df[features].values
+                    model_n_feats = getattr(model_trend, "n_features_in_", None)
+                    if model_n_feats is not None and model_n_feats < len(features):
+                        X_hist = df[features[:model_n_feats]].values
+                    else:
+                        X_hist = df[features].values
                 probs = model_trend.predict_proba(X_hist)
                 confidences = np.max(probs, axis=1)
                 

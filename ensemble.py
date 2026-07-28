@@ -120,6 +120,10 @@ class EnsembleClassifier:
 
     def predict_proba(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
+        if hasattr(self.xgb_model, "n_features_in_"):
+            expected_n = self.xgb_model.n_features_in_
+            if X_arr.ndim == 2 and X_arr.shape[1] > expected_n:
+                X_arr = X_arr[:, :expected_n]
         xgb_prob = self.xgb_model.predict_proba(X_arr)
         if self.lgb_model is None or self.cat_model is None or self.meta_coef_ is None:
             # Fallback to performance-weighted blending if base models or meta-coefficients are missing
@@ -278,6 +282,10 @@ class EnsembleRegressor:
 
     def predict(self, X, weights=None):
         X_arr = np.asarray(X, dtype=float)
+        if hasattr(self.xgb_model, "n_features_in_"):
+            expected_n = self.xgb_model.n_features_in_
+            if X_arr.ndim == 2 and X_arr.shape[1] > expected_n:
+                X_arr = X_arr[:, :expected_n]
         xgb_pred = self.xgb_model.predict(X_arr)
         if self.lgb_model is None or self.cat_model is None or self.meta_coef_ is None:
             # Fallback to performance-weighted average if any base models or meta-coefficients are missing
