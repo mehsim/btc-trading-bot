@@ -125,10 +125,10 @@ class SignalEvaluator:
         self.bot_state[f"confluence_results_{tf_key}"] = {
             "checks": {
                 "1d_Trend": {"pass": True, "detail": "1d Macro Structural Trend is aligned"},
-                "4h_Trend": {"pass": ema9 >= ema21, "detail": f"EMA9 ({ema9:.2f}) vs EMA21 ({ema21:.2f})"},
-                "4h_RSI": {"pass": 30 <= rsi <= 70, "detail": f"4h RSI {rsi:.1f} in safe neutral band [30, 70]"},
-                "1h_RSI": {"pass": 25 <= rsi <= 75, "detail": f"1h RSI {rsi:.1f} in safe neutral band [25, 75]"},
-                "Volume_Participation": {"pass": vol >= 0.8 * avg_vol, "detail": f"Volume {vol:.1f} vs 20-avg {avg_vol:.1f}"},
+                "4h_Trend": {"pass": bool(ema9 >= ema21), "detail": f"EMA9 ({ema9:.2f}) vs EMA21 ({ema21:.2f})"},
+                "4h_RSI": {"pass": bool(rsi >= 30.0 and rsi <= 70.0), "detail": f"4h RSI {rsi:.1f} in safe neutral band [30, 70]"},
+                "1h_RSI": {"pass": bool(rsi >= 25.0 and rsi <= 75.0), "detail": f"1h RSI {rsi:.1f} in safe neutral band [25, 75]"},
+                "Volume_Participation": {"pass": bool(vol >= 0.8 * avg_vol), "detail": f"Volume {vol:.1f} vs 20-avg {avg_vol:.1f}"},
                 "BB_Edge_Guard": {"pass": True, "detail": "Price safely inside Bollinger Bands"},
                 "Counter_Momentum": {"pass": True, "detail": "No extreme counter-momentum spike"},
                 "Volatility_Guard": {"pass": True, "detail": "ATR within normal volatility quantile"},
