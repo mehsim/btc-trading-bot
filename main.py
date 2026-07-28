@@ -4464,6 +4464,11 @@ def load_model_weights(iv):
         print(f"[Model Load Warning] 30M models not found on disk, falling back to 15M models for interval 30")
         load_iv = "15"
 
+    if load_iv != iv and load_iv in models_by_interval and models_by_interval[load_iv].get("trending", {}).get("trend") is not None:
+        print(f"[Model Load Optimization] Reusing pre-loaded {load_iv}M model pointers for interval {iv} to save RAM.")
+        models_by_interval[iv] = models_by_interval[load_iv]
+        return
+
     prefixes = {
         "trending_trend": f"ensemble_trending_trend_{load_iv}",
         "trending_price": f"ensemble_trending_price_{load_iv}",
