@@ -230,13 +230,39 @@ def index():
 @require_api_key
 def api_status():
     from state_manager import state_manager
-    from bybit_client import get_real_bybit_balance_cached
+    from bybit_client import get_real_bybit_balance_cached, bybit_get_request
     
     with bot_state_lock:
         if hasattr(state_manager, "_cache") and isinstance(state_manager._cache, dict):
             status_data = state_manager._cache.copy()
         else:
             status_data = {}
+        
+        # Fallback for live prices via Bybit REST API if WebSocket ticker hasn't updated yet
+        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
+        if not status_data.get("live_price_BTCUSDT"):
+            try:
+                res = bybit_get_request("/v5/market/tickers", {"category": "linear"})
+                if res and res.get("retCode") == 0 and res.get("result", {}).get("list"):
+                    for item in res["result"]["list"]:
+                        s = item.get("symbol")
+                        if s in symbols:
+                            lp = float(item.get("lastPrice", 0.0))
+                            status_data[f"live_price_{s}"] = lp
+                            state_manager[f"live_price_{s}"] = lp
+                            if s == "BTCUSDT":
+                                status_data["live_price"] = lp
+                                state_manager["live_price"] = lp
+            except Exception:
+                pass
+
+        # Timeframe defaults for UI rendering
+        for tf in ["15m", "30m", "1h", "2h", "4h"]:
+            if not status_data.get(f"regime_{tf}"):
+                status_data[f"regime_{tf}"] = "Ranging"
+            if not status_data.get(f"latest_prediction_{tf}"):
+                status_data[f"latest_prediction_{tf}"] = {"direction": "No Signal", "confidence": 0.0}
+
         status_data["status"] = "ok"
         status_data["bot_running"] = state_manager.get("bot_running", True)
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
