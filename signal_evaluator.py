@@ -62,28 +62,34 @@ class SignalEvaluator:
             self.bot_state[f"adx_{tf_key}"] = adx_val
 
             # Model evaluation if models loaded
+            model_eval_success = False
             if interval in self.models_by_interval:
-                models = self.models_by_interval[interval]["trending" if is_trending else "ranging"]
-                X_mat = df[features].values
-                row_X = X_mat[-1].reshape(1, -1)
-                
-                probs = models["trend"].predict_proba(row_X)[0]
-                pred_pct = float(models["price"].predict(row_X)[0])
-                
-                winning_class = int(np.argmax(probs))
-                raw_conf = float(probs[winning_class])
-                
-                direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
-                calibrated_conf = calibrate_confidence(raw_conf, 0.55, 0.75)
-                
-                self.bot_state[f"latest_prediction_{tf_key}"] = {
-                    "symbol": symbol,
-                    "direction": direction,
-                    "confidence": raw_conf,
-                    "calibrated_confidence": calibrated_conf,
-                    "predicted_change": pred_pct * float(last_row["close"])
-                }
-            else:
+                try:
+                    models = self.models_by_interval[interval]["trending" if is_trending else "ranging"]
+                    X_mat = df[features].values
+                    row_X = X_mat[-1].reshape(1, -1)
+                    
+                    probs = models["trend"].predict_proba(row_X)[0]
+                    pred_pct = float(models["price"].predict(row_X)[0])
+                    
+                    winning_class = int(np.argmax(probs))
+                    raw_conf = float(probs[winning_class])
+                    
+                    direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
+                    calibrated_conf = calibrate_confidence(raw_conf, 0.55, 0.75)
+                    
+                    self.bot_state[f"latest_prediction_{tf_key}"] = {
+                        "symbol": str(symbol),
+                        "direction": str(direction),
+                        "confidence": float(raw_conf),
+                        "calibrated_confidence": float(calibrated_conf),
+                        "predicted_change": float(pred_pct * float(last_row["close"]))
+                    }
+                    model_eval_success = True
+                except Exception as ex_m:
+                    pass
+
+            if not model_eval_success:
                 # Technical rule-based signal fallback
                 rsi = float(last_row.get("RSI", 50.0)) if "RSI" in last_row and not np.isnan(last_row["RSI"]) else 50.0
                 ema9 = float(last_row.get("EMA_9", last_row["close"]))
