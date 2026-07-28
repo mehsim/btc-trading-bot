@@ -8868,6 +8868,22 @@ def main():
                     f"• *Detail*: Failed during signal processing cycle."
                 )
 
+        # Clean temporary DataFrame caches and trim memory after candle checks
+        if check_queue:
+            fetched_data.clear()
+            htf_cache.clear()
+            if len(bot_state.get("prediction_history", [])) > 150:
+                bot_state["prediction_history"] = bot_state["prediction_history"][-150:]
+            try:
+                import gc, ctypes
+                gc.collect()
+                try:
+                    ctypes.CDLL("libc.so.6").malloc_trim(0)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         # Model Drift Check (every 4 hours)
         current_hour_utc = datetime.now(timezone.utc).hour
         if current_hour_utc % 4 == 0 and datetime.now(timezone.utc).minute == 0:
@@ -8881,18 +8897,6 @@ def main():
                     f"• *High-Conf Win Rate*: {drift_res.get('high_conf_wr', 0)*100:.1f}%\n"
                     f"• *Alerts*:\n{alert_text}"
                 )
-
-        # Periodic C-heap memory trimming to prevent Python memory fragmentation on Linux
-        if datetime.now(timezone.utc).minute % 5 == 0 and datetime.now(timezone.utc).second < 10:
-            try:
-                import gc, ctypes
-                gc.collect()
-                try:
-                    ctypes.CDLL("libc.so.6").malloc_trim(0)
-                except Exception:
-                    pass
-            except Exception:
-                pass
 
         time.sleep(10)
 
