@@ -4461,13 +4461,26 @@ for iv in ["15", "30", "60", "120"]:
 def load_model_weights(iv):
     load_iv = iv
     if iv == "30" and not os.path.exists(f"ensemble_trending_trend_{iv}_xgb.json"):
-        print(f"[Model Load Warning] 30M models not found on disk, falling back to 15M models for interval 30")
         load_iv = "15"
 
     if load_iv != iv and load_iv in models_by_interval and models_by_interval[load_iv].get("trending", {}).get("trend") is not None:
-        print(f"[Model Load Optimization] Reusing pre-loaded {load_iv}M model pointers for interval {iv} to save RAM.")
         models_by_interval[iv] = models_by_interval[load_iv]
         return
+
+    # To maintain ultra-low RAM footprint on 1GB AWS servers, purge other idle timeframe models when loading a new timeframe
+    for existing_iv in list(models_by_interval.keys()):
+        if existing_iv != iv and existing_iv != load_iv:
+            models_by_interval[existing_iv] = {
+                "trending": {"trend": None, "price": None, "meta": None, "calibrator": None},
+                "ranging": {"trend": None, "price": None, "meta": None, "calibrator": None},
+                "selected_features": None
+            }
+    import gc, ctypes
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
     prefixes = {
         "trending_trend": f"ensemble_trending_trend_{load_iv}",
@@ -8014,6 +8027,10 @@ def main():
                     regime = classify_market_regime(df, interval=iv)
                     adx_regime = latest_candle["ADX"]
                     
+                    # Ensure models for interval iv are loaded into memory on-demand
+                    if models_by_interval.get(iv, {}).get("trending", {}).get("trend") is None:
+                        load_model_weights(iv)
+
                     if iv in models_by_interval:
                         models_tf = models_by_interval[iv]
                         if regime == "Trending":
