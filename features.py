@@ -303,67 +303,76 @@ def add_features(df, fetch_calendar_callback=None):
             else:
                 df[col] = 0.0
                 
-    # Lag new features
+    # Batch all lag and cyclical features into a single dictionary to eliminate DataFrame fragmentation
+    new_lag_cols = {}
     for lag in [1, 2]:
-        df[f"open_interest_pct_change_lag{lag}"] = df["open_interest_pct_change"].shift(lag)
-        df[f"funding_rate_diff_lag{lag}"] = df["funding_rate_diff"].shift(lag)
-        df[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
-        df[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
-        df[f"upper_wick_volume_ratio_lag{lag}"] = df["upper_wick_volume_ratio"].shift(lag)
-        df[f"lower_wick_volume_ratio_lag{lag}"] = df["lower_wick_volume_ratio"].shift(lag)
-        
-        # Lag correlation features
-        df[f"oi_change_1h_lag{lag}"] = df["oi_change_1h"].shift(lag).fillna(0.0)
-        df[f"oi_change_4h_lag{lag}"] = df["oi_change_4h"].shift(lag).fillna(0.0)
-        df[f"btc_close_lag{lag}"] = df["btc_close"].shift(lag).ffill().bfill().fillna(0.0)
-        df[f"btc_volume_lag{lag}"] = df["btc_volume"].shift(lag).ffill().bfill().fillna(0.0)
-        df[f"btc_rsi_lag{lag}"] = df["btc_rsi"].shift(lag).ffill().bfill().fillna(50.0)
-        
+        new_lag_cols[f"open_interest_pct_change_lag{lag}"] = df["open_interest_pct_change"].shift(lag)
+        new_lag_cols[f"funding_rate_diff_lag{lag}"] = df["funding_rate_diff"].shift(lag)
+        new_lag_cols[f"CVD_rolling_1h_lag{lag}"] = df["CVD_rolling_1h"].shift(lag)
+        new_lag_cols[f"CVD_rolling_4h_lag{lag}"] = df["CVD_rolling_4h"].shift(lag)
+        new_lag_cols[f"upper_wick_volume_ratio_lag{lag}"] = df["upper_wick_volume_ratio"].shift(lag)
+        new_lag_cols[f"lower_wick_volume_ratio_lag{lag}"] = df["lower_wick_volume_ratio"].shift(lag)
+        new_lag_cols[f"oi_change_1h_lag{lag}"] = df["oi_change_1h"].shift(lag).fillna(0.0)
+        new_lag_cols[f"oi_change_4h_lag{lag}"] = df["oi_change_4h"].shift(lag).fillna(0.0)
+        new_lag_cols[f"btc_close_lag{lag}"] = df["btc_close"].shift(lag).ffill().bfill().fillna(0.0)
+        new_lag_cols[f"btc_volume_lag{lag}"] = df["btc_volume"].shift(lag).ffill().bfill().fillna(0.0)
+        new_lag_cols[f"btc_rsi_lag{lag}"] = df["btc_rsi"].shift(lag).ffill().bfill().fillna(50.0)
+
     # Cyclical time features
     datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-    df["hour_sin"] = np.sin(2 * np.pi * datetime_series.dt.hour / 24.0)
-    df["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
-    df["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
-    df["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+    new_lag_cols["hour_sin"] = np.sin(2 * np.pi * datetime_series.dt.hour / 24.0)
+    new_lag_cols["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
+    new_lag_cols["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
+    new_lag_cols["day_of_week_cos"] = np.cos(2 * np.pi * datetime_series.dt.dayofweek / 7.0)
 
-    # 1D Kalman Filter trend feature (Adaptive process variance)
-    df["close_to_Kalman"] = calculate_kalman_feature(df["close"].values, df["ATR_norm"].values)
+    # 1D Kalman Filter trend feature
+    kalman_series = calculate_kalman_feature(df["close"].values, df["ATR_norm"].values)
+    new_lag_cols["close_to_Kalman"] = kalman_series
     for lag in [1, 2]:
-        df[f"close_to_Kalman_lag{lag}"] = df["close_to_Kalman"].shift(lag)
+        new_lag_cols[f"close_to_Kalman_lag{lag}"] = pd.Series(kalman_series, index=df.index).shift(lag)
 
     # Garman-Klass Volatility
-    df["volatility_gk"] = calculate_garman_klass_vol(df, window=14)
-    # Volatility Term Structure (gk_5 / gk_60)
+    vol_gk = calculate_garman_klass_vol(df, window=14)
     gk_5 = calculate_garman_klass_vol(df, window=5)
     gk_60 = calculate_garman_klass_vol(df, window=60)
-    df["volatility_vts"] = gk_5 / (gk_60 + 1e-8)
+    vol_vts = gk_5 / (gk_60 + 1e-8)
+    
+    new_lag_cols["volatility_gk"] = vol_gk
+    new_lag_cols["volatility_vts"] = vol_vts
     for lag in [1, 2]:
-        df[f"volatility_gk_lag{lag}"] = df["volatility_gk"].shift(lag)
-        df[f"volatility_vts_lag{lag}"] = df["volatility_vts"].shift(lag)
+        new_lag_cols[f"volatility_gk_lag{lag}"] = vol_gk.shift(lag)
+        new_lag_cols[f"volatility_vts_lag{lag}"] = vol_vts.shift(lag)
 
     # Advanced Microstructure Features (VWAP & VWAP Deviation)
     cum_vol = df["volume"].cumsum() + 1e-8
     cum_pv = (df["close"] * df["volume"]).cumsum()
-    df["VWAP"] = cum_pv / cum_vol
-    df["vwap_deviation"] = (df["close"] - df["VWAP"]) / (df["VWAP"] + 1e-8)
+    vwap_series = cum_pv / cum_vol
+    vwap_dev_series = (df["close"] - vwap_series) / (vwap_series + 1e-8)
     
     dp_ret = df["close"].pct_change(1).fillna(0.0)
     autocov = dp_ret.rolling(24).cov(dp_ret.shift(1)).fillna(0.0)
-    df["roll_spread"] = 2.0 * np.sqrt(np.maximum(0.0, -autocov))
-    df["leverage_divergence"] = df["open_interest_pct_change"] - dp_ret
-    df["oi_velocity"] = df["open_interest_pct_change"].diff(1).fillna(0.0)
-    df["funding_acceleration"] = df["funding_rate_diff"].diff(1).fillna(0.0)
-    df["bid_ask_imbalance_ohlc"] = (df["close"] - df["low"]) / (high_low_range) - 0.5
-    
+    roll_spread_series = 2.0 * np.sqrt(np.maximum(0.0, -autocov))
+    lev_div_series = df["open_interest_pct_change"] - dp_ret
+    oi_vel_series = df["open_interest_pct_change"].diff(1).fillna(0.0)
+    funding_acc_series = df["funding_rate_diff"].diff(1).fillna(0.0)
+    bid_ask_imb_series = (df["close"] - df["low"]) / (high_low_range) - 0.5
+
+    new_lag_cols["VWAP"] = vwap_series
+    new_lag_cols["vwap_deviation"] = vwap_dev_series
+    new_lag_cols["roll_spread"] = roll_spread_series
+    new_lag_cols["leverage_divergence"] = lev_div_series
+    new_lag_cols["oi_velocity"] = oi_vel_series
+    new_lag_cols["funding_acceleration"] = funding_acc_series
+    new_lag_cols["bid_ask_imbalance_ohlc"] = bid_ask_imb_series
+
     # Lag advanced microstructure features
-    new_lag_cols = {}
     for lag in [1, 2]:
-        new_lag_cols[f"vwap_deviation_lag{lag}"] = df["vwap_deviation"].shift(lag)
-        new_lag_cols[f"roll_spread_lag{lag}"] = df["roll_spread"].shift(lag)
-        new_lag_cols[f"leverage_divergence_lag{lag}"] = df["leverage_divergence"].shift(lag)
-        new_lag_cols[f"oi_velocity_lag{lag}"] = df["oi_velocity"].shift(lag)
-        new_lag_cols[f"funding_acceleration_lag{lag}"] = df["funding_acceleration"].shift(lag)
-        new_lag_cols[f"bid_ask_imbalance_ohlc_lag{lag}"] = df["bid_ask_imbalance_ohlc"].shift(lag)
+        new_lag_cols[f"vwap_deviation_lag{lag}"] = vwap_dev_series.shift(lag)
+        new_lag_cols[f"roll_spread_lag{lag}"] = roll_spread_series.shift(lag)
+        new_lag_cols[f"leverage_divergence_lag{lag}"] = lev_div_series.shift(lag)
+        new_lag_cols[f"oi_velocity_lag{lag}"] = oi_vel_series.shift(lag)
+        new_lag_cols[f"funding_acceleration_lag{lag}"] = funding_acc_series.shift(lag)
+        new_lag_cols[f"bid_ask_imbalance_ohlc_lag{lag}"] = bid_ask_imb_series.shift(lag)
         if "CVD_true" in df.columns:
             new_lag_cols[f"CVD_true_lag{lag}"] = df["CVD_true"].shift(lag)
         if "OFI_true" in df.columns:

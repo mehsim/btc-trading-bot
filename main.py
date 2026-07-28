@@ -498,7 +498,7 @@ def send_daily_summary(chat_id=None):
         filter_stats = bot_state.get("filter_stats", {})
         
         summary_msg = (
-            f"📊 *BTC TRADING BOT — DAILY SUMMARY* ({datetime.utcnow().strftime('%Y-%m-%d')})\n\n"
+            f"📊 *BTC TRADING BOT — DAILY SUMMARY* ({datetime.now(timezone.utc).strftime('%Y-%m-%d')})\n\n"
             f"💰 *Overall 24h Result*: *${total_pnl_24h:+.2f}* ({total_trades_24h} trades)\n\n"
             f"⏱️ *Performance by Timeframe*:\n"
             f"{tf_text}\n\n"
@@ -538,7 +538,7 @@ class HTFTrendCache:
 
     def get_trend(self, symbol: str, interval: str) -> tuple:
         key = (symbol, str(interval))
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with self._lock:
             if key in self._cache:
                 cached = self._cache[key]
@@ -4332,7 +4332,7 @@ def run_rolling_retrain_scheduler():
     print("[Scheduler] Automated weekly Sunday retraining scheduler started.")
     while True:
         try:
-            now_utc = datetime.utcnow()
+            now_utc = datetime.now(timezone.utc)
             # Sunday is weekday 6. Check if it is Sunday between 00:00 and 00:20 UTC.
             if now_utc.weekday() == 6 and now_utc.hour == 0 and now_utc.minute < 20:
                 print(f"[Scheduler] Sunday 00:00 UTC detected. Triggering weekly model retraining...")
@@ -5616,7 +5616,7 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
         try:
             finnhub_token = os.environ.get("FINNHUB_TOKEN", "free")
             from datetime import datetime, timedelta
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             if start_ts_ms:
                 from_dt = datetime.utcfromtimestamp(start_ts_ms / 1000.0)
             else:
@@ -7710,7 +7710,7 @@ def main():
                 return True, news_reason
 
             try:
-                now_utc = datetime.utcnow()
+                now_utc = datetime.now(timezone.utc)
                 events = fetch_economic_calendar_cached()
                 for ev_time in events:
                     diff = abs((now_utc - ev_time).total_seconds())
@@ -7752,7 +7752,7 @@ def main():
         reloaded_intervals = check_and_hot_reload_models()
         
         # --- Intelligent Boundary Window Candle Polling ---
-        current_time_utc = datetime.utcnow()
+        current_time_utc = datetime.now(timezone.utc)
         current_utc_hour = current_time_utc.hour
         current_utc_minute = current_time_utc.minute
         current_15m_block = (current_utc_hour * 60 + current_utc_minute) // 15
@@ -7958,7 +7958,7 @@ def main():
                             continue
                             
                         # Session-Based Feature Weighting (Asian vs London vs NY)
-                        utc_hour_sess = datetime.utcnow().hour
+                        utc_hour_sess = datetime.now(timezone.utc).hour
                         session_name = "asian" if 0 <= utc_hour_sess < 8 else ("london" if 8 <= utc_hour_sess < 16 else "ny")
                         session_weights = {
                             "asian": {"vwap_deviation": 1.3, "ATR_norm": 1.2, "volume_ratio": 1.2, "RSI": 0.8, "MACD_diff": 0.8},
@@ -8187,23 +8187,26 @@ def main():
                         is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
                         news_event = ""
                         
-                        # Hierarchical Confluence Check (Trend Alignment)
+                        # Hierarchical Confluence Check & Macro-Trend Alignment Multiplier
                         confluence_blocked = False
                         htf_trend = "Neutral"
                         macro_tf = ""
-                        htf_mapping = {"60": "240", "120": "360"}
-                        if iv in htf_mapping:
-                            macro_iv = htf_mapping[iv]
+                        htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
+                        if str(iv) in htf_mapping:
+                            macro_iv = htf_mapping[str(iv)]
                             macro_tf = tf_map.get(str(macro_iv))
                             if macro_tf:
                                 macro_pred = bot_state.get(f"latest_prediction_{macro_tf}")
                                 if macro_pred and isinstance(macro_pred, dict):
                                     htf_trend = macro_pred.get("direction", "Neutral")
-                                    if htf_trend in ["Bullish", "Bearish"]:
-                                        if ml_trend == "Bullish" and htf_trend == "Bearish":
+                                    if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
+                                        if ml_trend == htf_trend:
+                                            calibrated_confidence = min(0.98, calibrated_confidence + 0.08)
+                                            print(f"[{symbol} {iv}m Macro Alignment Boost] Signals aligned with {macro_tf} ({htf_trend}). Confidence boosted (+8.0%) -> {calibrated_confidence*100:.2f}%")
+                                        else:
+                                            calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
                                             confluence_blocked = True
-                                        elif ml_trend == "Bearish" and htf_trend == "Bullish":
-                                            confluence_blocked = True
+                                            print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}). Confidence penalized (-10.0%) -> {calibrated_confidence*100:.2f}%")
 
                         # Funding Rate Carry Overlay
                         funding_rate = get_funding_rate(symbol)
@@ -8796,8 +8799,8 @@ def main():
                 )
 
         # Model Drift Check (every 4 hours)
-        current_hour_utc = datetime.utcnow().hour
-        if current_hour_utc % 4 == 0 and datetime.utcnow().minute == 0:
+        current_hour_utc = datetime.now(timezone.utc).hour
+        if current_hour_utc % 4 == 0 and datetime.now(timezone.utc).minute == 0:
             drift_res = mlops_engine.check_model_drift("15", bot_state.get("trade_history", []), window=100)
             if drift_res.get("status") == "ALERT":
                 alert_text = "\n".join(drift_res.get("alerts", []))

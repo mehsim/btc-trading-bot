@@ -41,21 +41,23 @@ def get_bybit_proxies():
 
 def _ensure_async_loop():
     global _async_loop, _aiohttp_session, _async_thread
-    if _async_loop is None or not _async_loop.is_running():
+    if _async_loop is None or not _async_loop.is_running() or _aiohttp_session is None or _aiohttp_session.closed:
         def run_loop():
             nonlocal loop
             asyncio.set_event_loop(loop)
             loop.run_forever()
 
-        loop = asyncio.new_event_loop()
-        _async_loop = loop
-        t = threading.Thread(target=run_loop, daemon=True)
-        t.start()
-        _async_thread = t
+        if _async_loop is None or not _async_loop.is_running():
+            loop = asyncio.new_event_loop()
+            _async_loop = loop
+            t = threading.Thread(target=run_loop, daemon=True)
+            t.start()
+            _async_thread = t
 
         async def init_session():
             global _aiohttp_session
-            _aiohttp_session = aiohttp.ClientSession()
+            if _aiohttp_session is None or _aiohttp_session.closed:
+                _aiohttp_session = aiohttp.ClientSession()
 
         future = asyncio.run_coroutine_threadsafe(init_session(), _async_loop)
         future.result(timeout=5)
@@ -270,6 +272,13 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
             best_bid = float(t_list[0].get("bid1Price", 0.0))
             best_ask = float(t_list[0].get("ask1Price", 0.0))
             
+    if best_bid > 0 and best_ask > 0:
+        spread_pct = (best_ask - best_bid) / best_bid
+        if spread_pct > 0.003:
+            # Spread > 0.30% wide -> Fallback directly to Taker Market order for safety
+            print(f"[{symbol}] Wide spread detected ({spread_pct*100:.2f}% > 0.30%). Bypassing Post-Only to execute via Taker Market.")
+            return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+
     limit_price = best_bid if side == "Buy" and best_bid > 0 else (best_ask if side == "Sell" and best_ask > 0 else None)
     if limit_price is None:
         # Fallback to direct Taker Market order if ticker fetch fails
