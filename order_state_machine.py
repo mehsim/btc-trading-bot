@@ -75,8 +75,11 @@ class ManagedOrder:
         self.state = new_state
         self.history.append((time.time(), f"{new_state.value}: {detail}".strip()))
 
-    def update_fill(self, fill_qty: float, fill_price: float):
-        self.filled_qty += fill_qty
+    def update_fill(self, fill_qty: float, fill_price: float, is_cumulative: bool = False):
+        if is_cumulative:
+            self.filled_qty = max(self.filled_qty, float(fill_qty))
+        else:
+            self.filled_qty += float(fill_qty)
         if self.filled_qty >= self.qty:
             self.transition_to(OrderState.FILLED, f"Filled {self.filled_qty}/{self.qty} @ {fill_price}")
         else:

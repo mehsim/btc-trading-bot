@@ -24,6 +24,8 @@ class SentimentDecayEngine:
 
             log_resp = np.log(responses[valid])
             clean_lags = lags[valid]
+            if len(np.unique(clean_lags)) < 2:
+                return self.default_half_life
 
             # Fit linear slope log(y) = log(A) - lambda * t
             poly = np.polyfit(clean_lags, log_resp, 1)

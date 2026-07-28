@@ -97,8 +97,8 @@ class PortfolioRiskEngine:
         var_new = float(np.dot(weights_new.T, np.dot(cov_matrix.values, weights_new)))
 
         mcr = var_new - var_curr
-        # Reject if addition increases total variance by > 2.0%
-        is_approved = mcr <= (0.02 * max(1e-5, var_new))
+        # Reject if addition increases total variance by > 2.0% (always approve initial position when tot_curr <= 0)
+        is_approved = True if tot_curr <= 0 else (mcr <= (0.02 * max(1e-5, var_new)))
 
         return mcr, is_approved
 

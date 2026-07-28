@@ -37,7 +37,7 @@ class GMMTrailingEngine:
 
 
 
-        probs = self.gmm.predict_proba([[current_adx]])[0]
+        probs = self.gmm.predict_proba(np.array([[float(current_adx)]]))[0]
         p_trend = float(probs[self.trending_component_idx])
 
         # Smooth interpolation between 0.90x and 1.50x

@@ -1,3 +1,4 @@
+import math
 import sqlite3
 import os
 import json
@@ -5,7 +6,7 @@ import threading
 from decimal import Decimal, ROUND_HALF_UP
 
 def round_monetary(val, decimals=4):
-    if val is None:
+    if val is None or (isinstance(val, float) and math.isnan(val)):
         return 0.0
     try:
         d = Decimal(str(val))

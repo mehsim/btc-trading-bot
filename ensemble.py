@@ -293,14 +293,11 @@ class EnsembleRegressor:
         lgb_pred = self.lgb_model.predict(X_arr)
         cat_pred = self.cat_model.predict(X_arr)
         
-        # Apply Ridge meta-model
+        # Apply Ridge meta-model via linear matrix multiplication
         X_meta = np.column_stack([xgb_pred, lgb_pred, cat_pred])
-        
-        from sklearn.linear_model import Ridge
-        meta_reg = Ridge(alpha=1.0, random_state=42)
-        meta_reg.coef_ = np.array(self.meta_coef_)
-        meta_reg.intercept_ = float(self.meta_intercept_)
-        return meta_reg.predict(X_meta)
+        coef = np.array(self.meta_coef_, dtype=float)
+        intercept = float(self.meta_intercept_) if self.meta_intercept_ is not None else 0.0
+        return np.dot(X_meta, coef) + intercept
 
 # ==========================================
 # NATIVE SAVING/LOADING (TEXT/JSON ONLY)

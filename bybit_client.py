@@ -9,7 +9,8 @@ import asyncio
 import aiohttp
 from typing import Dict, Any, Optional
 
-BYBIT_BASE_URL = "https://api.bybit.com"
+TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
+BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 
 _cached_time_offset = 0
 _last_time_sync = 0
@@ -39,18 +40,25 @@ def get_bybit_proxies():
     return None
 
 
+def parse_proxy_url(proxy_url):
+    """Parse proxy URL into a dictionary formatted for requests or aiohttp."""
+    if not proxy_url:
+        return None
+    return {"http": proxy_url, "https": proxy_url}
+
+
+_async_init_lock = threading.Lock()
+
 def _ensure_async_loop():
     global _async_loop, _aiohttp_session, _async_thread
-    if _async_loop is None or not _async_loop.is_running() or _aiohttp_session is None or _aiohttp_session.closed:
-        def run_loop():
-            nonlocal loop
-            asyncio.set_event_loop(loop)
-            loop.run_forever()
-
+    with _async_init_lock:
         if _async_loop is None or not _async_loop.is_running():
-            loop = asyncio.new_event_loop()
-            _async_loop = loop
-            t = threading.Thread(target=run_loop, daemon=True)
+            new_loop = asyncio.new_event_loop()
+            _async_loop = new_loop
+            def run_loop(l):
+                asyncio.set_event_loop(l)
+                l.run_forever()
+            t = threading.Thread(target=run_loop, args=(new_loop,), daemon=True)
             t.start()
             _async_thread = t
 
@@ -71,7 +79,7 @@ def get_bybit_time_offset() -> int:
             return _cached_time_offset
 
     async def do_time_sync():
-        url = "https://api.bybit.com/v5/market/time"
+        url = f"{BYBIT_BASE_URL}/v5/market/time"
         proxy_dict = get_bybit_proxies()
         proxy_url = proxy_dict.get("https") or proxy_dict.get("http") if proxy_dict else None
         timeout = aiohttp.ClientTimeout(total=5)
@@ -98,6 +106,7 @@ def get_bybit_time_offset() -> int:
 
 
 from secret_manager import get_secure_env
+
 
 def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     api_key = get_secure_env("BYBIT_API_KEY", "").strip()
@@ -222,6 +231,17 @@ def execute_bybit_order_ws_or_rest(endpoint: str, payload: Dict[str, Any]) -> Di
         return bybit_post_request(endpoint, payload)
 
 
+def set_bybit_leverage(symbol: str, leverage: float) -> Dict[str, Any]:
+    lev_str = f"{float(leverage):.1f}"
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "buyLeverage": lev_str,
+        "sellLeverage": lev_str
+    }
+    return bybit_post_request("/v5/position/set-leverage", payload)
+
+
 def format_bybit_price(symbol: str, price: float) -> str:
     p_val = float(price)
     if "BTC" in symbol or "ETH" in symbol:
@@ -230,6 +250,24 @@ def format_bybit_price(symbol: str, price: float) -> str:
         return f"{p_val:.3f}"
     else:
         return f"{p_val:.4f}"
+
+
+def format_bybit_qty(symbol: str, qty: float) -> str:
+    q_val = float(qty)
+    if "BTC" in symbol:
+        return f"{q_val:.3f}"
+    elif "ETH" in symbol:
+        return f"{q_val:.2f}"
+    elif "SOL" in symbol or "BNB" in symbol:
+        return f"{q_val:.2f}"
+    else:
+        return f"{int(round(q_val))}"
+
+
+def get_bybit_min_qty_step(symbol: str) -> tuple:
+    mins = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
+    steps = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
+    return mins.get(symbol, 0.001), steps.get(symbol, 0.001)
 
 
 def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market", post_only: bool = False) -> Dict[str, Any]:
@@ -243,7 +281,7 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
         "symbol": symbol,
         "side": side,
         "orderType": order_type_str,
-        "qty": str(qty),
+        "qty": format_bybit_qty(symbol, qty),
         "timeInForce": tif_str,
         "positionIdx": 0
     }
@@ -258,11 +296,100 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
         
     return execute_bybit_order_ws_or_rest("/v5/order/create", payload)
 
+
+def place_bybit_limit_order(symbol: str, side: str, qty: float, price: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False) -> Dict[str, Any]:
+    return place_bybit_order(symbol=symbol, side=side, qty=qty, price=price, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Limit")
+
+
+def place_bybit_taker_ioc_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False) -> Dict[str, Any]:
+    return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Market", post_only=False)
+
+
+def get_bybit_order_details(symbol: str, order_id: str) -> Dict[str, Any]:
+    return bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
+
+
+def cancel_bybit_order(symbol: str, order_id: str) -> Dict[str, Any]:
+    return execute_bybit_order_ws_or_rest("/v5/order/cancel", {"category": "linear", "symbol": symbol, "orderId": order_id})
+
+
+def get_bybit_position(symbol: str) -> Dict[str, Any]:
+    res = bybit_get_request("/v5/position/list", {"category": "linear", "symbol": symbol})
+    if res.get("retCode") == 0:
+        p_list = res.get("result", {}).get("list", [])
+        if p_list:
+            return p_list[0]
+    return {}
+
+
+def get_all_bybit_positions() -> list:
+    res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
+    if res.get("retCode") == 0:
+        return res.get("result", {}).get("list", [])
+    return []
+
+
+def get_bybit_closed_pnl(symbol: str, limit: int = 1) -> float:
+    res = bybit_get_request("/v5/position/closed-pnl", {"category": "linear", "symbol": symbol, "limit": limit})
+    if res.get("retCode") == 0:
+        p_list = res.get("result", {}).get("list", [])
+        if p_list:
+            return float(p_list[0].get("closedPnl", 0.0))
+    return 0.0
+
+
+def get_bybit_accumulated_closed_pnl(symbol: str, entry_time_ms: int) -> float:
+    res = bybit_get_request("/v5/position/closed-pnl", {"category": "linear", "symbol": symbol, "limit": 20})
+    if res.get("retCode") == 0:
+        p_list = res.get("result", {}).get("list", [])
+        tot = 0.0
+        for p in p_list:
+            created_t = int(p.get("createdTime", 0))
+            if created_t >= entry_time_ms - 60000:
+                tot += float(p.get("closedPnl", 0.0))
+        return tot
+    return 0.0
+
+
+def update_bybit_stop_loss(symbol: str, sl_price: float, active_trade: Optional[Dict] = None) -> Dict[str, Any]:
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "stopLoss": format_bybit_price(symbol, sl_price),
+        "positionIdx": 0
+    }
+    return bybit_post_request("/v5/position/trading-stop", payload)
+
+
+def update_bybit_take_profit(symbol: str, tp_price: float, active_trade: Optional[Dict] = None) -> Dict[str, Any]:
+    payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "takeProfit": format_bybit_price(symbol, tp_price),
+        "positionIdx": 0
+    }
+    return bybit_post_request("/v5/position/trading-stop", payload)
+
+
+def get_bybit_bid_ask(symbol: str) -> tuple:
+    res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
+    if res.get("retCode") == 0:
+        t_list = res.get("result", {}).get("list", [])
+        if t_list:
+            return float(t_list[0].get("bid1Price", 0.0)), float(t_list[0].get("ask1Price", 0.0))
+    return 0.0, 0.0
+
+
+def get_bybit_last_execution(symbol: str) -> Dict[str, Any]:
+    res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "limit": 1})
+    if res.get("retCode") == 0:
+        e_list = res.get("result", {}).get("list", [])
+        if e_list:
+            return e_list[0]
+    return {}
+
+
 def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, max_chase_seconds: float = 10.0) -> Dict[str, Any]:
-    """
-    Submits a Limit Post-Only Maker order inside the orderbook spread to capture Maker rebates.
-    Re-quotes order price over a 10-second window. Falls back to Taker IOC if unfilled.
-    """
     ticker_res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
     best_bid = 0.0
     best_ask = 0.0
@@ -275,13 +402,11 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
     if best_bid > 0 and best_ask > 0:
         spread_pct = (best_ask - best_bid) / best_bid
         if spread_pct > 0.003:
-            # Spread > 0.30% wide -> Fallback directly to Taker Market order for safety
             print(f"[{symbol}] Wide spread detected ({spread_pct*100:.2f}% > 0.30%). Bypassing Post-Only to execute via Taker Market.")
             return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
 
     limit_price = best_bid if side == "Buy" and best_bid > 0 else (best_ask if side == "Sell" and best_ask > 0 else None)
     if limit_price is None:
-        # Fallback to direct Taker Market order if ticker fetch fails
         return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
 
     post_payload = {
@@ -289,7 +414,7 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         "symbol": symbol,
         "side": side,
         "orderType": "Limit",
-        "qty": str(qty),
+        "qty": format_bybit_qty(symbol, qty),
         "price": format_bybit_price(symbol, limit_price),
         "timeInForce": "PostOnly",
         "positionIdx": 0
@@ -301,14 +426,12 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         
     res = execute_bybit_order_ws_or_rest("/v5/order/create", post_payload)
     if res.get("retCode") != 0:
-        # Post-Only rejected (e.g. price crossed spread) -> Failover directly to Taker IOC Market order
         return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
 
     order_id = res.get("result", {}).get("orderId")
     if not order_id:
         return res
         
-    # Poll for fill over max_chase_seconds window
     start_t = time.time()
     while time.time() - start_t < max_chase_seconds:
         time.sleep(2.0)
@@ -322,17 +445,27 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
                 elif o_status in ["Cancelled", "Rejected"]:
                     break
 
-    # Unfilled after 10s: Cancel PostOnly limit order and execute Taker IOC failover
     cancel_payload = {"category": "linear", "symbol": symbol, "orderId": order_id}
     execute_bybit_order_ws_or_rest("/v5/order/cancel", cancel_payload)
-    return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+    
+    chk_final = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
+    filled_qty = 0.0
+    if chk_final.get("retCode") == 0 and chk_final.get("result", {}).get("list"):
+        filled_qty = float(chk_final["result"]["list"][0].get("cumExecQty", 0.0))
+        
+    rem_qty = float(qty) - filled_qty
+    if rem_qty > 0.0001:
+        return place_bybit_order(symbol=symbol, side=side, qty=rem_qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+    return chk_final
 
 
-def get_all_bybit_positions() -> list:
-    res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
+def get_real_bybit_balance() -> float:
+    res = bybit_get_request("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
     if res.get("retCode") == 0:
-        return res.get("result", {}).get("list", [])
-    return []
+        l_data = res.get("result", {}).get("list", [])
+        if l_data:
+            return float(l_data[0].get("totalEquity") or l_data[0].get("totalWalletBalance") or 0.0)
+    return 0.0
 
 
 def get_real_bybit_balance_cached(force: bool = False):
@@ -342,8 +475,8 @@ def get_real_bybit_balance_cached(force: bool = False):
         if not force and _real_balance_cache is not None and (now - _last_real_balance_sync) < 60:
             return _real_balance_cache
 
-    api_key = os.getenv("BYBIT_API_KEY", "").strip()
-    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
+    api_key = get_secure_env("BYBIT_API_KEY", "").strip()
+    api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
     if not api_key or not api_secret:
         return "API_KEYS_MISSING"
 
@@ -357,3 +490,24 @@ def get_real_bybit_balance_cached(force: bool = False):
                 _last_real_balance_sync = now
             return total_equity
     return _real_balance_cache
+
+
+def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
+    """
+    Background worker thread running every 120s to sync wallet balance from Bybit API.
+    """
+    print("[Balance Sync] Bybit real wallet balance sync thread started.")
+    while True:
+        try:
+            bal = get_real_bybit_balance_cached(force=True)
+            if isinstance(bal, (int, float)) and bal > 0 and bot_state:
+                if bot_state_lock:
+                    with bot_state_lock:
+                        bot_state["wallet_balance"] = bal
+                        bot_state["live_balance"] = bal
+                else:
+                    bot_state["wallet_balance"] = bal
+                    bot_state["live_balance"] = bal
+        except Exception as e:
+            print(f"[Balance Sync Error] Failed to update Bybit balance: {e}")
+        time.sleep(120)

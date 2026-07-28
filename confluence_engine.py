@@ -87,6 +87,53 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         max_score += weight_4h * 2
         total_score += weight_4h * 2
 
+    # CHECK 3: Orderbook Imbalance & L2 Depth
+    weight_ob = 1
+    if get_orderbook_fn:
+        try:
+            ob_data = get_orderbook_fn(symbol=symbol)
+            ob_imbalance = ob_data.get("imbalance", 0.0)
+            ob_pass = (ml_trend == "Bullish" and ob_imbalance >= -0.2) or (ml_trend == "Bearish" and ob_imbalance <= 0.2)
+            results["Orderbook_L2"] = {"pass": ob_pass, "detail": f"Imbalance: {ob_imbalance:+.2f}", "weight": weight_ob}
+            max_score += weight_ob
+            if ob_pass:
+                total_score += weight_ob
+        except Exception as e:
+            results["Orderbook_L2"] = {"pass": True, "detail": f"Bypassed ({e})", "weight": 0}
+    else:
+        results["Orderbook_L2"] = {"pass": True, "detail": "Orderbook check bypassed", "weight": 0}
+
+    # CHECK 4: Choppiness Index Gate
+    weight_chop = 1
+    if choppiness_fn and df_1h is not None and len(df_1h) >= 14:
+        try:
+            ci_val = choppiness_fn(df_1h)
+            chop_pass = ci_val < 61.8
+            results["Choppiness_Gate"] = {"pass": chop_pass, "detail": f"CI: {ci_val:.1f} (<61.8 threshold)", "weight": weight_chop}
+            max_score += weight_chop
+            if chop_pass:
+                total_score += weight_chop
+        except Exception as e:
+            results["Choppiness_Gate"] = {"pass": True, "detail": f"Bypassed ({e})", "weight": 0}
+    else:
+        results["Choppiness_Gate"] = {"pass": True, "detail": "Choppiness check bypassed", "weight": 0}
+
+    # CHECK 5: News Blackout & Sentiment Check
+    weight_news = 1
+    news_pass = True
+    news_detail = "News Safe"
+    if news_sentiment:
+        if isinstance(news_sentiment, str) and "BLACKOUT" in news_sentiment:
+            news_pass = False
+            news_detail = news_sentiment
+        elif isinstance(news_sentiment, dict) and news_sentiment.get("blackout"):
+            news_pass = False
+            news_detail = news_sentiment.get("reason", "News Blackout Active")
+    results["News_Blackout"] = {"pass": news_pass, "detail": news_detail, "weight": weight_news}
+    max_score += weight_news
+    if news_pass:
+        total_score += weight_news
+
     # CHECK 6: Counter-Momentum Guard
     weight_cm = 2
     try:
@@ -116,11 +163,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
     trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True)
-    approved = (calibrated_confidence >= 0.60) and trend_gates_passed and traditional_approved
+    approved = (calibrated_confidence >= dynamic_conf_threshold) and trend_gates_passed and traditional_approved
 
     results["_Score_Summary"] = {
         "pass": approved,
-        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: 60%, Trend Pass: {trend_gates_passed}) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
+        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: {dynamic_conf_threshold*100:.1f}%, Trend Pass: {trend_gates_passed}) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
         "weight": "SUMMARY"
     }
 

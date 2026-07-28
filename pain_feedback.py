@@ -75,8 +75,7 @@ class PainFeedbackLoop:
                 # Expired, remove adjustment safely
                 del self.adjustments[symbol]
                 try:
-                    with open(self.state_file, 'w') as f:
-                        json.dump(self.adjustments, f, indent=2)
+                    self.save_state()
                 except Exception as e:
                     print(f"[PainFeedbackLoop] Error saving state file: {e}")
                 return None

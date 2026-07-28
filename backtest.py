@@ -137,27 +137,28 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             continue
 
         # 2. Daily Trend Alignment
-        if require_trend_alignment:
+        if require_trend_alignment and "EMA_9_1d" in df.columns and "EMA_21_1d" in df.columns:
             trend_1d = "Bullish" if df.loc[i, "EMA_9_1d"] > df.loc[i, "EMA_21_1d"] else "Bearish"
             if ml_trend != trend_1d:
                 i += 1
                 continue
 
         # 3. 4h Trend Alignment
-        if require_trend_alignment:
+        if require_trend_alignment and "EMA_9_4h" in df.columns and "EMA_21_4h" in df.columns:
             trend_4h = "Bullish" if df.loc[i, "EMA_9_4h"] > df.loc[i, "EMA_21_4h"] else "Bearish"
             if ml_trend != trend_4h:
                 i += 1
                 continue
 
         # 4. 4h RSI
-        rsi_4h = df.loc[i, "RSI_4h"]
-        if ml_trend == "Bullish" and rsi_4h >= 70.0:
-            i += 1
-            continue
-        if ml_trend == "Bearish" and rsi_4h <= 30.0:
-            i += 1
-            continue
+        if "RSI_4h" in df.columns:
+            rsi_4h = df.loc[i, "RSI_4h"]
+            if ml_trend == "Bullish" and rsi_4h >= 70.0:
+                i += 1
+                continue
+            if ml_trend == "Bearish" and rsi_4h <= 30.0:
+                i += 1
+                continue
 
         # 5. 1h RSI
         rsi_1h = df.loc[i, "RSI"]

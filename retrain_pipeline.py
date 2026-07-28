@@ -77,7 +77,13 @@ def evaluate_holdout_test_protocol(trades: list, min_trades: int = 100) -> tuple
     def _get_pnl(t):
         if not isinstance(t, dict):
             return 0.0
-        return float(t.get("pnl_usd") or t.get("scaled_out_pnl") or t.get("pnl_pct") or 0.0)
+        if t.get("pnl_usd") is not None:
+            return float(t["pnl_usd"])
+        if t.get("scaled_out_pnl") is not None:
+            return float(t["scaled_out_pnl"])
+        if t.get("pnl_pct") is not None:
+            return float(t["pnl_pct"])
+        return 0.0
 
     wins = [t for t in trades if _get_pnl(t) > 0 or t.get("success") is True]
     win_rate = (len(wins) / n_trades) * 100.0

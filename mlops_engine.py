@@ -4,7 +4,7 @@ import time
 import threading
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 
 # MLflow Integration with Fallback
 try:
