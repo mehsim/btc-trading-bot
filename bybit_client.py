@@ -7,7 +7,8 @@ import urllib.parse
 import threading
 import asyncio
 import aiohttp
-from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+load_dotenv()
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"

@@ -15,6 +15,8 @@ import threading
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+load_dotenv()
 from flask import Flask
 
 # === MODULAR COMPONENT IMPORTS ===
