@@ -2093,19 +2093,20 @@ def start_telegram_command_listener():
                                     reply_text = "ℹ️ *No trade history recorded yet for QuantStats tearsheet.*"
                                 else:
                                     total_t = len(trades_raw)
-                                    wins = sum(1 for t in trades_raw if t.get("realized_pnl", 0) > 0)
+                                    get_pnl = lambda t: t.get("pnl_usd") if t.get("pnl_usd") is not None else t.get("realized_pnl", 0.0)
+                                    wins = sum(1 for t in trades_raw if get_pnl(t) > 0 or t.get("success") is True)
                                     wr = (wins / total_t) * 100.0 if total_t > 0 else 0.0
-                                    total_pnl = sum(t.get("realized_pnl", 0) for t in trades_raw)
-                                    pnls = [t.get("realized_pnl", 0) for t in trades_raw]
+                                    total_pnl = sum(get_pnl(t) for t in trades_raw)
+                                    pnls = [get_pnl(t) for t in trades_raw]
                                     win_sum = sum(p for p in pnls if p > 0)
                                     loss_sum = abs(sum(p for p in pnls if p < 0))
                                     pf = (win_sum / loss_sum) if loss_sum > 0 else 99.0
                                     reply_text = (
                                         f"📈 *QUANTSTATS AUDITOR TEARSHEET* 📈\n\n"
                                         f"• *Total Trades Executed*: `{total_t}`\n"
-                                        f"• *Overall Win Rate*: `{wr:.1f}%`\n"
+                                        f"• *Overall Win Rate*: `{wr:.1f}%` ({wins} Wins / {total_t - wins} Losses)\n"
                                         f"• *Profit Factor*: `{pf:.2f}`\n"
-                                        f"• *Total Realized PnL*: `${total_pnl:+.2f}`\n"
+                                        f"• *Total Realized PnL*: `${total_pnl:+.4f}`\n"
                                         f"• *Calibrated Uncertainty Floor*: Active (0.18)\n"
                                         f"• *Macro Confluence Multiplier*: Active (+8.0%)"
                                     )
