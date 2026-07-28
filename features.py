@@ -1,4 +1,7 @@
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
+
 import numpy as np
 import bisect
 from ta.momentum import RSIIndicator
