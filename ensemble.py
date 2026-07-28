@@ -93,52 +93,78 @@ class EnsembleClassifier:
                 p_cat = self.cat_model.predict_proba(X_v_arr)
                 
                 # Stack features for meta-learner (multi-class probabilities stacked column-wise)
-                X_meta = np.column_stack([p_xgb, p_lgb, p_cat])
+                # Extract out-of-fold predictions
+                xgb_val_prob = self.xgb_model.predict_proba(_slice_model_input(self.xgb_model, X_val))
+                lgb_val_prob = self.lgb_model.predict_proba(_slice_model_input(self.lgb_model, X_val))
+                cat_val_prob = self.cat_model.predict_proba(_slice_model_input(self.cat_model, X_val))
                 
-                # Apply exponential time-decay sample weighting (newer validation samples weighted higher)
-                N_val = len(y_val)
-                val_decay_weights = np.exp(-0.02 * np.arange(N_val)[::-1])
-                val_decay_weights = val_decay_weights / np.sum(val_decay_weights) * N_val
+                acc_xgb = accuracy_score(y_val, np.argmax(xgb_val_prob, axis=1))
+                acc_lgb = accuracy_score(y_val, np.argmax(lgb_val_prob, axis=1))
+                acc_cat = accuracy_score(y_val, np.argmax(cat_val_prob, axis=1))
                 
+                raw_w = np.array([acc_xgb, acc_lgb, acc_cat], dtype=float)
+                raw_w = np.maximum(0.01, raw_w - 0.33)
+                self.weights = (raw_w / np.sum(raw_w)).tolist()
+                
+                # Create Meta-Feature Matrix [N, 9] (3 classes x 3 models)
+                X_meta = np.column_stack([xgb_val_prob, lgb_val_prob, cat_val_prob])
+                
+                # Fit L2 Regularized Logistic Regression Stacking Meta-Classifier
                 meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
-                meta_clf.fit(X_meta, y_val, sample_weight=val_decay_weights)
-                self.meta_clf = meta_clf
+                meta_clf.fit(X_meta, y_val)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
-                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully with time-decay weights (leak-free).")
+                self.meta_clf = meta_clf
+                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully with accuracy weights: {self.weights}")
             except Exception as e:
+                self.meta_coef_ = None
+                self.meta_intercept_ = None
                 self.meta_clf = None
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
                 
         # Now refit base models on the ENTIRE dataset for live trading
-        self.xgb_model.fit(X_arr, y, sample_weight=sample_weight)
+        self.xgb_model.fit(_slice_model_input(self.xgb_model, X_arr), y, sample_weight=sample_weight)
         if self.lgb_model is not None:
-            self.lgb_model.fit(X_arr, y, sample_weight=sample_weight)
+            try:
+                self.lgb_model.fit(_slice_model_input(self.lgb_model, X_arr), y, sample_weight=sample_weight)
+            except Exception:
+                pass
         if self.cat_model is not None:
-            self.cat_model.fit(X_arr, y, sample_weight=sample_weight)
+            try:
+                self.cat_model.fit(_slice_model_input(self.cat_model, X_arr), y, sample_weight=sample_weight)
+            except Exception:
+                pass
         return self
 
     def predict_proba(self, X, weights=None):
-        X_arr = np.asarray(X, dtype=float)
-        if hasattr(self.xgb_model, "n_features_in_"):
-            expected_n = self.xgb_model.n_features_in_
-            if X_arr.ndim == 2 and X_arr.shape[1] > expected_n:
-                X_arr = X_arr[:, :expected_n]
-        xgb_prob = self.xgb_model.predict_proba(X_arr)
-        if self.lgb_model is None or self.cat_model is None or self.meta_coef_ is None:
-            # Fallback to performance-weighted blending if base models or meta-coefficients are missing
+        xgb_prob = self.xgb_model.predict_proba(_slice_model_input(self.xgb_model, X))
+
+        lgb_prob = None
+        if self.lgb_model is not None:
+            try:
+                lgb_prob = self.lgb_model.predict_proba(_slice_model_input(self.lgb_model, X))
+            except Exception:
+                lgb_prob = None
+
+        cat_prob = None
+        if self.cat_model is not None:
+            try:
+                cat_prob = self.cat_model.predict_proba(_slice_model_input(self.cat_model, X))
+            except Exception:
+                cat_prob = None
+
+        if lgb_prob is None or cat_prob is None or getattr(self, "meta_coef_", None) is None:
             w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
             w = np.array(w_to_use, dtype=float)
             w = w / np.sum(w)
-            if self.lgb_model is None or self.cat_model is None:
+            if lgb_prob is None and cat_prob is None:
                 return xgb_prob
-            lgb_prob = self.lgb_model.predict_proba(X_arr)
-            cat_prob = self.cat_model.predict_proba(X_arr)
+            elif lgb_prob is not None and cat_prob is None:
+                return (xgb_prob * 0.5 + lgb_prob * 0.5)
+            elif lgb_prob is None and cat_prob is not None:
+                return (xgb_prob * 0.5 + cat_prob * 0.5)
             return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
             
-        lgb_prob = self.lgb_model.predict_proba(X_arr)
-        cat_prob = self.cat_model.predict_proba(X_arr)
-        
         # Stack probabilities for prediction
         X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])
         
@@ -281,21 +307,32 @@ class EnsembleRegressor:
         return self
 
     def predict(self, X, weights=None):
-        X_arr = np.asarray(X, dtype=float)
-        if hasattr(self.xgb_model, "n_features_in_"):
-            expected_n = self.xgb_model.n_features_in_
-            if X_arr.ndim == 2 and X_arr.shape[1] > expected_n:
-                X_arr = X_arr[:, :expected_n]
-        xgb_pred = self.xgb_model.predict(X_arr)
-        if self.lgb_model is None or self.cat_model is None or self.meta_coef_ is None:
-            # Fallback to performance-weighted average if any base models or meta-coefficients are missing
+        xgb_pred = self.xgb_model.predict(_slice_model_input(self.xgb_model, X))
+
+        lgb_pred = None
+        if self.lgb_model is not None:
+            try:
+                lgb_pred = self.lgb_model.predict(_slice_model_input(self.lgb_model, X))
+            except Exception:
+                lgb_pred = None
+
+        cat_pred = None
+        if self.cat_model is not None:
+            try:
+                cat_pred = self.cat_model.predict(_slice_model_input(self.cat_model, X))
+            except Exception:
+                cat_pred = None
+
+        if lgb_pred is None or cat_pred is None or getattr(self, "meta_coef_", None) is None:
             w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
             w = np.array(w_to_use, dtype=float)
             w = w / np.sum(w)
-            if self.lgb_model is None or self.cat_model is None:
+            if lgb_pred is None and cat_pred is None:
                 return xgb_pred
-            lgb_pred = self.lgb_model.predict(X_arr)
-            cat_pred = self.cat_model.predict(X_arr)
+            elif lgb_pred is not None and cat_pred is None:
+                return (xgb_pred * 0.5 + lgb_pred * 0.5)
+            elif lgb_pred is None and cat_pred is not None:
+                return (xgb_pred * 0.5 + cat_pred * 0.5)
             return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
             
         lgb_pred = self.lgb_model.predict(X_arr)
