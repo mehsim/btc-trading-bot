@@ -1758,15 +1758,61 @@ def start_telegram_command_listener():
                                             f"• *Leverage*: {leverage:.1f}x\n"
                                             f"• *Investment*: ${size_usd:.2f} (Value: ${size_usd * leverage:.2f})\n"
                                             f"• *Price*: ${current_p:.2f} (Entry: ${entry_p:.2f})\n"
-                                            f"• *TP / SL*: ${take_profit:.2f} / ${stop_loss:.2f}\n"
-                                            f"• *Net PnL*: {pnl_usd:+.2f} ({pnl_pct:+.2f}%)\n"
-                                        )
-                            
                             if active_trades_summary:
                                 reply_text = "📊 *ACTIVE OPEN TRADES* 📊\n\n" + "\n".join(active_trades_summary)
                             else:
                                 reply_text = "ℹ️ *No active trades currently open.*"
                                 
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+
+                        elif text == "/patterns":
+                            try:
+                                cdl_cols = [
+                                    "cdl_hammer", "cdl_hanging_man", "cdl_shooting_star", "cdl_inv_hammer", "cdl_doji",
+                                    "cdl_gravestone_doji", "cdl_dragonfly_doji", "cdl_spinning_top", "cdl_marubozu_bull", "cdl_marubozu_bear",
+                                    "cdl_bullish_engulfing", "cdl_bearish_engulfing", "cdl_bullish_harami", "cdl_bearish_harami",
+                                    "cdl_tweezer_top", "cdl_tweezer_bottom", "cdl_piercing_line", "cdl_dark_cloud_cover", "cdl_inside_bar",
+                                    "cdl_morning_star", "cdl_evening_star", "cdl_morning_doji_star", "cdl_evening_doji_star",
+                                    "cdl_three_white_soldiers", "cdl_three_black_crows", "cdl_three_inside_up", "cdl_three_inside_down",
+                                    "cdl_rising_three", "cdl_falling_three", "cdl_abandoned_baby_bull"
+                                ]
+                                total_patterns = 0
+                                pattern_counts = {}
+                                coin_breakdown = {}
+
+                                for sym in SUPPORTED_SYMBOLS:
+                                    raw_df = get_history(symbol=sym, interval="15", pages=2)
+                                    if raw_df is not None and len(raw_df) >= 96:
+                                        df_24h = add_features(raw_df).tail(96)
+                                        coin_cnt = 0
+                                        for col in cdl_cols:
+                                            if col in df_24h.columns:
+                                                hits = (df_24h[col] != 0).sum()
+                                                if hits > 0:
+                                                    p_name = col.replace("cdl_", "").replace("_", " ").title()
+                                                    pattern_counts[p_name] = pattern_counts.get(p_name, 0) + int(hits)
+                                                    coin_cnt += int(hits)
+                                                    total_patterns += int(hits)
+                                        if coin_cnt > 0:
+                                            coin_breakdown[sym.replace("USDT","")] = coin_cnt
+
+                                top_patterns = sorted(pattern_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+                                p_lines = "\n".join([f"  • *{name}*: `{cnt}x`" for name, cnt in top_patterns]) if top_patterns else "  • None identified"
+                                c_lines = ", ".join([f"*{k}*: {v}" for k, v in coin_breakdown.items()]) if coin_breakdown else "None"
+
+                                reply_text = (
+                                    f"🕯️ *CANDLESTICK PATTERNS (LAST 24 HOURS)* 🕯️\n\n"
+                                    f"• *Total Patterns Identified*: `{total_patterns}`\n\n"
+                                    f"📊 *Top Patterns Detected*:\n{p_lines}\n\n"
+                                    f"🪙 *Breakdown by Coin*:\n{c_lines}"
+                                )
+                            except Exception as pat_err:
+                                reply_text = f"❌ *Pattern Audit Error:* {pat_err}"
+
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
                                 "text": reply_text,
