@@ -233,7 +233,10 @@ def api_status():
     from bybit_client import get_real_bybit_balance_cached
     
     with bot_state_lock:
-        status_data = dict(state_manager)
+        if hasattr(state_manager, "_cache") and isinstance(state_manager._cache, dict):
+            status_data = state_manager._cache.copy()
+        else:
+            status_data = {}
         status_data["status"] = "ok"
         status_data["bot_running"] = state_manager.get("bot_running", True)
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
