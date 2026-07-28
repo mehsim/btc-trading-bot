@@ -2016,7 +2016,7 @@ def start_telegram_command_listener():
                                 "parse_mode": "Markdown"
                             })
 
-                        elif text == "/stop_all":
+                        elif text in ["/stop_all", "/pause"]:
                             try:
                                 with bot_state_lock:
                                     bot_state["bot_running"] = False
@@ -2038,11 +2038,69 @@ def start_telegram_command_listener():
                                 "parse_mode": "Markdown"
                             })
                             
-                        elif text == "/start_bot":
+                        elif text in ["/start_bot", "/resume"]:
                             with bot_state_lock:
                                 bot_state["bot_running"] = True
                                 save_history()
                             reply_text = "▶️ *BTC Trading Bot resumed successfully. New trade entries are enabled.*"
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+
+                        elif text == "/status":
+                            import psutil
+                            cpu_pct = psutil.cpu_percent(interval=0.5)
+                            mem = psutil.virtual_memory()
+                            active_cnt = 0
+                            with active_trades_lock:
+                                for tf in ["15m", "30m", "1h", "2h"]:
+                                    active_cnt += len(bot_state.get(f"active_trade_{tf}", []))
+                            is_running = bot_state.get("bot_running", True)
+                            status_str = "🟢 RUNNING" if is_running else "🔴 PAUSED"
+                            reply_text = (
+                                f"🤖 *BOT SYSTEM STATUS* 🤖\n\n"
+                                f"• *Execution Status*: {status_str}\n"
+                                f"• *CPU Utilization*: `{cpu_pct:.1f}%`\n"
+                                f"• *RAM Utilization*: `{mem.percent:.1f}%` ({mem.used // (1024*1024)}MB / {mem.total // (1024*1024)}MB)\n"
+                                f"• *Active Open Trades*: `{active_cnt}`\n"
+                                f"• *Mode*: `{TRADE_MODE.upper()}`\n"
+                                f"• *Server*: AWS Singapore"
+                            )
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": sender_chat_id,
+                                "text": reply_text,
+                                "parse_mode": "Markdown"
+                            })
+
+                        elif text == "/tearsheet":
+                            try:
+                                import database
+                                trades_raw = database.get_trade_history(limit=500)
+                                if not trades_raw:
+                                    reply_text = "ℹ️ *No trade history recorded yet for QuantStats tearsheet.*"
+                                else:
+                                    total_t = len(trades_raw)
+                                    wins = sum(1 for t in trades_raw if t.get("realized_pnl", 0) > 0)
+                                    wr = (wins / total_t) * 100.0 if total_t > 0 else 0.0
+                                    total_pnl = sum(t.get("realized_pnl", 0) for t in trades_raw)
+                                    pnls = [t.get("realized_pnl", 0) for t in trades_raw]
+                                    win_sum = sum(p for p in pnls if p > 0)
+                                    loss_sum = abs(sum(p for p in pnls if p < 0))
+                                    pf = (win_sum / loss_sum) if loss_sum > 0 else 99.0
+                                    reply_text = (
+                                        f"📈 *QUANTSTATS AUDITOR TEARSHEET* 📈\n\n"
+                                        f"• *Total Trades Executed*: `{total_t}`\n"
+                                        f"• *Overall Win Rate*: `{wr:.1f}%`\n"
+                                        f"• *Profit Factor*: `{pf:.2f}`\n"
+                                        f"• *Total Realized PnL*: `${total_pnl:+.2f}`\n"
+                                        f"• *Calibrated Uncertainty Floor*: Active (0.18)\n"
+                                        f"• *Macro Confluence Multiplier*: Active (+8.0%)"
+                                    )
+                            except Exception as ts_err:
+                                reply_text = f"❌ *Tearsheet Error:* {ts_err}"
+                                
                             execute_telegram_api_call("sendMessage", {
                                 "chat_id": sender_chat_id,
                                 "text": reply_text,
