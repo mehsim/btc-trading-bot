@@ -80,9 +80,21 @@ def init_db():
                     entry_heat REAL,
                     entry_drawdown_pct REAL,
                     entry_correlation REAL,
+                    model_version TEXT,
+                    model_sha TEXT,
+                    feature_set_version TEXT,
                     raw_data TEXT
                 );
             """)
+            
+            # Migration check for model lineage columns
+            cols = [row[1] for row in cursor.execute("PRAGMA table_info(completed_trades);").fetchall()]
+            for col_name in ["model_version", "model_sha", "feature_set_version"]:
+                if col_name not in cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE completed_trades ADD COLUMN {col_name} TEXT;")
+                    except Exception:
+                        pass
             
             # 3. Create Active Trades Table
             cursor.execute("""

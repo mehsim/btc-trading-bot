@@ -41,4 +41,53 @@ class CUSUMDriftDetector:
             self.S_high = 0.0
             self.S_low = 0.0
 
+def calculate_psi(baseline_data: np.ndarray, target_data: np.ndarray, num_bins: int = 10) -> float:
+    """
+    Calculates Population Stability Index (PSI) between baseline training distribution
+    and recent live distribution.
+    PSI < 0.10: Stable, 0.10 <= PSI < 0.25: Moderate Drift, PSI >= 0.25: Severe Drift
+    """
+    if len(baseline_data) < 20 or len(target_data) < 20:
+        return 0.0
+        
+    b_arr = np.asarray(baseline_data, dtype=float)
+    t_arr = np.asarray(target_data, dtype=float)
+    
+    quantiles = np.linspace(0, 100, num_bins + 1)
+    bins = np.percentile(b_arr, quantiles)
+    bins = np.unique(bins)
+    if len(bins) < 2:
+        return 0.0
+        
+    bins[0] = -np.inf
+    bins[-1] = np.inf
+    
+    b_counts, _ = np.histogram(b_arr, bins=bins)
+    t_counts, _ = np.histogram(t_arr, bins=bins)
+    
+    b_pct = b_counts / float(len(b_arr))
+    t_pct = t_counts / float(len(t_arr))
+    
+    # Avoid zero division with small epsilon
+    eps = 1e-4
+    b_pct = np.maximum(b_pct, eps)
+    t_pct = np.maximum(t_pct, eps)
+    
+    psi_val = np.sum((t_pct - b_pct) * np.log(t_pct / b_pct))
+    return float(psi_val)
+
+class PSIDriftDetector:
+    def __init__(self, warning_psi: float = 0.10, severe_psi: float = 0.25):
+        self.warning_psi = warning_psi
+        self.severe_psi = severe_psi
+
+    def check_feature_drift(self, baseline_feature: np.ndarray, live_feature: np.ndarray) -> Tuple[bool, float, str]:
+        psi_score = calculate_psi(baseline_feature, live_feature)
+        if psi_score >= self.severe_psi:
+            return True, psi_score, "SEVERE_DRIFT"
+        elif psi_score >= self.warning_psi:
+            return False, psi_score, "MODERATE_DRIFT"
+        return False, psi_score, "STABLE"
+
 cusum_drift_detector = CUSUMDriftDetector()
+psi_drift_detector = PSIDriftDetector()

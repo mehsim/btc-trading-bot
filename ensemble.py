@@ -179,6 +179,34 @@ class EnsembleClassifier:
         probs = self.predict_proba(X, weights=weights)
         return np.argmax(probs, axis=1)
 
+    def predict_with_uncertainty(self, X, weights=None, uncertainty_threshold=0.18):
+        """
+        Calculates ensemble prediction probabilities alongside Conformal Uncertainty.
+        Evaluates base model prediction variance and top-class margin.
+        Returns: (probs, uncertainty_score, is_uncertain)
+        """
+        X_arr = np.asarray(X, dtype=float)
+        probs = self.predict_proba(X_arr, weights=weights)
+        
+        # Calculate base model predictions to measure ensemble disagreement
+        xgb_p = self.xgb_model.predict_proba(X_arr)
+        if self.lgb_model is not None and self.cat_model is not None:
+            lgb_p = self.lgb_model.predict_proba(X_arr)
+            cat_p = self.cat_model.predict_proba(X_arr)
+            disagreement = np.std([xgb_p, lgb_p, cat_p], axis=0).mean()
+        else:
+            disagreement = 0.0
+            
+        # Top-class margin: margin between highest and second highest probability
+        sorted_p = np.sort(probs, axis=1)
+        margin = float(sorted_p[0, -1] - sorted_p[0, -2]) if sorted_p.shape[1] >= 2 else 1.0
+        
+        # Conformal uncertainty score
+        uncertainty_score = float(disagreement * 0.7 + max(0.0, 0.25 - margin) * 0.3)
+        is_uncertain = (disagreement > uncertainty_threshold) or (margin < 0.08)
+        
+        return probs, uncertainty_score, is_uncertain
+
 class EnsembleRegressor:
     """
     Blends XGBoost, LightGBM, and CatBoost regressors using a Stacking Meta-Regressor (Ridge).

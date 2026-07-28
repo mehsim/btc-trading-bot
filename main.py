@@ -7992,8 +7992,14 @@ def main():
                             pred_change = pred_pct * float(latest_candle["close"])
                             predicted_price = float(latest_candle["close"]) + pred_change
                             
-                            # 3-class probabilities
-                            probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
+                            # 3-class probabilities with Conformal Uncertainty estimation
+                            if hasattr(active_model_trend, "predict_with_uncertainty"):
+                                probs_arr, conformal_unc_score, conformal_is_uncertain = active_model_trend.predict_with_uncertainty(X_live, weights=ensemble_weights)
+                                probs = probs_arr[0]
+                            else:
+                                probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
+                                conformal_unc_score = 0.0
+                                conformal_is_uncertain = False
                         except Exception as pred_err:
                             print(f"[{symbol} {iv}m Prediction Error] Failed to run model prediction: {pred_err}. Skipping signal evaluation.")
                             continue
@@ -8284,6 +8290,9 @@ def main():
                         elif calibrated_confidence < dynamic_conf_threshold:
                             status_msg = "Skipped (Low Confidence)"
                             print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
+                        elif conformal_is_uncertain and ml_trend in ["Bullish", "Bearish"]:
+                            status_msg = "Skipped (High Conformal Uncertainty)"
+                            print(f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
 
                         if status_msg == "Pending":
                             # Check news window proximity status for logging/blocking purposes

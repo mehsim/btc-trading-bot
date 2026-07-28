@@ -230,15 +230,19 @@ def format_bybit_price(symbol: str, price: float) -> str:
         return f"{p_val:.4f}"
 
 
-def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market") -> Dict[str, Any]:
+def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market", post_only: bool = False) -> Dict[str, Any]:
+    if post_only and not reduce_only:
+        return place_bybit_maker_chase_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp)
+        
     order_type_str = "Limit" if (order_type == "Limit" and price is not None) else "Market"
+    tif_str = "PostOnly" if post_only else ("GTC" if order_type_str == "Limit" else "IOC")
     payload = {
         "category": "linear",
         "symbol": symbol,
         "side": side,
         "orderType": order_type_str,
         "qty": str(qty),
-        "timeInForce": "GTC" if order_type_str == "Limit" else "IOC",
+        "timeInForce": tif_str,
         "positionIdx": 0
     }
     if price is not None:
@@ -251,6 +255,68 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
         payload["takeProfit"] = format_bybit_price(symbol, tp)
         
     return execute_bybit_order_ws_or_rest("/v5/order/create", payload)
+
+def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, max_chase_seconds: float = 10.0) -> Dict[str, Any]:
+    """
+    Submits a Limit Post-Only Maker order inside the orderbook spread to capture Maker rebates.
+    Re-quotes order price over a 10-second window. Falls back to Taker IOC if unfilled.
+    """
+    ticker_res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
+    best_bid = 0.0
+    best_ask = 0.0
+    if ticker_res.get("retCode") == 0:
+        t_list = ticker_res.get("result", {}).get("list", [])
+        if t_list:
+            best_bid = float(t_list[0].get("bid1Price", 0.0))
+            best_ask = float(t_list[0].get("ask1Price", 0.0))
+            
+    limit_price = best_bid if side == "Buy" and best_bid > 0 else (best_ask if side == "Sell" and best_ask > 0 else None)
+    if limit_price is None:
+        # Fallback to direct Taker Market order if ticker fetch fails
+        return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+
+    post_payload = {
+        "category": "linear",
+        "symbol": symbol,
+        "side": side,
+        "orderType": "Limit",
+        "qty": str(qty),
+        "price": format_bybit_price(symbol, limit_price),
+        "timeInForce": "PostOnly",
+        "positionIdx": 0
+    }
+    if sl:
+        post_payload["stopLoss"] = format_bybit_price(symbol, sl)
+    if tp:
+        post_payload["takeProfit"] = format_bybit_price(symbol, tp)
+        
+    res = execute_bybit_order_ws_or_rest("/v5/order/create", post_payload)
+    if res.get("retCode") != 0:
+        # Post-Only rejected (e.g. price crossed spread) -> Failover directly to Taker IOC Market order
+        return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+
+    order_id = res.get("result", {}).get("orderId")
+    if not order_id:
+        return res
+        
+    # Poll for fill over max_chase_seconds window
+    start_t = time.time()
+    while time.time() - start_t < max_chase_seconds:
+        time.sleep(2.0)
+        chk = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
+        if chk.get("retCode") == 0:
+            o_list = chk.get("result", {}).get("list", [])
+            if o_list:
+                o_status = o_list[0].get("orderStatus")
+                if o_status in ["Filled"]:
+                    return chk
+                elif o_status in ["Cancelled", "Rejected"]:
+                    break
+
+    # Unfilled after 10s: Cancel PostOnly limit order and execute Taker IOC failover
+    cancel_payload = {"category": "linear", "symbol": symbol, "orderId": order_id}
+    execute_bybit_order_ws_or_rest("/v5/order/cancel", cancel_payload)
+    return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
 
 
 def get_all_bybit_positions() -> list:
