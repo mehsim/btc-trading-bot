@@ -2098,8 +2098,9 @@
                                 barElem.style.backgroundColor = "var(--text-secondary)";
                             }
 
-                            const confPct = pred.calibrated_confidence * 100;
-                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${pred.predicted_change >= 0 ? '+' : ''}${pred.predicted_change.toFixed(3)}`;
+                            const confPct = ((pred.calibrated_confidence !== undefined ? pred.calibrated_confidence : (pred.confidence || 0.0)) * 100);
+                            const changeVal = (typeof pred.predicted_change === 'number' && !isNaN(pred.predicted_change)) ? pred.predicted_change : 0.0;
+                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(3)}`;
                             barElem.style.width = `${confPct}%`;
                         } else if (predElem && barElem && subtitleElem) {
                             predElem.innerText = "No Signal";

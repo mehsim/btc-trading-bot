@@ -289,7 +289,12 @@ def api_status():
             if not status_data.get(f"regime_{tf}"):
                 status_data[f"regime_{tf}"] = "Ranging"
             if not status_data.get(f"latest_prediction_{tf}"):
-                status_data[f"latest_prediction_{tf}"] = {"direction": "No Signal", "confidence": 0.0}
+                status_data[f"latest_prediction_{tf}"] = {
+                    "direction": "No Signal",
+                    "confidence": 0.0,
+                    "calibrated_confidence": 0.0,
+                    "predicted_change": 0.0
+                }
             if not status_data.get(f"confluence_results_{tf}"):
                 status_data[f"confluence_results_{tf}"] = get_default_confluence_checks()
 
