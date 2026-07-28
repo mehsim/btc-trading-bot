@@ -1354,3 +1354,8 @@ if __name__ == "__main__":
             train_models(interval=iv, pages=args.pages)
     else:
         train_models(interval=args.interval, pages=args.pages)
+
+    # Post-Training Storage Optimization: Clean temporary CatBoost log artifacts
+    import shutil
+    shutil.rmtree("catboost_info", ignore_errors=True)
+    print("🧹 [Disk Cleanup] Successfully purged temporary catboost_info directory.")

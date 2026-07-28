@@ -133,6 +133,9 @@ def init_db():
                 );
             """)
             
+            # Enable Incremental Vacuum for storage optimization
+            cursor.execute("PRAGMA auto_vacuum = INCREMENTAL;")
+            
             # 8. Create Pending Pain Checks Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pending_pain_checks (
@@ -471,5 +474,26 @@ def get_cached_sentiment(since_ts):
         except Exception as e:
             print(f"[Database Error] Failed to fetch cached sentiment: {e}")
             return []
+
+def purge_old_order_flow_logs(retention_days: int = 60) -> int:
+    """
+    Purges historical order flow ticks older than retention_days (default 60 days) to optimize disk storage.
+    Executes PRAGMA incremental_vacuum to reclaim disk space.
+    """
+    cutoff_ts = time.time() - (retention_days * 86400)
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM historical_order_flow WHERE timestamp < ?", (cutoff_ts,))
+            deleted_rows = cursor.rowcount
+            conn.commit()
+            cursor.execute("PRAGMA incremental_vacuum;")
+            if deleted_rows > 0:
+                print(f"🧹 [Storage Cleanup] Purged {deleted_rows} order flow ticks older than {retention_days} days. Vacuum complete.")
+            return deleted_rows
+        except Exception as e:
+            print(f"[Database Error] Failed to purge old order flow logs: {e}")
+            return 0
         finally:
             conn.close()

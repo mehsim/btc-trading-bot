@@ -18,6 +18,22 @@ try:
             state_estimate[i] = pred_state + kalman_gain * (prices[i] - pred_state)
             error_covariance[i] = (1.0 - kalman_gain) * pred_error
         return state_estimate
+
+    @jit(nopython=True, cache=True)
+    def _garman_klass_jit(high, low, close, open_p, window):
+        n = len(high)
+        res = np.zeros(n)
+        const_factor = 2.0 * 0.6931471805599453 - 1.0
+        for i in range(window - 1, n):
+            sub_h = high[i - window + 1:i + 1]
+            sub_l = low[i - window + 1:i + 1]
+            sub_c = close[i - window + 1:i + 1]
+            sub_o = open_p[i - window + 1:i + 1]
+            log_hl = np.log(sub_h / (sub_l + 1e-8))
+            log_co = np.log(sub_c / (sub_o + 1e-8))
+            gk = 0.5 * log_hl**2 - const_factor * log_co**2
+            res[i] = np.sqrt(np.maximum(0.0, np.mean(gk)))
+        return res
 except ImportError:
     def _kalman_loop(prices, state_estimate, error_covariance, process_variance_arr, measurement_variance):
         n = len(prices)
@@ -29,6 +45,21 @@ except ImportError:
             error_covariance[i] = (1.0 - kalman_gain) * pred_error
         return state_estimate
 
+    def _garman_klass_jit(high, low, close, open_p, window):
+        n = len(high)
+        res = np.zeros(n)
+        const_factor = 2.0 * np.log(2.0) - 1.0
+        for i in range(window - 1, n):
+            sub_h = high[i - window + 1:i + 1]
+            sub_l = low[i - window + 1:i + 1]
+            sub_c = close[i - window + 1:i + 1]
+            sub_o = open_p[i - window + 1:i + 1]
+            log_hl = np.log(sub_h / (sub_l + 1e-8))
+            log_co = np.log(sub_c / (sub_o + 1e-8))
+            gk = 0.5 * log_hl**2 - const_factor * log_co**2
+            res[i] = np.sqrt(np.maximum(0.0, np.mean(gk)))
+        return res
+
 def calculate_kalman_feature(prices, atr_norm=None):
     n = len(prices)
     if n == 0:
@@ -39,7 +70,6 @@ def calculate_kalman_feature(prices, atr_norm=None):
     error_covariance[0] = 1.0
     
     if atr_norm is not None and len(atr_norm) == n:
-        # Scale process variance dynamically based on normalized volatility (clamped 1e-5 to 1e-3)
         process_variance_arr = np.clip(np.asarray(atr_norm, dtype=float) * 0.05, 1e-5, 1e-3)
     else:
         process_variance_arr = np.full(n, 1e-4)
@@ -49,10 +79,11 @@ def calculate_kalman_feature(prices, atr_norm=None):
     return (prices / (state_estimate + 1e-8)) - 1.0
 
 def calculate_garman_klass_vol(df, window=14):
-    log_hl = np.log(df["high"] / (df["low"] + 1e-8))
-    log_co = np.log(df["close"] / (df["open"] + 1e-8))
-    gk = 0.5 * log_hl**2 - (2.0 * np.log(2.0) - 1.0) * log_co**2
-    return np.sqrt(np.maximum(0.0, gk.rolling(window).mean()))
+    high = np.asarray(df["high"].values, dtype=float)
+    low = np.asarray(df["low"].values, dtype=float)
+    close = np.asarray(df["close"].values, dtype=float)
+    open_p = np.asarray(df["open"].values, dtype=float)
+    return pd.Series(_garman_klass_jit(high, low, close, open_p, window), index=df.index)
 
 def add_news_proximity_feature(df, fetch_calendar_callback=None):
     if df.empty:
