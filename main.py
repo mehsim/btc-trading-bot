@@ -8880,6 +8880,18 @@ def main():
                     f"• *Alerts*:\n{alert_text}"
                 )
 
+        # Periodic C-heap memory trimming to prevent Python memory fragmentation on Linux
+        if datetime.now(timezone.utc).minute % 5 == 0 and datetime.now(timezone.utc).second < 10:
+            try:
+                import gc, ctypes
+                gc.collect()
+                try:
+                    ctypes.CDLL("libc.so.6").malloc_trim(0)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         time.sleep(10)
 
 def run_order_flow_persister():
