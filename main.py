@@ -2052,9 +2052,17 @@ def start_telegram_command_listener():
                             })
 
                         elif text == "/status":
-                            import psutil
-                            cpu_pct = psutil.cpu_percent(interval=0.5)
-                            mem = psutil.virtual_memory()
+                            try:
+                                import psutil
+                                cpu_pct = psutil.cpu_percent(interval=0.2)
+                                mem = psutil.virtual_memory()
+                                cpu_str = f"{cpu_pct:.1f}%"
+                                ram_str = f"{mem.percent:.1f}% ({mem.used // (1024*1024)}MB / {mem.total // (1024*1024)}MB)"
+                            except Exception:
+                                load1, load5, _ = os.getloadavg() if hasattr(os, 'getloadavg') else (0, 0, 0)
+                                cpu_str = f"Load: {load1:.2f}, {load5:.2f}"
+                                ram_str = "Active"
+
                             active_cnt = 0
                             with active_trades_lock:
                                 for tf in ["15m", "30m", "1h", "2h"]:
@@ -2064,8 +2072,8 @@ def start_telegram_command_listener():
                             reply_text = (
                                 f"🤖 *BOT SYSTEM STATUS* 🤖\n\n"
                                 f"• *Execution Status*: {status_str}\n"
-                                f"• *CPU Utilization*: `{cpu_pct:.1f}%`\n"
-                                f"• *RAM Utilization*: `{mem.percent:.1f}%` ({mem.used // (1024*1024)}MB / {mem.total // (1024*1024)}MB)\n"
+                                f"• *CPU Utilization*: `{cpu_str}`\n"
+                                f"• *RAM Utilization*: `{ram_str}`\n"
                                 f"• *Active Open Trades*: `{active_cnt}`\n"
                                 f"• *Mode*: `{TRADE_MODE.upper()}`\n"
                                 f"• *Server*: AWS Singapore"
