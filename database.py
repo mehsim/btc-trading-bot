@@ -497,3 +497,35 @@ def purge_old_order_flow_logs(retention_days: int = 60) -> int:
             return 0
         finally:
             conn.close()
+
+def archive_legacy_recovery_trades() -> int:
+    """
+    Archives legacy pre-upgrade trades marked with 'OFFLINE' or 'RECOVERY'
+    into completed_trades_archive table so tearsheet reflects clean live performance.
+    """
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS completed_trades_archive AS 
+                SELECT * FROM completed_trades WHERE 1=0;
+            """)
+            cursor.execute("""
+                INSERT INTO completed_trades_archive 
+                SELECT * FROM completed_trades WHERE reason LIKE '%OFFLINE%' OR reason LIKE '%RECOVERY%';
+            """)
+            cursor.execute("""
+                DELETE FROM completed_trades WHERE reason LIKE '%OFFLINE%' OR reason LIKE '%RECOVERY%';
+            """)
+            archived_count = cursor.rowcount
+            conn.commit()
+            cursor.execute("PRAGMA incremental_vacuum;")
+            if archived_count > 0:
+                print(f"📦 [Database Archive] Moved {archived_count} legacy offline recovery trades into completed_trades_archive.")
+            return archived_count
+        except Exception as e:
+            print(f"[Database Error] Failed to archive legacy trades: {e}")
+            return 0
+        finally:
+            conn.close()
