@@ -56,6 +56,25 @@ class PortfolioRiskEngine:
         if returns_df is None or returns_df.empty:
             return 0.0, True
 
+        # Construct full position set including the candidate trade
+        all_candidate_positions = []
+        cand_found = False
+        for p in (open_positions or []):
+            if p.get("symbol") == candidate_symbol:
+                all_candidate_positions.append({
+                    "symbol": candidate_symbol,
+                    "position_size_usd": p.get("position_size_usd", 0.0) + candidate_size_usd
+                })
+                cand_found = True
+            else:
+                all_candidate_positions.append(p)
+
+        if not cand_found:
+            all_candidate_positions.append({
+                "symbol": candidate_symbol,
+                "position_size_usd": candidate_size_usd
+            })
+
         cand_sym_set = {p.get("symbol") for p in all_candidate_positions}
         symbols = [col for col in returns_df.columns if col in cand_sym_set]
         if candidate_symbol not in symbols:

@@ -2363,12 +2363,14 @@ def load_history():
     # 2. Sync from AWS Server API if running locally
     elif not space_id:
         try:
-            server_ip_default = os.environ.get("SERVER_IP", "127.0.0.1")
-            aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or f"http://{server_ip_default}"
-
+            server_ip_default = os.environ.get("SERVER_IP", "47.129.153.199")
+            aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or server_ip_default
 
             if not aws_host.startswith("http://") and not aws_host.startswith("https://"):
                 aws_host = f"http://{aws_host}"
+            if ":" not in aws_host.replace("http://", "").replace("https://", ""):
+                sync_port = os.environ.get("PORT", "5001")
+                aws_host = f"{aws_host}:{sync_port}"
             sync_url = f"{aws_host.rstrip('/')}/api/status"
             print(f"Syncing: Attempting to pull latest history from AWS Server API ({sync_url})...")
             resp = requests.get(sync_url, timeout=5)
@@ -2408,7 +2410,7 @@ def load_history():
                     save_history()
                     return
         except Exception as e:
-            print(f"AWS Sync: Could not fetch from AWS Server: {e}")
+            print(f"[AWS Sync] Could not fetch state from AWS Server ({sync_url}): {e}")
 
 
     # 2. Local/Persistent history fallback load
@@ -5505,8 +5507,54 @@ def get_news_sentiment():
                 from transformers import pipeline
                 sentiment_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=-1)
             except ImportError:
-                print("[News/Sentiment] transformers/torch not installed. Serverless HF_TOKEN must be configured. Sentiment defaults to Neutral.")
-                return "Neutral", cleaned_titles
+                # Comprehensive expanded financial & crypto lexicon
+                bullish_keywords = {
+                    # Market Price Action
+                    "bullish", "surge", "surges", "surging", "rally", "rallies", "rallying", "breakout", "skyrocket", "skyrockets",
+                    "gain", "gains", "gaining", "all-time high", "ath", "soar", "soars", "soaring", "pump", "pumping", "pumps",
+                    "rebound", "rebounds", "rebounding", "recovery", "recovers", "recovering", "uptrend", "outperform", "outperforms",
+                    "bounce", "bouncing", "climb", "climbs", "climbing", "record high", "milestone", "moon", "soaring",
+                    # Flows & Institutional
+                    "inflow", "inflows", "accumulation", "accumulating", "accumulate", "adoption", "approval", "approved", "approves",
+                    "institutional", "profit", "profits", "profitable", "upward", "bull", "bulls", "optimistic", "growth", "expanding",
+                    "buy", "buying", "bought", "reserve", "treasury", "sec approval", "etf approval", "partnership", "mainnet", "upgrade",
+                    "stimulus", "rate cut", "rate cuts", "dovish", "easing", "support level", "holder", "holders"
+                }
+                bearish_keywords = {
+                    # Market Price Action & Losses
+                    "bearish", "crash", "crashes", "crashing", "dump", "dumps", "dumping", "plunge", "plunges", "plunging",
+                    "drop", "drops", "dropping", "fall", "falls", "falling", "slide", "slides", "sliding", "tumble", "tumbles", "tumbling",
+                    "collapse", "collapses", "collapsing", "selloff", "sell-off", "selloffs", "downtrend", "slump", "slumps", "retreat",
+                    "retreats", "bleeding", "capitulation", "correction", "wilt", "wilts", "wilted",
+                    # Risk, Hacks & Failures
+                    "hack", "hacked", "hacks", "exploit", "exploited", "exploits", "stolen", "drain", "drained", "scam", "rugpull",
+                    "fraud", "bankruptcy", "bankrupt", "bankruptcies", "insolvent", "insolvency", "liquidation", "liquidations", "liquidated",
+                    "outflow", "outflows", "loss", "losses", "bear", "bears", "pessimistic", "panic", "sell", "selling", "sold",
+                    "cut headcount", "layoff", "layoffs", "cuts 1", "cuts 2", "job cuts",
+                    # Regulatory & Macro Hardship
+                    "ban", "banned", "banning", "bans", "lawsuit", "lawsuits", "sued", "suing", "sec", "crackdown", "probe", "investigation",
+                    "subpoena", "fine", "fined", "penalty", "rate hike", "rate hikes", "hawkish", "inflation", "recession", "war", "restriction"
+                }
+                
+                total_score = 0.0
+                for text in cleaned_titles:
+                    text_lower = text.lower()
+                    b_count = sum(1 for kw in bullish_keywords if kw in text_lower)
+                    r_count = sum(1 for kw in bearish_keywords if kw in text_lower)
+                    if b_count + r_count > 0:
+                        score = (b_count - r_count) / (b_count + r_count)
+                    else:
+                        score = 0.0
+                    total_score += score
+                    
+                avg_score = total_score / len(cleaned_titles)
+                sentiment = "Neutral"
+                if avg_score > 0.10:
+                    sentiment = "Bullish"
+                elif avg_score < -0.10:
+                    sentiment = "Bearish"
+                print(f"[News/Sentiment Lexicon Local] Analyzed {len(cleaned_titles)} titles via local financial lexicon. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
+                return sentiment, cleaned_titles
 
         print(f"[News/Sentiment Local] Running local FinBERT pipeline on {len(cleaned_titles)} inputs...")
         results = sentiment_pipeline(cleaned_titles)

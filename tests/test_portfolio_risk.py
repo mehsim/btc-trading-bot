@@ -33,3 +33,25 @@ def test_pca_factor_loadings():
     res = portfolio_risk_engine.calculate_pca_factor_loadings(returns_df)
     assert "pc1_explained_variance" in res
     assert 0.0 <= res["pc1_explained_variance"] <= 1.0
+
+def test_calculate_mcr():
+    """Verify MCR calculation with candidate position."""
+    dates = pd.date_range("2026-01-01", periods=50, freq="D")
+    returns_df = pd.DataFrame({
+        "BTCUSDT": np.random.normal(0.001, 0.02, 50),
+        "ETHUSDT": np.random.normal(0.001, 0.03, 50)
+    }, index=dates)
+    
+    positions = [
+        {"symbol": "ETHUSDT", "position_size_usd": 50.0}
+    ]
+    
+    mcr, is_approved = portfolio_risk_engine.calculate_mcr(
+        candidate_symbol="BTCUSDT",
+        candidate_size_usd=100.0,
+        open_positions=positions,
+        returns_df=returns_df
+    )
+    assert isinstance(mcr, float)
+    assert isinstance(is_approved, bool)
+
