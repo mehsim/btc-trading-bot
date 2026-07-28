@@ -938,6 +938,8 @@ def start_telegram_command_listener():
         # Automatically configure the Telegram bot commands menu
         commands_payload = {
             "commands": [
+                {"command": "status", "description": "View live CPU/RAM load, active trades & status"},
+                {"command": "tearsheet", "description": "View QuantStats performance audit report"},
                 {"command": "active", "description": "View all active open trades"},
                 {"command": "summary", "description": "View 24h performance & health summary report"},
                 {"command": "balance", "description": "View account/wallet balance"},
@@ -949,8 +951,8 @@ def start_telegram_command_listener():
                 {"command": "retrain_status", "description": "View model retraining status"},
                 {"command": "latency", "description": "Check Bybit API round-trip latency"},
                 {"command": "logs", "description": "View latest bot running logs"},
-                {"command": "add_user", "description": "Authorize a new user via email verification"},
-                {"command": "retrain", "description": "Retrain models with recent live trade feedback"},
+                {"command": "pause", "description": "Emergency pause automated trade entries"},
+                {"command": "resume", "description": "Resume automated trade entries"},
                 {"command": "stop_all", "description": "Emergency stop bot and close all trades"},
                 {"command": "start_bot", "description": "Resume bot and enable new trade entries"}
             ]
