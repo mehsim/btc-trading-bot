@@ -1758,6 +1758,8 @@ def start_telegram_command_listener():
                                             f"• *Leverage*: {leverage:.1f}x\n"
                                             f"• *Investment*: ${size_usd:.2f} (Value: ${size_usd * leverage:.2f})\n"
                                             f"• *Price*: ${current_p:.2f} (Entry: ${entry_p:.2f})\n"
+                                            f"• *Net PnL*: {pnl_usd:+.2f} ({pnl_pct:+.2f}%)\n"
+                                        )
                             if active_trades_summary:
                                 reply_text = "📊 *ACTIVE OPEN TRADES* 📊\n\n" + "\n".join(active_trades_summary)
                             else:
