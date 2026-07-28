@@ -109,6 +109,7 @@ class SignalEvaluator:
 
             # Update Confluence Results for UI
             self.update_confluence_results(tf_key, df, symbol)
+            print(f"[SignalEvaluator] Evaluated {interval}m: Regime={regime_str}, Direction={direction}, ADX={adx_val:.1f}")
 
         except Exception as e:
             import traceback

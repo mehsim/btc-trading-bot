@@ -286,7 +286,7 @@ def api_status():
 
         # Timeframe defaults for UI rendering
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
-            if not status_data.get(f"regime_{tf}"):
+            if not status_data.get(f"regime_{tf}") or status_data.get(f"regime_{tf}") == "Unknown":
                 status_data[f"regime_{tf}"] = "Ranging"
             if not status_data.get(f"latest_prediction_{tf}"):
                 status_data[f"latest_prediction_{tf}"] = {
