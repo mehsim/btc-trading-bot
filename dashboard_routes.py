@@ -304,7 +304,9 @@ def api_status():
         status_data["status"] = "ok"
         status_data["bot_running"] = state_manager.get("bot_running", True)
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
-        status_data["real_balance"] = get_real_bybit_balance_cached()
+        real_bal = get_real_bybit_balance_cached()
+        status_data["real_balance"] = real_bal
+        status_data["real_bybit_balance"] = real_bal
         status_data["trade_history"] = state_manager.get("trade_history", [])
         status_data["prediction_history"] = state_manager.get("prediction_history", [])
         status_data["uptime_seconds"] = int(time.time() - startup_time)
