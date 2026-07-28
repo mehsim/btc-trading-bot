@@ -18,6 +18,16 @@ class ObservedList(list):
             self._callback(self, it)
 
 
+def default_json_serializer(obj):
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+    return str(obj)
+
+
 class StateManager:
     def __init__(self):
         import os
@@ -175,7 +185,7 @@ class StateManager:
                 
             if self._redis:
                 try:
-                    self._redis.set(f"bot_state:{key}", json.dumps(raw_value))
+                    self._redis.set(f"bot_state:{key}", json.dumps(raw_value, default=default_json_serializer))
                 except Exception as e:
                     print(f"[StateManager Redis Error] Failed to set {key}: {e}")
                     

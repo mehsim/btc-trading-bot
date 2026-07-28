@@ -24,6 +24,36 @@ bot_state_lock = threading.RLock()
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
 
+import sys
+
+class StdoutRedirector:
+    def __init__(self, original_stdout):
+        self.original_stdout = original_stdout
+
+    def write(self, text):
+        try:
+            self.original_stdout.write(text)
+        except Exception:
+            pass
+        if text and text.strip():
+            msg = text.strip()
+            if not msg.startswith("["):
+                ts = time.strftime('%H:%M:%S')
+                msg = f"[{ts}] {msg}"
+            with logs_lock:
+                bot_logs.append(msg)
+                if len(bot_logs) > 400:
+                    bot_logs.pop(0)
+
+    def flush(self):
+        try:
+            self.original_stdout.flush()
+        except Exception:
+            pass
+
+if not isinstance(sys.stdout, StdoutRedirector):
+    sys.stdout = StdoutRedirector(sys.stdout)
+
 
 def require_api_key(f):
     @wraps(f)

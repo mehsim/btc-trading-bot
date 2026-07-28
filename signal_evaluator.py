@@ -88,23 +88,23 @@ class SignalEvaluator:
                 rsi = float(last_row.get("RSI", 50.0)) if "RSI" in last_row and not np.isnan(last_row["RSI"]) else 50.0
                 ema9 = float(last_row.get("EMA_9", last_row["close"]))
                 ema21 = float(last_row.get("EMA_21", last_row["close"]))
+                close_p = float(last_row["close"])
                 
-                if ema9 > ema21 and rsi > 50:
+                if ema9 >= ema21:
                     direction = "Bullish"
-                    conf = min(0.85, 0.55 + (rsi - 50) / 100.0)
-                elif ema9 < ema21 and rsi < 50:
-                    direction = "Bearish"
-                    conf = min(0.85, 0.55 + (50 - rsi) / 100.0)
+                    conf = min(0.85, 0.55 + max(0.0, (rsi - 45.0) / 100.0))
+                    change_val = close_p * 0.003
                 else:
-                    direction = "Neutral"
-                    conf = 0.50
+                    direction = "Bearish"
+                    conf = min(0.85, 0.55 + max(0.0, (55.0 - rsi) / 100.0))
+                    change_val = -close_p * 0.003
 
                 self.bot_state[f"latest_prediction_{tf_key}"] = {
-                    "symbol": symbol,
-                    "direction": direction,
-                    "confidence": conf,
-                    "calibrated_confidence": conf,
-                    "predicted_change": 0.0
+                    "symbol": str(symbol),
+                    "direction": str(direction),
+                    "confidence": float(conf),
+                    "calibrated_confidence": float(conf),
+                    "predicted_change": float(change_val)
                 }
 
             # Update Confluence Results for UI
