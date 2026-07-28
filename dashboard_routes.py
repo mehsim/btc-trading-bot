@@ -221,6 +221,36 @@ def load_history(bot_state):
             print(f"Error loading local history: {e}")
 
 
+@dashboard_bp.route("/")
+def index():
+    return render_template("index.html")
+
+
+@dashboard_bp.route("/api/status")
+@require_api_key
+def api_status():
+    from state_manager import state_manager
+    from bybit_client import get_real_bybit_balance_cached
+    
+    with bot_state_lock:
+        status_data = {
+            "status": "ok",
+            "bot_running": state_manager.get("bot_running", True),
+            "simulated_balance": state_manager.get("simulated_balance", 80.0),
+            "real_balance": get_real_bybit_balance_cached(),
+            "trade_history": state_manager.get("trade_history", []),
+            "prediction_history": state_manager.get("prediction_history", []),
+            "active_trade_15m": state_manager.get("active_trade_15m", []),
+            "active_trade_30m": state_manager.get("active_trade_30m", []),
+            "active_trade_1h": state_manager.get("active_trade_1h", []),
+            "active_trade_2h": state_manager.get("active_trade_2h", []),
+            "active_trade_4h": state_manager.get("active_trade_4h", []),
+            "active_trade_6h": state_manager.get("active_trade_6h", []),
+            "uptime_seconds": int(time.time() - startup_time)
+        }
+    return jsonify(status_data)
+
+
 @dashboard_bp.route("/api/health")
 def api_health():
     from bybit_client import get_real_bybit_balance_cached
