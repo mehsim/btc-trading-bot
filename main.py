@@ -189,6 +189,11 @@ def main():
     balance_thread = threading.Thread(target=run_bybit_balance_updater, kwargs={"bot_state": bot_state, "bot_state_lock": bot_state_lock}, daemon=True)
     balance_thread.start()
 
+    # 4b. Start Signal Evaluator Worker Thread (Market Regimes & Predictions)
+    from signal_evaluator import run_signal_evaluator_loop
+    signal_eval_thread = threading.Thread(target=run_signal_evaluator_loop, kwargs={"bot_state": bot_state}, daemon=True)
+    signal_eval_thread.start()
+
     # 5. Start Background Schedulers (Daily summary, journal, backup, funding rate, pain feedback)
     from bybit_client import place_bybit_order, format_bybit_qty
     from core import calculate_historical_thresholds
