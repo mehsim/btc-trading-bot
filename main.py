@@ -129,7 +129,7 @@ ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 
 def run_flask_server():
     """Runs the Flask dashboard server in a background thread."""
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5001))
     host = os.environ.get("HOST", "0.0.0.0")
     print(f"[Flask Server] Starting web dashboard on {host}:{port}...")
     import logging
