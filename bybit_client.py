@@ -473,6 +473,55 @@ def get_real_bybit_balance() -> float:
     return 0.0
 
 
+_instrument_specs_cache = {}
+_instrument_specs_lock = threading.Lock()
+
+def get_instrument_specs(symbol: str) -> Dict[str, Any]:
+    with _instrument_specs_lock:
+        if symbol in _instrument_specs_cache:
+            return _instrument_specs_cache[symbol]
+
+    default_specs = {
+        "tickSize": "0.01" if symbol in ["BTCUSDT", "ETHUSDT"] else "0.0001",
+        "lotSize": "0.001" if symbol in ["BTCUSDT"] else ("0.01" if symbol in ["ETHUSDT", "SOLUSDT"] else "0.1"),
+        "minOrderQty": "0.001",
+        "minNotionalValue": "5.0"
+    }
+
+    try:
+        url = f"{BYBIT_BASE_URL}/v5/market/instruments-info"
+        res = bybit_public_get(url, params={"category": "linear", "symbol": symbol})
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("retCode") == 0:
+                list_data = data.get("result", {}).get("list", [])
+                if list_data:
+                    item = list_data[0]
+                    price_filter = item.get("priceFilter", {})
+                    lot_filter = item.get("lotSizeFilter", {})
+                    specs = {
+                        "tickSize": price_filter.get("tickSize", default_specs["tickSize"]),
+                        "lotSize": lot_filter.get("qtyStep", default_specs["lotSize"]),
+                        "minOrderQty": lot_filter.get("minOrderQty", default_specs["minOrderQty"]),
+                        "minNotionalValue": lot_filter.get("minNotionalValue", default_specs["minNotionalValue"])
+                    }
+                    with _instrument_specs_lock:
+                        _instrument_specs_cache[symbol] = specs
+                    return specs
+    except Exception as e:
+        print(f"[Instrument Specs Warning] Failed to fetch instrument info for {symbol}: {e}")
+
+    return default_specs
+
+def quantize_bybit_price(symbol: str, price: float) -> str:
+    specs = get_instrument_specs(symbol)
+    tick_str = specs.get("tickSize", "0.01")
+    try:
+        decimals = len(tick_str.split(".")[1]) if "." in tick_str else 0
+        return f"{price:.{decimals}f}"
+    except Exception:
+        return format_bybit_price(symbol, price)
+
 def get_real_bybit_balance_cached(force: bool = False):
     global _real_balance_cache, _last_real_balance_sync
     now = time.time()
@@ -483,7 +532,7 @@ def get_real_bybit_balance_cached(force: bool = False):
     api_key = get_secure_env("BYBIT_API_KEY", "").strip()
     api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
     if not api_key or not api_secret:
-        return "API_KEYS_MISSING"
+        return None
 
     res = bybit_get_request("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
     if res.get("retCode") == 0:

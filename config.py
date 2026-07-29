@@ -15,6 +15,7 @@ MAX_WALLET_MARGIN_UTILIZATION_PCT = 0.90 # 90% wallet balance margin limit
 
 # Leverage & Timeframe Caps
 TIMEFRAME_MAX_LEVERAGE_CAPS = {
+    "5": 10.0,
     "15": 10.0,
     "30": 10.0,
     "60": 5.0,
@@ -28,7 +29,9 @@ INTERVAL_MAX_POSITION_PCT = {
     "15": 0.08,
     "30": 0.10,
     "60": 0.20,
-    "120": 0.20
+    "120": 0.20,
+    "240": 0.25,
+    "360": 0.25
 }
 
 MAX_SYMBOL_EXPOSURE_PCT = 0.20  # Max 20% total balance in one symbol across all intervals

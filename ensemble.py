@@ -53,10 +53,20 @@ def _slice_model_input(model, X):
             return X
         else:
             X_arr = np.asarray(X)
-            if X_arr.ndim == 2 and X_arr.shape[1] > n_expected:
-                return X_arr[:, :n_expected]
-            elif X_arr.ndim == 1 and X_arr.shape[0] > n_expected:
-                return X_arr[:n_expected]
+            if X_arr.ndim == 2:
+                if X_arr.shape[1] > n_expected:
+                    return X_arr[:, :n_expected]
+                elif X_arr.shape[1] < n_expected:
+                    pad_len = n_expected - X_arr.shape[1]
+                    return np.pad(X_arr, ((0, 0), (0, pad_len)), mode="constant")
+                return X_arr
+            elif X_arr.ndim == 1:
+                if X_arr.shape[0] > n_expected:
+                    return X_arr[:n_expected]
+                elif X_arr.shape[0] < n_expected:
+                    pad_len = n_expected - X_arr.shape[0]
+                    return np.pad(X_arr, (0, pad_len), mode="constant")
+                return X_arr
             return X
     except Exception:
         return X
@@ -282,9 +292,10 @@ class EnsembleClassifier:
         else:
             disagreement = 0.0
             
-        # Top-class margin: margin between highest and second highest probability
+        # Top-class margin: margin between highest and second highest probability per row
         sorted_p = np.sort(probs, axis=1)
-        margin = float(sorted_p[0, -1] - sorted_p[0, -2]) if sorted_p.shape[1] >= 2 else 1.0
+        margins = (sorted_p[:, -1] - sorted_p[:, -2]) if sorted_p.shape[1] >= 2 else np.ones(len(probs))
+        margin = float(margins[0]) if len(margins) == 1 else float(margins.mean())
         
         # Conformal uncertainty score
         uncertainty_score = float(disagreement * 0.7 + max(0.0, 0.25 - margin) * 0.3)

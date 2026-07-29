@@ -88,10 +88,46 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         results["4h_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
         results["4h_RSI"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
     else:
-        results["4h_Trend"] = {"pass": True, "detail": "4h Trend Aligned", "weight": weight_4h}
-        results["4h_RSI"] = {"pass": True, "detail": "4h RSI Safe", "weight": weight_4h}
-        max_score += weight_4h * 2
-        total_score += weight_4h * 2
+        df_4h = None
+        if htf_cache is not None and (symbol, "240") in htf_cache:
+            df_4h = htf_cache[(symbol, "240")]
+        if df_4h is None and get_history_fn:
+            try:
+                df_4h = get_history_fn(symbol=symbol, interval="240", limit=100)
+                if htf_cache is not None and df_4h is not None:
+                    htf_cache[(symbol, "240")] = df_4h
+            except Exception:
+                df_4h = None
+
+        if df_4h is None or len(df_4h) < 21:
+            results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data", "weight": weight_4h}
+            results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data", "weight": weight_4h}
+            max_score += weight_4h * 2
+        else:
+            df_4h_completed = df_4h.iloc[:-1].copy()
+            ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator().iloc[-1]
+            ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator().iloc[-1]
+            rsi_4h = RSIIndicator(df_4h_completed["close"], window=14).rsi().iloc[-1]
+
+            trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
+            trend_4h_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")
+            rsi_4h_pass = (rsi_4h < 75.0) if ml_trend == "Bullish" else (rsi_4h > 25.0)
+
+            results["4h_Trend"] = {
+                "pass": trend_4h_pass,
+                "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})",
+                "weight": weight_4h
+            }
+            results["4h_RSI"] = {
+                "pass": rsi_4h_pass,
+                "detail": f"4h RSI is {rsi_4h:.1f}",
+                "weight": weight_4h
+            }
+            max_score += weight_4h * 2
+            if trend_4h_pass:
+                total_score += weight_4h
+            if rsi_4h_pass:
+                total_score += weight_4h
 
     # CHECK 3: Orderbook Imbalance & L2 Depth
     weight_ob = 1

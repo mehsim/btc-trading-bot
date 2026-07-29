@@ -15,7 +15,8 @@ from core import (
     add_features,
     calibrate_confidence,
     calculate_historical_thresholds,
-    features
+    features,
+    TIMEFRAME_CONFIG
 )
 import argparse
 
@@ -41,8 +42,9 @@ INTERVAL_SLIPPAGE = {
     "120": 0.0003  # 0.03% base slippage for 120m
 }
 
-def calculate_backtest_slippage(interval: str, atr_norm: float) -> float:
+def calculate_backtest_slippage(interval: str, atr_norm: float = 0.0) -> float:
     base = INTERVAL_SLIPPAGE.get(str(interval), 0.0003)
+    volatility_premium = (atr_norm * 0.07) if atr_norm >= 0.01 else 0.0
     return base + volatility_premium
 
 
@@ -518,7 +520,7 @@ def run_backtest():
     import json
     export_data = {
         "timestamp": datetime.now().isoformat(),
-        "scenarios": res_df.to_dict(orient="records"),
+        "scenarios": results_df.to_dict(orient="records"),
         "fee_sensitivity": fee_results
     }
     try:
