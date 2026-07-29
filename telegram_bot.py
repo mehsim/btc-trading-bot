@@ -127,7 +127,7 @@ def send_daily_summary(chat_id=None, bot_state=None):
             if bot_state:
                 bot_state["peak_balance"] = peak_eq
             
-        dd_pct = ((peak_eq - current_eq) / peak_eq * 100.0) if peak_eq > 0 else 0.0
+        dd_pct = ((peak_eq - current_eq) / max(1e-9, peak_eq) * 100.0) if peak_eq > 0 else 0.0
         filter_stats = bot_state.get("filter_stats", {}) if bot_state else {}
         
         summary_msg = (

@@ -80,8 +80,8 @@ class SignalEvaluator:
                     
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:
-                        norm_bear = prob_bearish / dir_total
-                        norm_bull = prob_bullish / dir_total
+                        norm_bear = prob_bearish / max(1e-9, dir_total)
+                        norm_bull = prob_bullish / max(1e-9, dir_total)
                         if norm_bull >= 0.52:
                             direction = "Bullish"
                             raw_conf = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))

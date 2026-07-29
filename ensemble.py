@@ -149,7 +149,7 @@ class EnsembleClassifier:
                 lgb_acc = accuracy_score(y_val, self.lgb_model.predict(X_v_arr))
                 cat_acc = accuracy_score(y_val, self.cat_model.predict(X_v_arr))
                 raw_weights = [max(0.01, xgb_acc), max(0.01, lgb_acc), max(0.01, cat_acc)]
-                sum_w = sum(raw_weights)
+                sum_w = max(1e-9, sum(raw_weights))
                 self.weights = [w / sum_w for w in raw_weights]
                 
                 # Extract validation probabilities from each base model
@@ -256,13 +256,12 @@ class EnsembleClassifier:
                 three_probs[:, 2] = binary_probs[:, 1]
                 three_probs[:, 1] = np.maximum(0.0, 1.0 - (three_probs[:, 0] + three_probs[:, 2]))
                 row_sums = three_probs.sum(axis=1, keepdims=True)
-                row_sums[row_sums == 0] = 1.0
-                three_probs = three_probs / row_sums
+                three_probs = three_probs / np.maximum(1e-9, row_sums)
                 return three_probs
 
             except Exception:
                 w = np.array(self.weights, dtype=float)
-                w = w / np.sum(w)
+                w = w / max(1e-9, float(np.sum(w)))
                 return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
         else:
             meta_clf.coef_ = coef

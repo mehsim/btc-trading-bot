@@ -32,7 +32,7 @@ class PortfolioRiskEngine:
         if portfolio_val <= 0:
             return 0.0, 0.0, True
 
-        weight_vector = weights / portfolio_val
+        weight_vector = weights / max(1e-9, portfolio_val)
         sub_returns = returns_df[symbols].dropna()
         if sub_returns.empty or len(sub_returns) < 10:
             return 0.0, 0.0, True
@@ -48,7 +48,7 @@ class PortfolioRiskEngine:
 
 
         var_dollars = float(self.z_score * port_std_dev * portfolio_val)
-        var_pct_equity = float(var_dollars / total_equity)
+        var_pct_equity = float(var_dollars / max(1e-9, total_equity))
         is_within_limit = var_pct_equity <= self.max_var_pct
 
         return var_dollars, var_pct_equity, is_within_limit
@@ -121,7 +121,7 @@ class PortfolioRiskEngine:
             eigenvalues = np.real(eigenvalues)
             eigenvalues = np.sort(eigenvalues)[::-1]
             total_var = float(np.sum(eigenvalues))
-            pc1_share = float(eigenvalues[0] / total_var) if total_var > 0 else 0.50
+            pc1_share = float(eigenvalues[0] / max(1e-9, total_var)) if total_var > 0 else 0.50
             return {"pc1_explained_variance": pc1_share}
         except Exception:
             return {"pc1_explained_variance": 0.50}

@@ -205,7 +205,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         total_score += weight_cm
 
     # FINAL SCORING
-    score_pct = (total_score / max_score * 100) if max_score > 0 else 100.0
+    score_pct = (total_score / max(1.0, float(max_score)) * 100.0) if max_score > 0 else 100.0
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
     trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True)

@@ -1423,7 +1423,7 @@ def start_telegram_command_listener():
                                             set_bybit_leverage(sym, l)
                                             
                                             notional = m * l
-                                            qty = notional / e_price
+                                            qty = notional / max(1e-9, e_price)
                                             qty_str = format_bybit_qty(sym, qty)
                                             actual_qty = float(qty_str)
                                             
@@ -8209,8 +8209,8 @@ def main():
                         # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
                         if str(iv) in ["15", "30"]:
                             if dir_total >= 0.15:
-                                norm_bear = prob_bearish / dir_total
-                                norm_bull = prob_bullish / dir_total
+                                norm_bear = prob_bearish / max(1e-9, dir_total)
+                                norm_bull = prob_bullish / max(1e-9, dir_total)
                                 
                                 if norm_bear >= 0.52:
                                     ml_trend = "Bearish"

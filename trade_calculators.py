@@ -207,7 +207,7 @@ class MFEBreakEvenTrigger:
                     raw = json.loads(t.get("raw_data", "{}")) if t.get("raw_data") else {}
                     mfe_val = float(raw.get("mfe", 0.0))
                     if mfe_val > 0:
-                        mfe_ratios.append(mfe_val / atr)
+                        mfe_ratios.append(mfe_val / max(1e-9, atr))
             if len(mfe_ratios) >= self.min_sample_size:
                 trig = float(np.percentile(mfe_ratios, 25))
                 trig = float(np.clip(trig, 0.8, 2.0))
@@ -415,7 +415,7 @@ def calculate_recent_performance_leverage_multiplier(bot_state=None, days=7):
         if std_pnl < 1e-4:
             return 1.0
             
-        sharpe = (mean_pnl / std_pnl) * np.sqrt(len(recent_trades))
+        sharpe = (mean_pnl / max(1e-9, std_pnl)) * np.sqrt(len(recent_trades))
         if sharpe < 0:
             multiplier = max(0.5, 1.0 + sharpe * 0.2)
         elif sharpe > 1.5:

@@ -103,8 +103,8 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         
         # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
         if str(interval) in ["15", "30"] and dir_total > 1e-6:
-            norm_bear = prob_bearish / dir_total
-            norm_bull = prob_bullish / dir_total
+            norm_bear = prob_bearish / max(1e-9, dir_total)
+            norm_bull = prob_bullish / max(1e-9, dir_total)
 
             
             if norm_bear >= 0.70 and prob_bearish >= 0.12:
@@ -132,7 +132,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             continue
 
         calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
-        expected_pct_change = (abs(pred_change) / close_price) * 100
+        expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
 
         # 1. Confidence threshold
         if calibrated_confidence < min_confidence:
@@ -302,7 +302,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         equity_simple += net_return
         
         peak_equity = max(peak_equity, equity_compounded)
-        current_drawdown = (peak_equity - equity_compounded) / peak_equity
+        current_drawdown = (peak_equity - equity_compounded) / max(1e-9, peak_equity)
         max_drawdown = max(max_drawdown, current_drawdown)
 
         trades.append({
@@ -315,11 +315,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         return 0, 0.0, 0.0, 0.0, 0.0
     
     returns = [t["net_return"] for t in trades]
-    win_rate = len([r for r in returns if r > 0]) / total_trades * 100
+    win_rate = len([r for r in returns if r > 0]) / max(1, total_trades) * 100.0
     
     gross_profits = sum([r for r in returns if r > 0])
     gross_losses = abs(sum([r for r in returns if r <= 0]))
-    profit_factor = gross_profits / gross_losses if gross_losses > 0 else float("inf")
+    profit_factor = gross_profits / max(1e-9, gross_losses) if gross_losses > 0 else float("inf")
     
     ending_return = equity_compounded - 100.0
     return total_trades, win_rate, profit_factor, max_drawdown * 100, ending_return
