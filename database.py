@@ -561,3 +561,25 @@ def clear_all_trade_history():
                     json.dump([], f) if fname != "pain_feedback_state.json" else json.dump({}, f)
             except Exception:
                 pass
+
+
+def backup_database(dest_path=None) -> bool:
+    """
+    Creates an automated online snapshot of trading_bot.db for RPO < 1 min disaster recovery.
+    Uses SQLite's native online backup API to avoid blocking concurrent database access.
+    """
+    if dest_path is None:
+        db_dir = os.path.dirname(DB_FILE) if os.path.dirname(DB_FILE) else "."
+        dest_path = os.path.join(db_dir, "trading_bot_backup.db")
+    with db_lock:
+        try:
+            source_conn = sqlite3.connect(DB_FILE, timeout=10)
+            backup_conn = sqlite3.connect(dest_path, timeout=10)
+            with backup_conn:
+                source_conn.backup(backup_conn)
+            backup_conn.close()
+            source_conn.close()
+            return True
+        except Exception as e:
+            print(f"[Database Backup Error] Failed automated backup: {e}")
+            return False
