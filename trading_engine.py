@@ -7,6 +7,7 @@ Core trade execution and async order placement engine for Bybit.
 import os
 import time
 import uuid
+import json
 import threading
 import pandas as pd
 import numpy as np
@@ -74,7 +75,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
     leverage_ok = set_bybit_leverage(symbol, leverage_val)
     if leverage_ok:
-        side = "Buy" if ml_trend == "Bullish" else "Sell"
+        side = "Buy" if ml_trend in ["Bullish", "BUY", "LONG", "UP"] else "Sell"
         bybit_success = False
         
         rolling_atr = df_completed["ATR_norm"].tail(30) if "ATR_norm" in df_completed.columns else pd.Series([0.01])

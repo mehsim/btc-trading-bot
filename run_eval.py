@@ -70,7 +70,8 @@ for interval in timeframes:
     for name, df_regime in [("trending", df_trending), ("ranging", df_ranging)]:
         if len(df_regime) < 10:
             continue
-        X = df_regime[selected_features].values
+        from ensemble import _slice_model_input
+        X = df_regime[features_module.features].values
         y_trend = df_regime["target_trend"].values
         y_price = df_regime["target_price_change"].values
         
@@ -86,11 +87,14 @@ for interval in timeframes:
             clf_prefix = f"{workspace}/ensemble_{name}_trend_{interval}"
             reg_prefix = f"{workspace}/ensemble_{name}_price_{interval}"
             
-            clf = load_ensemble_classifier(clf_prefix, n_features=len(selected_features))
-            reg = load_ensemble_regressor(reg_prefix, n_features=len(selected_features))
+            clf = load_ensemble_classifier(clf_prefix, n_features=len(features_module.features))
+            reg = load_ensemble_regressor(reg_prefix, n_features=len(features_module.features))
             
-            pred_t = clf.predict(X_val)
-            pred_p = reg.predict(X_val)
+            X_val_clf = _slice_model_input(clf, X_val)
+            X_val_reg = _slice_model_input(reg, X_val)
+            
+            pred_t = clf.predict(X_val_clf)
+            pred_p = reg.predict(X_val_reg)
             
             acc = accuracy_score(y_val_t, pred_t)
             mae = mean_absolute_error(y_val_p, pred_p)

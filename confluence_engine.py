@@ -17,6 +17,12 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     """
     if symbol is None:
         symbol = "BTCUSDT"
+    if get_history_fn is None:
+        try:
+            from data import get_history
+            get_history_fn = get_history
+        except Exception:
+            pass
     results = {}
     hard_gate_failed = False
     total_score = 0
@@ -143,12 +149,16 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         is_red = [c1["close"] < c1["open"], c2["close"] < c2["open"], c3["close"] < c3["open"]]
         is_green = [c1["close"] > c1["open"], c2["close"] > c2["open"], c3["close"] > c3["open"]]
         is_bullish = ml_trend in ["Bullish", "BUY", "LONG", "UP"]
+        is_bearish = ml_trend in ["Bearish", "SELL", "SHORT", "DOWN"]
         if is_bullish:
             candle_pass = not all(is_red)
             detail_msg = "Safe (No consecutive 3 red candles)" if candle_pass else "Blocked (Knife Falling: 3 consecutive red candles)"
-        else:
+        elif is_bearish:
             candle_pass = not all(is_green)
             detail_msg = "Safe (No consecutive 3 green candles)" if candle_pass else "Blocked (Rocket Rising: 3 consecutive green candles)"
+        else:
+            candle_pass = True
+            detail_msg = "Safe (Neutral trend)"
 
     except Exception as e:
         candle_pass = True

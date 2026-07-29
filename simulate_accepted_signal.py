@@ -55,12 +55,8 @@ def main():
         timestamp = int(candle["timestamp"])
         candle_dt = datetime.fromtimestamp(timestamp / 1000)
         
-        # Generate ML prediction
-        selected_features_list = models_by_interval["60"].get("selected_features")
-        if selected_features_list is not None:
-            X_live = candle[selected_features_list].values.reshape(1, -1)
-        else:
-            X_live = candle[features].values.reshape(1, -1)
+        from ensemble import _slice_model_input
+        X_live_full = candle[features].values.reshape(1, -1)
         
         # Dynamic Regime Routing based on ADX
         adx_regime = candle["ADX"]
@@ -73,6 +69,7 @@ def main():
             active_model_trend = models_ranging["trend"]
             regime_name = "Ranging (ADX < 20)"
 
+        X_live = _slice_model_input(active_model_trend, X_live_full)
         pred_change = float(active_model_price.predict(X_live)[0])
         predicted_price = float(candle["close"]) + pred_change
         probs = active_model_trend.predict_proba(X_live)[0]

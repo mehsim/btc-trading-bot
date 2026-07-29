@@ -530,3 +530,31 @@ def archive_legacy_recovery_trades() -> int:
             return 0
         finally:
             conn.close()
+
+
+def clear_all_trade_history():
+    """
+    Completely clears completed_trades and predictions tables from SQLite,
+    resetting all-time cumulative PnL to $0.00.
+    """
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM completed_trades;")
+            cursor.execute("DELETE FROM predictions;")
+            conn.commit()
+            cursor.execute("PRAGMA incremental_vacuum;")
+            print("🧹 [Database Clear] Successfully wiped all completed_trades and predictions records.")
+        except Exception as e:
+            print(f"[Database Error] Failed clearing trade history: {e}")
+        finally:
+            conn.close()
+
+    for fname in ["dashboard_history.json", "kelly_trade_history.json", "pain_feedback_state.json"]:
+        if os.path.exists(fname):
+            try:
+                with open(fname, "w") as f:
+                    json.dump([], f) if fname != "pain_feedback_state.json" else json.dump({}, f)
+            except Exception:
+                pass

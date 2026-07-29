@@ -1,6 +1,7 @@
 import threading
 import json
 import redis
+import numpy as np
 import database
 
 class ObservedList(list):

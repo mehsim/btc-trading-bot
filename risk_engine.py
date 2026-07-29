@@ -147,7 +147,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
         return 0.0
     
     target_df = df_dict[symbol].copy()
-    target_s = target_df["close"].pct_change().dropna().tail(100).reset_index(drop=True)
+    target_s = target_df["close"].pct_change().dropna().tail(100)
     max_corr = 0.0
     
     for pos in open_positions:
@@ -156,7 +156,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
             if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
                 pos_df = df_dict[pos_symbol].copy()
                 if "close" in pos_df.columns and len(pos_df) >= 20:
-                    other_s = pos_df["close"].pct_change().dropna().tail(100).reset_index(drop=True)
+                    other_s = pos_df["close"].pct_change().dropna().tail(100)
                     combined = pd.concat([target_s, other_s], axis=1).dropna()
                     if len(combined) >= 20:
                         corr_matrix = combined.corr()

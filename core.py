@@ -106,14 +106,8 @@ def calculate_historical_thresholds(model_trend, interval):
                     with open(selected_features_filename, "r") as f:
                         selected_features_list = json.load(f)
                             
-                if selected_features_list is not None:
-                    X_hist = df[selected_features_list].values
-                else:
-                    model_n_feats = getattr(model_trend, "n_features_in_", None)
-                    if model_n_feats is not None and model_n_feats < len(features):
-                        X_hist = df[features[:model_n_feats]].values
-                    else:
-                        X_hist = df[features].values
+                from ensemble import _slice_model_input
+                X_hist = _slice_model_input(model_trend, df[features].values)
                 probs = model_trend.predict_proba(X_hist)
                 confidences = np.max(probs, axis=1)
                 

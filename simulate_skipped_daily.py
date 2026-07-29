@@ -47,14 +47,14 @@ def calculate_atr_at_time(kline_conn, symbol, interval, entry_time_ms):
 def main():
     args = parse_args()
     
-    # Get date window
+    from datetime import timezone
     if args.date:
         target_date = datetime.datetime.strptime(args.date, "%Y-%m-%d").date()
     else:
-        target_date = datetime.datetime.now(datetime.UTC).date()
+        target_date = datetime.datetime.now(timezone.utc).date()
         
-    start_dt = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=datetime.UTC)
-    end_dt = datetime.datetime.combine(target_date, datetime.time.max, tzinfo=datetime.UTC)
+    start_dt = datetime.datetime.combine(target_date, datetime.time.min, tzinfo=timezone.utc)
+    end_dt = datetime.datetime.combine(target_date, datetime.time.max, tzinfo=timezone.utc)
     
     start_ts = start_dt.timestamp()
     end_ts = end_dt.timestamp()

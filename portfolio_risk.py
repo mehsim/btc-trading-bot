@@ -17,11 +17,17 @@ class PortfolioRiskEngine:
         if not open_positions or returns_df is None or returns_df.empty or total_equity <= 0:
             return 0.0, 0.0, True
 
-        symbols = [p.get("symbol") for p in open_positions if p.get("symbol") in returns_df.columns]
+        symbol_sizes = {}
+        for p in open_positions:
+            sym = p.get("symbol")
+            if sym and sym in returns_df.columns:
+                symbol_sizes[sym] = symbol_sizes.get(sym, 0.0) + float(p.get("position_size_usd", 0.0))
+
+        symbols = list(symbol_sizes.keys())
         if not symbols:
             return 0.0, 0.0, True
 
-        weights = np.array([p.get("position_size_usd", 0.0) for p in open_positions if p.get("symbol") in symbols])
+        weights = np.array([symbol_sizes[s] for s in symbols])
         portfolio_val = float(np.sum(weights))
         if portfolio_val <= 0:
             return 0.0, 0.0, True

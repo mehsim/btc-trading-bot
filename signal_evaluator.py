@@ -14,7 +14,7 @@ from typing import Dict, Any
 
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features, calibrate_confidence, features
-from ensemble import load_ensemble_classifier, load_ensemble_regressor
+from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 
 TF_MAP = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
 
@@ -55,7 +55,7 @@ class SignalEvaluator:
             last_row = df.iloc[-1]
             adx_val = float(last_row.get("ADX", 20.0)) if "ADX" in last_row and not np.isnan(last_row["ADX"]) else 20.0
             
-            is_trending = adx_val >= 25.0
+            is_trending = adx_val >= 20.0
             regime_str = f"Trending (ADX {adx_val:.1f})" if is_trending else f"Ranging (ADX {adx_val:.1f})"
             
             self.bot_state[f"regime_{tf_key}"] = regime_str
@@ -68,15 +68,39 @@ class SignalEvaluator:
                     models = self.models_by_interval[interval]["trending" if is_trending else "ranging"]
                     X_mat = df[features].values
                     row_X = X_mat[-1].reshape(1, -1)
+                    row_X_sliced = _slice_model_input(models["trend"], row_X)
                     
-                    probs = models["trend"].predict_proba(row_X)[0]
-                    pred_pct = float(models["price"].predict(row_X)[0])
+                    probs = models["trend"].predict_proba(row_X_sliced)[0]
+                    pred_pct = float(models["price"].predict(row_X_sliced)[0])
                     
+                    prob_bearish = float(probs[0])
+                    prob_neutral = float(probs[1]) if len(probs) > 1 else 0.0
+                    prob_bullish = float(probs[2]) if len(probs) > 2 else float(probs[0])
                     winning_class = int(np.argmax(probs))
-                    raw_conf = float(probs[winning_class])
                     
-                    direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
-                    calibrated_conf = calibrate_confidence(raw_conf, 0.55, 0.75)
+                    dir_total = prob_bearish + prob_bullish
+                    if str(interval) in ["15", "30"] and dir_total >= 0.15:
+                        norm_bear = prob_bearish / dir_total
+                        norm_bull = prob_bullish / dir_total
+                        if norm_bull >= 0.52:
+                            direction = "Bullish"
+                            raw_conf = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
+                        elif norm_bear >= 0.52:
+                            direction = "Bearish"
+                            raw_conf = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
+                        else:
+                            direction = "Neutral"
+                            raw_conf = prob_neutral
+                    else:
+                        direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
+                        raw_conf = float(probs[winning_class])
+
+                    calibrator = models.get("calibrator")
+                    if calibrator is not None and "X" in calibrator and "y" in calibrator and direction in ["Bullish", "Bearish"]:
+                        iso_val = float(np.interp(raw_conf, calibrator["X"], calibrator["y"]))
+                        calibrated_conf = max(raw_conf, iso_val) if str(interval) in ["15", "30"] else iso_val
+                    else:
+                        calibrated_conf = calibrate_confidence(raw_conf, 0.55, 0.75)
                     
                     self.bot_state[f"latest_prediction_{tf_key}"] = {
                         "symbol": str(symbol),

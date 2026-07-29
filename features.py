@@ -472,21 +472,26 @@ def add_candlestick_patterns(df):
     mid_small = np.abs(prev_c - prev_o) / np.maximum(prev_h - prev_l, 1e-8) <= 0.3
     res["cdl_morning_star"] = np.where(p2_red & mid_small & is_green & (c >= p2_c + 0.5 * np.abs(p2_c - p2_o)), 1, 0)
     res["cdl_evening_star"] = np.where(p2_green & mid_small & is_red & (c <= p2_c - 0.5 * np.abs(p2_c - p2_o)), -1, 0)
-    res["cdl_morning_doji_star"] = np.where(p2_red & (res["cdl_doji"] == 1) & is_green, 1, 0)
-    res["cdl_evening_doji_star"] = np.where(p2_green & (res["cdl_doji"] == 1) & is_red, -1, 0)
+    prev_doji = _shift(res["cdl_doji"], 1)
+    res["cdl_morning_doji_star"] = np.where(p2_red & (prev_doji == 1) & is_green, 1, 0)
+    res["cdl_evening_doji_star"] = np.where(p2_green & (prev_doji == 1) & is_red, -1, 0)
 
     c1_g, c2_g, c3_g = is_green, _shift(is_green, 1), _shift(is_green, 2)
     c1_r, c2_r, c3_r = is_red, _shift(is_red, 1), _shift(is_red, 2)
     res["cdl_three_white_soldiers"] = np.where(c1_g & c2_g & c3_g & (c > prev_c) & (prev_c > p2_c), 1, 0)
     res["cdl_three_black_crows"] = np.where(c1_r & c2_r & c3_r & (c < prev_c) & (prev_c < p2_c), -1, 0)
-    res["cdl_three_inside_up"] = np.where(p2_red & (res["cdl_bullish_harami"] == 1) & is_green & (c > p2_o), 1, 0)
-    res["cdl_three_inside_down"] = np.where(p2_green & (res["cdl_bearish_harami"] == 1) & is_red & (c < p2_o), -1, 0)
+    prev_harami_bull = _shift(res["cdl_bullish_harami"], 1)
+    prev_harami_bear = _shift(res["cdl_bearish_harami"], 1)
+    res["cdl_three_inside_up"] = np.where(p2_red & (prev_harami_bull == 1) & is_green & (c > p2_o), 1, 0)
+    res["cdl_three_inside_down"] = np.where(p2_green & (prev_harami_bear == 1) & is_red & (c < p2_o), -1, 0)
 
     # 5-candle patterns
     p4_green, p4_red = _shift(is_green, 4), _shift(is_red, 4)
-    res["cdl_rising_three"] = np.where(p4_green & is_green & c1_r & c2_r & c3_r & (c > _shift(h, 4)), 1, 0)
-    res["cdl_falling_three"] = np.where(p4_red & is_red & c1_g & c2_g & c3_g & (c < _shift(l, 4)), -1, 0)
-    res["cdl_abandoned_baby_bull"] = np.where(p2_red & (res["cdl_doji"] == 1) & is_green & (prev_l > _shift(h, 2)) & (l > prev_h), 1, 0)
+    r1, r2, r3 = _shift(is_red, 1), _shift(is_red, 2), _shift(is_red, 3)
+    g1, g2, g3 = _shift(is_green, 1), _shift(is_green, 2), _shift(is_green, 3)
+    res["cdl_rising_three"] = np.where(p4_green & is_green & r1 & r2 & r3 & (c > _shift(h, 4)), 1, 0)
+    res["cdl_falling_three"] = np.where(p4_red & is_red & g1 & g2 & g3 & (c < _shift(l, 4)), -1, 0)
+    res["cdl_abandoned_baby_bull"] = np.where(p2_red & (prev_doji == 1) & is_green & (prev_h < _shift(l, 2)) & (l > prev_h), 1, 0)
 
     # Set initial 5 rows to 0 due to rolling
     pattern_df = pd.DataFrame(res, index=df.index)

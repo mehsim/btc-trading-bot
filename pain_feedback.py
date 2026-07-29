@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 
 PAIN_FEEDBACK_FILE = "pain_feedback_state.json"
-pain_lock = threading.Lock()
+pain_lock = threading.RLock()
 
 class PainFeedbackLoop:
     def __init__(self, state_file=PAIN_FEEDBACK_FILE):
@@ -43,14 +43,15 @@ class PainFeedbackLoop:
         new_floor = max(current_floor * 1.15, needed_floor)
         new_floor = max(0.005, min(new_floor, 0.020))  # Hard cap at 2.0%, min 0.5%
         
-        self.adjustments[symbol] = {
-            'base_floor': current_floor,
-            'adjusted_floor': new_floor,
-            'applied_at': datetime.now(timezone.utc).isoformat(),
-            'decay_days': 30,
-            'reason': f"Pain trade: stopped at {adverse_move:.2%}, reversed to TP"
-        }
-        self.save_state()
+        with pain_lock:
+            self.adjustments[symbol] = {
+                'base_floor': current_floor,
+                'adjusted_floor': new_floor,
+                'applied_at': datetime.now(timezone.utc).isoformat(),
+                'decay_days': 30,
+                'reason': f"Pain trade: stopped at {adverse_move:.2%}, reversed to TP"
+            }
+            self.save_state()
         print(f"[PainFeedbackLoop ALERT] Raised {symbol} min floor from {current_floor:.2%} to {new_floor:.2%} (Decay: 30 days)")
 
     def get_effective_floor(self, symbol):

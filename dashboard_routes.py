@@ -113,7 +113,7 @@ def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: s
         print(f"[Kill Switch Error] Failed executing emergency close: {err}")
 
 
-@dashboard_bp.route("/killswitch", methods=["GET", "POST"])
+@dashboard_bp.route("/killswitch", methods=["POST"])
 @require_api_key
 def killswitch_endpoint():
     from state_manager import state_manager
@@ -291,9 +291,9 @@ def api_status():
     from bybit_client import get_real_bybit_balance_cached, bybit_get_request
     
     with bot_state_lock:
-        if hasattr(state_manager, "_cache") and isinstance(state_manager._cache, dict):
-            status_data = state_manager._cache.copy()
-        else:
+        try:
+            status_data = state_manager.copy()
+        except Exception:
             status_data = {}
         
         # Fallback for live prices via Bybit REST API if WebSocket ticker hasn't updated yet

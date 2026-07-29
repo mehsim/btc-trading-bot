@@ -101,9 +101,19 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
         dd = (peak - eq) / peak * 100.0
         max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
         
+        def _get_ts(row_val):
+            try:
+                if "timestamp" in test_df.columns:
+                    return int(row_val["timestamp"])
+                elif hasattr(row_val.name, "timestamp"):
+                    return int(row_val.name.timestamp() * 1000)
+                return 0
+            except Exception:
+                return 0
+
         window_results.append({
-            "window_start": int(test_df.iloc[0]["timestamp"]),
-            "window_end": int(test_df.iloc[-1]["timestamp"]),
+            "window_start": _get_ts(test_df.iloc[0]),
+            "window_end": _get_ts(test_df.iloc[-1]),
             "win_rate": win_rate,
             "cum_return": cum_ret,
             "max_drawdown": max_dd

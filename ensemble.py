@@ -6,6 +6,61 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 from xgboost import XGBClassifier, XGBRegressor
 
+def _slice_model_input(model, X):
+    """
+    Slices input feature matrix X to match model's expected number of input features (n_features_in_)
+    if X has extra columns/features.
+    """
+    if model is None or X is None:
+        return X
+
+    n_expected = None
+    if hasattr(model, "booster_") and hasattr(model.booster_, "num_feature"):
+        try:
+            n_expected = model.booster_.num_feature()
+        except Exception:
+            pass
+    if n_expected is None and hasattr(model, "feature_names_") and model.feature_names_:
+        try:
+            n_expected = len(model.feature_names_)
+        except Exception:
+            pass
+    if n_expected is None and hasattr(model, "get_num_features"):
+        try:
+            n_expected = model.get_num_features()
+        except Exception:
+            pass
+    if n_expected is None:
+        n_expected = getattr(model, "n_features_in_", None)
+    if n_expected is None:
+        n_expected = getattr(model, "_n_features_in", None)
+    if n_expected is None:
+        n_expected = getattr(model, "_n_features", None)
+    if n_expected is None:
+        n_expected = getattr(model, "n_features_", None)
+
+    if n_expected is None:
+        return X
+
+    try:
+        if isinstance(X, pd.DataFrame):
+            if X.shape[1] > n_expected:
+                return X.iloc[:, :n_expected]
+            return X
+        elif isinstance(X, pd.Series):
+            if len(X) > n_expected:
+                return X.iloc[:n_expected]
+            return X
+        else:
+            X_arr = np.asarray(X)
+            if X_arr.ndim == 2 and X_arr.shape[1] > n_expected:
+                return X_arr[:, :n_expected]
+            elif X_arr.ndim == 1 and X_arr.shape[0] > n_expected:
+                return X_arr[:n_expected]
+            return X
+    except Exception:
+        return X
+
 class PurgedEmbargoTimeSeriesSplit:
     """
     Implements Purged and Embargoed Time-Series Cross-Validation.
@@ -219,10 +274,10 @@ class EnsembleClassifier:
         probs = self.predict_proba(X_arr, weights=weights)
         
         # Calculate base model predictions to measure ensemble disagreement
-        xgb_p = self.xgb_model.predict_proba(X_arr)
+        xgb_p = self.xgb_model.predict_proba(_slice_model_input(self.xgb_model, X_arr))
         if self.lgb_model is not None and self.cat_model is not None:
-            lgb_p = self.lgb_model.predict_proba(X_arr)
-            cat_p = self.cat_model.predict_proba(X_arr)
+            lgb_p = self.lgb_model.predict_proba(_slice_model_input(self.lgb_model, X_arr))
+            cat_p = self.cat_model.predict_proba(_slice_model_input(self.cat_model, X_arr))
             disagreement = np.std([xgb_p, lgb_p, cat_p], axis=0).mean()
         else:
             disagreement = 0.0
@@ -335,9 +390,6 @@ class EnsembleRegressor:
                 return (xgb_pred * 0.5 + cat_pred * 0.5)
             return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
             
-        lgb_pred = self.lgb_model.predict(X_arr)
-        cat_pred = self.cat_model.predict(X_arr)
-        
         # Apply Ridge meta-model via linear matrix multiplication
         X_meta = np.column_stack([xgb_pred, lgb_pred, cat_pred])
         coef = np.array(self.meta_coef_, dtype=float)

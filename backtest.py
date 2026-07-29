@@ -43,10 +43,11 @@ INTERVAL_SLIPPAGE = {
 
 def calculate_backtest_slippage(interval: str, atr_norm: float) -> float:
     base = INTERVAL_SLIPPAGE.get(str(interval), 0.0003)
-    volatility_premium = 0.0010 if atr_norm >= 0.01 else 0.0
     return base + volatility_premium
 
+
 def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60"):
+    df = df.reset_index(drop=True)
     trades = []
     equity_compounded = 100.0
     equity_simple = 0.0

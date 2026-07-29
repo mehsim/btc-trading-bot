@@ -43,7 +43,8 @@ def main():
         
         if p.returncode != 0:
             print(f"[retrain_worker Error] Retraining for interval {iv}m failed:\n{stderr}")
-            send_telegram_alert(f"❌ *retrain_worker error* ❌\nRetraining failed for {iv}m:\n`{stderr[:200]}`")
+            err_clean = stderr[:200].replace("`", "'")
+            send_telegram_alert(f"❌ *retrain_worker error* ❌\nRetraining failed for {iv}m:\n`{err_clean}`")
             continue
             
         print(f"[retrain_worker] Retraining for interval {iv}m finished successfully.")

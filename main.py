@@ -775,7 +775,7 @@ def run_manual_confluence_report(symbol, interval):
             
         all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
             latest_candle["close"], df_features, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol,
-            calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.58
+            calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.58, get_history_fn=get_history
         )
         
         adx_regime = latest_candle["ADX"]
@@ -2206,7 +2206,7 @@ logs_lock = threading.Lock()
 retraining_lock = threading.Lock()
 active_trades_lock = threading.Lock()
 
-bot_state = state_manager.StateManager()
+from state_manager import state_manager as bot_state
 
 def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
     print(f"[EMERGENCY KILL SWITCH] Triggered! Reason: {reason}")
@@ -2266,7 +2266,7 @@ def require_ip_whitelist(f):
 
 
 
-@app.route("/killswitch", methods=["GET", "POST"])
+@app.route("/killswitch", methods=["POST"])
 @require_api_key
 def killswitch_endpoint():
     trigger_emergency_kill_switch("HTTP /killswitch Request")
@@ -3872,8 +3872,6 @@ def reset_circuit_breaker():
 @app.route("/api/clear_history", methods=["POST"])
 @require_api_key
 def clear_history_endpoint():
-    bot_state["trade_history"] = []
-    bot_state["prediction_history"] = []
     if TRADE_MODE == "simulation":
         bot_state["simulated_balance"] = 80.0
         bot_state["daily_drawdown_start_balance"] = 80.0
@@ -3885,7 +3883,7 @@ def clear_history_endpoint():
     for tf_key in ["60", "120", "240", "360"]:
         bot_state["win_rate_by_tf"][tf_key] = None
     save_history()
-    return jsonify({"status": "success", "message": "All completed trades and prediction history have been successfully cleared from the backend and Hugging Face Dataset space. Simulated balance has been reset to $80.00."})
+    return jsonify({"status": "success", "message": "Circuit breaker and state reset. Completed trades history preserved."})
 
 @app.route("/api/test_email", methods=["POST"])
 @require_api_key
@@ -4493,7 +4491,7 @@ SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRP
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
 import joblib
-from ensemble import load_ensemble_classifier, load_ensemble_regressor
+from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 
 models_by_interval = {}
 model_files_mtime = {}
@@ -8128,14 +8126,8 @@ def main():
                                 except Exception:
                                     pass
 
-                        if feat_list is not None:
-                            X_live = latest_candle_weighted[feat_list].values.reshape(1, -1)
-                        else:
-                            model_n_features = getattr(active_model_trend, "n_features_in_", None)
-                            if model_n_features is not None and model_n_features < len(features):
-                                X_live = latest_candle_weighted[features[:model_n_features]].values.reshape(1, -1)
-                            else:
-                                X_live = latest_candle_weighted[features].values.reshape(1, -1)
+                        X_live_full = latest_candle_weighted[features].values.reshape(1, -1)
+                        X_live = _slice_model_input(active_model_trend, X_live_full)
 
                         # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
                         if str(iv) == "15":
@@ -8335,15 +8327,33 @@ def main():
                         if ml_trend in ["Bullish", "Bearish"]:
                             active_meta_model = models_tf["trending"]["meta"] if adx_regime >= 20.0 else models_tf["ranging"]["meta"]
                             if active_meta_model is not None:
-                                meta_pred = int(active_meta_model.predict(X_live)[0])
-                                if meta_pred == 1:
-                                    meta_adjustment = +0.05
-                                    print(f"[{iv}m] Meta-Classifier: PASS (confidence boosted +5%)")
-                                else:
-                                    meta_adjustment = -0.07  # Middle ground penalty
-                                    print(f"[{iv}m] Meta-Classifier: FAIL (confidence reduced -7%)")
-                                calibrated_confidence = max(0.0, min(1.0, calibrated_confidence + meta_adjustment))
-                                print(f"[{iv}m] Adjusted Calibrated Confidence: {calibrated_confidence*100:.2f}%")
+                                try:
+                                    X_meta_live = latest_candle_weighted[features].values.reshape(1, -1)
+                                    X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
+                                    meta_pred = int(active_meta_model.predict(X_meta_input)[0])
+                                    if meta_pred == 1:
+                                        meta_adjustment = +0.05
+                                        print(f"[{iv}m] Meta-Classifier: PASS (confidence boosted +5%)")
+                                    else:
+                                        meta_adjustment = -0.07  # Middle ground penalty
+                                        print(f"[{iv}m] Meta-Classifier: FAIL (confidence reduced -7%)")
+                                    calibrated_confidence = max(0.0, min(1.0, calibrated_confidence + meta_adjustment))
+                                    print(f"[{iv}m] Adjusted Calibrated Confidence: {calibrated_confidence*100:.2f}%")
+                                except Exception as meta_err:
+                                    print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
+
+                        # Candlestick Pattern Alignment Overlay Boost (+4% Confidence Boost)
+                        bull_patterns = ["cdl_hammer", "cdl_bullish_engulfing", "cdl_morning_star", "cdl_three_white_soldiers", "cdl_three_inside_up", "cdl_abandoned_baby_bull", "cdl_piercing_line", "cdl_tweezer_bottom", "cdl_marubozu_bull"]
+                        bear_patterns = ["cdl_shooting_star", "cdl_bearish_engulfing", "cdl_evening_star", "cdl_three_black_crows", "cdl_three_inside_down", "cdl_dark_cloud_cover", "cdl_tweezer_top", "cdl_marubozu_bear"]
+                        pattern_boost = False
+                        if ml_trend == "Bullish" and any(latest_candle.get(p, 0) == 1 for p in bull_patterns):
+                            pattern_boost = True
+                        elif ml_trend == "Bearish" and any(latest_candle.get(p, 0) in [1, -1] for p in bear_patterns):
+                            pattern_boost = True
+
+                        if pattern_boost:
+                            calibrated_confidence = min(0.98, calibrated_confidence + 0.04)
+                            print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (+4.0% confidence) -> {calibrated_confidence*100:.2f}%")
 
                         # Determine tracking status
                         # Softened contradiction: only block if regressor predicts > 0.05% in OPPOSITE direction
@@ -8476,7 +8486,7 @@ def main():
                                 latest_titles = cached_news_titles
                                 all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
                                     latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
-                                    calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold
+                                    calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold, get_history_fn=get_history
                                 )
 
                                 # Update global confluence status
@@ -9058,9 +9068,10 @@ def safe_main():
             except Exception:
                 pass
             try:
+                err_clean = str(e).replace("`", "'")
                 send_telegram_alert(
                     f"🔴 *CRITICAL RUNTIME ERROR* 🔴\n"
-                    f"• *Error*: {str(e)}\n"
+                    f"• *Error*: `{err_clean}`\n"
                     f"• *Action*: Restarting main bot loop...\n\n"
                     f"```\n{traceback_str[:300]}...\n```"
                 )
@@ -9099,7 +9110,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_backup_scheduler, daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread
     threading.Thread(target=run_daily_summary_scheduler, daemon=True).start()
-    # Start pain feedback 24h post-exit verifier thread
-    threading.Thread(target=run_pain_feedback_verifier, daemon=True).start()
+    from signal_evaluator import run_signal_evaluator_loop
+    threading.Thread(target=run_signal_evaluator_loop, args=(bot_state,), daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()

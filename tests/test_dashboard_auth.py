@@ -28,6 +28,7 @@ def test_unauthenticated_killswitch(client, monkeypatch):
 def test_authenticated_killswitch(client, monkeypatch):
     """Verify POST /killswitch succeeds with valid X-API-KEY header."""
     monkeypatch.setenv("DASHBOARD_API_KEY", "secret_test_key_123")
+    monkeypatch.setattr("dashboard_routes.trigger_emergency_kill_switch", lambda *args, **kwargs: None)
     
     # Request with valid X-API-KEY header
     headers = {"X-API-KEY": "secret_test_key_123"}

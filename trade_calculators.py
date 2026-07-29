@@ -352,7 +352,9 @@ def calculate_covariance_multiplier(new_symbol, new_direction, bot_state=None):
             continue
         r = get_correlation(new_symbol, open_sym)
         
-        if new_direction == open_dir:
+        is_new_bull = new_direction in ["Bullish", "BUY", "LONG", "UP"]
+        is_open_bull = open_dir in ["Bullish", "BUY", "LONG", "UP"]
+        if is_new_bull == is_open_bull:
             impact = r
             risk_type = "CONCENTRATION"
         else:

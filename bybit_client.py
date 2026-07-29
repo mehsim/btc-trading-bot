@@ -261,6 +261,8 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
         return f"{q_val:.2f}"
     elif "SOL" in symbol or "BNB" in symbol:
         return f"{q_val:.2f}"
+    elif "DOT" in symbol or "AVAX" in symbol or "LTC" in symbol:
+        return f"{q_val:.1f}"
     else:
         return f"{int(round(q_val))}"
 

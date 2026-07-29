@@ -141,14 +141,9 @@ def main():
     # 4. Generate Predictions
     print("\n[Step 3] Generating Machine Learning Predictions...")
     latest_candle = df.iloc[-1]
-    import json
-    selected_features_filename = f"selected_features_{INTERVAL}.json"
-    if os.path.exists(selected_features_filename):
-        with open(selected_features_filename, "r") as f:
-            selected_features = json.load(f)
-    else:
-        selected_features = features
-    X_live = latest_candle[selected_features].values.reshape(1, -1)
+    from ensemble import _slice_model_input
+    X_live_full = latest_candle[features].values.reshape(1, -1)
+    X_live = _slice_model_input(active_model_trend, X_live_full)
 
     # Dynamic Regime Routing based on ADX
     adx_regime = latest_candle["ADX"]

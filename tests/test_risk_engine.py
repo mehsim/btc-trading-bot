@@ -72,3 +72,11 @@ def test_evaluate_pre_trade_checklist_leveraged_notional():
     )
     assert pass_flag is True
     assert cap_size > 0.0
+
+def test_bybit_quantity_formatting():
+    """Verify format_bybit_qty formats decimal quantities for DOT, AVAX, LTC correctly."""
+    from bybit_client import format_bybit_qty
+    assert format_bybit_qty("DOTUSDT", 2.4) == "2.4"
+    assert format_bybit_qty("AVAXUSDT", 0.5) == "0.5"
+    assert format_bybit_qty("LTCUSDT", 1.8) == "1.8"
+    assert format_bybit_qty("BTCUSDT", 0.1234) == "0.123"
