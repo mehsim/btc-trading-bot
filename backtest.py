@@ -223,17 +223,16 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         entry_price = close_price
         atr_dollars = atr_norm * entry_price
         
-        # Regime-Adaptive Take-Profit Multiplier
-        if adx_val >= 20.0:
-            tp_multiplier = 1.50
-        else:
-            tp_multiplier = 1.00
+        # Regime-Adaptive Take-Profit & Stop-Loss Multipliers from TIMEFRAME_CONFIG
+        cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+        sl_mult = cfg.get("sl_mult", 1.5)
+        tp_multiplier = cfg.get("tp_mult_trending", 2.5) if adx_val >= 20.0 else cfg.get("tp_mult_ranging", 1.5)
             
         if ml_trend == "Bullish":
-            stop_loss = entry_price - 0.75 * atr_dollars
+            stop_loss = entry_price - sl_mult * atr_dollars
             take_profit = entry_price + tp_multiplier * atr_dollars
         else:
-            stop_loss = entry_price + 0.75 * atr_dollars
+            stop_loss = entry_price + sl_mult * atr_dollars
             take_profit = entry_price - tp_multiplier * atr_dollars
 
         # Look up to lookahead candles

@@ -1,0 +1,227 @@
+{
+  "timestamp": "2026-07-29T23:21:07.684435",
+  "scenarios": [
+    {
+      "Scenario": "A (Baseline - Regressor Fee Check, Conf >= 70%)",
+      "Trades": 430,
+      "Win Rate": "39.30%",
+      "Profit Factor": "0.47",
+      "Max Drawdown": "62.34%",
+      "Cumulative Return": "-62.12%"
+    },
+    {
+      "Scenario": "B (ATR Fee Check >= 0.25%, Conf >= 70%)",
+      "Trades": 498,
+      "Win Rate": "37.15%",
+      "Profit Factor": "0.45",
+      "Max Drawdown": "69.73%",
+      "Cumulative Return": "-69.73%"
+    },
+    {
+      "Scenario": "C (ATR Fee Check >= 0.25%, Conf >= 65%)",
+      "Trades": 625,
+      "Win Rate": "36.00%",
+      "Profit Factor": "0.44",
+      "Max Drawdown": "79.47%",
+      "Cumulative Return": "-79.46%"
+    },
+    {
+      "Scenario": "D (ATR Fee Check >= 0.25%, Conf >= 60%)",
+      "Trades": 625,
+      "Win Rate": "36.00%",
+      "Profit Factor": "0.44",
+      "Max Drawdown": "79.47%",
+      "Cumulative Return": "-79.46%"
+    },
+    {
+      "Scenario": "E (ATR Fee Check, Conf >= 65%, No Trend Align)",
+      "Trades": 2306,
+      "Win Rate": "36.51%",
+      "Profit Factor": "0.48",
+      "Max Drawdown": "99.64%",
+      "Cumulative Return": "-99.63%"
+    }
+  ],
+  "fee_sensitivity": [
+    {
+      "Fee Structure": "1. Spot Taker Fee (0.20% roundtrip)",
+      "Trades": 498,
+      "Win Rate": "37.15%",
+      "Profit Factor": "0.45",
+      "Max Drawdown": "69.73%",
+      "Net Cumulative Return": "-69.73%"
+    },
+    {
+      "Fee Structure": "2. Futures Taker Fee (0.10% roundtrip)",
+      "Trades": 498,
+      "Win Rate": "38.55%",
+      "Profit Factor": "0.63",
+      "Max Drawdown": "50.17%",
+      "Net Cumulative Return": "-50.14%"
+    },
+    {
+      "Fee Structure": "3. Futures Limit/Maker Fee (0.04% roundtrip)",
+      "Trades": 498,
+      "Win Rate": "38.76%",
+      "Profit Factor": "0.77",
+      "Max Drawdown": "34.23%",
+      "Net Cumulative Return": "-32.75%"
+    }
+  ],
+  "walk_forward_validation": {
+    "status": "success",
+    "window_count": 21,
+    "mean_win_rate": 49.937971180456145,
+    "mean_return": -1.4812425872364334,
+    "max_drawdown": 30.319130661258292,
+    "windows": [
+      {
+        "window_start": 1746097200000,
+        "window_end": 1747893600000,
+        "win_rate": 49.69939879759519,
+        "cum_return": 15.011514673667726,
+        "max_drawdown": 4.238217960816215
+      },
+      {
+        "window_start": 1747897200000,
+        "window_end": 1749693600000,
+        "win_rate": 51.302605210420836,
+        "cum_return": -2.392557888097935,
+        "max_drawdown": 10.066111203628541
+      },
+      {
+        "window_start": 1749697200000,
+        "window_end": 1751493600000,
+        "win_rate": 49.899799599198396,
+        "cum_return": 1.1766549724524733,
+        "max_drawdown": 9.129939429829365
+      },
+      {
+        "window_start": 1751497200000,
+        "window_end": 1753293600000,
+        "win_rate": 53.106212424849694,
+        "cum_return": 8.824389033390712,
+        "max_drawdown": 5.474445418490243
+      },
+      {
+        "window_start": 1753297200000,
+        "window_end": 1755093600000,
+        "win_rate": 48.49699398797595,
+        "cum_return": 2.096576118812976,
+        "max_drawdown": 6.1361934601371075
+      },
+      {
+        "window_start": 1755097200000,
+        "window_end": 1756893600000,
+        "win_rate": 49.298597194388776,
+        "cum_return": -7.860440768205779,
+        "max_drawdown": 13.336513594405247
+      },
+      {
+        "window_start": 1756897200000,
+        "window_end": 1758693600000,
+        "win_rate": 51.302605210420836,
+        "cum_return": 1.026921685551807,
+        "max_drawdown": 5.259583138769759
+      },
+      {
+        "window_start": 1758697200000,
+        "window_end": 1760493600000,
+        "win_rate": 50.1002004008016,
+        "cum_return": 0.204553855777867,
+        "max_drawdown": 13.012089889531314
+      },
+      {
+        "window_start": 1760497200000,
+        "window_end": 1762293600000,
+        "win_rate": 48.69739478957916,
+        "cum_return": -9.558202946028105,
+        "max_drawdown": 13.565710039456475
+      },
+      {
+        "window_start": 1762297200000,
+        "window_end": 1764093600000,
+        "win_rate": 49.899799599198396,
+        "cum_return": -14.047351242435202,
+        "max_drawdown": 22.905168912041475
+      },
+      {
+        "window_start": 1764097200000,
+        "window_end": 1765893600000,
+        "win_rate": 50.50100200400801,
+        "cum_return": 0.48665723139711403,
+        "max_drawdown": 8.95756234146418
+      },
+      {
+        "window_start": 1765897200000,
+        "window_end": 1767693600000,
+        "win_rate": 52.104208416833664,
+        "cum_return": 6.368107717763882,
+        "max_drawdown": 5.8085740836390505
+      },
+      {
+        "window_start": 1767697200000,
+        "window_end": 1769493600000,
+        "win_rate": 48.296593186372746,
+        "cum_return": -5.888309614591403,
+        "max_drawdown": 11.42644919369711
+      },
+      {
+        "window_start": 1769497200000,
+        "window_end": 1771293600000,
+        "win_rate": 47.09418837675351,
+        "cum_return": -22.067945284925194,
+        "max_drawdown": 30.319130661258292
+      },
+      {
+        "window_start": 1771297200000,
+        "window_end": 1773093600000,
+        "win_rate": 50.1002004008016,
+        "cum_return": 0.22807999310368032,
+        "max_drawdown": 10.458409146457328
+      },
+      {
+        "window_start": 1773097200000,
+        "window_end": 1774893600000,
+        "win_rate": 50.300601202404806,
+        "cum_return": -2.5883636225393913,
+        "max_drawdown": 13.217776460689334
+      },
+      {
+        "window_start": 1774897200000,
+        "window_end": 1776693600000,
+        "win_rate": 51.302605210420836,
+        "cum_return": 12.74487988669739,
+        "max_drawdown": 5.24709475958467
+      },
+      {
+        "window_start": 1776697200000,
+        "window_end": 1778493600000,
+        "win_rate": 52.705410821643284,
+        "cum_return": 6.921087444642571,
+        "max_drawdown": 4.8142307449694455
+      },
+      {
+        "window_start": 1778497200000,
+        "window_end": 1780293600000,
+        "win_rate": 48.09619238476954,
+        "cum_return": -9.925900736064053,
+        "max_drawdown": 11.01521845012767
+      },
+      {
+        "window_start": 1780297200000,
+        "window_end": 1782093600000,
+        "win_rate": 46.49298597194389,
+        "cum_return": -11.742718860192769,
+        "max_drawdown": 18.534603415059888
+      },
+      {
+        "window_start": 1782097200000,
+        "window_end": 1783893600000,
+        "win_rate": 49.899799599198396,
+        "cum_return": -0.12372598214347441,
+        "max_drawdown": 11.121891685736026
+      }
+    ]
+  }
+}
