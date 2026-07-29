@@ -7826,7 +7826,7 @@ def main():
         # 3. Check for completed candle closes to search for a new signal
 
         # --- Daily Drawdown Circuit Breaker & Profit Goal ---
-        today = get_pkt_time().day
+        today = datetime.now(timezone.utc).day
         current_equity_val = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
         if current_equity_val <= 0:
             current_equity_val = float(bot_state.get("simulated_balance", 80.0))
@@ -7836,7 +7836,7 @@ def main():
             bot_state["daily_drawdown_reset_day"] = today
             bot_state["circuit_breaker_active"] = False
             bot_state["daily_goal_reached"] = False
-            print(f"[Circuit Breaker] Daily reset (PKT). Start balance: ${bot_state['daily_drawdown_start_balance']:.2f}")
+            print(f"[Circuit Breaker] Daily reset (UTC). Start balance: ${bot_state['daily_drawdown_start_balance']:.2f}")
         else:
             start_bal = bot_state["daily_drawdown_start_balance"]
             curr_bal = current_equity_val
