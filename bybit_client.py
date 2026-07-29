@@ -245,26 +245,28 @@ def set_bybit_leverage(symbol: str, leverage: float) -> Dict[str, Any]:
 
 def format_bybit_price(symbol: str, price: float) -> str:
     p_val = float(price)
-    if "BTC" in symbol or "ETH" in symbol:
-        return f"{p_val:.2f}"
-    elif "SOL" in symbol or "BNB" in symbol:
-        return f"{p_val:.3f}"
-    else:
-        return f"{p_val:.4f}"
+    price_precisions = {
+        "BTCUSDT": 2, "ETHUSDT": 2, "SOLUSDT": 3, "BNBUSDT": 2,
+        "AVAXUSDT": 3, "NEARUSDT": 3, "LINKUSDT": 3, "LTCUSDT": 2,
+        "ADAUSDT": 4, "XRPUSDT": 4, "DOGEUSDT": 5, "DOTUSDT": 3,
+        "SUIUSDT": 4, "APTUSDT": 3
+    }
+    p = price_precisions.get(symbol, 2)
+    return f"{p_val:.{p}f}"
 
 
 def format_bybit_qty(symbol: str, qty: float) -> str:
     q_val = float(qty)
-    if "BTC" in symbol:
-        return f"{q_val:.3f}"
-    elif "ETH" in symbol:
-        return f"{q_val:.2f}"
-    elif "SOL" in symbol or "BNB" in symbol:
-        return f"{q_val:.2f}"
-    elif "DOT" in symbol or "AVAX" in symbol or "LTC" in symbol:
-        return f"{q_val:.1f}"
-    else:
-        return f"{int(round(q_val))}"
+    precisions = {
+        "BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1, "BNBUSDT": 1,
+        "AVAXUSDT": 1, "NEARUSDT": 1, "LINKUSDT": 1, "LTCUSDT": 1,
+        "ADAUSDT": 0, "XRPUSDT": 0, "DOGEUSDT": 0, "DOTUSDT": 1,
+        "SUIUSDT": 0, "APTUSDT": 1
+    }
+    p = precisions.get(symbol, 1)
+    if p == 0:
+        return f"{int(q_val)}"
+    return f"{q_val:.{p}f}"
 
 
 def get_bybit_min_qty_step(symbol: str) -> tuple:
