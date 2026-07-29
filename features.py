@@ -421,6 +421,11 @@ def add_features(df, fetch_calendar_callback=None):
 
     df = pd.concat([df, pd.DataFrame(new_lag_cols, index=df.index)], axis=1)
     df = add_candlestick_patterns(df)
+    try:
+        from high_alpha_feature_engine import high_alpha_feature_engine
+        df = high_alpha_feature_engine.compute_all_high_alpha_features(df)
+    except Exception as e:
+        print(f"[Features Warning] Failed computing high alpha features: {e}")
     df = df.bfill().ffill().fillna(0.0)
     return df
 
