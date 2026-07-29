@@ -48,3 +48,12 @@ def test_send_telegram_report_formatting():
     sent = background_ml_tester.send_telegram_report(shadow_res, stress_res, decayed)
     assert isinstance(sent, bool)
 
+
+def test_execute_live_ml_audit():
+    res = background_ml_tester.execute_live_ml_audit(symbol="BTCUSDT", interval="15")
+    assert "shadow_res" in res
+    assert "stress_res" in res
+    assert "decayed_feats" in res
+    assert res["shadow_res"]["champion_accuracy"] > 0.0
+
+
