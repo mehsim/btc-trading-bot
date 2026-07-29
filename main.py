@@ -4575,31 +4575,33 @@ def load_model_weights(iv):
         trending_features_filename = f"selected_features_{iv}_trending.json"
         ranging_features_filename = f"selected_features_{iv}_ranging.json"
         model_trending_filename = f"ensemble_trending_trend_{iv}_xgb.json"
-        model_ranging_filename = f"ensemble_ranging_trend_{iv}_xgb.json"
-        
         feat_trending = None
-        if os.path.exists(trending_features_filename) and os.path.exists(model_trending_filename):
-            if os.path.getmtime(trending_features_filename) >= os.path.getmtime(model_trending_filename) - 60:
-                with open(trending_features_filename, "r") as f:
-                    feat_trending = json.load(f)
-        if feat_trending is None and os.path.exists(selected_features_filename):
-            with open(selected_features_filename, "r") as f:
-                feat_trending = json.load(f)
-        if feat_trending is None and os.path.exists(trending_features_filename):
-            with open(trending_features_filename, "r") as f:
-                feat_trending = json.load(f)
-                
+        for f_name in [trending_features_filename, selected_features_filename, "selected_features_30.json"]:
+            if os.path.exists(f_name):
+                try:
+                    with open(f_name, "r") as f:
+                        feat_trending = json.load(f)
+                        if feat_trending:
+                            break
+                except Exception:
+                    pass
+        if feat_trending is None:
+            from core import features as master_features
+            feat_trending = master_features
+
         feat_ranging = None
-        if os.path.exists(ranging_features_filename) and os.path.exists(model_ranging_filename):
-            if os.path.getmtime(ranging_features_filename) >= os.path.getmtime(model_ranging_filename) - 60:
-                with open(ranging_features_filename, "r") as f:
-                    feat_ranging = json.load(f)
-        if feat_ranging is None and os.path.exists(selected_features_filename):
-            with open(selected_features_filename, "r") as f:
-                feat_ranging = json.load(f)
-        if feat_ranging is None and os.path.exists(ranging_features_filename):
-            with open(ranging_features_filename, "r") as f:
-                feat_ranging = json.load(f)
+        for f_name in [ranging_features_filename, selected_features_filename, "selected_features_30.json"]:
+            if os.path.exists(f_name):
+                try:
+                    with open(f_name, "r") as f:
+                        feat_ranging = json.load(f)
+                        if feat_ranging:
+                            break
+                except Exception:
+                    pass
+        if feat_ranging is None:
+            from core import features as master_features
+            feat_ranging = master_features
                 
         if feat_trending is None or feat_ranging is None:
             print(f"[Model Load Warning] selected_features for interval {iv} missing! Disabling model loading.")
