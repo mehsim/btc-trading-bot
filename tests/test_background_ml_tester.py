@@ -40,11 +40,15 @@ def test_feature_importance_decay_audit():
     assert "funding_mom" not in decayed
 
 
-def test_send_telegram_report_formatting():
+def test_send_telegram_report_formatting(monkeypatch):
     shadow_res = {"champion_accuracy": 0.85, "challenger_accuracy": 0.88, "promoted": True}
     stress_res = {"is_stable": True, "mean_prediction_shift": 0.02}
     decayed = []
-    # Mock send_telegram_alert call to return True
+    
+    # Intercept send_telegram_alert so unit tests do not dispatch dummy reports to Telegram
+    import telegram_bot
+    monkeypatch.setattr(telegram_bot, "send_telegram_alert", lambda msg, *args, **kwargs: True)
+    
     sent = background_ml_tester.send_telegram_report(shadow_res, stress_res, decayed)
     assert isinstance(sent, bool)
 
