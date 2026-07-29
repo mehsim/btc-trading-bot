@@ -89,5 +89,54 @@ class PSIDriftDetector:
             return False, psi_score, "MODERATE_DRIFT"
         return False, psi_score, "STABLE"
 
+
+def evaluate_drift_and_trigger_playbook(cusum_detector: CUSUMDriftDetector, psi_detector: PSIDriftDetector, recent_outcomes: list, live_features: np.ndarray = None, baseline_features: np.ndarray = None) -> dict:
+    """
+    Automated 5-Step Drift Playbook:
+    1. De-risk: Reduce position cap to 50% on moderate drift (PSI >= 0.10)
+    2. Pause: Pause new entries on severe drift or CUSUM threshold hit (PSI >= 0.25 or CUSUM >= 5.0)
+    3. Retrain: Signal background model retraining script
+    4. Shadow: Keep new challenger in shadow evaluation until outperforming champion
+    5. Re-arm: Promote challenger and restore full risk limits
+    """
+    playbook_action = {
+        "status": "STABLE",
+        "de_risk": False,
+        "pause_entries": False,
+        "trigger_retrain": False,
+        "cusum_score": 0.0,
+        "psi_score": 0.0,
+        "details": "All drift metrics within safe bounds"
+    }
+
+    if recent_outcomes:
+        for out in recent_outcomes:
+            outcome_val = 1 if out.get("success") == 1 or (out.get("pnl_usd") or 0.0) > 0 else 0
+            is_drift, s_high, err_rate = cusum_detector.update(outcome_val, out.get("confidence", 0.70))
+            playbook_action["cusum_score"] = s_high
+            if is_drift:
+                playbook_action["status"] = "SEVERE_DRIFT_CUSUM"
+                playbook_action["de_risk"] = True
+                playbook_action["pause_entries"] = True
+                playbook_action["trigger_retrain"] = True
+                playbook_action["details"] = f"CUSUM score ({s_high:.2f}) exceeded threshold H ({cusum_detector.threshold_H})"
+                return playbook_action
+
+    if live_features is not None and baseline_features is not None:
+        is_severe, psi_score, status_str = psi_detector.check_feature_drift(baseline_features, live_features)
+        playbook_action["psi_score"] = psi_score
+        if status_str == "SEVERE_DRIFT":
+            playbook_action["status"] = "SEVERE_DRIFT_PSI"
+            playbook_action["de_risk"] = True
+            playbook_action["pause_entries"] = True
+            playbook_action["trigger_retrain"] = True
+            playbook_action["details"] = f"PSI score ({psi_score:.3f}) exceeded severe threshold ({psi_detector.severe_psi})"
+        elif status_str == "MODERATE_DRIFT":
+            playbook_action["status"] = "MODERATE_DRIFT_PSI"
+            playbook_action["de_risk"] = True
+            playbook_action["details"] = f"PSI score ({psi_score:.3f}) exceeded warning threshold ({psi_detector.warning_psi})"
+
+    return playbook_action
+
 cusum_drift_detector = CUSUMDriftDetector()
 psi_drift_detector = PSIDriftDetector()

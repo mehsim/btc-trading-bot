@@ -477,7 +477,33 @@ def load_ensemble_classifier(prefix, n_features=54):
     clf.cat_model = cat
     return clf
 
-def save_ensemble_regressor(model, prefix):
+import hashlib, subprocess, datetime
+
+def write_model_manifest(prefix: str, feature_names: list = None, metrics: dict = None):
+    try:
+        git_sha = "unknown"
+        try:
+            git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+        except Exception:
+            pass
+
+        feat_str = ",".join(feature_names or [])
+        feat_hash = hashlib.sha256(feat_str.encode("utf-8")).hexdigest()
+
+        manifest = {
+            "prefix": prefix,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "git_sha": git_sha,
+            "feature_count": len(feature_names or []),
+            "feature_contract_hash": feat_hash,
+            "metrics": metrics or {}
+        }
+        with open(f"{prefix}_manifest.json", "w") as f:
+            json.dump(manifest, f, indent=2)
+    except Exception as e:
+        print(f"[Model Governance Warning] Could not write manifest for {prefix}: {e}")
+
+def save_ensemble_regressor(model, prefix, feature_names=None):
     import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
     if hasattr(model.lgb_model, "_Booster") and model.lgb_model._Booster is not None:
@@ -495,6 +521,7 @@ def save_ensemble_regressor(model, prefix):
     }
     with open(f"{prefix}_weights.json", "w") as f:
         json.dump(meta_data, f)
+    write_model_manifest(prefix, feature_names=feature_names)
 
 def load_ensemble_regressor(prefix, n_features=54):
     xgb = XGBRegressor()

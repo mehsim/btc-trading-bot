@@ -124,3 +124,67 @@ def calculate_historical_thresholds(model_trend, interval):
         print(f"Error calculating calibration for {interval}m: {e}. Using defaults.")
     
     return 0.55, 0.75
+
+
+def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd.Series:
+    """
+    Generates Triple-Barrier target labels for ML training based on exact SL/TP barrier hits.
+    - Label 2 (Bullish Win): TP hit before SL for Long
+    - Label 0 (Bearish Win): TP hit before SL for Short
+    - Label 1 (Neutral): Neither barrier hit or SL hit before TP
+    """
+    cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10, "sl_mult": 1.5, "tp_mult_ranging": 1.5, "tp_mult_trending": 2.5})
+    lookahead = cfg.get("lookahead", 10)
+    sl_mult = cfg.get("sl_mult", 1.5)
+    tp_mult = cfg.get("tp_mult_trending", 2.5)
+
+    labels = np.full(len(df), 1, dtype=int)
+    prices = df["close"].values
+    highs = df["high"].values if "high" in df.columns else prices
+    lows = df["low"].values if "low" in df.columns else prices
+    atrs = (df["ATR_norm"] * df["close"]).values if "ATR_norm" in df.columns else (df["close"] * 0.015).values
+
+    n = len(df)
+    for i in range(n - lookahead):
+        p_entry = prices[i]
+        atr_d = atrs[i]
+        
+        long_tp = p_entry + tp_mult * atr_d
+        long_sl = p_entry - sl_mult * atr_d
+        
+        short_tp = p_entry - tp_mult * atr_d
+        short_sl = p_entry + sl_mult * atr_d
+        
+        long_won = False
+        short_won = False
+
+        for k in range(1, lookahead + 1):
+            h_k = highs[i + k]
+            l_k = lows[i + k]
+
+            if not long_won:
+                if l_k <= long_sl:
+                    break
+                if h_k >= long_tp:
+                    long_won = True
+                    break
+
+        for k in range(1, lookahead + 1):
+            h_k = highs[i + k]
+            l_k = lows[i + k]
+
+            if not short_won:
+                if h_k >= short_sl:
+                    break
+                if l_k <= short_tp:
+                    short_won = True
+                    break
+
+        if long_won and not short_won:
+            labels[i] = 2
+        elif short_won and not long_won:
+            labels[i] = 0
+        else:
+            labels[i] = 1
+
+    return pd.Series(labels, index=df.index)
