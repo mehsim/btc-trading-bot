@@ -1799,7 +1799,7 @@
 
                 const originalQty = parseFloat(trade.original_qty) || parseFloat(trade.qty) || 0.0;
                 const currentQty = parseFloat(trade.qty) || 0.0;
-                let fillPct = originalQty > 0 ? (currentQty / originalQty) * 100.0 : 100.0;
+                let fillPct = trade.half_closed ? 50.0 : (originalQty > 0 ? (currentQty / originalQty) * 100.0 : 100.0);
                 fillPct = Math.min(100.0, Math.max(0.0, fillPct));
                 const fillPctStr = fillPct.toFixed(1) + '%';
                 const fillPctColor = fillPct >= 99.0 ? "var(--accent-green)" : fillPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
