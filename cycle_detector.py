@@ -54,3 +54,21 @@ class FastFourierCycleDetector:
         return fast_ema, rsi_period, bollinger_window
 
 cycle_detector = FastFourierCycleDetector()
+
+from production_regime_engine import production_regime_engine
+
+def detect_market_regime_with_hysteresis(df: pd.DataFrame, symbol: str = "DEFAULT", interval: str = "60") -> str:
+    """
+    Evaluates market regime using ProductionRegimeEngine with ADX hysteresis.
+    - Transition to TRENDING when ADX > 26.0 and volatility_ratio > 1.2
+    - Transition back to RANGING when ADX < 22.0 or volatility_ratio < 0.8
+    """
+    if df is None or len(df) < 14 or "ADX" not in df.columns or "ATR_norm" not in df.columns:
+        return "RANGING"
+
+    adx_val = float(df["ADX"].iloc[-1])
+    atr_norm = float(df["ATR_norm"].iloc[-1])
+    atr_hist_median = float(df["ATR_norm"].iloc[:-1].median()) if len(df) > 1 else float(atr_norm)
+    vol_ratio = atr_norm / max(1e-9, atr_hist_median)
+
+    return production_regime_engine.update_regime(symbol=symbol, interval=interval, adx_value=adx_val, volatility_ratio=vol_ratio)

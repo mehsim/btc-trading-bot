@@ -223,6 +223,30 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if candle_pass:
         total_score += weight_cm
 
+    # CHECK 7: Regime-Aware RSI Guard (Rec 2)
+    weight_regime_rsi = 2
+    rsi_val = 50.0
+    if df_1h is not None and "RSI" in df_1h.columns and len(df_1h) > 0:
+        rsi_val = float(df_1h["RSI"].iloc[-1])
+    
+    from cycle_detector import detect_market_regime_with_hysteresis
+    current_regime = detect_market_regime_with_hysteresis(df_1h, symbol=symbol, interval=str(interval))
+    
+    from production_regime_engine import production_regime_engine
+    macro_blackout = (news_sentiment == "BLACKOUT" or (isinstance(news_sentiment, dict) and news_sentiment.get("blackout")))
+    regime_res = production_regime_engine.evaluate_confluence(ml_trend, current_regime, rsi_val, macro_guard_active=macro_blackout)
+    
+    regime_rsi_pass = regime_res["execute"]
+    regime_rsi_detail = regime_res["reason"] + f" [Regime: {current_regime}, RSI: {rsi_val:.1f}]"
+    
+    if not regime_rsi_pass:
+        hard_gate_failed = True
+        
+    results["Regime_RSI_Guard"] = {"pass": regime_rsi_pass, "detail": regime_rsi_detail, "weight": weight_regime_rsi}
+    max_score += weight_regime_rsi
+    if regime_rsi_pass:
+        total_score += weight_regime_rsi
+
     # FINAL SCORING
     score_pct = (total_score / max(1.0, float(max_score)) * 100.0) if max_score > 0 else 100.0
     score_threshold = 75.0
