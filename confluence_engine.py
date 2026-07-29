@@ -82,9 +82,28 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         if trend_1d_pass:
             total_score += weight_1d
 
-    # CHECK 2: 4-Hour Tactical Trend & RSI
+    # CHECK 2: 1-Hour & 4-Hour Tactical Trend & RSI
     weight_4h = 1
     if str(interval) in ["5", "15", "30"]:
+        if df_1h is not None and len(df_1h) >= 21:
+            df_1h_comp = df_1h.iloc[:-1].copy()
+            ema9_1h = EMAIndicator(df_1h_comp["close"], window=9).ema_indicator().iloc[-1]
+            ema21_1h = EMAIndicator(df_1h_comp["close"], window=21).ema_indicator().iloc[-1]
+            trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
+            trend_1h_pass = (ml_trend == "Bullish" and trend_1h == "Bullish") or (ml_trend == "Bearish" and trend_1h == "Bearish")
+            results["1h_Trend"] = {
+                "pass": trend_1h_pass,
+                "detail": f"1h Trend is {trend_1h} (EMA9: {ema9_1h:.2f}, EMA21: {ema21_1h:.2f}) [HARD GATE]",
+                "weight": 1
+            }
+            if not trend_1h_pass:
+                hard_gate_failed = True
+            max_score += 1
+            if trend_1h_pass:
+                total_score += 1
+        else:
+            results["1h_Trend"] = {"pass": True, "detail": "Bypassed (Insufficient 1h data)", "weight": 0}
+
         results["4h_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
         results["4h_RSI"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
     else:
@@ -208,7 +227,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_pct = (total_score / max(1.0, float(max_score)) * 100.0) if max_score > 0 else 100.0
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
-    trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True)
+    trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True) and results.get("1h_Trend", {}).get("pass", True)
 
     try:
         from trade_frequency_optimizer import trade_frequency_optimizer
