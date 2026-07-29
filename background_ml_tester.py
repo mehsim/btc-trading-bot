@@ -69,4 +69,30 @@ class BackgroundMLTester:
         decayed_features = [name for name, w in zip(feature_names, norm_weights) if w < 0.01]
         return decayed_features
 
+    def send_telegram_report(self, shadow_res: Dict[str, Any], stress_res: Dict[str, Any], decayed_feats: List[str]) -> bool:
+        """
+        Formats background ML test results and dispatches clean summary to Telegram automatically.
+        """
+        msg = f"🧪 *[BACKGROUND ML TEST REPORT]*\n\n"
+        msg += f"• *Shadow Paper Evaluation*:\n"
+        msg += f"  - Champion Acc: `{shadow_res.get('champion_accuracy', 0.0)*100:.1f}%`\n"
+        msg += f"  - Challenger Acc: `{shadow_res.get('challenger_accuracy', 0.0)*100:.1f}%`\n"
+        msg += f"  - Status: {'PROMOTED 🚀' if shadow_res.get('promoted') else 'CHAMPION RETAINED 🔒'}\n\n"
+
+        msg += f"• *Adversarial Stress Test*:\n"
+        msg += f"  - Stability: {'PASSED ✅' if stress_res.get('is_stable') else 'FAILED ⚠️'}\n"
+        msg += f"  - Prediction Shift: `{stress_res.get('mean_prediction_shift', 0.0):.4f}`\n\n"
+
+        msg += f"• *Feature Decay Audit*:\n"
+        if decayed_feats:
+            msg += f"  - Pruned Low-Attribution Features: `{', '.join(decayed_feats)}`\n"
+        else:
+            msg += f"  - All 10 High-Alpha Features Healthy ✅\n"
+
+        try:
+            from telegram_bot import send_telegram_alert
+            return send_telegram_alert(msg)
+        except Exception:
+            return False
+
 background_ml_tester = BackgroundMLTester()

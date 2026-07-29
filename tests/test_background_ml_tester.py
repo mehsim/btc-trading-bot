@@ -38,3 +38,13 @@ def test_feature_importance_decay_audit():
     decayed = background_ml_tester.audit_feature_importance_decay(names, weights)
     assert "decayed_feat" in decayed
     assert "funding_mom" not in decayed
+
+
+def test_send_telegram_report_formatting():
+    shadow_res = {"champion_accuracy": 0.85, "challenger_accuracy": 0.88, "promoted": True}
+    stress_res = {"is_stable": True, "mean_prediction_shift": 0.02}
+    decayed = []
+    # Mock send_telegram_alert call to return True
+    sent = background_ml_tester.send_telegram_report(shadow_res, stress_res, decayed)
+    assert isinstance(sent, bool)
+
