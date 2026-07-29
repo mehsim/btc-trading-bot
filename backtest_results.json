@@ -1,71 +1,71 @@
 {
-  "timestamp": "2026-07-29T23:21:07.684435",
+  "timestamp": "2026-07-29T23:25:25.974016",
   "scenarios": [
     {
       "Scenario": "A (Baseline - Regressor Fee Check, Conf >= 70%)",
-      "Trades": 430,
-      "Win Rate": "39.30%",
-      "Profit Factor": "0.47",
-      "Max Drawdown": "62.34%",
-      "Cumulative Return": "-62.12%"
+      "Trades": 294,
+      "Win Rate": "45.92%",
+      "Profit Factor": "0.64",
+      "Max Drawdown": "47.38%",
+      "Cumulative Return": "-44.66%"
     },
     {
       "Scenario": "B (ATR Fee Check >= 0.25%, Conf >= 70%)",
-      "Trades": 498,
-      "Win Rate": "37.15%",
-      "Profit Factor": "0.45",
-      "Max Drawdown": "69.73%",
-      "Cumulative Return": "-69.73%"
+      "Trades": 339,
+      "Win Rate": "43.07%",
+      "Profit Factor": "0.64",
+      "Max Drawdown": "50.01%",
+      "Cumulative Return": "-49.04%"
     },
     {
       "Scenario": "C (ATR Fee Check >= 0.25%, Conf >= 65%)",
-      "Trades": 625,
-      "Win Rate": "36.00%",
-      "Profit Factor": "0.44",
-      "Max Drawdown": "79.47%",
-      "Cumulative Return": "-79.46%"
+      "Trades": 423,
+      "Win Rate": "42.79%",
+      "Profit Factor": "0.62",
+      "Max Drawdown": "60.73%",
+      "Cumulative Return": "-60.02%"
     },
     {
       "Scenario": "D (ATR Fee Check >= 0.25%, Conf >= 60%)",
-      "Trades": 625,
-      "Win Rate": "36.00%",
-      "Profit Factor": "0.44",
-      "Max Drawdown": "79.47%",
-      "Cumulative Return": "-79.46%"
+      "Trades": 423,
+      "Win Rate": "42.79%",
+      "Profit Factor": "0.62",
+      "Max Drawdown": "60.73%",
+      "Cumulative Return": "-60.02%"
     },
     {
       "Scenario": "E (ATR Fee Check, Conf >= 65%, No Trend Align)",
-      "Trades": 2306,
-      "Win Rate": "36.51%",
-      "Profit Factor": "0.48",
-      "Max Drawdown": "99.64%",
-      "Cumulative Return": "-99.63%"
+      "Trades": 1346,
+      "Win Rate": "41.83%",
+      "Profit Factor": "0.61",
+      "Max Drawdown": "96.04%",
+      "Cumulative Return": "-95.78%"
     }
   ],
   "fee_sensitivity": [
     {
       "Fee Structure": "1. Spot Taker Fee (0.20% roundtrip)",
-      "Trades": 498,
-      "Win Rate": "37.15%",
-      "Profit Factor": "0.45",
-      "Max Drawdown": "69.73%",
-      "Net Cumulative Return": "-69.73%"
+      "Trades": 339,
+      "Win Rate": "43.07%",
+      "Profit Factor": "0.64",
+      "Max Drawdown": "50.01%",
+      "Net Cumulative Return": "-49.04%"
     },
     {
       "Fee Structure": "2. Futures Taker Fee (0.10% roundtrip)",
-      "Trades": 498,
-      "Win Rate": "38.55%",
-      "Profit Factor": "0.63",
-      "Max Drawdown": "50.17%",
-      "Net Cumulative Return": "-50.14%"
+      "Trades": 339,
+      "Win Rate": "46.61%",
+      "Profit Factor": "0.81",
+      "Max Drawdown": "32.65%",
+      "Net Cumulative Return": "-28.43%"
     },
     {
       "Fee Structure": "3. Futures Limit/Maker Fee (0.04% roundtrip)",
-      "Trades": 498,
-      "Win Rate": "38.76%",
-      "Profit Factor": "0.77",
-      "Max Drawdown": "34.23%",
-      "Net Cumulative Return": "-32.75%"
+      "Trades": 339,
+      "Win Rate": "48.38%",
+      "Profit Factor": "0.93",
+      "Max Drawdown": "21.37%",
+      "Net Cumulative Return": "-12.28%"
     }
   ],
   "walk_forward_validation": {

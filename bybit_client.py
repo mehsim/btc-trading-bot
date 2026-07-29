@@ -245,34 +245,54 @@ def set_bybit_leverage(symbol: str, leverage: float) -> Dict[str, Any]:
 
 def format_bybit_price(symbol: str, price: float) -> str:
     p_val = float(price)
-    price_precisions = {
-        "BTCUSDT": 2, "ETHUSDT": 2, "SOLUSDT": 3, "BNBUSDT": 2,
-        "AVAXUSDT": 3, "NEARUSDT": 3, "LINKUSDT": 3, "LTCUSDT": 2,
-        "ADAUSDT": 4, "XRPUSDT": 4, "DOGEUSDT": 5, "DOTUSDT": 3,
-        "SUIUSDT": 4, "APTUSDT": 3
-    }
-    p = price_precisions.get(symbol, 2)
-    return f"{p_val:.{p}f}"
+    try:
+        specs = get_instrument_specs(symbol)
+        tick_str = specs.get("tickSize", "0.01")
+        p = len(tick_str.split(".")[1]) if "." in tick_str else 0
+        return f"{p_val:.{p}f}"
+    except Exception:
+        price_precisions = {
+            "BTCUSDT": 2, "ETHUSDT": 2, "SOLUSDT": 3, "BNBUSDT": 2,
+            "AVAXUSDT": 3, "NEARUSDT": 3, "LINKUSDT": 3, "LTCUSDT": 2,
+            "ADAUSDT": 4, "XRPUSDT": 4, "DOGEUSDT": 5, "DOTUSDT": 3,
+            "SUIUSDT": 4, "APTUSDT": 3
+        }
+        p = price_precisions.get(symbol, 2)
+        return f"{p_val:.{p}f}"
 
 
 def format_bybit_qty(symbol: str, qty: float) -> str:
     q_val = float(qty)
-    precisions = {
-        "BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1, "BNBUSDT": 1,
-        "AVAXUSDT": 1, "NEARUSDT": 1, "LINKUSDT": 1, "LTCUSDT": 1,
-        "ADAUSDT": 0, "XRPUSDT": 0, "DOGEUSDT": 0, "DOTUSDT": 1,
-        "SUIUSDT": 0, "APTUSDT": 1
-    }
-    p = precisions.get(symbol, 1)
-    if p == 0:
-        return f"{int(q_val)}"
-    return f"{q_val:.{p}f}"
+    try:
+        specs = get_instrument_specs(symbol)
+        lot_str = specs.get("lotSize", "0.01")
+        p = len(lot_str.split(".")[1]) if "." in lot_str else 0
+        if p == 0:
+            return f"{int(q_val)}"
+        return f"{q_val:.{p}f}"
+    except Exception:
+        precisions = {
+            "BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1, "BNBUSDT": 1,
+            "AVAXUSDT": 1, "NEARUSDT": 1, "LINKUSDT": 1, "LTCUSDT": 1,
+            "ADAUSDT": 0, "XRPUSDT": 0, "DOGEUSDT": 0, "DOTUSDT": 1,
+            "SUIUSDT": 0, "APTUSDT": 1
+        }
+        p = precisions.get(symbol, 1)
+        if p == 0:
+            return f"{int(q_val)}"
+        return f"{q_val:.{p}f}"
 
 
 def get_bybit_min_qty_step(symbol: str) -> tuple:
-    mins = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
-    steps = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
-    return mins.get(symbol, 0.001), steps.get(symbol, 0.001)
+    try:
+        specs = get_instrument_specs(symbol)
+        min_q = float(specs.get("minOrderQty", 0.001))
+        step_q = float(specs.get("lotSize", 0.001))
+        return min_q, step_q
+    except Exception:
+        mins = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
+        steps = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
+        return mins.get(symbol, 0.001), steps.get(symbol, 0.001)
 
 
 def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market", post_only: bool = False) -> Dict[str, Any]:
