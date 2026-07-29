@@ -1786,16 +1786,17 @@
                 const confidencePctStr = !isNaN(confidencePctVal) ? (confidencePctVal * 100).toFixed(1) + '%' : '—';
 
                 const tradePosSize = parseFloat(trade.position_size_usd) || 0.00;
-                const originalSize = parseFloat(trade.original_size) || tradePosSize;
+                const isScaledOut = trade.half_closed || (trade.bybit_scale_out_order_id && trade.bybit_scale_out_order_id !== '');
+                const originalSize = parseFloat(trade.original_size) || (isScaledOut ? tradePosSize * 2.0 : tradePosSize);
                 const tradeLeverage = parseFloat(trade.leverage) || 1.0;
                 const tradeLeveragedVal = (originalSize * tradeLeverage).toFixed(2);
                 
                 // Formula: (actual investment now in trade / actual investment at opening trade) * 100
-                let marginPresentPct = originalSize > 0 ? (tradePosSize / originalSize) * 100.0 : 100.0;
+                let marginPresentPct = isScaledOut ? 50.0 : (originalSize > 0 ? (tradePosSize / originalSize) * 100.0 : 100.0);
                 marginPresentPct = Math.min(100.0, Math.max(0.0, marginPresentPct));
                 const marginPresentStr = marginPresentPct.toFixed(1) + '%';
-                const marginPresentColor = marginPresentPct >= 99.0 ? "var(--accent-green)" : marginPresentPct >= 50.0 ? "var(--accent-orange)" : "var(--accent-red)";
-                const marginPresentBg = marginPresentPct >= 99.0 ? "rgba(16, 185, 129, 0.12)" : marginPresentPct >= 50.0 ? "rgba(245, 158, 11, 0.12)" : "rgba(244, 63, 94, 0.12)";
+                const marginPresentColor = marginPresentPct >= 99.0 ? "var(--accent-green)" : marginPresentPct >= 49.0 ? "var(--accent-orange)" : "var(--accent-red)";
+                const marginPresentBg = marginPresentPct >= 99.0 ? "rgba(16, 185, 129, 0.12)" : marginPresentPct >= 49.0 ? "rgba(245, 158, 11, 0.12)" : "rgba(244, 63, 94, 0.12)";
 
                 const originalQty = parseFloat(trade.original_qty) || parseFloat(trade.qty) || 0.0;
                 const currentQty = parseFloat(trade.qty) || 0.0;
