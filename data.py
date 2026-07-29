@@ -18,6 +18,39 @@ db_write_lock = threading.Lock()
 _db_initialized = False
 _db_init_lock = threading.Lock()
 
+def safe_get_sqlite_conn(db_path=DB_PATH, timeout=60.0):
+    import sqlite3
+    for attempt in range(3):
+        try:
+            conn = sqlite3.connect(db_path, timeout=timeout)
+            conn.execute("PRAGMA busy_timeout = 60000;")
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA synchronous = NORMAL;")
+            conn.row_factory = sqlite3.Row
+            res = conn.execute("PRAGMA quick_check;").fetchone()
+            if res and res[0] != "ok":
+                raise sqlite3.DatabaseError(f"Corrupt DB disk image: {res[0]}")
+            return conn
+        except sqlite3.DatabaseError as e:
+            print(f"[SQLite Auto-Recovery] Detected database corruption ({e}). Rebuilding database file {db_path}...")
+            try:
+                if 'conn' in locals() and conn:
+                    conn.close()
+            except Exception:
+                pass
+            for ext in ["", "-wal", "-shm"]:
+                target = f"{db_path}{ext}"
+                if os.path.exists(target):
+                    try:
+                        os.remove(target)
+                    except Exception:
+                        pass
+            time.sleep(0.5)
+    conn = sqlite3.connect(db_path, timeout=timeout)
+    conn.execute("PRAGMA busy_timeout = 60000;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    return conn
+
 def init_db():
     global _db_initialized
     if _db_initialized:
@@ -25,9 +58,7 @@ def init_db():
     with _db_init_lock:
         if _db_initialized:
             return
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
+        conn = safe_get_sqlite_conn(DB_PATH)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS kline_data (
                 symbol TEXT,
@@ -149,9 +180,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     # 1. Load cache if it exists
     df_cache = None
     try:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
+        conn = safe_get_sqlite_conn(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
             "SELECT timestamp, open, high, low, close, volume, turnover FROM kline_data WHERE symbol=? AND interval=? ORDER BY timestamp ASC",
@@ -462,10 +491,8 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             df_combined = df_combined.iloc[-30000:]
             
         try:
-            import sqlite3
             with db_write_lock:
-                conn = sqlite3.connect(DB_PATH, timeout=30.0)
-                conn.execute("PRAGMA journal_mode=WAL;")
+                conn = safe_get_sqlite_conn(DB_PATH)
                 conn.executemany(
                     "INSERT OR REPLACE INTO kline_data (symbol, interval, timestamp, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(symbol, str(interval), float(row["timestamp"]), float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row["volume"]), float(row["turnover"])) for _, row in df_combined.iterrows()]

@@ -19,9 +19,35 @@ DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data
 db_lock = threading.Lock()
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
+    for attempt in range(3):
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=60.0)
+            conn.execute("PRAGMA busy_timeout = 60000;")
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA synchronous = NORMAL;")
+            conn.row_factory = sqlite3.Row
+            res = conn.execute("PRAGMA quick_check;").fetchone()
+            if res and res[0] != "ok":
+                raise sqlite3.DatabaseError(f"Corrupt DB disk image: {res[0]}")
+            return conn
+        except sqlite3.DatabaseError as e:
+            print(f"[Database Auto-Recovery] Detected corruption/lock ({e}). Rebuilding DB file {DB_FILE}...")
+            try:
+                if 'conn' in locals() and conn:
+                    conn.close()
+            except Exception:
+                pass
+            for ext in ["", "-wal", "-shm"]:
+                target = f"{DB_FILE}{ext}"
+                if os.path.exists(target):
+                    try:
+                        os.remove(target)
+                    except Exception:
+                        pass
+            time.sleep(0.5)
+    conn = sqlite3.connect(DB_FILE, timeout=60.0)
+    conn.execute("PRAGMA busy_timeout = 60000;")
+    conn.execute("PRAGMA journal_mode = WAL;")
     conn.row_factory = sqlite3.Row
     return conn
 
