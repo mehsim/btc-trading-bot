@@ -898,7 +898,7 @@ def classify_market_regime(df_history: pd.DataFrame, interval: str = None) -> st
 
     latest_atr = df_clean["ATR_norm"].iloc[-1]
     latest_adx = df_clean["ADX"].iloc[-1]
-    atr_median = float(df_clean["ATR_norm"].median())
+    atr_median = float(df_clean["ATR_norm"].iloc[:-1].median()) if len(df_clean) > 1 else float(latest_atr)
 
     is_high_vol = latest_atr > atr_median
     is_trending = latest_adx >= 20.0
