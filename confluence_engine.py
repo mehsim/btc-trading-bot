@@ -173,11 +173,21 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
     trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True)
-    approved = (calibrated_confidence >= dynamic_conf_threshold) and trend_gates_passed and traditional_approved
+
+    try:
+        from trade_frequency_optimizer import trade_frequency_optimizer
+        adx_val = 20.0
+        if df_1h is not None and "ADX" in df_1h.columns and len(df_1h) > 0:
+            adx_val = float(df_1h["ADX"].iloc[-1])
+        effective_conf_threshold = trade_frequency_optimizer.calculate_regime_adaptive_confidence_threshold(adx_val, dynamic_conf_threshold)
+    except Exception:
+        effective_conf_threshold = dynamic_conf_threshold
+
+    approved = (calibrated_confidence >= effective_conf_threshold) and trend_gates_passed and traditional_approved
 
     results["_Score_Summary"] = {
         "pass": approved,
-        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: {dynamic_conf_threshold*100:.1f}%, Trend Pass: {trend_gates_passed}) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
+        "detail": f"Meta-Gate: {'APPROVED' if approved else 'REJECTED'} (Calibrated Conf: {calibrated_confidence*100:.1f}% vs Req: {effective_conf_threshold*100:.1f}%, Trend Pass: {trend_gates_passed}) | Traditional Score: {total_score}/{max_score} ({score_pct:.0f}%, Hard Gates: {'PASSED' if not hard_gate_failed else 'FAILED'})",
         "weight": "SUMMARY"
     }
 

@@ -130,8 +130,22 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
         current_rr = max_rr
         logs.append(f"[TP_CAPPED_UNIVERSAL] {symbol} {interval} R:R capped from {tp_dist/adjusted['stop_dist']:.1f}:1 to {max_rr:.1f}:1 (TP dist reduced from ${tp_dist:.4f} to ${max_allowed_tp_dist:.4f})")
         
-    # 3. Minimum R:R Ratio Floor Gate (Reject trades below minimum viable R:R)
+    # 3. Minimum R:R Ratio Floor Gate (Dynamic TP optimization if below min_rr)
     min_rr = MIN_RR_RATIO.get(str(interval), MIN_RR_RATIO.get(iv_str, 2.0))
+    if current_rr < min_rr:
+        try:
+            from trade_frequency_optimizer import trade_frequency_optimizer
+            opt_tp, new_rr, adjusted_flag = trade_frequency_optimizer.optimize_tp_target_for_rr(
+                entry_price=entry_price, stop_price=adjusted["stop_price"], atr_dollars=atr_dollars, direction=direction, min_rr_required=min_rr
+            )
+            if adjusted_flag:
+                adjusted["tp_price"] = opt_tp
+                adjusted["tp_dist"] = abs(opt_tp - entry_price)
+                current_rr = min_rr
+                logs.append(f"[TP_OPTIMIZED_RR] {symbol} {interval} TP target adjusted to ${opt_tp:.4f} to satisfy {min_rr:.1f}:1 R:R floor")
+        except Exception as e:
+            pass
+
     if current_rr < min_rr:
         logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1")
         return False, adjusted, "; ".join(logs)
