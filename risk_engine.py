@@ -208,6 +208,9 @@ def check_margin_utilization(used_margin: float, total_equity: float, max_levera
     return "NORMAL"
 
 def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60") -> tuple:
+    if bot_state.get("circuit_breaker_active", False):
+        return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
+
     equity = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
     if equity <= 0:
         equity = float(bot_state.get("simulated_balance", 80.0))
