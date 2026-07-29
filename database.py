@@ -305,10 +305,13 @@ def save_completed_trade(trade):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 t_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
-                trade.get("entry_price"), trade.get("exit_price"), trade.get("change_pct"), 1 if trade.get("success") else 0,
-                trade.get("reason"), trade.get("position_size_usd"), trade.get("original_size"), trade.get("pnl_usd"),
-                trade.get("balance"), trade.get("leverage"), trade.get("confidence"), trade.get("take_profit"),
-                trade.get("stop_loss"), trade.get("atr_dollars"), trade.get("fill_pct"), json.dumps(trade)
+                round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
+                trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
+                round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
+                round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
+                round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
             ))
             conn.commit()
         except Exception as e:

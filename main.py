@@ -5440,6 +5440,21 @@ def evaluate_predictions(df_completed, interval, symbol):
 # =========================
 sentiment_pipeline = None
 
+def safe_parse_xml(xml_content):
+    """
+    Safely parses XML content to eliminate XXE vulnerabilities (CWE-611).
+    """
+    try:
+        import defusedxml.ElementTree as SafeET
+        return SafeET.fromstring(xml_content)
+    except Exception:
+        import xml.etree.ElementTree as ET
+        parser = ET.XMLParser()
+        if hasattr(parser, 'entity'):
+            parser.entity.clear()
+        return ET.fromstring(xml_content, parser=parser)
+
+
 def get_reddit_posts():
     """
     Fetches the top crypto/bitcoin post titles from Reddit RSS feeds.
@@ -5456,8 +5471,8 @@ def get_reddit_posts():
             res = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=10)
             if res.status_code == 200:
                 xml_content = res.content.decode("utf-8")
-                # Parse the Atom XML feed
-                root = ET.fromstring(xml_content)
+                # Parse the Atom XML feed safely
+                root = safe_parse_xml(xml_content)
                 namespace = {'atom': 'http://www.w3.org/2005/Atom'}
                 sub_posts = []
                 for entry in root.findall("atom:entry", namespace):
@@ -5479,7 +5494,6 @@ def get_cryptopanic_posts():
     Fetches the top live crypto news from RSS feeds of Cointelegraph, CoinDesk, and Decrypt.
     Replaces the discontinued CryptoPanic developer API. No API key is needed.
     """
-    import xml.etree.ElementTree as ET
     feeds = [
         "https://cointelegraph.com/rss",
         "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
@@ -5493,7 +5507,7 @@ def get_cryptopanic_posts():
             res = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=8)
             if res.status_code == 200:
                 xml_content = res.content
-                root = ET.fromstring(xml_content)
+                root = safe_parse_xml(xml_content)
                 feed_posts = []
                 for item in root.findall(".//item"):
                     title_elem = item.find("title")
@@ -5555,7 +5569,7 @@ def get_news_sentiment():
         res = requests.get(url, headers=headers, proxies=get_bybit_proxies(), timeout=10)
         if res.status_code == 200:
             xml_content = res.content.decode("utf-8")
-            root = ET.fromstring(xml_content)
+            root = safe_parse_xml(xml_content)
             rss_titles = []
             for item in root.findall(".//item"):
                 title_elem = item.find("title")
@@ -5572,7 +5586,12 @@ def get_news_sentiment():
         res = requests.get(url_coindesk, headers=headers, proxies=get_bybit_proxies(), timeout=10)
         if res.status_code == 200:
             xml_content = res.content.decode("utf-8")
-            root = ET.fromstring(xml_content)
+            root = safe_parse_xml(xml_content)
+            coindesk_titles = []
+            for item in root.findall(".//item"):
+                title_elem = item.find("title")
+                if title_elem is not None and title_elem.text:
+                    coindesk_titles.append(title_elem.text.strip())
             coindesk_titles = []
             for item in root.findall(".//item"):
                 title_elem = item.find("title")

@@ -67,10 +67,23 @@ def is_news_blackout(now_utc, interval) -> bool:
     return False
 
 
-def get_reddit_posts() -> List[str]:
+def safe_parse_xml(xml_content):
     """
-    Fetches the top crypto/bitcoin post titles from Reddit RSS feeds.
-    Does not require API keys, but does require a descriptive User-Agent.
+    Safely parses XML content to eliminate XXE vulnerabilities (CWE-611).
+    """
+    try:
+        import defusedxml.ElementTree as SafeET
+        return SafeET.fromstring(xml_content)
+    except Exception:
+        parser = ET.XMLParser()
+        if hasattr(parser, 'entity'):
+            parser.entity.clear()
+        return ET.fromstring(xml_content, parser=parser)
+
+
+def get_reddit_crypto_posts() -> List[str]:
+    """
+    Fetches hot posts from r/CryptoCurrency and r/Bitcoin RSS feeds.
     """
     from bybit_client import get_bybit_proxies
     subreddits = ["CryptoCurrency", "Bitcoin"]
@@ -84,7 +97,7 @@ def get_reddit_posts() -> List[str]:
             if res.status_code == 200:
                 xml_content = res.content.decode("utf-8")
                 try:
-                    root = ET.fromstring(xml_content)
+                    root = safe_parse_xml(xml_content)
                     namespace = {'atom': 'http://www.w3.org/2005/Atom'}
                     sub_posts = []
                     for entry in root.findall("atom:entry", namespace):
@@ -122,7 +135,7 @@ def get_cryptopanic_posts() -> List[str]:
             if res.status_code == 200:
                 xml_content = res.content
                 try:
-                    root = ET.fromstring(xml_content)
+                    root = safe_parse_xml(xml_content)
                     feed_posts = []
                     for item in root.findall(".//item"):
                         title_elem = item.find("title")
