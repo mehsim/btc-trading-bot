@@ -294,10 +294,10 @@ class EnsembleClassifier:
         # Top-class margin: margin between highest and second highest probability per row
         sorted_p = np.sort(probs, axis=1)
         margins = (sorted_p[:, -1] - sorted_p[:, -2]) if sorted_p.shape[1] >= 2 else np.ones(len(probs))
-        margin = float(margins[0]) if len(margins) == 1 else float(margins.mean())
+        margin = float(np.nan_to_num(margins[0] if len(margins) == 1 else margins.mean(), nan=0.10, posinf=1.0, neginf=0.0))
         
         # Conformal uncertainty score
-        uncertainty_score = float(disagreement * 0.7 + max(0.0, 0.25 - margin) * 0.3)
+        uncertainty_score = float(np.nan_to_num(disagreement * 0.7 + max(0.0, 0.25 - margin) * 0.3, nan=0.0, posinf=1.0, neginf=0.0))
         is_uncertain = (disagreement > uncertainty_threshold) or (margin < 0.08)
         
         return probs, uncertainty_score, is_uncertain

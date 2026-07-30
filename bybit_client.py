@@ -68,8 +68,11 @@ def _ensure_async_loop():
             if _aiohttp_session is None or _aiohttp_session.closed:
                 _aiohttp_session = aiohttp.ClientSession()
 
-        future = asyncio.run_coroutine_threadsafe(init_session(), _async_loop)
-        future.result(timeout=5)
+        try:
+            future = asyncio.run_coroutine_threadsafe(init_session(), _async_loop)
+            future.result(timeout=5)
+        except Exception as e:
+            print(f"[bybit_client] Warning: HTTP session init timed out or failed: {e}")
 
 
 def get_bybit_time_offset() -> int:
@@ -92,6 +95,7 @@ def get_bybit_time_offset() -> int:
         try:
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_time_sync(), _async_loop)
+            status, res = future.result(timeout=5)
             if status == 200 and isinstance(res, dict) and "result" in res:
                 result_data = res.get("result", {})
                 if isinstance(result_data, dict) and "timeNano" in result_data:

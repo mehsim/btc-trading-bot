@@ -305,8 +305,8 @@ def choppiness_index(df, window=14):
     tr = np.maximum(df['high'] - df['low'], np.maximum(abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))))
     atr_sum = tr.rolling(window).sum()
     price_range = high_max - low_min
-    ci = 100 * np.log10(atr_sum / (price_range + 1e-8)) / np.log10(window)
-    return float(ci.iloc[-1]) if not np.isnan(ci.iloc[-1]) else 50.0
+    val = ci.iloc[-1]
+    return float(val) if not np.isnan(val) and not np.isinf(val) else 50.0
 
 
 def check_flash_crash(symbol: str, max_drop_pct: float = 3.0, window_minutes: int = 5) -> bool:
