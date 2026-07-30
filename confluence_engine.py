@@ -150,8 +150,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if str(interval) in ["5", "15", "30"]:
         if df_1h is not None and len(df_1h) >= 21:
             df_1h_comp = df_1h.iloc[:-1].copy()
-            ema9_1h = EMAIndicator(df_1h_comp["close"], window=9).ema_indicator().iloc[-1]
-            ema21_1h = EMAIndicator(df_1h_comp["close"], window=21).ema_indicator().iloc[-1]
+            s_ema9 = EMAIndicator(df_1h_comp["close"], window=9).ema_indicator()
+            s_ema21 = EMAIndicator(df_1h_comp["close"], window=21).ema_indicator()
+            ema9_1h = float(s_ema9.iloc[-1]) if len(s_ema9) > 0 and pd.notna(s_ema9.iloc[-1]) else 0.0
+            ema21_1h = float(s_ema21.iloc[-1]) if len(s_ema21) > 0 and pd.notna(s_ema21.iloc[-1]) else 0.0
             trend_1h = "Bullish" if ema9_1h > ema21_1h else "Bearish"
             trend_1h_pass = (ml_trend == "Bullish" and trend_1h == "Bullish") or (ml_trend == "Bearish" and trend_1h == "Bearish")
             results["1h_Trend"] = {
@@ -184,9 +186,13 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             max_score += weight_4h * 2
         else:
             df_4h_completed = df_4h.iloc[:-1].copy()
-            ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator().iloc[-1]
-            ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator().iloc[-1]
-            rsi_4h = RSIIndicator(df_4h_completed["close"], window=14).rsi().iloc[-1]
+            s_ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator()
+            s_ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator()
+            s_rsi_4h = RSIIndicator(df_4h_completed["close"], window=14).rsi()
+            
+            ema9_4h = float(s_ema9_4h.iloc[-1]) if len(s_ema9_4h) > 0 and pd.notna(s_ema9_4h.iloc[-1]) else 0.0
+            ema21_4h = float(s_ema21_4h.iloc[-1]) if len(s_ema21_4h) > 0 and pd.notna(s_ema21_4h.iloc[-1]) else 0.0
+            rsi_4h = float(s_rsi_4h.iloc[-1]) if len(s_rsi_4h) > 0 and pd.notna(s_rsi_4h.iloc[-1]) else 50.0
 
             trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
             trend_4h_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")

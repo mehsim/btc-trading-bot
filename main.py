@@ -4301,7 +4301,8 @@ def send_daily_journal_digest():
                     rows.append(row)
                     pnl = float(row.get("pnl_usd", 0))
                     total_pnl += pnl
-                    if row.get("success") == "True":
+                    is_win = str(row.get("success", "")).lower() in ["true", "1"] or row.get("success") is True
+                    if is_win:
                         wins += 1
                     else:
                         losses += 1
@@ -4312,7 +4313,8 @@ def send_daily_journal_digest():
                  f"• Trades: {total} | ✅ {wins} / ❌ {losses} | WR: {wr}",
                  f"• Total PnL: *${total_pnl:+.2f}*", ""]
         for r in rows[-10:]:
-            emoji = "✅" if r.get("success") == "True" else "❌"
+            r_win = str(r.get("success", "")).lower() in ["true", "1"] or r.get("success") is True
+            emoji = "✅" if r_win else "❌"
             lines.append(f"{emoji} {r['symbol']} {r['direction']} {r['interval']}m | ${float(r['pnl_usd']):+.2f} | {r['reason']}")
         send_telegram_alert("\n".join(lines))
     except Exception as e:
