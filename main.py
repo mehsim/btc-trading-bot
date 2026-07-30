@@ -806,10 +806,11 @@ def run_manual_confluence_report(symbol, interval):
             f"*Check Details:*\n"
         )
         for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
-            if check_name == "_Score_Summary":
+            if check_name == "_Score_Summary" or not isinstance(res_val, dict):
                 continue
-            circle = "🟢" if res_val["pass"] else "🔴"
-            report += f"{circle} *{check_name.replace('_', ' ')}*: {res_val['detail']}\n"
+            circle = "🟢" if res_val.get("pass", False) else "🔴"
+            detail_str = res_val.get("detail", "")
+            report += f"{circle} *{check_name.replace('_', ' ')}*: {detail_str}\n"
             
         report += f"\n📊 *{confluence_results.get('_Score_Summary', {}).get('detail', '')}*"
         return report

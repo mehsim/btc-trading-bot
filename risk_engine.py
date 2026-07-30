@@ -112,7 +112,7 @@ def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> 
     """Continuous Sigmoid & Exponential Drawdown Penalty: dd_penalty = exp(-5 * DD). Hard halt at 20% DD."""
     if peak_equity <= 0 or current_equity <= 0:
         return 1.0
-    dd_fraction = max(0.0, (peak_equity - current_equity) / peak_equity)
+    dd_fraction = max(0.0, (peak_equity - current_equity) / max(1e-9, peak_equity))
     if dd_fraction >= 0.20:
         return 0.0  # Hard halt at 20% drawdown
     penalty = float(np.exp(-5.0 * dd_fraction))
@@ -137,7 +137,7 @@ def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr
         return base_leverage
     cap = 10.0 if "BTC" in symbol else 5.0
     max_limit = min(max_lev, cap)
-    effective_lev = base_leverage * np.sqrt(target_atr / current_atr)
+    effective_lev = base_leverage * np.sqrt(target_atr / max(1e-9, current_atr))
     return float(np.clip(effective_lev, min_lev, max_limit))
 
 def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict) -> float:
@@ -178,7 +178,7 @@ def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candid
         for p in open_positions if isinstance(p, dict)
     )
     new_heat_usd = current_heat_usd + (candidate_size_usd * candidate_lev)
-    heat_pct = (new_heat_usd / total_equity) * 100.0
+    heat_pct = (new_heat_usd / max(1e-9, total_equity)) * 100.0
 
     # Parametric VaR calculation if returns history is available
     if returns_df is not None and not returns_df.empty:

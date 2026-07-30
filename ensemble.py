@@ -340,7 +340,7 @@ class EnsembleRegressor:
                 lgb_mae = mean_absolute_error(y_val, self.lgb_model.predict(X_v_arr))
                 cat_mae = mean_absolute_error(y_val, self.cat_model.predict(X_v_arr))
                 raw_weights = [1.0 / max(1e-6, xgb_mae), 1.0 / max(1e-6, lgb_mae), 1.0 / max(1e-6, cat_mae)]
-                sum_w = sum(raw_weights)
+                sum_w = max(1e-9, sum(raw_weights))
                 self.weights = [w / sum_w for w in raw_weights]
                 
                 # Extract predictions for stacking

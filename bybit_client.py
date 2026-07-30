@@ -92,15 +92,16 @@ def get_bybit_time_offset() -> int:
         try:
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_time_sync(), _async_loop)
-            status, res = future.result(timeout=7)
-            if status == 200:
-                server_time = int(res["result"]["timeNano"]) // 1000000
-                local_time = int(time.time() * 1000)
-                offset = server_time - local_time
-                with _time_offset_lock:
-                    _cached_time_offset = offset
-                    _last_time_sync = time.time()
-                return offset
+            if status == 200 and isinstance(res, dict) and "result" in res:
+                result_data = res.get("result", {})
+                if isinstance(result_data, dict) and "timeNano" in result_data:
+                    server_time = int(result_data["timeNano"]) // 1000000
+                    local_time = int(time.time() * 1000)
+                    offset = server_time - local_time
+                    with _time_offset_lock:
+                        _cached_time_offset = offset
+                        _last_time_sync = time.time()
+                    return offset
         except Exception:
             time.sleep(1)
     return 0
