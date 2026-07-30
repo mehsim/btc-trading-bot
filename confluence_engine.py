@@ -28,15 +28,35 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     total_score = 0
     max_score = 0
 
+import time
+
+def get_valid_htf_cache(htf_cache: dict, key: tuple, ttl_seconds: float = 900.0):
+    """
+    Retrieves HTF DataFrame from htf_cache with a 15-minute TTL eviction rule.
+    """
+    if htf_cache is None or key not in htf_cache:
+        return None
+    val = htf_cache[key]
+    if isinstance(val, tuple) and len(val) == 2:
+        df_cached, timestamp = val
+        if time.time() - timestamp < ttl_seconds:
+            return df_cached
+        else:
+            return None
+    elif isinstance(val, pd.DataFrame):
+        return val
+    return None
+
+def set_valid_htf_cache(htf_cache: dict, key: tuple, df: pd.DataFrame):
+    if htf_cache is not None and df is not None:
+        htf_cache[key] = (df, time.time())
+
     # CHECK 1: 1-Day Structural Trend
-    df_1d = None
-    if htf_cache is not None and (symbol, "D") in htf_cache:
-        df_1d = htf_cache[(symbol, "D")]
+    df_1d = get_valid_htf_cache(htf_cache, (symbol, "D"))
     if df_1d is None and get_history_fn:
         try:
             df_1d = get_history_fn(symbol=symbol, interval="D", limit=100)
-            if htf_cache is not None and df_1d is not None:
-                htf_cache[(symbol, "D")] = df_1d
+            set_valid_htf_cache(htf_cache, (symbol, "D"), df_1d)
         except Exception as e:
             df_1d = None
 
@@ -107,14 +127,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         results["4h_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
         results["4h_RSI"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
     else:
-        df_4h = None
-        if htf_cache is not None and (symbol, "240") in htf_cache:
-            df_4h = htf_cache[(symbol, "240")]
+        df_4h = get_valid_htf_cache(htf_cache, (symbol, "240"))
         if df_4h is None and get_history_fn:
             try:
                 df_4h = get_history_fn(symbol=symbol, interval="240", limit=100)
-                if htf_cache is not None and df_4h is not None:
-                    htf_cache[(symbol, "240")] = df_4h
+                set_valid_htf_cache(htf_cache, (symbol, "240"), df_4h)
             except Exception:
                 df_4h = None
 
