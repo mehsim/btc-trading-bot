@@ -7,29 +7,6 @@ from ta.trend import EMAIndicator
 from ta.momentum import RSIIndicator
 
 
-def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58, get_history_fn=None, get_orderbook_fn=None, choppiness_fn=None, bot_state_dict=None, global_htf_cache=None):
-    """
-    Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
-    Critical checks are hard gates (instant reject if failed).
-    Other checks contribute weighted points to a total score.
-    Trade is approved if score >= 75% of max possible points AND no hard gate fails.
-    Returns: (bool_approved, dict_results_details, float_score_pct)
-    """
-    if symbol is None:
-        symbol = "BTCUSDT"
-    if get_history_fn is None:
-        try:
-            from data import get_history
-            get_history_fn = get_history
-        except Exception:
-            pass
-    results = {}
-    hard_gate_failed = False
-    total_score = 0
-    max_score = 0
-
-import time
-
 def get_valid_htf_cache(htf_cache: dict, key: tuple, ttl_seconds: float = 900.0):
     """
     Retrieves HTF DataFrame from htf_cache with a 15-minute TTL eviction rule.
@@ -50,6 +27,28 @@ def get_valid_htf_cache(htf_cache: dict, key: tuple, ttl_seconds: float = 900.0)
 def set_valid_htf_cache(htf_cache: dict, key: tuple, df: pd.DataFrame):
     if htf_cache is not None and df is not None:
         htf_cache[key] = (df, time.time())
+
+
+def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58, get_history_fn=None, get_orderbook_fn=None, choppiness_fn=None, bot_state_dict=None, global_htf_cache=None):
+    """
+    Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
+    Critical checks are hard gates (instant reject if failed).
+    Other checks contribute weighted points to a total score.
+    Trade is approved if score >= 75% of max possible points AND no hard gate fails.
+    Returns: (bool_approved, dict_results_details, float_score_pct)
+    """
+    if symbol is None:
+        symbol = "BTCUSDT"
+    if get_history_fn is None:
+        try:
+            from data import get_history
+            get_history_fn = get_history
+        except Exception:
+            pass
+    results = {}
+    hard_gate_failed = False
+    total_score = 0
+    max_score = 0
 
     # CHECK 1: 1-Day Structural Trend
     df_1d = get_valid_htf_cache(htf_cache, (symbol, "D"))
