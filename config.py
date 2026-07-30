@@ -41,21 +41,36 @@ TARGET_VOLATILITY_ATR = 0.005
 PARAMETRIC_VAR_CONFIDENCE_LEVEL = 0.95
 PARAMETRIC_VAR_DAILY_EQUITY_CAP_PCT = 0.05 # 5% daily equity VaR limit
 
-# v2 Institutional Quant Engine Feature Flags
+# v2 & v3 Institutional Quant Engine Feature Flags (disabled / shadow / active)
+EXIT_QUALITY_MODE = "shadow"          # "disabled", "shadow", "active"
+EXPECTANCY_GATE_MODE = "shadow"       # "disabled", "shadow", "active"
+SHADOW_EVALUATION_MODE = "active"     # "disabled", "shadow", "active"
+
 ENABLE_REGIME_HYSTERESIS = True
 ENABLE_UNCERTAINTY_TP_SCALING = True
 ENABLE_DYNAMIC_STRUCTURAL_BUFFERS = True
 ENABLE_REGIME_ADAPTIVE_RR_GATES = True
-ENABLE_EXIT_QUALITY_SCORE = True
 ENABLE_PARTIAL_TP_SYSTEM = True
 ENABLE_SMART_BREAKEVEN = True
 ENABLE_DYNAMIC_TRAILING_STOP = True
-ENABLE_EXPECTANCY_GATE = True
 ENABLE_EXPLAINABLE_TRADE_LOG = True
 
-# v2 Quant Thresholds & Bounds
+# Learnable EQS Weights Dictionary (Bayesian Optimization Ready)
+EQS_WEIGHTS = {
+    "structure": 20.0,
+    "liquidity": 15.0,
+    "expected_move": 20.0,
+    "spread": 15.0,
+    "funding": 10.0,
+    "volatility": 10.0,
+    "regime": 10.0
+}
+
+# v2 & v3 Quant Thresholds & Bounds
 STRONG_TREND_ADX_ENTER = 32.0
 STRONG_TREND_ADX_EXIT = 28.0
 MIN_EXIT_QUALITY_SCORE = 75.0
 MIN_VOLATILITY_ATR_NORM = 0.0035  # 0.35% minimum ATR volatility gate
+MIN_STRATEGY_HEALTH_SCORE = 50.0  # Halt threshold below 50 SHS
+
 
