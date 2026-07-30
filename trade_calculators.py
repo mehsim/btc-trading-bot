@@ -186,7 +186,7 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
                 current_rr = min_rr
                 logs.append(f"[TP_OPTIMIZED_RR] {symbol} {interval} TP target adjusted to ${opt_tp:.4f} to satisfy {min_rr:.1f}:1 R:R floor")
         except Exception as e:
-            pass
+            logs.append(f"[TP_OPTIMIZE_WARNING] {symbol} {interval}: {e}")
 
     if current_rr < min_rr:
         logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1")

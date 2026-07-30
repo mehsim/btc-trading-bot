@@ -31,7 +31,7 @@ class AutoStopFloor:
                         opt_floor = float(np.percentile(required_floors, 75))
                         return max(0.005, min(opt_floor, 0.020))
             except Exception as e:
-                pass
+                print(f"[risk_engine] Warning computing floor for {symbol}: {e}")
         return 0.008
 
     def get_floor(self, symbol, database_module=None):
