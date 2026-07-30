@@ -126,5 +126,187 @@ class PortfolioRiskEngine:
         except Exception:
             return {"pc1_explained_variance": 0.50}
 
+    def run_monte_carlo_stress_test(
+        self,
+        open_positions: List[Dict],
+        returns_df: pd.DataFrame = None,
+        total_equity: float = 100.0,
+        num_simulations: int = 5000,
+        shock_pct: float = -0.30
+    ) -> Dict[str, float]:
+        """
+        Runs a vectorized Monte Carlo Stress Test under an instant market index shock (e.g. -30% BTC crash).
+        1. Estimates asset betas relative to BTCUSDT (or market proxy).
+        2. Inflates pairwise correlations to 0.95 (panic regime).
+        3. Simulates N fat-tailed portfolio return paths under joint shock.
+        4. Calculates Expected Tail Loss (Stress CVaR 99.9%) and Max Portfolio Equity Drawdown.
+        """
+        if not open_positions or total_equity <= 0:
+            return {
+                "projected_stress_loss_usd": 0.0,
+                "projected_stress_loss_pct": 0.0,
+                "stress_cvar_999_usd": 0.0,
+                "stress_cvar_999_pct": 0.0,
+                "is_within_budget": True
+            }
+
+        symbol_exposures = {}
+        for p in open_positions:
+            if not isinstance(p, dict):
+                continue
+            sym = p.get("symbol")
+            if not sym:
+                continue
+            size = float(p.get("position_size_usd", 0.0))
+            lev = float(p.get("leverage", 1.0))
+            dir_mult = -1.0 if str(p.get("direction", "Bullish")).capitalize() == "Bearish" else 1.0
+            symbol_exposures[sym] = symbol_exposures.get(sym, 0.0) + (size * lev * dir_mult)
+
+        symbols = list(symbol_exposures.keys())
+        if not symbols:
+            return {
+                "projected_stress_loss_usd": 0.0,
+                "projected_stress_loss_pct": 0.0,
+                "stress_cvar_999_usd": 0.0,
+                "stress_cvar_999_pct": 0.0,
+                "is_within_budget": True
+            }
+
+        exposure_vec = np.array([symbol_exposures[s] for s in symbols])
+
+        # Estimate Betas relative to BTCUSDT
+        betas = {}
+        if returns_df is not None and not returns_df.empty and len(returns_df) >= 10:
+            btc_col = "BTCUSDT" if "BTCUSDT" in returns_df.columns else (returns_df.columns[0] if len(returns_df.columns) > 0 else None)
+            if btc_col and btc_col in returns_df.columns:
+                btc_ret = returns_df[btc_col].dropna()
+                btc_var = float(btc_ret.var())
+                for s in symbols:
+                    if s in returns_df.columns:
+                        s_ret = returns_df[s].dropna()
+                        common_idx = btc_ret.index.intersection(s_ret.index)
+                        if len(common_idx) >= 10 and btc_var > 1e-8:
+                            cov = float(np.cov(s_ret.loc[common_idx], btc_ret.loc[common_idx])[0, 1])
+                            betas[s] = max(0.2, min(3.0, cov / btc_var))
+                        else:
+                            betas[s] = 1.0
+                    else:
+                        betas[s] = 1.0
+            else:
+                for s in symbols:
+                    betas[s] = 1.0
+        else:
+            for s in symbols:
+                betas[s] = 1.0
+
+        beta_vec = np.array([betas[s] for s in symbols])
+        expected_asset_shocks = beta_vec * shock_pct
+
+        # Construct stressed correlation matrix (inflated to 0.95 during panic)
+        n_assets = len(symbols)
+        stressed_corr = np.full((n_assets, n_assets), 0.95)
+        np.fill_diagonal(stressed_corr, 1.0)
+
+        # Asset volatility estimation
+        vol_vec = np.array([0.03] * n_assets)
+        if returns_df is not None and not returns_df.empty:
+            for i, s in enumerate(symbols):
+                if s in returns_df.columns and len(returns_df[s].dropna()) >= 10:
+                    vol_vec[i] = max(0.01, min(0.15, float(returns_df[s].dropna().std())))
+
+        cov_matrix = np.outer(vol_vec, vol_vec) * stressed_corr
+
+        # Multivariate Monte Carlo simulation (using t-distribution df=4 for heavy tails)
+        try:
+            chol = np.linalg.cholesky(cov_matrix + 1e-8 * np.eye(n_assets))
+            z = np.random.standard_t(df=4, size=(num_simulations, n_assets))
+            z = z / np.sqrt(2.0)
+            simulated_residuals = z @ chol.T
+        except Exception:
+            simulated_residuals = np.random.normal(0, 0.02, size=(num_simulations, n_assets))
+
+        simulated_returns = expected_asset_shocks + simulated_residuals
+        simulated_pnls = simulated_returns @ exposure_vec
+        simulated_losses = -simulated_pnls
+
+        mean_loss_usd = float(np.mean(simulated_losses))
+        var_999 = float(np.percentile(simulated_losses, 99.9))
+        tail_losses = simulated_losses[simulated_losses >= var_999]
+        cvar_999_usd = float(np.mean(tail_losses)) if len(tail_losses) > 0 else var_999
+
+        mean_loss_usd = max(0.0, mean_loss_usd)
+        cvar_999_usd = max(0.0, cvar_999_usd)
+
+        loss_pct = float(mean_loss_usd / max(1e-9, total_equity))
+        cvar_pct = float(cvar_999_usd / max(1e-9, total_equity))
+
+        return {
+            "projected_stress_loss_usd": round(mean_loss_usd, 4),
+            "projected_stress_loss_pct": round(loss_pct, 4),
+            "stress_cvar_999_usd": round(cvar_999_usd, 4),
+            "stress_cvar_999_pct": round(cvar_pct, 4),
+            "is_within_budget": loss_pct <= 0.25
+        }
+
+    def check_candidate_stress_budget(
+        self,
+        candidate_symbol: str,
+        candidate_size_usd: float,
+        candidate_lev: float,
+        candidate_direction: str,
+        open_positions: List[Dict],
+        returns_df: pd.DataFrame = None,
+        total_equity: float = 100.0,
+        max_stress_loss_pct: float = 0.25,
+        shock_pct: float = -0.30
+    ) -> Tuple[bool, float, float, Dict]:
+        """
+        Evaluates whether adding candidate position causes -30% market shock loss to exceed max_stress_loss_pct (default 25%).
+        Returns: (is_approved, recommended_scaling_factor, projected_loss_pct, summary_dict)
+        """
+        if total_equity <= 0:
+            return True, 1.0, 0.0, {}
+
+        candidate_pos = {
+            "symbol": candidate_symbol,
+            "position_size_usd": candidate_size_usd,
+            "leverage": candidate_lev,
+            "direction": candidate_direction
+        }
+
+        full_positions = list(open_positions or []) + [candidate_pos]
+
+        res = self.run_monte_carlo_stress_test(
+            open_positions=full_positions,
+            returns_df=returns_df,
+            total_equity=total_equity,
+            num_simulations=3000,
+            shock_pct=shock_pct
+        )
+
+        loss_pct = res.get("projected_stress_loss_pct", 0.0)
+
+        if loss_pct <= max_stress_loss_pct:
+            return True, 1.0, loss_pct, res
+
+        # Exceeds stress budget! Calculate recommended scaling factor
+        base_res = self.run_monte_carlo_stress_test(
+            open_positions=open_positions,
+            returns_df=returns_df,
+            total_equity=total_equity,
+            num_simulations=1500,
+            shock_pct=shock_pct
+        )
+        base_loss_pct = base_res.get("projected_stress_loss_pct", 0.0)
+
+        remaining_budget = max(0.0, max_stress_loss_pct - base_loss_pct)
+        marginal_loss = max(1e-6, loss_pct - base_loss_pct)
+
+        scale_factor = max(0.0, min(1.0, float(remaining_budget / marginal_loss)))
+        is_approved = scale_factor >= 0.25
+
+        return is_approved, round(scale_factor, 2), loss_pct, res
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
+

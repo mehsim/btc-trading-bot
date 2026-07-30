@@ -207,7 +207,7 @@ def check_margin_utilization(used_margin: float, total_equity: float, max_levera
         return "WARNING_ALERT"
     return "NORMAL"
 
-def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60") -> tuple:
+def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish") -> tuple:
     if bot_state.get("circuit_breaker_active", False):
         return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
 
@@ -234,13 +234,32 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
     heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df)
     if not heat_safe:
         return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit", dd_mult, 0.0
+
+    # 2.5 Monte Carlo -30% Stress Test Check
+    mc_approved, mc_scale_factor, mc_loss_pct, _ = portfolio_risk_engine.check_candidate_stress_budget(
+        candidate_symbol=symbol,
+        candidate_size_usd=capped_size,
+        candidate_lev=leverage_val,
+        candidate_direction=direction,
+        open_positions=active_trades,
+        returns_df=returns_df,
+        total_equity=equity,
+        max_stress_loss_pct=0.25,
+        shock_pct=-0.30
+    )
+    if not mc_approved:
+        return False, f"REJECTED: Monte Carlo -30% Stress Test projected loss ({mc_loss_pct*100.0:.1f}%) exceeds max 25% equity budget", dd_mult, 0.0
+
+    if mc_scale_factor < 1.0:
+        capped_size = round(capped_size * mc_scale_factor, 2)
     
     # 3. Correlation check
     corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict)
     if corr_val > 0.7:
         return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult, 0.0
         
-    return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Sigmoid DD Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
+    return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Sigmoid DD Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Stress Loss: {mc_loss_pct*100.0:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
+
 
 def get_volatility_regime_multiplier(atr_norm: float, interval: str) -> float:
     """Rule 16: Dynamic Inverse ATR Percentile Sizing."""
