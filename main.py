@@ -178,10 +178,18 @@ class AdaptiveVolumeGate:
             if len(sym_trades) < 20:
                 return 0.25
             
+            def _safe_vol(t):
+                try:
+                    if t.get("raw_data"):
+                        return float(json.loads(t["raw_data"]).get("vol_pctile", 1.0))
+                except Exception:
+                    pass
+                return 1.0
+
             best_threshold = 0.25
             best_profit = -float('inf')
             for threshold in np.arange(0.10, 0.51, 0.05):
-                allowed = [t for t in sym_trades if t.get("raw_data") and json.loads(t["raw_data"]).get("vol_pctile", 1.0) >= threshold]
+                allowed = [t for t in sym_trades if _safe_vol(t) >= threshold]
                 if len(allowed) < 5:
                     continue
                 pnl_sum = sum(float(t.get("pnl_usd", 0.0)) for t in allowed)
@@ -227,7 +235,12 @@ class MFEBreakEvenTrigger:
             for t in sym_winning_trades:
                 atr = float(t.get("atr_dollars", 0.0))
                 if atr > 0:
-                    raw = json.loads(t.get("raw_data", "{}")) if t.get("raw_data") else {}
+                    raw = {}
+                    if t.get("raw_data"):
+                        try:
+                            raw = json.loads(t["raw_data"])
+                        except Exception:
+                            raw = {}
                     mfe_val = float(raw.get("mfe", 0.0))
                     if mfe_val > 0:
                         mfe_ratios.append(mfe_val / atr)

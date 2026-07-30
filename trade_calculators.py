@@ -278,7 +278,12 @@ class MFEBreakEvenTrigger:
             for t in sym_winning_trades:
                 atr = float(t.get("atr_dollars", 0.0))
                 if atr > 0:
-                    raw = json.loads(t.get("raw_data", "{}")) if t.get("raw_data") else {}
+                    raw = {}
+                    if t.get("raw_data"):
+                        try:
+                            raw = json.loads(t["raw_data"])
+                        except Exception:
+                            raw = {}
                     mfe_val = float(raw.get("mfe", 0.0))
                     if mfe_val > 0:
                         mfe_ratios.append(mfe_val / max(1e-9, atr))
