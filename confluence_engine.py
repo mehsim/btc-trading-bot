@@ -29,6 +29,50 @@ def set_valid_htf_cache(htf_cache: dict, key: tuple, df: pd.DataFrame):
         htf_cache[key] = (df, time.time())
 
 
+def calculate_exit_quality_score(
+    structure_pass: bool,
+    liquidity_pass: bool,
+    expected_move_pct: float,
+    spread_pct: float = 0.0003,
+    funding_rate: float = 0.0001,
+    atr_norm: float = 0.0040,
+    regime: str = "MODERATE_TREND"
+) -> float:
+    """
+    Component 5: Exit Quality Score (EQS 0 - 100)
+    Evaluates Structure (20), Liquidity (15), Expected Move (20), Spread (15), Funding (10), Volatility (10), Regime (10).
+    """
+    score = 0.0
+    if structure_pass: score += 20.0
+    if liquidity_pass: score += 15.0
+    if float(expected_move_pct) >= 0.015: score += 20.0
+    elif float(expected_move_pct) >= 0.008: score += 12.0
+    
+    if float(spread_pct) <= 0.0005: score += 15.0
+    elif float(spread_pct) <= 0.0010: score += 8.0
+    
+    if abs(float(funding_rate)) <= 0.0003: score += 10.0
+    if float(atr_norm) >= 0.0035: score += 10.0
+    
+    reg_u = regime.upper()
+    if "STRONG" in reg_u or "MODERATE" in reg_u: score += 10.0
+    elif "RANGING" in reg_u: score += 5.0
+
+    return score
+
+
+def evaluate_expectancy_gate(historical_win_rate: float, avg_win_pct: float, avg_loss_pct: float) -> Tuple[bool, float]:
+    """
+    Component 9: Expectancy Gate
+    Expected Value = (WinRate * Reward) - (LossRate * Risk)
+    """
+    wr = float(historical_win_rate) if float(historical_win_rate) <= 1.0 else float(historical_win_rate) / 100.0
+    lr = 1.0 - wr
+    ev = (wr * abs(avg_win_pct)) - (lr * abs(avg_loss_pct))
+    return ev > 0.0, ev
+
+
+
 def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58, get_history_fn=None, get_orderbook_fn=None, choppiness_fn=None, bot_state_dict=None, global_htf_cache=None):
     """
     Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.

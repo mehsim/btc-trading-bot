@@ -35,6 +35,80 @@ MIN_RR_RATIO = {
 }
 
 
+def calculate_uncertainty_tp_scaling(prediction_confidence: float, expected_move_pct: float) -> float:
+    """
+    Component 2: Uncertainty-Aware TP Scaling based on prediction confidence
+    - Very High (>= 90%): 90% of Expected Move
+    - High (80 - 89%): 85% of Expected Move
+    - Medium (70 - 79%): 75% of Expected Move
+    - Low (< 70%): 65% of Expected Move
+    """
+    conf = float(prediction_confidence) * 100.0 if float(prediction_confidence) <= 1.0 else float(prediction_confidence)
+    if conf >= 90.0:
+        multiplier = 0.90
+    elif conf >= 80.0:
+        multiplier = 0.85
+    elif conf >= 70.0:
+        multiplier = 0.75
+    else:
+        multiplier = 0.65
+    return expected_move_pct * multiplier
+
+
+def calculate_dynamic_structural_buffer(atr_dollars: float, current_price: float, spread_pct: float = 0.0005) -> float:
+    """
+    Component 3: Dynamic Structural Buffer
+    Buffer = max(0.25 * ATR, Spread * 2, 0.15% of Price)
+    """
+    atr_buffer = 0.25 * atr_dollars
+    spread_buffer = current_price * (spread_pct * 2.0)
+    pct_buffer = current_price * 0.0015
+    return max(atr_buffer, spread_buffer, pct_buffer)
+
+
+def get_regime_adaptive_min_rr(regime: str) -> float:
+    """
+    Component 4: Regime-Adaptive Hard R:R Gate
+    - STRONG_TREND: 2.2
+    - MODERATE_TREND: 1.8
+    - RANGE / RANGING: 1.5
+    - HIGH_VOLATILITY / CHOPPY: 2.0
+    """
+    r = regime.upper()
+    if "STRONG" in r:
+        return 2.2
+    elif "MODERATE" in r:
+        return 1.8
+    elif "HIGH" in r or "VOLATILITY" in r:
+        return 2.0
+    return 1.5
+
+
+def calculate_3stage_partial_tp_targets(entry_price: float, direction: str, sl_price: float, tp_final_price: float) -> dict:
+    """
+    Component 6: 3-Stage Partial Profit System
+    - TP1 (30% position): 40% of target distance
+    - TP2 (30% position): 70% of target distance
+    - Runner (40% position): 100% of target distance (with trailing stop)
+    """
+    dist = abs(tp_final_price - entry_price)
+    if direction == "Bullish":
+        tp1 = entry_price + (dist * 0.40)
+        tp2 = entry_price + (dist * 0.70)
+        tp3 = tp_final_price
+    else:
+        tp1 = entry_price - (dist * 0.40)
+        tp2 = entry_price - (dist * 0.70)
+        tp3 = tp_final_price
+    
+    return {
+        "tp1": {"price": tp1, "size_pct": 0.30},
+        "tp2": {"price": tp2, "size_pct": 0.30},
+        "runner": {"price": tp3, "size_pct": 0.40}
+    }
+
+
+
 def compute_be_trigger_distance(atr_dollars, leverage, interval, mfe_trigger_atr_multiple, entry_price=0.0, min_pct_floor=0.0):
     """
     Compute minimum favorable move before break-even activates.
