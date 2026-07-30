@@ -27,7 +27,7 @@ class RiskParityAllocator:
         inv_vols = {}
         for sym, vol in symbol_volatilities.items():
             safe_vol = max(0.005, float(vol))
-            inv_vols[sym] = 1.0 / safe_vol
+            inv_vols[sym] = 1.0 / max(1e-9, safe_vol)
 
         sum_inv_vol = sum(inv_vols.values())
         if sum_inv_vol <= 0:

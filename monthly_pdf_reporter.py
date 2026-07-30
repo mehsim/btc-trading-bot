@@ -19,7 +19,7 @@ class MonthlyPDFReporter:
         """
         Calculates monthly performance metrics and compiles report structure.
         """
-        total_trades = len(trade_history)
+        total_trades = max(1, len(trade_history))
         winning_trades = [t for t in trade_history if isinstance(t, dict) and t.get("pnl_usd", 0.0) > 0]
         win_rate = (len(winning_trades) / total_trades * 100.0) if total_trades > 0 else 0.0
         
