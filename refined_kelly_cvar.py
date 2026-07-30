@@ -47,7 +47,7 @@ class RefinedKellyCVaR:
         # Full Kelly fraction: f* = p - (1-p)/b
         b = max(0.5, win_loss_ratio)
         p = min(0.95, max(0.05, win_rate))
-        full_kelly = p - ((1 - p) / b)
+        full_kelly = p - ((1 - p) / max(1e-9, b))
         
         # Half-Kelly for capital preservation
         half_kelly = max(0.02, full_kelly * 0.50)

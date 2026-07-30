@@ -146,6 +146,8 @@ class SignalEvaluator:
             print(f"[SignalEvaluator Error] Exception evaluating {interval}m: {e}\n{traceback.format_exc()}")
 
     def update_confluence_results(self, tf_key, df, symbol):
+        if df is None or len(df) == 0:
+            return
         last_row = df.iloc[-1]
         close = float(last_row["close"])
         ema9 = float(last_row.get("EMA_9", close))
