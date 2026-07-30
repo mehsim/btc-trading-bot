@@ -301,8 +301,9 @@ def api_status():
         if not status_data.get("live_price_BTCUSDT"):
             try:
                 res = bybit_get_request("/v5/market/tickers", {"category": "linear"})
-                if res and res.get("retCode") == 0 and res.get("result", {}).get("list"):
-                    for item in res["result"]["list"]:
+                result_list = res.get("result", {}).get("list", []) if isinstance(res, dict) else []
+                if res and res.get("retCode") == 0 and result_list:
+                    for item in result_list:
                         s = item.get("symbol")
                         if s in symbols:
                             lp = float(item.get("lastPrice", 0.0))
