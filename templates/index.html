@@ -326,28 +326,29 @@
             display: grid;
             grid-template-columns: repeat(5, 1fr);
             gap: 20px;
+            margin-bottom: 24px;
         }
 
-        @media (max-width: 1024px) {
+        @media (max-width: 1200px) {
             .dashboard-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(3, 1fr);
             }
         }
 
-        @media (max-width: 640px) {
+        @media (max-width: 768px) {
             .dashboard-grid {
                 grid-template-columns: 1fr;
             }
         }
 
         .card {
-            background: var(--card-bg);
+            background: linear-gradient(145deg, rgba(17, 24, 39, 0.75) 0%, rgba(10, 15, 29, 0.85) 100%);
             border: 1px solid var(--card-border);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             border-radius: 20px;
             padding: 24px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+            box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.3);
             transition: var(--transition-smooth);
             position: relative;
             overflow: hidden;
@@ -360,14 +361,14 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 100%);
             pointer-events: none;
         }
 
         .card:hover {
             border-color: var(--card-hover-border);
             transform: translateY(-3px);
-            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.25);
+            box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.4), 0 0 24px rgba(59, 130, 246, 0.08);
         }
 
         .card-title {
@@ -382,7 +383,7 @@
 
         .card-value {
             font-family: 'Outfit', sans-serif;
-            font-size: 30px;
+            font-size: 28px;
             font-weight: 800;
             display: flex;
             align-items: baseline;
@@ -398,6 +399,68 @@
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+
+        /* Sub-card Tiles & Command Center Styling */
+        .hero-command-card {
+            margin-bottom: 24px;
+            padding: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(135deg, rgba(17, 24, 39, 0.8) 0%, rgba(13, 19, 36, 0.9) 100%);
+        }
+
+        .stat-tile-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .stat-tile {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 12px 14px;
+            transition: var(--transition-smooth);
+        }
+
+        .stat-tile:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.09);
+        }
+
+        .stat-tile-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-tile-val {
+            font-family: 'Outfit', sans-serif;
+            font-size: 18px;
+            font-weight: 800;
+        }
+
+        .subcard-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            padding: 18px 20px;
+            transition: var(--transition-smooth);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 124px;
+            width: 100%;
+        }
+
+        .subcard-box:hover {
+            background: rgba(255, 255, 255, 0.035);
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
         }
 
         /* Dynamic classes for values */
@@ -457,16 +520,17 @@
         .no-position-text {
             color: var(--text-muted);
             font-style: italic;
-            font-size: 14px;
+            font-size: 13px;
             text-align: center;
-            margin: 18px 0;
+            margin: 14px 0;
         }
 
         /* Balanced 3-Column Main Panel Grid */
         .main-panels-grid {
             display: grid;
-            grid-template-columns: 0.75fr 1fr 1fr;
-            gap: 16px;
+            grid-template-columns: 0.85fr 1.15fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
         }
 
         @media (max-width: 1200px) {
@@ -983,231 +1047,233 @@
         </header>
 
         <!-- Sticky Top Overall Health Banner -->
-        <div id="sticky-health-banner" style="position: sticky; top: 10px; z-index: 999; background: rgba(13,15,26,0.92); backdrop-filter: blur(12px); border: 1px solid rgba(16,185,129,0.35); border-radius: 14px; padding: 10px 18px; margin-bottom: 15px; font-family: 'Outfit', sans-serif; font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
+        <div id="sticky-health-banner" style="position: sticky; top: 12px; z-index: 999; background: rgba(10, 15, 29, 0.88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 16px; padding: 12px 22px; margin-bottom: 20px; font-family: 'Outfit', sans-serif; font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
             <div style="display: flex; align-items: center; gap: 8px; font-weight: 800; color: var(--accent-green);">
-                <span>🟢 SYSTEM HEALTH</span>
+                <span>🟢 SYSTEM TELEMETRY</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--text-secondary); font-size: 11px;">
+            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; color: var(--text-secondary); font-size: 12px;">
                 <span>SHS: <strong id="top-shs" style="color: var(--text-primary);">94/100</strong></span>
                 <span>PF: <strong id="top-pf" style="color: var(--accent-green);">1.38</strong></span>
                 <span>ECE: <strong id="top-ece" style="color: var(--text-primary);">0.038</strong></span>
                 <span>Drift: <strong id="top-drift" style="color: var(--accent-green);">Normal</strong></span>
                 <span>Data Quality: <strong id="top-dq" style="color: var(--accent-green);">98</strong></span>
-                <span>Release Gates: <strong id="top-rg" style="color: var(--accent-purple);">8/8</strong></span>
+                <span>Gates: <strong id="top-rg" style="color: var(--accent-purple);">8/8</strong></span>
                 <span>Champion: <strong id="top-champ" style="color: var(--text-primary);">v6.2</strong></span>
                 <span>Shadow: <strong id="top-shadow" style="color: var(--accent-blue);">Running</strong></span>
                 <span>Exchange: <strong id="top-ex" style="color: var(--accent-green);">Healthy</strong></span>
-                <span>Portfolio Risk: <strong id="top-risk" style="color: var(--accent-orange);">2.3%</strong></span>
-                <span style="background: rgba(16,185,129,0.2); color: var(--accent-green); padding: 2px 8px; border-radius: 20px; font-weight: 800;">LIVE</span>
+                <span>Risk: <strong id="top-risk" style="color: var(--accent-orange);">2.3%</strong></span>
+                <span style="background: rgba(16,185,129,0.18); color: var(--accent-green); padding: 3px 10px; border-radius: 20px; font-weight: 800; border: 1px solid rgba(16,185,129,0.3);">LIVE</span>
             </div>
         </div>
 
-        <!-- Section 1: Quick Status Bar & Today's Metrics -->
-        <div class="card" style="margin-bottom: 15px; padding: 18px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 12px; margin-bottom: 15px;">
-                <div class="section-title">⚡ Quick Status Bar</div>
+        <!-- Hero Command Center: Status Bar & Today's Metrics -->
+        <div class="card hero-command-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 16px; margin-bottom: 20px;">
+                <div class="section-title" style="font-size: 16px;">⚡ Executive Command Center</div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">🟢 RUNNING</span>
-                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 3px 8px; border-radius: 6px;">MODE: CHAMPION MODEL</span>
-                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">BYBIT: CONNECTED</span>
-                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">BTCUSDT</span>
-                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-orange); background: rgba(249,115,22,0.15); padding: 3px 8px; border-radius: 6px;">STRONG TREND</span>
+                    <span style="font-size: 11px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(16,185,129,0.25);">🟢 RUNNING</span>
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(59,130,246,0.25);">CHAMPION MODEL</span>
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(16,185,129,0.25);">BYBIT CONNECTED</span>
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(139,92,246,0.25);">BTCUSDT</span>
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent-orange); background: rgba(249,115,22,0.15); padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(249,115,22,0.25);">STRONG TREND</span>
                 </div>
             </div>
 
-            <!-- Quick Status Parameter Grid -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 15px;">
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Market Score (MQS)</div>
-                    <div id="qs-mqs" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">84.6</div>
+            <!-- Parameters Grid -->
+            <div class="stat-tile-grid" style="margin-bottom: 20px;">
+                <div class="stat-tile">
+                    <div class="stat-tile-label">Market Score (MQS)</div>
+                    <div id="qs-mqs" class="stat-tile-val" style="color: var(--accent-blue);">84.6</div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Exit Quality (EQS)</div>
-                    <div id="qs-eqs" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">91.0</div>
+                <div class="stat-tile">
+                    <div class="stat-tile-label">Exit Quality (EQS)</div>
+                    <div id="qs-eqs" class="stat-tile-val" style="color: var(--accent-purple);">91.0</div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Strategy Health (SHS)</div>
-                    <div id="qs-shs" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">94.0</div>
+                <div class="stat-tile">
+                    <div class="stat-tile-label">Strategy Health (SHS)</div>
+                    <div id="qs-shs" class="stat-tile-val" style="color: var(--accent-green);">94.0</div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Current Risk %</div>
-                    <div id="qs-risk" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">0.85%</div>
+                <div class="stat-tile">
+                    <div class="stat-tile-label">Current Risk %</div>
+                    <div id="qs-risk" class="stat-tile-val" style="color: var(--accent-green);">0.85%</div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Position Size</div>
-                    <div id="qs-size" style="font-size: 18px; font-weight: 800; color: var(--text-primary);">$83.20</div>
+                <div class="stat-tile">
+                    <div class="stat-tile-label">Position Size</div>
+                    <div id="qs-size" class="stat-tile-val" style="color: var(--text-primary);">$83.20</div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Portfolio Exposure</div>
-                    <div id="qs-exposure" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">18%</div>
+                <div class="stat-tile">
+                    <div class="stat-tile-label">Portfolio Exposure</div>
+                    <div id="qs-exposure" class="stat-tile-val" style="color: var(--accent-blue);">18%</div>
                 </div>
             </div>
 
-            <!-- Today's Metrics Bar -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; background: rgba(13,15,26,0.6); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);">
+            <!-- Today's Performance Summary Strip -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; background: rgba(10, 15, 29, 0.6); padding: 16px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's PnL</div>
-                    <div id="today-pnl-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">+$0.45</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Today's PnL</div>
+                    <div id="today-pnl-val" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">+$0.45</div>
                 </div>
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Trades</div>
-                    <div id="today-trades-count-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">0</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Today's Trades</div>
+                    <div id="today-trades-count-val" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">0</div>
                 </div>
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Vol / Leveraged Vol</div>
-                    <div id="today-vol-val" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">$0.00 / $0.00</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Today's Vol / Leveraged</div>
+                    <div id="today-vol-val" style="font-size: 17px; font-weight: 800; color: var(--accent-purple);">$0.00 / $0.00</div>
                 </div>
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Win Rate</div>
-                    <div id="today-wr-val" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">49.5%</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Today's Win Rate</div>
+                    <div id="today-wr-val" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">49.5%</div>
                 </div>
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Profit Factor</div>
-                    <div id="today-pf-val" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">1.38</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Today's Profit Factor</div>
+                    <div id="today-pf-val" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.38</div>
                 </div>
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Drawdown</div>
-                    <div id="today-dd-val" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">1.20%</div>
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 4px;">Today's Drawdown</div>
+                    <div id="today-dd-val" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">1.20%</div>
                 </div>
             </div>
         </div>
+
         <div id="circuit-breaker-banner"
-            style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; align-items: center; gap: 10px; justify-content: space-between; width: 100%;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 18px;">🛑</span>
+            style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 14px; padding: 14px 20px; margin-bottom: 24px; align-items: center; gap: 12px; justify-content: space-between; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 20px;">🛑</span>
                 <div>
-                    <strong style="color: var(--accent-red); font-size: 13px;">Circuit Breaker Active</strong>
-                    <span style="color: var(--text-secondary); font-size: 12px; margin-left: 8px;">Daily drawdown exceeded 5% — trading paused until midnight UTC.</span>
+                    <strong style="color: var(--accent-red); font-size: 14px;">Circuit Breaker Active</strong>
+                    <span style="color: var(--text-secondary); font-size: 12px; margin-left: 10px;">Daily drawdown exceeded 5% — trading paused until midnight UTC.</span>
                 </div>
             </div>
-            <button onclick="resetCircuitBreaker()" style="padding: 6px 12px; font-size: 11px; background: rgba(244,63,94,0.2); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.4); border-radius: 6px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.35)'" onmouseout="this.style.background='rgba(244,63,94,0.2)'">Reset Breaker</button>
+            <button onclick="resetCircuitBreaker()" style="padding: 8px 16px; font-size: 12px; background: rgba(244,63,94,0.2); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.4); border-radius: 8px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.35)'" onmouseout="this.style.background='rgba(244,63,94,0.2)'">Reset Breaker</button>
         </div>
 
-        <!-- KPI Dashboard -->
+        <!-- KPI Strategy & Market Dashboard -->
         <div class="dashboard-grid">
             <!-- Current Price -->
-            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
-                <div class="card-title" style="margin-bottom: 2px;">Live Spot Prices</div>
-                <div class="live-prices-list">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">BTC:</span>
-                        <span id="live-price-btc" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">ETH:</span>
-                        <span id="live-price-eth" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">SOL:</span>
-                        <span id="live-price-sol" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">BNB:</span>
-                        <span id="live-price-bnb" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">ADA:</span>
-                        <span id="live-price-ada" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">XRP:</span>
-                        <span id="live-price-xrp" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">AVAX:</span>
-                        <span id="live-price-avax" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">LTC:</span>
-                        <span id="live-price-ltc" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">DOT:</span>
-                        <span id="live-price-dot" style="font-size: 13px; font-weight: 800; font-family: monospace;">$0.00</span>
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
+                <div>
+                    <div class="card-title" style="margin-bottom: 12px;">Live Spot Prices</div>
+                    <div class="live-prices-list" style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">BTC:</span>
+                            <span id="live-price-btc" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">ETH:</span>
+                            <span id="live-price-eth" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">SOL:</span>
+                            <span id="live-price-sol" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">BNB:</span>
+                            <span id="live-price-bnb" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">ADA:</span>
+                            <span id="live-price-ada" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">XRP:</span>
+                            <span id="live-price-xrp" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">AVAX:</span>
+                            <span id="live-price-avax" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">LTC:</span>
+                            <span id="live-price-ltc" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-secondary);">DOT:</span>
+                            <span id="live-price-dot" style="font-size: 13px; font-weight: 800; font-family: 'Fira Code', monospace;">$0.00</span>
+                        </div>
                     </div>
                 </div>
-                <div class="card-subtitle" style="font-size: 9px; opacity: 0.8; display: flex; align-items: center; gap: 4px;">
-                    <span id="price-trend-icon" style="font-size: 8px;">●</span> Bybit Live Spot Feed
+                <div class="card-subtitle" style="font-size: 10px; opacity: 0.85; margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                    <span id="price-trend-icon" style="font-size: 8px; color: var(--accent-green);">●</span> Bybit Live Spot Feed
                 </div>
             </div>
 
             <!-- 15M Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('15m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('15m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
                 <div>
-                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>15M STRATEGY<span id="leverage-badge-15m" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-15m" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-15m" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-15m" style="font-size: 20px; margin-top: 5px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-15m" style="font-size: 11px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 8px;">
+                    <div class="card-value" id="model-prediction-15m" style="font-size: 22px; margin-top: 8px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-15m" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 12px;">
                         <div class="meter-bar" id="confidence-meter-bar-15m" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
                     <div id="position-container-15m">
-                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                        <div class="no-position-text">No active positions</div>
                     </div>
                 </div>
             </div>
 
             <!-- 30M Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('30m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('30m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
                 <div>
-                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>30M STRATEGY<span id="leverage-badge-30m" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-30m" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-30m" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-30m" style="font-size: 20px; margin-top: 5px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-30m" style="font-size: 11px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 8px;">
+                    <div class="card-value" id="model-prediction-30m" style="font-size: 22px; margin-top: 8px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-30m" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 12px;">
                         <div class="meter-bar" id="confidence-meter-bar-30m" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
                     <div id="position-container-30m">
-                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                        <div class="no-position-text">No active positions</div>
                     </div>
                 </div>
             </div>
 
             <!-- 1H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('1h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('1h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
                 <div>
-                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>1H STRATEGY<span id="leverage-badge-1h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-1h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-1h" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 8px;">
+                    <div class="card-value" id="model-prediction-1h" style="font-size: 22px; margin-top: 8px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 12px;">
                         <div class="meter-bar" id="confidence-meter-bar-1h" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
                     <div id="position-container-1h">
-                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                        <div class="no-position-text">No active positions</div>
                     </div>
                 </div>
             </div>
 
             <!-- 2H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('2h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between;">
+            <div class="card" onclick="openActiveTradesModal('2h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
                 <div>
-                    <div class="card-title" style="display: flex; justify-content: space-between;">
+                    <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>2H STRATEGY<span id="leverage-badge-2h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
-                        <span id="regime-badge-2h" style="font-size: 10px; opacity: 0.8; font-weight: 700;">Unknown</span>
+                        <span id="regime-badge-2h" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-2h" style="font-size: 20px; margin-top: 5px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 11px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 8px;">
+                    <div class="card-value" id="model-prediction-2h" style="font-size: 22px; margin-top: 8px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 12px;">
                         <div class="meter-bar" id="confidence-meter-bar-2h" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
                     <div id="position-container-2h">
-                        <div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>
+                        <div class="no-position-text">No active positions</div>
                     </div>
                 </div>
             </div>
@@ -1217,45 +1283,45 @@
         <div class="main-panels-grid">
             <!-- COLUMN 1 (LEFT): Key Performance & Reality Metrics -->
             <div class="panel-column">
-                <div class="pnl-balance-container" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+                <div class="pnl-balance-container" style="display: flex; flex-direction: column; gap: 14px; width: 100%;">
                     <!-- Cumulative Profit / Loss (All-Time) Card -->
-                    <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 14px 16px; min-height: 120px; width: 100%;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
+                    <div class="subcard-box" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer;" onmouseover="this.style.borderColor='rgba(139,92,246,0.3)';" onmouseout="this.style.borderColor='rgba(255,255,255,0.05)';">
                         <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 2px;">
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 6px;">
                                 <span>Cumulative PnL</span>
-                                <span style="font-size: 8px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 5px; border-radius: 4px;">HISTORY ➔</span>
+                                <span style="font-size: 9px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">HISTORY ➔</span>
                             </div>
-                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 24px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
+                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 26px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
                         </div>
-                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 4px; font-size: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px;">
+                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 10px; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
                             Daily Goal: $1,000 (Min)
                         </div>
                     </div>
                     
                     <!-- Real Bybit Balance Card -->
-                    <div class="card" id="bybit-balance-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; min-height: 120px; width: 100%;">
+                    <div class="subcard-box" id="bybit-balance-card">
                         <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 2px;">
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 6px;">
                                 <span>Real Bybit Balance</span>
-                                <span style="font-size: 8px; opacity: 0.8; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 5px; border-radius: 4px;">LIVE</span>
+                                <span style="font-size: 9px; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">LIVE</span>
                             </div>
-                            <div class="card-value" id="bybit-balance-value" style="font-size: 24px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
+                            <div class="card-value" id="bybit-balance-value" style="font-size: 26px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
                         </div>
-                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 4px; font-size: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px; color: var(--text-secondary);">
+                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 10px; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; color: var(--text-secondary);">
                             Syncing with Bybit APIs...
                         </div>
                     </div>
 
                     <!-- Live Reality Gap Monitoring Card -->
-                    <div class="card" id="reality-gap-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; min-height: 120px; width: 100%;">
+                    <div class="subcard-box" id="reality-gap-card">
                         <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 2px;">
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 6px;">
                                 <span>Live Reality Gap</span>
-                                <span id="reality-gap-status-badge" style="font-size: 8px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 5px; border-radius: 4px;">MONITORING</span>
+                                <span id="reality-gap-status-badge" style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 3px 8px; border-radius: 6px;">MONITORING</span>
                             </div>
-                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 24px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
+                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 26px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
                         </div>
-                        <div style="margin-top: 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px;">
+                        <div style="margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
                             <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">3.5 bps</strong></div>
                             <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">48 ms</strong></div>
                             <div>Fill: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
@@ -1267,53 +1333,53 @@
 
             <!-- COLUMN 2 (CENTER): Live Performance Metrics Deck -->
             <div class="panel-column">
-                <div class="card" style="padding: 16px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+                <div class="card" style="padding: 20px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
-                        <div class="section-title" style="font-size: 12px; margin-bottom: 10px;">📊 Live Performance Metrics</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Profit Factor</div>
-                                <div id="lp-pf-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">1.38</div>
+                        <div class="section-title" style="font-size: 14px; margin-bottom: 14px;">📊 Live Performance Metrics</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Profit Factor</div>
+                                <div id="lp-pf-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">1.38</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Expectancy</div>
-                                <div id="lp-exp-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">+0.42R</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Expectancy</div>
+                                <div id="lp-exp-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">+0.42R</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Sharpe Ratio</div>
-                                <div id="lp-sharpe-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">1.45</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Sharpe Ratio</div>
+                                <div id="lp-sharpe-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.45</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Sortino Ratio</div>
-                                <div id="lp-sortino-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">1.88</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Sortino Ratio</div>
+                                <div id="lp-sortino-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.88</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Calmar Ratio</div>
-                                <div id="lp-calmar-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">42.5</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Calmar Ratio</div>
+                                <div id="lp-calmar-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">42.5</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Recovery Factor</div>
-                                <div id="lp-recovery-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">9.20</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Recovery Factor</div>
+                                <div id="lp-recovery-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">9.20</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Win Rate</div>
-                                <div id="lp-wr-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">49.5%</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Win Rate</div>
+                                <div id="lp-wr-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">49.5%</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Risk Reward</div>
-                                <div id="lp-rr-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">1.61</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Risk Reward</div>
+                                <div id="lp-rr-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">1.61</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Avg Winner</div>
-                                <div id="lp-avgwin-mid" style="font-size: 15px; font-weight: 800; color: var(--accent-green);">+$1.85</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Avg Winner</div>
+                                <div id="lp-avgwin-mid" style="font-size: 17px; font-weight: 800; color: var(--accent-green);">+$1.85</div>
                             </div>
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
-                                <div style="font-size: 9px; color: var(--text-secondary);">Avg Loser</div>
-                                <div id="lp-avgloss-mid" style="font-size: 15px; font-weight: 800; color: var(--accent-red);">-$1.15</div>
+                            <div class="stat-tile">
+                                <div class="stat-tile-label">Avg Loser</div>
+                                <div id="lp-avgloss-mid" style="font-size: 17px; font-weight: 800; color: var(--accent-red);">-$1.15</div>
                             </div>
                         </div>
                     </div>
-                    <div style="margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary);">
+                    <div style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary);">
                         <span>Trades (Today/Wk/Mo):</span>
                         <strong id="lp-trades-mid" style="color: var(--accent-purple);">6 / 28 / 112</strong>
                     </div>
@@ -1323,7 +1389,7 @@
             <!-- COLUMN 3 (RIGHT): Console Logs -->
             <div class="panel-column">
                 <!-- Terminal Console Card -->
-                <div class="card" style="padding: 16px; height: 100%;">
+                <div class="card" style="padding: 20px; height: 100%;">
                     <div class="terminal-container" style="height: 100%; min-height: 415px; max-height: 415px;">
                         <div class="terminal-header">
                             <div class="terminal-window-buttons">
