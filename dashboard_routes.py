@@ -490,10 +490,19 @@ def api_institutional_summary():
     
     win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 0.0
     import datetime
-    today_start_utc = datetime.datetime.now(datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    try:
+        import zoneinfo
+        pkt_tz = zoneinfo.ZoneInfo("Asia/Karachi")
+    except Exception:
+        pkt_tz = datetime.timezone(datetime.timedelta(hours=5))
+
+    now_pkt = datetime.datetime.now(pkt_tz)
+    today_start_pkt = now_pkt.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_ts = today_start_pkt.timestamp()
+
     today_trades = [
         t for t in valid_trades 
-        if isinstance(t, dict) and float(t.get("exit_time", 0.0)) >= today_start_utc
+        if isinstance(t, dict) and float(t.get("exit_time", 0.0)) >= today_start_ts
     ]
     if not today_trades:
         twenty_four_hours_ago = time.time() - 86400.0
