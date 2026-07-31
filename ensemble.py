@@ -44,6 +44,10 @@ def _slice_model_input(model, X):
 
     try:
         if isinstance(X, pd.DataFrame):
+            if hasattr(model, "feature_names_") and model.feature_names_:
+                valid_cols = [c for c in model.feature_names_ if c in X.columns]
+                if len(valid_cols) == n_expected:
+                    return X[valid_cols]
             if X.shape[1] > n_expected:
                 return X.iloc[:, :n_expected]
             return X

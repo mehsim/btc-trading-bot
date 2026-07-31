@@ -480,8 +480,10 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
     
     chk_final = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
     filled_qty = 0.0
-    if chk_final.get("retCode") == 0 and chk_final.get("result", {}).get("list"):
-        filled_qty = float(chk_final["result"]["list"][0].get("cumExecQty", 0.0))
+    res_data = chk_final.get("result") if isinstance(chk_final.get("result"), dict) else {}
+    res_list = res_data.get("list") if isinstance(res_data, dict) else []
+    if chk_final.get("retCode") == 0 and res_list:
+        filled_qty = float(res_list[0].get("cumExecQty", 0.0))
         
     rem_qty = float(qty) - filled_qty
     if rem_qty > 0.0001:

@@ -2,7 +2,7 @@
   "BTCUSDT": {
     "base_floor": 0.008,
     "adjusted_floor": 0.013000000000000001,
-    "applied_at": "2026-07-31T13:43:13.496832+00:00",
+    "applied_at": "2026-07-31T14:11:09.509923+00:00",
     "decay_days": 30,
     "reason": "Pain trade: stopped at 1.00%, reversed to TP"
   }

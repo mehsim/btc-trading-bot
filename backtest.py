@@ -257,11 +257,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             take_profit = entry_price - tp_multiplier * atr_dollars
 
         # Look up to lookahead candles
-        cfg = TIMEFRAME_CONFIG.get(str(INTERVAL), {"lookahead": 10})
+        cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10})
         lookahead = cfg.get("lookahead", 10)
         
         start_step = 1 if pessimistic_mode else 1
-        exit_price = df.loc[min(i + lookahead, total_candles - 1), "close"]
+        exit_price = df.iloc[min(i + lookahead, total_candles - 1)]["close"]
         exit_reason = "Timer Elapsed"
         candles_elapsed = lookahead
 
@@ -270,8 +270,8 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                 candles_elapsed = step - 1
                 break
             
-            next_high = df.loc[i + step, "high"]
-            next_low = df.loc[i + step, "low"]
+            next_high = df.iloc[i + step]["high"]
+            next_low = df.iloc[i + step]["low"]
             
             if ml_trend == "Bullish":
                 sl_hit = (next_low <= stop_loss)
