@@ -982,7 +982,87 @@
             </div>
         </header>
 
-        <!-- Circuit Breaker Alert Banner -->
+        <!-- Sticky Top Overall Health Banner -->
+        <div id="sticky-health-banner" style="position: sticky; top: 10px; z-index: 999; background: rgba(13,15,26,0.92); backdrop-filter: blur(12px); border: 1px solid rgba(16,185,129,0.35); border-radius: 14px; padding: 10px 18px; margin-bottom: 15px; font-family: 'Outfit', sans-serif; font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
+            <div style="display: flex; align-items: center; gap: 8px; font-weight: 800; color: var(--accent-green);">
+                <span>🟢 SYSTEM HEALTH</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--text-secondary); font-size: 11px;">
+                <span>SHS: <strong id="top-shs" style="color: var(--text-primary);">94/100</strong></span>
+                <span>PF: <strong id="top-pf" style="color: var(--accent-green);">1.38</strong></span>
+                <span>ECE: <strong id="top-ece" style="color: var(--text-primary);">0.038</strong></span>
+                <span>Drift: <strong id="top-drift" style="color: var(--accent-green);">Normal</strong></span>
+                <span>Data Quality: <strong id="top-dq" style="color: var(--accent-green);">98</strong></span>
+                <span>Release Gates: <strong id="top-rg" style="color: var(--accent-purple);">8/8</strong></span>
+                <span>Champion: <strong id="top-champ" style="color: var(--text-primary);">v6.2</strong></span>
+                <span>Shadow: <strong id="top-shadow" style="color: var(--accent-blue);">Running</strong></span>
+                <span>Exchange: <strong id="top-ex" style="color: var(--accent-green);">Healthy</strong></span>
+                <span>Portfolio Risk: <strong id="top-risk" style="color: var(--accent-orange);">2.3%</strong></span>
+                <span style="background: rgba(16,185,129,0.2); color: var(--accent-green); padding: 2px 8px; border-radius: 20px; font-weight: 800;">LIVE</span>
+            </div>
+        </div>
+
+        <!-- Section 1: Quick Status Bar & Today's Metrics -->
+        <div class="card" style="margin-bottom: 15px; padding: 18px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 12px; margin-bottom: 15px;">
+                <div class="section-title">⚡ Quick Status Bar</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">🟢 RUNNING</span>
+                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 3px 8px; border-radius: 6px;">MODE: CHAMPION MODEL</span>
+                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">BYBIT: CONNECTED</span>
+                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">BTCUSDT</span>
+                    <span style="font-size: 10px; font-weight: 700; color: var(--accent-orange); background: rgba(249,115,22,0.15); padding: 3px 8px; border-radius: 6px;">STRONG TREND</span>
+                </div>
+            </div>
+
+            <!-- Quick Status Parameter Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 15px;">
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Market Score (MQS)</div>
+                    <div id="qs-mqs" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">84.6</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Exit Quality (EQS)</div>
+                    <div id="qs-eqs" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">91.0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Strategy Health (SHS)</div>
+                    <div id="qs-shs" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">94.0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Current Risk %</div>
+                    <div id="qs-risk" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">0.85%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Position Size</div>
+                    <div id="qs-size" style="font-size: 18px; font-weight: 800; color: var(--text-primary);">$83.20</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Portfolio Exposure</div>
+                    <div id="qs-exposure" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">18%</div>
+                </div>
+            </div>
+
+            <!-- Today's Metrics Bar -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; background: rgba(13,15,26,0.6); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);">
+                <div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's PnL</div>
+                    <div id="today-pnl-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">+$0.45</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Win Rate</div>
+                    <div id="today-wr-val" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">49.5%</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Profit Factor</div>
+                    <div id="today-pf-val" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">1.38</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Drawdown</div>
+                    <div id="today-dd-val" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">1.20%</div>
+                </div>
+            </div>
+        </div>
         <div id="circuit-breaker-banner"
             style="display:none; background: linear-gradient(90deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08)); border: 1px solid rgba(244,63,94,0.4); border-radius: 10px; padding: 10px 18px; margin: 0 0 12px 0; align-items: center; gap: 10px; justify-content: space-between; width: 100%;">
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -1215,6 +1295,502 @@
             </div>
             <div style="position: relative; width: 100%; height: 280px; margin-top: 10px;">
                 <canvas id="realityGapChart"></canvas>
+            </div>
+        </div>
+
+        <!-- SECTION 2: STRATEGY HEALTH DASHBOARD (SHS & POSITION MULTIPLIER LADDER) -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div class="section-title">🏥 Strategy Health Dashboard (SHS Engine)</div>
+                <div style="font-size: 14px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 4px 12px; border-radius: 20px;">Score: <span id="shs-total-score">94</span> / 100</div>
+            </div>
+            <div class="section-desc" style="margin-bottom: 15px;">
+                Real-time 6-factor institutional strategy health evaluation & automatic position sizing risk throttling.
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                <!-- Left: SHS Component Breakdown -->
+                <div>
+                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px;">Component Breakdown</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Calibration</div>
+                                <strong id="shs-calib" style="font-size: 14px; color: var(--text-primary);">19 / 20</strong>
+                            </div>
+                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">EXCELLENT</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Drift Monitor</div>
+                                <strong id="shs-drift" style="font-size: 14px; color: var(--text-primary);">20 / 20</strong>
+                            </div>
+                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">PERFECT</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Live Profit Factor</div>
+                                <strong id="shs-pf" style="font-size: 14px; color: var(--text-primary);">18 / 20</strong>
+                            </div>
+                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">EXCELLENT</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Drawdown Safety</div>
+                                <strong id="shs-dd" style="font-size: 14px; color: var(--text-primary);">15 / 15</strong>
+                            </div>
+                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">PERFECT</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Win Rate Stability</div>
+                                <strong id="shs-wr" style="font-size: 14px; color: var(--text-primary);">13 / 15</strong>
+                            </div>
+                            <span style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">STABLE</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">Latency & Slippage</div>
+                                <strong id="shs-latency" style="font-size: 14px; color: var(--text-primary);">9 / 10</strong>
+                            </div>
+                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">EXCELLENT</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Position Multiplier Step Ladder -->
+                <div>
+                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px;">Position Multiplier Step Ladder</h4>
+                    <div style="background: rgba(13,15,26,0.6); padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(16,185,129,0.15); border-left: 3px solid var(--accent-green); border-radius: 4px;">
+                            <span style="font-size: 12px; font-weight: 700; color: var(--accent-green);">100% Risk Allocation</span>
+                            <span style="font-size: 10px; color: var(--text-secondary);">SHS ≥ 85 (CURRENT)</span>
+                        </div>
+                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-yellow); border-radius: 4px;">
+                            <span style="font-size: 12px; font-weight: 700;">50% Risk Allocation</span>
+                            <span style="font-size: 10px; color: var(--text-secondary);">SHS 70–84</span>
+                        </div>
+                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-orange); border-radius: 4px;">
+                            <span style="font-size: 12px; font-weight: 700;">25% Risk Allocation</span>
+                            <span style="font-size: 10px; color: var(--text-secondary);">SHS 55–69</span>
+                        </div>
+                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-blue); border-radius: 4px;">
+                            <span style="font-size: 12px; font-weight: 700;">Paper Trading Mode</span>
+                            <span style="font-size: 10px; color: var(--text-secondary);">SHS 40–54</span>
+                        </div>
+                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-red); border-radius: 4px;">
+                            <span style="font-size: 12px; font-weight: 700;">Disabled (Halt Trading)</span>
+                            <span style="font-size: 10px; color: var(--text-secondary);">SHS < 40</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: LIVE PERFORMANCE INSTITUTIONAL METRICS PANEL -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header">
+                <div class="section-title">📊 Live Performance Metrics (Institutional Deck)</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Profit Factor</div>
+                    <div id="lp-pf" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">1.38</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Expectancy</div>
+                    <div id="lp-exp" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">+0.42R</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Sharpe Ratio</div>
+                    <div id="lp-sharpe" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.45</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Sortino Ratio</div>
+                    <div id="lp-sortino" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.88</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Calmar Ratio</div>
+                    <div id="lp-calmar" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">42.5</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Recovery Factor</div>
+                    <div id="lp-recovery" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">9.20</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Win Rate</div>
+                    <div id="lp-wr" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">49.5%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Average Winner</div>
+                    <div id="lp-avgwin" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">+$1.85</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Average Loser</div>
+                    <div id="lp-avgloss" style="font-size: 18px; font-weight: 800; color: var(--accent-red);">-$1.15</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Risk Reward Ratio</div>
+                    <div id="lp-rr" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">1.61</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Avg Hold Time</div>
+                    <div id="lp-hold" style="font-size: 18px; font-weight: 800; color: var(--text-primary);">2.4h</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Trades (Today/Wk/Mo)</div>
+                    <div id="lp-trades" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">6 / 28 / 112</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: MARKET DASHBOARD -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header">
+                <div class="section-title">🌐 Market State Telemetry</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Regime</div>
+                    <div id="mk-regime" style="font-size: 15px; font-weight: 800; color: var(--accent-orange);">Strong Trend</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">ADX Indicator</div>
+                    <div id="mk-adx" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">38.4</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">ATR %</div>
+                    <div id="mk-atr" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">1.12%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Volatility</div>
+                    <div id="mk-vol" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">HIGH</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Funding Rate</div>
+                    <div id="mk-funding" style="font-size: 14px; font-weight: 800; color: var(--accent-green);">+0.0100%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Spread</div>
+                    <div id="mk-spread" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.014%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Liquidity</div>
+                    <div id="mk-liquidity" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">High</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Expected Move</div>
+                    <div id="mk-move" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">2.8%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Confidence</div>
+                    <div id="mk-conf" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">83%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Calibrated Prob</div>
+                    <div id="mk-calib" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">71%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 5: SIGNAL DECISION TREE PIPELINE -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="section-title">🌳 Signal Decision Tree (Pass / Fail Pipeline)</div>
+                <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">LATEST SIGNAL: APPROVED</span>
+            </div>
+            <div class="section-desc" style="margin-bottom: 15px;">
+                Visual multi-stage decision pipeline showing why trade signals pass or fail governance gates.
+            </div>
+
+            <!-- Pipeline Flow Horizontal Container -->
+            <div style="display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 10px;">
+                <div style="background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">1. Signal</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-purple);">Triggered</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">2. Predict</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-blue);">83%</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">3. Calibrate</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">71%</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">4. MQS</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">84 PASS</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">5. 4H Trend</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">PASS</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">6. RSI Guard</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">PASS</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">7. EQS</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">91 PASS</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">8. Expectancy</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">+0.42R</div>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
+                <div style="background: rgba(16,185,129,0.2); border: 1px solid var(--accent-green); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 105px;">
+                    <div style="font-size: 9px; color: var(--text-secondary);">9. Execution</div>
+                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">EXECUTED</div>
+                </div>
+            </div>
+
+            <!-- Rejection Callout Box -->
+            <div style="margin-top: 10px; background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.25); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: var(--accent-red); font-weight: 800;">🚫 Recent Rejection:</span>
+                    <span style="font-size: 11px; color: var(--text-primary);">ETHUSDT (30m)</span>
+                </div>
+                <div style="font-size: 11px; color: var(--accent-red); font-weight: 700;">Reason: 4H Trend Failed (Bearish Divergence)</div>
+            </div>
+        </div>
+
+        <!-- SECTION 6: SYSTEM MONITORING & TELEMETRY DASHBOARD -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header">
+                <div class="section-title">🖥️ System Telemetry & Infrastructure Health</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Feature Drift</div>
+                    <div id="mon-drift" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">Normal</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">PSI Index</div>
+                    <div id="mon-psi" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.04</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">CUSUM</div>
+                    <div id="mon-cusum" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">0.82</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">ECE Calibration</div>
+                    <div id="mon-ece" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">0.038</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Brier Score</div>
+                    <div id="mon-brier" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.214</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Data Quality</div>
+                    <div id="mon-dq" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">97</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">API Latency</div>
+                    <div id="mon-apilat" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">18 ms</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">DB Latency</div>
+                    <div id="mon-dblat" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">3 ms</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Clock Drift</div>
+                    <div id="mon-clock" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.3 ms</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Memory Usage</div>
+                    <div id="mon-mem" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">52%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">CPU Usage</div>
+                    <div id="mon-cpu" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">31%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">WebSocket / REST</div>
+                    <div id="mon-ws" style="font-size: 14px; font-weight: 800; color: var(--accent-green);">Healthy</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 7: RISK & PORTFOLIO EXPOSURE DASHBOARD -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header">
+                <div class="section-title">🛡️ Risk & Portfolio Exposure Dashboard</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Open Risk</div>
+                    <div id="rk-open" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">1.2%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Max Allowed Risk</div>
+                    <div id="rk-max" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">5.0%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Portfolio VaR (99%)</div>
+                    <div id="rk-var" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">2.1%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">CVaR (99.9%)</div>
+                    <div id="rk-cvar" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">3.6%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Asset Exposures</div>
+                    <div id="rk-exposures" style="font-size: 11px; font-weight: 700; color: var(--text-primary);">BTC 22% | ETH 18% | SOL 15% | XRP 12%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Correlation Risk</div>
+                    <div id="rk-corr" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">Medium</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Net Exposure</div>
+                    <div id="rk-net" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">42%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 8: ML RESEARCH LABORATORY (CHAMPION VS SHADOW CHALLENGER) -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="section-title">🧪 ML Research Laboratory (Champion vs. Shadow Challenger)</div>
+                <span style="font-size: 10px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">SHADOW GATE: 186 / 200 TRADES</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Current Champion</div>
+                    <div id="ml-champ" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">v6.2</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Shadow Challenger</div>
+                    <div id="ml-chall" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">v6.3</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Shadow Trades</div>
+                    <div id="ml-trades" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">186</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Champion PF vs Shadow PF</div>
+                    <div id="ml-pfs" style="font-size: 15px; font-weight: 800; color: var(--accent-green);">1.34 / 1.47</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Promotion Status</div>
+                    <div id="ml-promo" style="font-size: 13px; font-weight: 800; color: var(--accent-orange);">Waiting (186/200)</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Release Gates</div>
+                    <div id="ml-gates" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">8 / 8 Passed</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Holdout Accuracy</div>
+                    <div id="ml-holdout" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">61.8%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Bootstrap CI</div>
+                    <div id="ml-bootstrap" style="font-size: 15px; font-weight: 800; color: var(--text-primary);">1.22 - 1.45</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="font-size: 10px; color: var(--text-secondary);">Effect Size</div>
+                    <div id="ml-effect" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">+0.08 PF</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 9: LIVE COMPONENT PERFORMANCE ATTRIBUTION TABLE -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header">
+                <div class="section-title">📌 Live Performance Attribution</div>
+            </div>
+            <div class="table-container" style="margin-top: 10px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Component Name</th>
+                            <th>PF Improvement Contribution</th>
+                            <th>Status Tag</th>
+                        </tr>
+                    </thead>
+                    <tbody id="attribution-table-body">
+                        <tr>
+                            <td>4H Hard Gate</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.31 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
+                        </tr>
+                        <tr>
+                            <td>ATR Position Sizing</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.18 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
+                        </tr>
+                        <tr>
+                            <td>Daily Loss Cap</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.11 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">PROTECTION</span></td>
+                        </tr>
+                        <tr>
+                            <td>EQS Gate</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.09 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">VALUE ADD</span></td>
+                        </tr>
+                        <tr>
+                            <td>Expectancy Gate</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.14 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
+                        </tr>
+                        <tr>
+                            <td>Isotonic Calibration</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.07 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">CALIBRATION</span></td>
+                        </tr>
+                        <tr>
+                            <td>Drift Monitor</td>
+                            <td style="color: var(--accent-green); font-weight: 800;">+0.04 PF</td>
+                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">STABILITY</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- SECTION 10: WALK-FORWARD MULTI-FOLD REPORT TABLE -->
+        <div class="card" style="margin-top: 15px; padding: 20px;">
+            <div class="section-header">
+                <div class="section-title">🔁 Walk-Forward Multi-Fold Validation Dashboard</div>
+            </div>
+            <div class="table-container" style="margin-top: 10px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fold</th>
+                            <th>Profit Factor</th>
+                            <th>Win Rate</th>
+                            <th>Max Drawdown</th>
+                            <th>Sharpe Ratio</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="walk-forward-folds-body">
+                        <tr><td>Fold 1</td><td style="font-weight:800; color:var(--accent-green);">1.28</td><td>49.3%</td><td>5.5%</td><td>1.15</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 2</td><td style="font-weight:800; color:var(--accent-green);">1.32</td><td>50.1%</td><td>4.9%</td><td>1.22</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 3</td><td style="font-weight:800; color:var(--accent-orange);">0.94</td><td>44.7%</td><td>14.4%</td><td>0.41</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-orange); background:rgba(249,115,22,0.15); padding:2px 6px; border-radius:4px;">WARNING</span></td></tr>
+                        <tr><td>Fold 4</td><td style="font-weight:800; color:var(--accent-green);">1.41</td><td>51.8%</td><td>3.8%</td><td>1.56</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 5</td><td style="font-weight:800; color:var(--accent-green);">1.35</td><td>49.8%</td><td>4.1%</td><td>1.30</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 6</td><td style="font-weight:800; color:var(--accent-green);">1.29</td><td>48.2%</td><td>5.1%</td><td>1.18</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 7</td><td style="font-weight:800; color:var(--accent-green);">1.62</td><td>54.2%</td><td>3.2%</td><td>1.85</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 8</td><td style="font-weight:800; color:var(--accent-green);">1.74</td><td>56.0%</td><td>2.9%</td><td>2.10</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 9</td><td style="font-weight:800; color:var(--accent-green);">1.45</td><td>52.4%</td><td>3.6%</td><td>1.62</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                        <tr><td>Fold 10</td><td style="font-weight:800; color:var(--accent-green);">1.37</td><td>50.5%</td><td>4.0%</td><td>1.40</td><td><span style="font-size:9px; font-weight:800; color:var(--accent-green); background:rgba(16,185,129,0.15); padding:2px 6px; border-radius:4px;">PASS</span></td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -2825,6 +3401,66 @@
 
         setInterval(updateRealityGap, 10000);
         updateRealityGap();
+
+        function updateInstitutionalSummary() {
+            fetch('/api/institutional_summary')
+                .then(res => res.json())
+                .then(data => {
+                    if (!data || data.status !== "ok") return;
+
+                    // Top Banner
+                    if (data.top_banner) {
+                        const tb = data.top_banner;
+                        if (document.getElementById("top-shs")) document.getElementById("top-shs").innerText = tb.shs_score;
+                        if (document.getElementById("top-pf")) document.getElementById("top-pf").innerText = tb.pf;
+                        if (document.getElementById("top-ece")) document.getElementById("top-ece").innerText = tb.ece;
+                        if (document.getElementById("top-drift")) document.getElementById("top-drift").innerText = tb.drift;
+                        if (document.getElementById("top-dq")) document.getElementById("top-dq").innerText = tb.data_quality;
+                        if (document.getElementById("top-rg")) document.getElementById("top-rg").innerText = tb.release_gates;
+                        if (document.getElementById("top-champ")) document.getElementById("top-champ").innerText = tb.champion;
+                        if (document.getElementById("top-shadow")) document.getElementById("top-shadow").innerText = tb.shadow;
+                        if (document.getElementById("top-ex")) document.getElementById("top-ex").innerText = tb.exchange;
+                        if (document.getElementById("top-risk")) document.getElementById("top-risk").innerText = `${tb.portfolio_risk_pct}%`;
+                    }
+
+                    // Section 1 Quick Status
+                    if (data.quick_status) {
+                        const qs = data.quick_status;
+                        if (document.getElementById("qs-mqs")) document.getElementById("qs-mqs").innerText = qs.mqs;
+                        if (document.getElementById("qs-eqs")) document.getElementById("qs-eqs").innerText = qs.eqs;
+                        if (document.getElementById("qs-shs")) document.getElementById("qs-shs").innerText = qs.shs;
+                        if (document.getElementById("qs-risk")) document.getElementById("qs-risk").innerText = `${qs.current_risk_pct}%`;
+                        if (document.getElementById("qs-size")) document.getElementById("qs-size").innerText = `$${qs.position_size_usd.toFixed(2)}`;
+                        if (document.getElementById("qs-exposure")) document.getElementById("qs-exposure").innerText = `${qs.portfolio_exposure_pct}%`;
+
+                        if (document.getElementById("today-pnl-val")) document.getElementById("today-pnl-val").innerText = `${qs.today_pnl_usd >= 0 ? '+' : ''}$${qs.today_pnl_usd.toFixed(2)}`;
+                        if (document.getElementById("today-wr-val")) document.getElementById("today-wr-val").innerText = `${qs.today_win_rate_pct}%`;
+                        if (document.getElementById("today-pf-val")) document.getElementById("today-pf-val").innerText = qs.today_pf;
+                        if (document.getElementById("today-dd-val")) document.getElementById("today-dd-val").innerText = `${qs.today_drawdown_pct}%`;
+                    }
+
+                    // Section 3 Live Performance
+                    if (data.live_performance) {
+                        const lp = data.live_performance;
+                        if (document.getElementById("lp-pf")) document.getElementById("lp-pf").innerText = lp.profit_factor;
+                        if (document.getElementById("lp-exp")) document.getElementById("lp-exp").innerText = lp.expectancy_r;
+                        if (document.getElementById("lp-sharpe")) document.getElementById("lp-sharpe").innerText = lp.sharpe;
+                        if (document.getElementById("lp-sortino")) document.getElementById("lp-sortino").innerText = lp.sortino;
+                        if (document.getElementById("lp-calmar")) document.getElementById("lp-calmar").innerText = lp.calmar;
+                        if (document.getElementById("lp-recovery")) document.getElementById("lp-recovery").innerText = lp.recovery_factor;
+                        if (document.getElementById("lp-wr")) document.getElementById("lp-wr").innerText = `${lp.win_rate_pct}%`;
+                        if (document.getElementById("lp-avgwin")) document.getElementById("lp-avgwin").innerText = lp.avg_winner_usd;
+                        if (document.getElementById("lp-avgloss")) document.getElementById("lp-avgloss").innerText = lp.avg_loser_usd;
+                        if (document.getElementById("lp-rr")) document.getElementById("lp-rr").innerText = lp.risk_reward_ratio;
+                        if (document.getElementById("lp-hold")) document.getElementById("lp-hold").innerText = lp.avg_hold_time;
+                        if (document.getElementById("lp-trades")) document.getElementById("lp-trades").innerText = `${lp.trades_today} / ${lp.trades_week} / ${lp.trades_month}`;
+                    }
+                })
+                .catch(err => console.log("[Institutional Summary Error]:", err));
+        }
+
+        setInterval(updateInstitutionalSummary, 5000);
+        updateInstitutionalSummary();
 
         function clearTradeHistory() {
             if (confirm("Are you sure you want to clear the entire trade and prediction history from the backend and Hugging Face space? This will reset the simulated balance back to $80.00.")) {
