@@ -1050,8 +1050,12 @@
                     <div id="today-pnl-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">+$0.45</div>
                 </div>
                 <div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Volume</div>
-                    <div id="today-vol-val" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">$0.00</div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Trades</div>
+                    <div id="today-trades-count-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">0</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Vol / Leveraged Vol</div>
+                    <div id="today-vol-val" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">$0.00 / $0.00</div>
                 </div>
                 <div>
                     <div style="font-size: 10px; color: var(--text-secondary);">Today's Win Rate</div>
@@ -3465,9 +3469,19 @@
                             const pnlVal = parseFloat(qs.today_pnl_usd);
                             document.getElementById("today-pnl-val").innerText = !isNaN(pnlVal) ? `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}` : qs.today_pnl_usd;
                         }
+                        if (document.getElementById("today-trades-count-val")) {
+                            document.getElementById("today-trades-count-val").innerText = qs.today_trades_count ?? 0;
+                        }
                         if (document.getElementById("today-vol-val")) {
                             const volVal = parseFloat(qs.today_volume_usd);
-                            document.getElementById("today-vol-val").innerText = !isNaN(volVal) ? `$${volVal.toFixed(2)}` : (qs.today_volume_usd || "$0.00");
+                            const levVolVal = parseFloat(qs.today_leveraged_volume_usd);
+                            if (!isNaN(volVal) && !isNaN(levVolVal)) {
+                                document.getElementById("today-vol-val").innerText = `$${volVal.toFixed(2)} / $${levVolVal.toFixed(2)}`;
+                            } else if (!isNaN(volVal)) {
+                                document.getElementById("today-vol-val").innerText = `$${volVal.toFixed(2)}`;
+                            } else {
+                                document.getElementById("today-vol-val").innerText = "$0.00";
+                            }
                         }
                         if (document.getElementById("today-wr-val")) document.getElementById("today-wr-val").innerText = `${qs.today_win_rate_pct}%`;
                         if (document.getElementById("today-pf-val")) document.getElementById("today-pf-val").innerText = qs.today_pf;

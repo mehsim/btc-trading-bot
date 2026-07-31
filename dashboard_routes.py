@@ -492,6 +492,10 @@ def api_institutional_summary():
     today_trades = valid_trades[-6:] if valid_trades else []
     today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in today_trades)
     today_volume = sum(float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 22.84)))) for t in today_trades)
+    today_leveraged_volume = sum(
+        float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 22.84)))) * float(t.get("leverage", 10.0))
+        for t in today_trades
+    )
 
     gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades)
     gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades))
@@ -582,8 +586,10 @@ def api_institutional_summary():
             "current_risk_pct": float(state_manager.get("current_risk_pct", 0.85)),
             "position_size_usd": float(current_position_size_usd),
             "portfolio_exposure_pct": float(portfolio_exposure_pct),
+            "today_trades_count": len(today_trades),
             "today_pnl_usd": float(round(today_pnl, 2)),
             "today_volume_usd": float(round(today_volume, 2)),
+            "today_leveraged_volume_usd": float(round(today_leveraged_volume, 2)),
             "today_win_rate_pct": float(round(win_rate, 1)),
             "today_pf": calculated_pf,
             "today_drawdown_pct": float(dynamic_dd)
