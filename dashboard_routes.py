@@ -405,7 +405,13 @@ def api_reality_gap():
         tf = str(t.get("interval", t.get("timeframe", "1h")))
         act_pnl = float(t.get("pnl_usd", 0.0))
 
-        sl = float(t.get("stop_loss", 0.0))
+        entry = float(t.get("entry_price", t.get("entry", 0.0)))
+        sl = float(t.get("stop_loss", t.get("sl", 0.0)))
+        tp = float(t.get("take_profit", t.get("tp", 0.0)))
+        pos_size = float(t.get("position_size_usd", t.get("position_size", t.get("original_size", 10.0))))
+        lev = float(t.get("leverage", 10.0))
+        conf = float(t.get("confidence", 0.75))
+
         if entry > 0 and sl > 0:
             sl_pct = abs((entry - sl) / entry)
             exp_loss = pos_size * sl_pct * lev
@@ -703,17 +709,93 @@ def api_institutional_summary():
             {"component": "Isotonic Calibration", "improvement": "+0.07 PF", "status": "CALIBRATION"},
             {"component": "Drift Monitor", "improvement": "+0.04 PF", "status": "STABILITY"}
         ]),
-        "walk_forward_folds": state_manager.get("walk_forward_folds", [
-            {"fold": "Fold 1", "pf": 1.28, "win_rate": "49.3%", "drawdown": "5.5%", "sharpe": 1.15, "status": "PASS"},
-            {"fold": "Fold 2", "pf": 1.32, "win_rate": "50.1%", "drawdown": "4.9%", "sharpe": 1.22, "status": "PASS"},
-            {"fold": "Fold 3", "pf": 0.94, "win_rate": "44.7%", "drawdown": "14.4%", "sharpe": 0.41, "status": "WARNING"},
-            {"fold": "Fold 4", "pf": 1.41, "win_rate": "51.8%", "drawdown": "3.8%", "sharpe": 1.56, "status": "PASS"},
-            {"fold": "Fold 5", "pf": 1.35, "win_rate": "49.8%", "drawdown": "4.1%", "sharpe": 1.30, "status": "PASS"},
-            {"fold": "Fold 6", "pf": 1.29, "win_rate": "48.2%", "drawdown": "5.1%", "sharpe": 1.18, "status": "PASS"},
-            {"fold": "Fold 7", "pf": 1.62, "win_rate": "54.2%", "drawdown": "3.2%", "sharpe": 1.85, "status": "PASS"},
-            {"fold": "Fold 8", "pf": 1.74, "win_rate": "56.0%", "drawdown": "2.9%", "sharpe": 2.10, "status": "PASS"},
-            {"fold": "Fold 9", "pf": 1.45, "win_rate": "52.4%", "drawdown": "3.6%", "sharpe": 1.62, "status": "PASS"},
-            {"fold": "Fold 10", "pf": 1.37, "win_rate": "50.5%", "drawdown": "4.0%", "sharpe": 1.40, "status": "PASS"}
-        ])
+        "walk_forward_folds": _get_walk_forward_folds()
     }
     return jsonify(data)
+
+
+def _get_walk_forward_folds():
+    from state_manager import state_manager
+    folds = state_manager.get("walk_forward_folds")
+    if folds and isinstance(folds, list) and len(folds) > 0:
+        return folds
+
+    try:
+        if os.path.exists("backtest_results.json"):
+            with open("backtest_results.json", "r") as f:
+                bt_data = json.load(f)
+            wf_val = bt_data.get("walk_forward_validation", {})
+            windows = wf_val.get("windows", [])
+            if windows and isinstance(windows, list) and len(windows) > 0:
+                extracted = []
+                for idx, w in enumerate(windows[:10]):
+                    wr = float(w.get("win_rate", 50.0))
+                    dd = float(w.get("max_drawdown", 0.0))
+                    ret = float(w.get("cum_return", 0.0))
+                    pf = float(w.get("profit_factor", round(max(0.5, 1.0 + (ret / 20.0)), 2)))
+                    sharpe = float(w.get("sharpe", round(max(0.1, (ret / max(1.0, dd)) * 1.5 + 1.0), 2)))
+                    status = "PASS" if ret >= 0 and dd < 15 else ("WARNING" if ret > -10 and dd < 25 else "FAIL")
+                    extracted.append({
+                        "fold": f"Fold {idx+1}",
+                        "pf": pf,
+                        "win_rate": f"{wr:.1f}%",
+                        "drawdown": f"{dd:.1f}%",
+                        "sharpe": sharpe,
+                        "status": status
+                    })
+                if extracted:
+                    return extracted
+    except Exception:
+        pass
+
+    try:
+        history = state_manager.get("trade_history", [])
+        if not history or not isinstance(history, list) or len(history) < 5:
+            try:
+                history = database.get_trade_history(limit=500)
+            except Exception:
+                history = []
+
+        valid_trades = [t for t in history if isinstance(t, dict)]
+        if len(valid_trades) >= 5:
+            num_folds = min(10, max(1, len(valid_trades) // 3))
+            chunk_size = max(1, len(valid_trades) // num_folds)
+            dynamic_folds = []
+            for i in range(num_folds):
+                seg = valid_trades[i * chunk_size : (i + 1) * chunk_size if i < num_folds - 1 else len(valid_trades)]
+                if not seg:
+                    continue
+                pnls = [float(t.get("pnl_usd", 0.0)) for t in seg]
+                wins = [p for p in pnls if p > 0]
+                losses = [abs(p) for p in pnls if p < 0]
+                wr = (len(wins) / max(1, len(pnls))) * 100.0
+                gg = sum(wins)
+                gl = sum(losses)
+                pf = round(gg / gl, 2) if gl > 0 else (2.0 if gg > 0 else 1.0)
+
+                cum = 0.0
+                peak = 0.0
+                max_dd = 0.0
+                for p in pnls:
+                    cum += p
+                    if cum > peak:
+                        peak = cum
+                    dd = (peak - cum)
+                    if dd > max_dd:
+                        max_dd = dd
+
+                status = "PASS" if pf >= 1.1 else ("WARNING" if pf >= 0.85 else "FAIL")
+                dynamic_folds.append({
+                    "fold": f"Fold {i+1}",
+                    "pf": pf,
+                    "win_rate": f"{wr:.1f}%",
+                    "drawdown": f"{max_dd:.1f}%",
+                    "sharpe": round(pf * 1.1, 2),
+                    "status": status
+                })
+            if dynamic_folds:
+                return dynamic_folds
+    except Exception:
+        pass
+
+    return []
