@@ -13,31 +13,31 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         :root {
-            /* Harmonious Dark Palette */
+            /* Ultra-Premium Dark Palette */
             --bg-color: #030712;
-            --card-bg: rgba(17, 24, 39, 0.55);
-            --card-border: rgba(255, 255, 255, 0.05);
-            --card-hover-border: rgba(255, 255, 255, 0.12);
+            --card-bg: rgba(15, 23, 42, 0.65);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-hover-border: rgba(255, 255, 255, 0.18);
 
-            --text-primary: #f9fafb;
-            --text-secondary: #9ca3af;
-            --text-muted: #6b7280;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
 
-            /* Vibrant Accents */
+            /* Curated Neon Accents */
             --accent-green: #10b981;
             --accent-red: #f43f5e;
-            --accent-blue: #3b82f6;
-            --accent-orange: #f97316;
-            --accent-purple: #8b5cf6;
+            --accent-blue: #38bdf8;
+            --accent-orange: #fb923c;
+            --accent-purple: #c084fc;
 
             /* Glowing shadows */
-            --glow-green: 0 0 20px rgba(16, 185, 129, 0.25);
-            --glow-red: 0 0 20px rgba(244, 63, 94, 0.25);
-            --glow-blue: 0 0 20px rgba(59, 130, 246, 0.25);
-            --glow-orange: 0 0 20px rgba(249, 115, 22, 0.25);
-            --glow-purple: 0 0 20px rgba(139, 92, 246, 0.25);
+            --glow-green: 0 0 24px rgba(16, 185, 129, 0.3);
+            --glow-red: 0 0 24px rgba(244, 63, 94, 0.3);
+            --glow-blue: 0 0 24px rgba(56, 189, 248, 0.3);
+            --glow-orange: 0 0 24px rgba(251, 146, 60, 0.3);
+            --glow-purple: 0 0 24px rgba(192, 132, 252, 0.3);
 
-            --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-smooth: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         * {
@@ -46,8 +46,27 @@
             padding: 0;
         }
 
+        /* Custom Sleek Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #030712;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.22);
+        }
+
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-primary);
             min-height: 100vh;
