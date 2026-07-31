@@ -430,31 +430,7 @@ def api_reality_gap():
             "actual_pnl": round(act_pnl, 2)
         })
 
-    if len(trades_comparison) < 20:
-        sample_trades = [
-            {"label": "#1 ETH (15m)",  "expected_pnl": +0.35, "actual_pnl": +0.12},
-            {"label": "#2 LTC (15m)",  "expected_pnl": +0.28, "actual_pnl": -0.05},
-            {"label": "#3 BTC (15m)",  "expected_pnl": +0.45, "actual_pnl": +0.10},
-            {"label": "#4 ETH (15m)",  "expected_pnl": +0.42, "actual_pnl": -0.25},
-            {"label": "#5 BTC (15m)",  "expected_pnl": +0.38, "actual_pnl": -0.15},
-            {"label": "#6 AVAX (60m)", "expected_pnl": +0.32, "actual_pnl": -0.20},
-            {"label": "#7 ETH (15m)",  "expected_pnl": +0.40, "actual_pnl": -0.38},
-            {"label": "#8 AVAX (15m)", "expected_pnl": +0.25, "actual_pnl": -0.15},
-            {"label": "#9 DOT (15m)",  "expected_pnl": +0.22, "actual_pnl": -0.14},
-            {"label": "#10 BNB (15m)", "expected_pnl": +0.30, "actual_pnl": +0.12},
-            {"label": "#11 BNB (15m)", "expected_pnl": +0.28, "actual_pnl": -0.13},
-            {"label": "#12 BNB (15m)", "expected_pnl": +0.29, "actual_pnl": -0.15},
-            {"label": "#13 ADA (15m)", "expected_pnl": +0.26, "actual_pnl": -0.26},
-            {"label": "#14 DOT (15m)", "expected_pnl": +0.24, "actual_pnl": +0.07},
-            {"label": "#15 AVAX (60m)","expected_pnl": +0.35, "actual_pnl": +0.15},
-            {"label": "#16 AVAX (60m)","expected_pnl": +0.33, "actual_pnl": +0.12},
-            {"label": "#17 XRP (15m)", "expected_pnl": +0.22, "actual_pnl": -0.02},
-            {"label": "#18 AVAX (15m)","expected_pnl": +0.26, "actual_pnl": -0.16},
-            {"label": "#19 BTC (15m)", "expected_pnl": +0.48, "actual_pnl": +0.10},
-            {"label": "#20 ETH (15m)", "expected_pnl": +0.40, "actual_pnl": +0.05}
-        ]
-        needed = 20 - len(trades_comparison)
-        trades_comparison = sample_trades[:needed] + trades_comparison
+
 
     # Dynamic Reality Gap Calculations across trade comparisons
     tot_exp = sum(float(t.get("expected_pnl", 0.0)) for t in trades_comparison)
