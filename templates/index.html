@@ -10,6 +10,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         :root {
             /* Harmonious Dark Palette */
@@ -1223,6 +1224,20 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Latest 10 Closed Trades Performance Chart (Expected vs. Real Result) -->
+        <div class="card" style="margin-top: 4px;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div class="section-title">📊 Trade Performance Reality Gap (Latest 10 Closed Trades)</div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 4px 12px; border-radius: 20px;">ALL STRATEGIES COMBINED</div>
+            </div>
+            <div class="section-desc">
+                Compares expected PnL vs. actual realized PnL across the latest 10 closed trades across all timeframes (15m, 30m, 1h, 2h).
+            </div>
+            <div style="position: relative; width: 100%; height: 260px; margin-top: 10px;">
+                <canvas id="realityGapChart"></canvas>
             </div>
         </div>
 
@@ -2722,6 +2737,81 @@
             }
         }
 
+        let realityChartInstance = null;
+
+        function renderRealityGapChart(tradesList) {
+            const ctx = document.getElementById('realityGapChart');
+            if (!ctx || !window.Chart) return;
+
+            const labels = tradesList.map(t => t.label);
+            const expectedData = tradesList.map(t => t.expected_pnl);
+            const actualData = tradesList.map(t => t.actual_pnl);
+
+            if (realityChartInstance) {
+                realityChartInstance.data.labels = labels;
+                realityChartInstance.data.datasets[0].data = expectedData;
+                realityChartInstance.data.datasets[1].data = actualData;
+                realityChartInstance.update();
+                return;
+            }
+
+            realityChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Expected Result (PnL $)',
+                            data: expectedData,
+                            backgroundColor: 'rgba(139, 92, 246, 0.75)',
+                            borderColor: 'rgba(139, 92, 246, 1)',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        },
+                        {
+                            label: 'Real Live Result (PnL $)',
+                            data: actualData,
+                            backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                            borderColor: 'rgba(16, 185, 129, 1)',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', font: { size: 10, family: 'Inter' } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#9ca3af',
+                                font: { size: 10, family: 'Inter' },
+                                callback: function(value) { return (value >= 0 ? '+' : '') + '$' + value.toFixed(2); }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#f9fafb', font: { family: 'Outfit', size: 11, weight: '600' } }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const val = context.raw;
+                                    return `${context.dataset.label}: ${val >= 0 ? '+' : ''}$${val.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         function updateRealityGap() {
             fetch('/api/reality_gap')
                 .then(res => res.json())
@@ -2740,6 +2830,10 @@
                         if (fillVal) fillVal.innerText = `${parseFloat(data.fill_quality_pct).toFixed(1)}%`;
                         if (pfVal) pfVal.innerText = `${parseFloat(data.expected_pf).toFixed(2)} / ${parseFloat(data.actual_pf).toFixed(2)}`;
                         if (statusBadge) statusBadge.innerText = data.status_tag || "MONITORING";
+
+                        if (data.latest_10_closed_trades && Array.isArray(data.latest_10_closed_trades)) {
+                            renderRealityGapChart(data.latest_10_closed_trades);
+                        }
                     }
                 })
                 .catch(err => console.log("[Reality Gap Update Warning]:", err));
