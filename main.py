@@ -45,6 +45,10 @@ from confluence_engine import check_pre_trade_confluence
 from telegram_bot import send_telegram_alert, execute_telegram_api_call
 from websocket_client import init_bybit_websocket_listeners, get_ws_status
 from dashboard_routes import dashboard_bp
+from risk_limits import assert_risk_governance_invariants
+
+# F-09 Governance Startup Lock: Assert hard safety bounds before trading initialization
+assert_risk_governance_invariants()
 
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 

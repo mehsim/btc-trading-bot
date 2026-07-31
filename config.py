@@ -3,6 +3,14 @@ Centralized Configuration System for BTC Trading Bot
 Consolidates strategy thresholds, leverage caps, risk parameters, and memory bounds.
 """
 
+# F-09 Isolated Governance Risk Limits
+from risk_limits import (
+    HARD_TIMEFRAME_MAX_LEVERAGE_CAPS as TIMEFRAME_MAX_LEVERAGE_CAPS,
+    HARD_MAX_WALLET_MARGIN_UTILIZATION_PCT as MAX_WALLET_MARGIN_UTILIZATION_PCT,
+    HARD_MAX_SYMBOL_EXPOSURE_PCT as MAX_SYMBOL_EXPOSURE_PCT,
+    assert_risk_governance_invariants
+)
+
 # System & Memory Bounds
 MAX_TRADE_HISTORY_MEMORY = 1000
 MAX_PREDICTION_HISTORY_MEMORY = 1000
@@ -11,18 +19,6 @@ MAX_LOG_ENTRIES_MEMORY = 200
 # Order Execution Bounds
 MIN_ORDER_VALUE_USDT = 5.1
 MAX_SCALED_RISK_CAP_RATIO = 1.10  # 110% hard cap on approved risk when order size is scaled up
-MAX_WALLET_MARGIN_UTILIZATION_PCT = 0.90 # 90% wallet balance margin limit
-
-# Leverage & Timeframe Caps
-TIMEFRAME_MAX_LEVERAGE_CAPS = {
-    "5": 10.0,
-    "15": 10.0,
-    "30": 10.0,
-    "60": 5.0,
-    "120": 5.0,
-    "240": 3.0,
-    "360": 3.0
-}
 
 INTERVAL_MAX_POSITION_PCT = {
     "5": 0.05,
@@ -33,8 +29,6 @@ INTERVAL_MAX_POSITION_PCT = {
     "240": 0.25,
     "360": 0.25
 }
-
-MAX_SYMBOL_EXPOSURE_PCT = 0.20  # Max 20% total balance in one symbol across all intervals
 
 # Volatility & Market Regime Thresholds
 TARGET_VOLATILITY_ATR = 0.005

@@ -28,6 +28,47 @@ def init_mlflow(experiment_name: str = "BTC_Trading_Bot"):
         print(f"[MLflow Warning] Failed to initialize MLflow: {e}")
         return False
 
+def calculate_brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    """
+    F-10 Calibration Metric: Brier Score
+    BS = (1/N) * sum((prob - label)^2)
+    Lower Brier score indicates superior calibration (0.0 is perfect).
+    """
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_prob, dtype=float)
+    if len(y_t) == 0 or len(y_t) != len(y_p):
+        return 0.25
+    return float(np.mean((y_p - y_t) ** 2))
+
+def calculate_expected_calibration_error(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
+    """
+    F-10 Calibration Metric: Expected Calibration Error (ECE)
+    ECE = sum(|acc(bin) - conf(bin)| * (|bin| / N))
+    Quantifies deviation between stated probability confidence and actual realized win rate.
+    """
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_prob, dtype=float)
+    if len(y_t) == 0 or len(y_t) != len(y_p):
+        return 0.0
+
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    total_samples = len(y_t)
+
+    for i in range(n_bins):
+        bin_lower = bin_boundaries[i]
+        bin_upper = bin_boundaries[i + 1]
+        
+        in_bin = (y_p >= bin_lower) & (y_p < bin_upper) if i < n_bins - 1 else (y_p >= bin_lower) & (y_p <= bin_upper)
+        bin_size = np.sum(in_bin)
+        
+        if bin_size > 0:
+            avg_confidence = np.mean(y_p[in_bin])
+            avg_accuracy = np.mean(y_t[in_bin])
+            ece += np.abs(avg_accuracy - avg_confidence) * (bin_size / total_samples)
+
+    return float(ece)
+
 # Model Registry Stages
 STAGE_STAGING = "Staging"
 STAGE_PRODUCTION = "Production"
