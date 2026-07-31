@@ -1181,7 +1181,7 @@
             <div class="panel-column">
                 <!-- Terminal Console Card -->
                 <div class="card" style="padding: 16px; height: 100%;">
-                    <div class="terminal-container" style="height: 100%; min-height: 480px;">
+                    <div class="terminal-container" style="height: 100%; min-height: 415px; max-height: 415px;">
                         <div class="terminal-header">
                             <div class="terminal-window-buttons">
                                 <div class="terminal-btn btn-red"></div>
@@ -2238,6 +2238,10 @@
                             logContainer.appendChild(lineDiv);
                         }
                         loggedLinesCount = logs.length;
+                        // Prune older DOM lines to keep maximum 40 lines displayed
+                        while (logContainer.children.length > 40) {
+                            logContainer.removeChild(logContainer.firstChild);
+                        }
                         // Scroll to bottom
                         logContainer.scrollTop = logContainer.scrollHeight;
                     }

@@ -42,7 +42,7 @@ class StdoutRedirector:
                 msg = f"[{ts}] {msg}"
             with logs_lock:
                 bot_logs.append(msg)
-                if len(bot_logs) > 400:
+                if len(bot_logs) > 80:
                     bot_logs.pop(0)
 
     def flush(self):
