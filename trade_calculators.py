@@ -35,6 +35,70 @@ MIN_RR_RATIO = {
 }
 
 
+# Statistical Quality Engine: Profit Factor, Expectancy (R), Sharpe, and Sortino Ratios
+def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.0, risk_per_trade_pct: float = 0.01) -> dict:
+    """
+    Unified Statistical Replay & Backtest Quality Engine.
+    Computes Profit Factor, Expectancy in R-multiples, Sharpe Ratio, Sortino Ratio, Win Rate, and Drawdown.
+    """
+    if not returns_list:
+        return {
+            "total_trades": 0,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "expectancy_r": 0.0,
+            "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "max_drawdown_pct": 0.0,
+            "ending_return_pct": 0.0
+        }
+
+    returns = np.array(returns_list, dtype=float)
+    total_trades = len(returns)
+    
+    wins = returns[returns > 0]
+    losses = returns[returns <= 0]
+    
+    win_rate = (len(wins) / max(1, total_trades)) * 100.0
+    
+    gross_gains = float(np.sum(wins)) if len(wins) > 0 else 0.0
+    gross_losses = float(np.abs(np.sum(losses))) if len(losses) > 0 else 0.0
+    
+    profit_factor = gross_gains / max(1e-9, gross_losses) if gross_losses > 0 else (10.0 if gross_gains > 0 else 0.0)
+
+    # Convert trade returns to R-multiples (assuming risk_per_trade_pct baseline)
+    r_multiples = returns / max(1e-4, risk_per_trade_pct)
+    expectancy_r = float(np.mean(r_multiples))
+
+    # Sharpe & Sortino Ratios (Trade-level annualized assuming ~252 trading windows per year)
+    mean_ret = float(np.mean(returns))
+    std_ret = float(np.std(returns)) if len(returns) > 1 else 0.0
+    
+    downside_returns = returns[returns < 0]
+    std_downside = float(np.std(downside_returns)) if len(downside_returns) > 1 else (std_ret if len(returns) > 1 else 0.0)
+
+    sharpe_ratio = (mean_ret / max(1e-8, std_ret)) * np.sqrt(min(total_trades, 252)) if std_ret > 0 else 0.0
+    sortino_ratio = (mean_ret / max(1e-8, std_downside)) * np.sqrt(min(total_trades, 252)) if std_downside > 0 else (sharpe_ratio if mean_ret > 0 else 0.0)
+
+    # Equity Curve & Drawdown
+    equity_curve = initial_equity * np.cumprod(np.maximum(0.001, 1.0 + returns))
+    peak = np.maximum.accumulate(equity_curve)
+    dd_curve = (peak - equity_curve) / peak * 100.0
+    max_drawdown = float(np.max(dd_curve)) if len(dd_curve) > 0 else 0.0
+    ending_return = float(((equity_curve[-1] - initial_equity) / initial_equity) * 100.0) if len(equity_curve) > 0 else 0.0
+
+    return {
+        "total_trades": total_trades,
+        "win_rate": float(win_rate),
+        "profit_factor": float(profit_factor),
+        "expectancy_r": float(expectancy_r),
+        "sharpe_ratio": float(sharpe_ratio),
+        "sortino_ratio": float(sortino_ratio),
+        "max_drawdown_pct": float(max_drawdown),
+        "ending_return_pct": float(ending_return)
+    }
+
+
 def calculate_fixed_risk_position_size(
     account_equity: float,
     entry_price: float,

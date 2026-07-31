@@ -111,12 +111,21 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
             except Exception:
                 return 0
 
+        # Calculate statistical quality metrics for test window
+        ret_list = (test_returns / 100.0).tolist()
+        from trade_calculators import calculate_replay_statistics
+        stats = calculate_replay_statistics(ret_list, initial_equity=100.0)
+
         window_results.append({
             "window_start": _get_ts(test_df.iloc[0]),
             "window_end": _get_ts(test_df.iloc[-1]),
             "win_rate": win_rate,
             "cum_return": cum_ret,
-            "max_drawdown": max_dd
+            "max_drawdown": max_dd,
+            "profit_factor": stats["profit_factor"],
+            "expectancy_r": stats["expectancy_r"],
+            "sharpe_ratio": stats["sharpe_ratio"],
+            "sortino_ratio": stats["sortino_ratio"]
         })
         
         start_idx += step_bars
@@ -124,6 +133,10 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
     win_rates = [w["win_rate"] for w in window_results]
     returns = [w["cum_return"] for w in window_results]
     drawdowns = [w["max_drawdown"] for w in window_results]
+    pfs = [w["profit_factor"] for w in window_results]
+    expectancies = [w["expectancy_r"] for w in window_results]
+    sharpes = [w["sharpe_ratio"] for w in window_results]
+    sortinos = [w["sortino_ratio"] for w in window_results]
     
     summary = {
         "status": "success",
@@ -131,6 +144,10 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
         "mean_win_rate": float(np.mean(win_rates)) if win_rates else 0.0,
         "mean_return": float(np.mean(returns)) if returns else 0.0,
         "max_drawdown": float(np.max(drawdowns)) if drawdowns else 0.0,
+        "mean_profit_factor": float(np.mean(pfs)) if pfs else 0.0,
+        "mean_expectancy_r": float(np.mean(expectancies)) if expectancies else 0.0,
+        "mean_sharpe_ratio": float(np.mean(sharpes)) if sharpes else 0.0,
+        "mean_sortino_ratio": float(np.mean(sortinos)) if sortinos else 0.0,
         "windows": window_results
     }
     return summary

@@ -334,19 +334,20 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         })
         i += max(1, candles_elapsed)
 
-    total_trades = len(trades)
-    if total_trades == 0:
-        return 0, 0.0, 0.0, 0.0, 0.0
-    
     returns = [t["net_return"] for t in trades]
-    win_rate = len([r for r in returns if r > 0]) / max(1, total_trades) * 100.0
+    from trade_calculators import calculate_replay_statistics
+    stats = calculate_replay_statistics(returns, initial_equity=100.0)
     
-    gross_profits = sum([r for r in returns if r > 0])
-    gross_losses = abs(sum([r for r in returns if r <= 0]))
-    profit_factor = gross_profits / max(1e-9, gross_losses) if gross_losses > 0 else float("inf")
-    
-    ending_return = equity_compounded - 100.0
-    return total_trades, win_rate, profit_factor, max_drawdown * 100, ending_return
+    return (
+        stats["total_trades"],
+        stats["win_rate"],
+        stats["profit_factor"],
+        stats["max_drawdown_pct"],
+        stats["ending_return_pct"],
+        stats["expectancy_r"],
+        stats["sharpe_ratio"],
+        stats["sortino_ratio"]
+    )
 
 def run_backtest():
     print("=" * 60)
