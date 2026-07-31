@@ -1127,36 +1127,61 @@
 
         <!-- Balanced Main Layout Grid -->
         <div class="main-panels-grid">
-            <!-- LEFT COLUMN: Confluence Report & Trades History -->
+            <!-- LEFT COLUMN: Key Performance & Reality Metrics -->
             <div class="panel-column">
-                <!-- Confluence Panel -->
-                <div class="card">
-                    <div class="section-header"
-                        style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <div class="section-title">📊 Pre-Trade Confluence Guard</div>
-                        <div class="filter-tabs">
-                            <button class="tab-btn active" onclick="setConfluenceTimeframe('15m', this)">15M</button>
-                            <button class="tab-btn" onclick="setConfluenceTimeframe('30m', this)">30M</button>
-                            <button class="tab-btn" onclick="setConfluenceTimeframe('1h', this)">1H</button>
-                            <button class="tab-btn" onclick="setConfluenceTimeframe('2h', this)">2H</button>
+                <div class="pnl-balance-container" style="display: flex; flex-direction: column; gap: 16px; width: 100%;">
+                    <!-- Cumulative Profit / Loss (All-Time) Card -->
+                    <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 22px; min-height: 135px; width: 100%;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
+                        <div>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                                <span>Cumulative Profit / Loss (All-Time)</span>
+                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">HISTORY ➔</span>
+                            </div>
+                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 32px; margin-top: 10px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
+                        </div>
+                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 10px; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+                            Daily Goal: $1,000 (Min)
                         </div>
                     </div>
-                    <div class="section-desc">
-                        The bot triggers and validates all 13 confluence rules before executing a signal. Any single
-                        failure cancels the trade entry.
+                    
+                    <!-- Real Bybit Balance Card -->
+                    <div class="card" id="bybit-balance-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 135px; width: 100%;">
+                        <div>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                                <span>Real Bybit Balance</span>
+                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">LIVE</span>
+                            </div>
+                            <div class="card-value" id="bybit-balance-value" style="font-size: 32px; margin-top: 10px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
+                        </div>
+                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 10px; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; color: var(--text-secondary);">
+                            Syncing with Bybit APIs...
+                        </div>
                     </div>
-                    <div class="confluence-grid" id="confluence-items-container">
-                        <!-- Confluence Items loaded dynamically -->
+
+                    <!-- Live Reality Gap Monitoring Card -->
+                    <div class="card" id="reality-gap-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 135px; width: 100%;">
+                        <div>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                                <span>Live Reality Gap</span>
+                                <span id="reality-gap-status-badge" style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">MONITORING</span>
+                            </div>
+                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 32px; margin-top: 10px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
+                        </div>
+                        <div style="margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+                            <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">3.5 bps</strong></div>
+                            <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">48 ms</strong></div>
+                            <div>Fill Quality: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
+                            <div>Exp/Act PF: <strong id="reality-pf-val" style="color: var(--text-primary);">1.38 / 1.31</strong></div>
+                        </div>
                     </div>
                 </div>
-
             </div>
 
-            <!-- RIGHT COLUMN: Console Logs & Predictions Tracker -->
+            <!-- RIGHT COLUMN: Console Logs -->
             <div class="panel-column">
                 <!-- Terminal Console Card -->
-                <div class="card" style="padding: 16px;">
-                    <div class="terminal-container">
+                <div class="card" style="padding: 16px; height: 100%;">
+                    <div class="terminal-container" style="height: 100%; min-height: 480px;">
                         <div class="terminal-header">
                             <div class="terminal-window-buttons">
                                 <div class="terminal-btn btn-red"></div>
@@ -1173,54 +1198,6 @@
                                 local dashboard link...</div>
                             <div class="terminal-line"><span class="terminal-timestamp">[System]</span> Local dashboard
                                 connected. Fetching live state...</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Today's PnL and Bybit Balance Cards Container -->
-                <div class="pnl-balance-container">
-                    <!-- Today's PnL (PKT) Card -->
-                    <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 22px; min-height: 140px; flex: 1; min-width: 230px; margin-bottom: 0;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
-                        <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
-                                <span>Cumulative Profit / Loss (All-Time)</span>
-                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">HISTORY ➔</span>
-                            </div>
-                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
-                        </div>
-                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 15px; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
-                            Daily Goal: $1,000 (Min)
-                        </div>
-                    </div>
-                    
-                    <!-- Real Bybit Balance Card -->
-                    <div class="card" id="bybit-balance-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 140px; flex: 1; min-width: 230px; margin-bottom: 0;">
-                        <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
-                                <span>Real Bybit Balance</span>
-                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">LIVE</span>
-                            </div>
-                            <div class="card-value" id="bybit-balance-value" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
-                        </div>
-                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 15px; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; color: var(--text-secondary);">
-                            Syncing with Bybit APIs...
-                        </div>
-                    </div>
-
-                    <!-- Live Reality Gap Monitoring Card -->
-                    <div class="card" id="reality-gap-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 140px; flex: 1; min-width: 230px; margin-bottom: 0;">
-                        <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
-                                <span>Live Reality Gap</span>
-                                <span id="reality-gap-status-badge" style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">MONITORING</span>
-                            </div>
-                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
-                        </div>
-                        <div style="margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
-                            <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">3.5 bps</strong></div>
-                            <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">48 ms</strong></div>
-                            <div>Fill Quality: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
-                            <div>Exp/Act PF: <strong id="reality-pf-val" style="color: var(--text-primary);">1.38 / 1.31</strong></div>
                         </div>
                     </div>
                 </div>
