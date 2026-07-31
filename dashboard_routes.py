@@ -942,7 +942,7 @@ def api_strategy_health():
             "champion_policy": exit_policy_engine.active_champion_id,
             "shadow_policy": getattr(exit_policy_engine, "active_shadow_id", "policy_v4.0.0"),
             "rollback_target": exit_policy_engine.rollback_target_id,
-            "policy_version": exit_policy_engine.champion_policy.get("version", "3.0.0") if isinstance(exit_policy_engine.champion_policy, dict) else "3.0.0",
+            "policy_version": exit_policy_engine.champion_config.get("version", "3.0.0") if hasattr(exit_policy_engine, "champion_config") and isinstance(exit_policy_engine.champion_config, dict) else "3.0.0",
             "engine_version": "3.0.0",
             "config_hash": exit_policy_engine.champion_hash[:16] + "...",
             "git_commit": git_commit,
