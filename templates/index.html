@@ -3498,10 +3498,16 @@
                             }
                         }
 
-                        if (document.getElementById("qs-size")) document.getElementById("qs-size").innerText = `$${qs.position_size_usd.toFixed(2)}`;
+                        if (document.getElementById("qs-size")) {
+                            const pSize = parseFloat(qs.position_size_usd);
+                            document.getElementById("qs-size").innerText = !isNaN(pSize) ? `$${pSize.toFixed(2)}` : qs.position_size_usd;
+                        }
                         if (document.getElementById("qs-exposure")) document.getElementById("qs-exposure").innerText = `${qs.portfolio_exposure_pct}%`;
 
-                        if (document.getElementById("today-pnl-val")) document.getElementById("today-pnl-val").innerText = `${qs.today_pnl_usd >= 0 ? '+' : ''}$${qs.today_pnl_usd.toFixed(2)}`;
+                        if (document.getElementById("today-pnl-val")) {
+                            const pnlVal = parseFloat(qs.today_pnl_usd);
+                            document.getElementById("today-pnl-val").innerText = !isNaN(pnlVal) ? `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}` : qs.today_pnl_usd;
+                        }
                         if (document.getElementById("today-wr-val")) document.getElementById("today-wr-val").innerText = `${qs.today_win_rate_pct}%`;
                         if (document.getElementById("today-pf-val")) document.getElementById("today-pf-val").innerText = qs.today_pf;
                         if (document.getElementById("today-dd-val")) document.getElementById("today-dd-val").innerText = `${qs.today_drawdown_pct}%`;
