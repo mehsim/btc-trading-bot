@@ -932,6 +932,22 @@ def api_strategy_health():
     today_stats = calculate_replay_statistics(today_pnls, initial_equity=100.0) if today_pnls else {"max_drawdown_pct": 0.8}
     daily_dd = today_stats.get("max_drawdown_pct", 0.8)
 
+    # ATR Override Rate Metrics
+    if history:
+        today_min_floor_count = sum(1 for t in today_trades if t.get("sl_source") == "MIN_FLOOR" or (float(t.get("min_sl_dist", 0)) > float(t.get("atr_sl_dist", 999))))
+        today_override_rate = (today_min_floor_count / len(today_trades) * 100.0) if today_trades else 0.0
+
+        r30_trades = history[:30]
+        r30_min_floor_count = sum(1 for t in r30_trades if t.get("sl_source") == "MIN_FLOOR" or (float(t.get("min_sl_dist", 0)) > float(t.get("atr_sl_dist", 999))))
+        r30_override_rate = (r30_min_floor_count / len(r30_trades) * 100.0) if r30_trades else 0.0
+
+        lifetime_min_floor_count = sum(1 for t in history if t.get("sl_source") == "MIN_FLOOR" or (float(t.get("min_sl_dist", 0)) > float(t.get("atr_sl_dist", 999))))
+        lifetime_override_rate = (lifetime_min_floor_count / len(history) * 100.0) if history else 0.0
+    else:
+        today_override_rate = 0.0
+        r30_override_rate = 0.0
+        lifetime_override_rate = 0.0
+
     psi_val = float(state_manager.get("last_psi", 0.04))
     ece_val = float(state_manager.get("last_ece", 3.8))
 
@@ -970,7 +986,10 @@ def api_strategy_health():
             "avg_mfe_r": f"{avg_mfe:.2f}R",
             "avg_mae_r": f"{avg_mae:.2f}R",
             "fill_slippage_pct": f"{float(state_manager.get('avg_slippage_pct', 0.04)):.2f}%",
-            "maker_taker_ratio": f"{float(state_manager.get('maker_taker_ratio', 0.82)):.2f}"
+            "maker_taker_ratio": f"{float(state_manager.get('maker_taker_ratio', 0.82)):.2f}",
+            "atr_override_rate_today": f"{today_override_rate:.1f}%",
+            "atr_override_rate_r30": f"{r30_override_rate:.1f}%",
+            "atr_override_rate_lifetime": f"{lifetime_override_rate:.1f}%"
         },
         "risk": {
             "current_drawdown_pct": f"{stats.get('max_drawdown_pct', 2.4):.1f}%",

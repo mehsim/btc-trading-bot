@@ -6924,10 +6924,28 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             actual_qty = raw_qty
                             
         if bybit_success:
-            # 3. Recalculate SL/TP targets based on actual entry_price
-            min_sl_pct = 1.0 if symbol == "BTCUSDT" else (1.5 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 2.0)
+            # 3. Timeframe-Adaptive Minimum Stop Floor & SL Target Calculation
+            iv_str = str(iv)
+            if iv_str == "15":
+                min_sl_pct = 0.35 if symbol == "BTCUSDT" else (0.50 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 0.65)
+            elif iv_str == "30":
+                min_sl_pct = 0.50 if symbol == "BTCUSDT" else (0.75 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 1.00)
+            elif iv_str == "60":
+                min_sl_pct = 0.75 if symbol == "BTCUSDT" else (1.00 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 1.25)
+            else:
+                min_sl_pct = 1.00 if symbol == "BTCUSDT" else (1.50 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 1.75)
+
             min_sl_dist = entry_price * (min_sl_pct / 100.0)
-            raw_sl_dist = max(sl_multiplier_adjusted * atr_dollars, min_sl_dist)
+            atr_sl_dist = sl_multiplier_adjusted * atr_dollars
+
+            if atr_sl_dist >= min_sl_dist:
+                raw_sl_dist = atr_sl_dist
+                sl_source = "ATR"
+                sl_override_reason = "ATR Multiplier Applied"
+            else:
+                raw_sl_dist = min_sl_dist
+                sl_source = "MIN_FLOOR"
+                sl_override_reason = f"Minimum Risk Floor ({min_sl_pct:.2f}%) Triggered"
             
             min_tp_dist = entry_price * 0.015
             if ml_trend == "Bullish":
@@ -7003,6 +7021,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "initial_take_profit": float(take_profit_price),
             "sl_multiplier": float(sl_multiplier_adjusted),
             "tp_multiplier": float(tp_multiplier_adjusted),
+            "sl_source": str(sl_source),
+            "min_sl_pct": float(min_sl_pct),
+            "atr_sl_dist": float(atr_sl_dist),
+            "min_sl_dist": float(min_sl_dist),
             "initial_planned_rr": float(init_planned_rr),
             "direction": str(ml_trend),
             "end_time": float(time.time() + duration_seconds),
@@ -7047,12 +7069,18 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             f"• *Entry Time*: {entry_time_str}\n"
             f"• *Take Profit*: ${float(take_profit_price):.6f}\n"
             f"• *Stop Loss*: ${float(stop_loss_price):.6f}\n"
+            f"• *SL Source*: {sl_source} ({sl_override_reason})\n"
             f"• *Planned R:R*: {init_planned_rr:.2f}\n"
             f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
             f"• *Leverage*: {leverage_val:.1f}x\n"
             f"• *Position Size (Margin)*: ${actual_margin_usd:.2f} (Value: ${actual_notional_val:.2f})\n"
             f"• *Execution Mode*: {TRADE_MODE.upper()}"
         )
+        print(f"[{symbol} {iv}m SL SOURCE DIAGNOSTIC]")
+        print(f"  • ATR Stop Dist: ${atr_sl_dist:.6f}")
+        print(f"  • Min Floor Dist: ${min_sl_dist:.6f} ({min_sl_pct:.2f}%)")
+        print(f"  • Applied Stop Dist: ${raw_sl_dist:.6f}")
+        print(f"  • SL Source: {sl_source} ({sl_override_reason})")
         print(f"[{symbol} {iv}m TRADE SANITY CHECK LOG]")
         print(f"  • ATR: {atr_dollars:.6f}")
         print(f"  • ATR (USD): ${atr_dollars:.6f}")
@@ -7063,7 +7091,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         print(f"  • Initial Planned R:R: {init_planned_rr:.2f}")
         print(f"  • Current Trailing SL: {stop_loss_price:.6f}")
         print(f"  • Current Dashboard SL: {stop_loss_price:.6f}")
-        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.6f} (SL: {stop_loss_price:.6f}, TP: {take_profit_price:.6f}, Planned R:R: {init_planned_rr:.2f})")
+        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.6f} (SL: {stop_loss_price:.6f}, TP: {take_profit_price:.6f}, SL Source: {sl_source}, Planned R:R: {init_planned_rr:.2f})")
     else:
         err_msg = order_res.get('retMsg') if 'order_res' in locals() else "Execution failed"
         err_code = order_res.get('retCode') if 'order_res' in locals() else "N/A"

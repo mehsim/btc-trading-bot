@@ -1771,6 +1771,10 @@
                             <div class="stat-tile-label">Calibrated Prob</div>
                             <div id="mk-calib" class="stat-tile-val" style="color: var(--accent-green);">71%</div>
                         </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">ATR Override Rate</div>
+                            <div id="mk-atr-override" class="stat-tile-val" style="color: var(--accent-orange); font-size: 14px;">0.0%</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3663,6 +3667,7 @@
                             if (document.getElementById("sh-mfemae")) document.getElementById("sh-mfemae").innerText = `${ex.avg_mfe_r || '2.41R'} / ${ex.avg_mae_r || '0.88R'}`;
                             if (document.getElementById("sh-slippage")) document.getElementById("sh-slippage").innerText = ex.fill_slippage_pct || "0.04%";
                             if (document.getElementById("sh-makertaker")) document.getElementById("sh-makertaker").innerText = ex.maker_taker_ratio || "0.82";
+                            if (document.getElementById("mk-atr-override")) document.getElementById("mk-atr-override").innerText = ex.atr_override_rate_r30 || "0.0%";
 
                             if (document.getElementById("sh-cdd")) document.getElementById("sh-cdd").innerText = rk.current_drawdown_pct || "2.4%";
                             if (document.getElementById("sh-ddd")) document.getElementById("sh-ddd").innerText = rk.daily_drawdown_pct || "0.8%";
