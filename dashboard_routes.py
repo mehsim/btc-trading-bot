@@ -491,27 +491,27 @@ def api_institutional_summary():
     winning_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) > 0]
     losing_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) < 0]
     
-    win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 41.5
-    today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in valid_trades[-6:]) if valid_trades else +0.83
+    win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 0.0
+    today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in valid_trades[-6:]) if valid_trades else 0.0
     
     gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades)
     gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades))
-    calculated_pf = round(gross_gains / gross_losses, 2) if gross_losses > 0 else (2.50 if gross_gains > 0 else 1.38)
+    calculated_pf = round(gross_gains / gross_losses, 2) if gross_losses > 0 else (1.00 if gross_gains > 0 else 0.00)
     
-    avg_win_val = (gross_gains / len(winning_trades)) if winning_trades else 0.21
-    avg_loss_val = (gross_losses / len(losing_trades)) if losing_trades else 0.20
-    rr_val = round(avg_win_val / avg_loss_val, 2) if avg_loss_val > 0 else 1.05
+    avg_win_val = (gross_gains / len(winning_trades)) if winning_trades else 0.00
+    avg_loss_val = (gross_losses / len(losing_trades)) if losing_trades else 0.00
+    rr_val = round(avg_win_val / avg_loss_val, 2) if avg_loss_val > 0 else 0.00
     
     returns_list = [float(t.get("pnl_usd", 0.0)) for t in valid_trades]
     stats = calculate_replay_statistics(returns_list, initial_equity=100.0) if returns_list else {}
     
-    dynamic_sharpe = round(stats.get("sharpe_ratio", 1.45), 2)
-    dynamic_sortino = round(stats.get("sortino_ratio", 1.88), 2)
-    dynamic_calmar = round(stats.get("calmar_ratio", 42.5), 1)
-    dynamic_recovery = round(stats.get("recovery_factor", 9.20), 2)
-    exp_r_val = stats.get("expectancy_r", 0.42)
+    dynamic_sharpe = round(stats.get("sharpe_ratio", 0.0), 2)
+    dynamic_sortino = round(stats.get("sortino_ratio", 0.0), 2)
+    dynamic_calmar = round(stats.get("calmar_ratio", 0.0), 1)
+    dynamic_recovery = round(stats.get("recovery_factor", 0.0), 2)
+    exp_r_val = stats.get("expectancy_r", 0.0)
     dynamic_exp_r = f"+{exp_r_val:.2f}R" if exp_r_val >= 0 else f"{exp_r_val:.2f}R"
-    dynamic_dd = round(stats.get("max_drawdown_pct", 1.2), 1)
+    dynamic_dd = round(stats.get("max_drawdown_pct", 0.0), 1)
 
     # Active Position & Exposure calculation
     sim_balance = float(state_manager.get("simulated_balance", 100.0))
@@ -524,8 +524,8 @@ def api_institutional_summary():
             active_positions.append(pos)
             
     active_position_size = sum(float(p.get("position_size_usd", p.get("notional_usd", 0.0))) for p in active_positions if isinstance(p, dict))
-    portfolio_exposure_pct = round((active_position_size / max(1.0, sim_balance)) * 100.0, 1) if active_position_size > 0 else 18.0
-    current_position_size_usd = round(active_position_size, 2) if active_position_size > 0 else 83.20
+    portfolio_exposure_pct = round((active_position_size / max(1.0, sim_balance)) * 100.0, 1) if active_position_size > 0 else 0.0
+    current_position_size_usd = round(active_position_size, 2) if active_position_size > 0 else 0.00
     
     # Dynamic Scores — use real StrategyHealthEngine instead of simplified formula
     try:
