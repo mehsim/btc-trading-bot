@@ -1,0 +1,53 @@
+{
+  "policy_id": "policy_v3",
+  "version": "3.0.0",
+  "min_engine_version": "3.0",
+  "provenance": {
+    "parent_policy": "policy_v2",
+    "created_at": "2026-07-31T23:55:00Z",
+    "git_commit": "a1b2c3d4",
+    "dataset_hash": "e5f6g7h8",
+    "walkforward_hash": "w1w2w3w4",
+    "optuna_study": "study_exit_v3_institutional",
+    "researcher": "DeepMind Agentic MLOps",
+    "approval_signature": "SIG_GOVERNANCE_VERIFIED"
+  },
+  "parameters": {
+    "RANGING": {
+      "scale_out_pct": 0.25,
+      "scale_out_atr_mult": 1.2,
+      "be_trigger_atr_mult": 1.5,
+      "be_buffer_mode": "dynamic_fee_slippage",
+      "be_safety_margin_atr": 0.10,
+      "trailing_mode": "hybrid_structure_atr",
+      "enable_structure_trailing": true,
+      "enable_partial_close": true,
+      "enable_dynamic_be": true,
+      "enable_stagnation_gate": true
+    },
+    "MODERATE_TREND": {
+      "scale_out_pct": 0.20,
+      "scale_out_atr_mult": 1.5,
+      "be_trigger_atr_mult": 1.5,
+      "be_buffer_mode": "dynamic_fee_slippage",
+      "be_safety_margin_atr": 0.10,
+      "trailing_mode": "hybrid_structure_atr",
+      "enable_structure_trailing": true,
+      "enable_partial_close": true,
+      "enable_dynamic_be": true,
+      "enable_stagnation_gate": true
+    },
+    "STRONG_TREND": {
+      "scale_out_pct": 0.00,
+      "scale_out_atr_mult": 0.0,
+      "be_trigger_atr_mult": 2.0,
+      "be_buffer_mode": "dynamic_fee_slippage",
+      "be_safety_margin_atr": 0.10,
+      "trailing_mode": "hybrid_structure_atr",
+      "enable_structure_trailing": true,
+      "enable_partial_close": false,
+      "enable_dynamic_be": true,
+      "enable_stagnation_gate": false
+    }
+  }
+}

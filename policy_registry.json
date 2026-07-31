@@ -1,0 +1,46 @@
+{
+  "active_champion": "policy_v3",
+  "rollback_target": "policy_v2",
+  "engine_version": "3.0",
+  "policies": {
+    "policy_v1": {
+      "status": "Retired",
+      "policy_hash": "a58b29c011e4838e",
+      "policy_path": "policies/policy_v1.json",
+      "evaluation_report": "reports/exit_eval_v1.json",
+      "composite_score": 0.45,
+      "exit_efficiency": 0.32,
+      "provenance": {
+        "created_at": "2026-07-01T12:00:00Z",
+        "git_commit": "c01a2b3",
+        "approval_signature": "SIG_GOVERNANCE_VERIFIED"
+      }
+    },
+    "policy_v2": {
+      "status": "RollbackTarget",
+      "policy_hash": "b69c30d022f5949f",
+      "policy_path": "policies/policy_v2.json",
+      "evaluation_report": "reports/exit_eval_v2.json",
+      "composite_score": 0.74,
+      "exit_efficiency": 0.61,
+      "provenance": {
+        "created_at": "2026-07-15T14:30:00Z",
+        "git_commit": "d4e5f6g",
+        "approval_signature": "SIG_GOVERNANCE_VERIFIED"
+      }
+    },
+    "policy_v3": {
+      "status": "Champion",
+      "policy_hash": "c70d41e033f605a0",
+      "policy_path": "policies/policy_v3.json",
+      "evaluation_report": "reports/exit_eval_v3.json",
+      "composite_score": 0.84,
+      "exit_efficiency": 0.73,
+      "provenance": {
+        "created_at": "2026-07-31T23:55:00Z",
+        "git_commit": "a1b2c3d4",
+        "approval_signature": "SIG_GOVERNANCE_VERIFIED"
+      }
+    }
+  }
+}

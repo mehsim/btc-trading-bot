@@ -101,6 +101,12 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
     annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
     calmar_ratio = annualized_return / safe_dd
 
+    # Calculate SQN, Ulcer Index, MAR Ratio, and Gain-to-Pain
+    sqn = (np.sqrt(total_trades) * expectancy_r / (np.std(r_multiples) + 1e-8)) if len(r_multiples) > 1 and np.std(r_multiples) > 0 else 0.0
+    ulcer_index = float(np.sqrt(np.mean(dd_curve ** 2))) if len(dd_curve) > 0 else 0.0
+    mar_ratio = annualized_return / safe_dd
+    gain_to_pain = (gross_gains / max(1e-8, gross_losses)) if gross_losses > 0 else (10.0 if gross_gains > 0 else 0.0)
+
     return {
         "total_trades": total_trades,
         "win_rate": float(win_rate),
@@ -111,8 +117,49 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
         "calmar_ratio": float(calmar_ratio),
         "recovery_factor": float(recovery_factor),
         "max_drawdown_pct": float(max_drawdown),
-        "ending_return_pct": float(ending_return)
+        "ending_return_pct": float(ending_return),
+        "sqn": float(round(sqn, 2)),
+        "ulcer_index": float(round(ulcer_index, 2)),
+        "mar_ratio": float(round(mar_ratio, 2)),
+        "gain_to_pain": float(round(gain_to_pain, 2))
     }
+
+def calculate_sqn(returns_list: list, risk_usd: float = 1.0) -> float:
+    """Calculates System Quality Number: sqrt(N) * Mean(R) / StdDev(R)."""
+    if not returns_list or len(returns_list) < 2:
+        return 0.0
+    arr = np.array(returns_list, dtype=float)
+    r_mult = arr / max(1e-8, risk_usd)
+    std_r = float(np.std(r_mult))
+    if std_r <= 0:
+        return 0.0
+    return float(round(np.sqrt(len(arr)) * np.mean(r_mult) / std_r, 2))
+
+def calculate_ulcer_index(returns_list: list, initial_equity: float = 100.0) -> float:
+    """Calculates Ulcer Index measuring drawdown depth + duration."""
+    if not returns_list:
+        return 0.0
+    eq = initial_equity + np.cumsum(returns_list)
+    full_eq = np.insert(eq, 0, initial_equity)
+    peak = np.maximum.accumulate(full_eq)
+    dd_sq = ((peak - full_eq) / np.maximum(1e-8, peak) * 100.0) ** 2
+    return float(round(np.sqrt(np.mean(dd_sq)), 2))
+
+def calculate_mar_ratio(cagr_pct: float, max_dd_pct: float) -> float:
+    """Calculates MAR Ratio: CAGR / Max Drawdown."""
+    safe_dd = max(0.01, abs(max_dd_pct))
+    return float(round(cagr_pct / safe_dd, 2))
+
+def calculate_gain_to_pain(returns_list: list) -> float:
+    """Calculates Gain-to-Pain Ratio: Sum(Wins) / Sum(|Losses|)."""
+    if not returns_list:
+        return 0.0
+    arr = np.array(returns_list, dtype=float)
+    wins = float(np.sum(arr[arr > 0])) if len(arr[arr > 0]) > 0 else 0.0
+    losses = float(np.abs(np.sum(arr[arr < 0]))) if len(arr[arr < 0]) > 0 else 0.0
+    if losses <= 0:
+        return 10.0 if wins > 0 else 0.0
+    return float(round(wins / losses, 2))
 
 
 def calculate_fixed_risk_position_size(

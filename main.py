@@ -7535,13 +7535,13 @@ def main():
                     half_closed = active_trade.get("half_closed", False)
                     
                     # 1. Check timer programmatic exit (applies to both simulation and live)
-                    if current_time >= end_time and not half_closed:
+                    if current_time >= end_time:
                         cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
                         lookahead = cfg.get("lookahead", 10)
                         exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
                     
                     # 2. Check stagnation programmatic exit (applies to both simulation and live)
-                    if not exit_reason and not half_closed:
+                    if not exit_reason:
                         entry_time_ms = active_trade.get("entry_time")
                         if entry_time_ms:
                             trade_age_hours = (time.time() - (entry_time_ms / 1000.0)) / 3600.0
@@ -7561,12 +7561,12 @@ def main():
                         if direction == "Bullish":
                             if current_price <= stop_loss:
                                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
-                            elif current_price >= take_profit and not half_closed:
+                            elif current_price >= take_profit:
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
                         else:
                             if current_price >= stop_loss:
                                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
-                            elif current_price <= take_profit and not half_closed:
+                            elif current_price <= take_profit:
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
                     
                     if TRADE_MODE != "simulation":

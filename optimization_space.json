@@ -1,0 +1,11 @@
+{
+  "description": "Hyperparameter search grid for Exit Policy optimization",
+  "search_space": {
+    "scale_out_pct": [0.0, 0.05, 0.10, 0.15, 0.20, 0.25],
+    "scale_out_atr_mult": [1.0, 1.2, 1.4, 1.5, 1.6, 1.8],
+    "be_trigger_atr_mult": [1.3, 1.5, 1.7, 2.0, 2.3],
+    "be_safety_margin_atr": [0.05, 0.10, 0.15],
+    "stagnation_age_fraction": [0.5, 0.6, 0.7],
+    "stagnation_adx_threshold": [16.0, 18.0, 20.0]
+  }
+}

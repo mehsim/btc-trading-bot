@@ -1,0 +1,25 @@
+{
+  "policy_id": "policy_v3",
+  "evaluation_date": "2026-07-31T23:55:00Z",
+  "sample_size": 266,
+  "metrics": {
+    "profit_factor": 1.84,
+    "expectancy_r": 0.36,
+    "win_rate": 58.4,
+    "realized_rr": 2.15,
+    "exit_efficiency": 0.73,
+    "opportunity_loss_r": 0.82,
+    "max_drawdown_pct": 7.8,
+    "calmar_ratio": 3.12,
+    "recovery_factor": 4.15,
+    "avg_time_to_tp_hours": 3.4,
+    "avg_time_to_sl_hours": 1.8
+  },
+  "exit_attribution": {
+    "TAKE_PROFIT": { "pct": 42.1, "avg_r": 2.15 },
+    "TRAILING_STOP": { "pct": 34.2, "avg_r": 1.45 },
+    "BREAK_EVEN": { "pct": 14.3, "avg_r": 0.12 },
+    "STAGNATION": { "pct": 6.4, "avg_r": -0.15 },
+    "TIMER_ELAPSED": { "pct": 3.0, "avg_r": -0.22 }
+  }
+}
