@@ -885,9 +885,19 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 json.dump(regime_features, f)
             print(f"Saved {name.upper()} regime selected features to {features_filename}")
 
-        X = df_regime[regime_features]
-        y_trend = df_regime["target_trend"]
-        y_price = df_regime["target_price_change"]
+        X_full = df_regime[regime_features]
+        y_trend_full = df_regime["target_trend"]
+        y_price_full = df_regime["target_price_change"]
+
+        # F-03 ML Validity: Freeze true final 15% hold-out dataset untouched during CV & tuning
+        split_idx = int(len(X_full) * 0.85)
+        X = X_full.iloc[:split_idx]
+        y_trend = y_trend_full.iloc[:split_idx]
+        y_price = y_price_full.iloc[:split_idx]
+        
+        X_holdout = X_full.iloc[split_idx:]
+        y_holdout_trend = y_trend_full.iloc[split_idx:]
+        y_holdout_price = y_price_full.iloc[split_idx:]
 
         # Purged and Embargoed Time-Series Cross Validation
         cv = PurgedEmbargoTimeSeriesSplit(n_splits=5, lookahead=6, embargo_pct=0.01)
@@ -912,7 +922,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         
         from sklearn.utils.class_weight import compute_sample_weight
         
-        print(f"  Running Purged & Embargoed Cross-Validation...")
+        print(f"  Running Purged & Embargoed Cross-Validation on {len(X)} samples (15% holdout frozen: {len(X_holdout)} samples)...")
         for fold, (train_idx, val_idx) in enumerate(cv.split(X, y_trend)):
             X_train, y_train_t, y_train_p = X.iloc[train_idx], y_trend.iloc[train_idx], y_price.iloc[train_idx]
             X_val, y_val_t, y_val_p = X.iloc[val_idx], y_trend.iloc[val_idx], y_price.iloc[val_idx]
@@ -974,8 +984,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
             meta_features_list.append(X_val[is_non_neutral])
             meta_labels_list.append(is_correct[is_non_neutral].astype(int))
             
-        print(f"  Validation Out-of-Sample Accuracy (Ensemble Trend): {np.mean(primary_accuracies)*100:.2f}%")
-        print(f"  Validation Out-of-Sample MAE (Ensemble Price): {np.mean(primary_maes):.4f}")
+        mean_cv_acc = float(np.mean(primary_accuracies))
+        mean_cv_mae = float(np.mean(primary_maes))
+        print(f"  Validation Out-of-Sample Accuracy (Ensemble Trend): {mean_cv_acc*100:.2f}%")
+        print(f"  Validation Out-of-Sample MAE (Ensemble Price): {mean_cv_mae:.4f}")
         
         # Meta-Classifier Dataset
         valid_dfs = [df_item for df_item in meta_features_list if not df_item.empty]
@@ -1118,22 +1130,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         should_save = True
                         raise Exception("feature_count_mismatch")
                 # Load existing champion
-                champion_t = load_ensemble_classifier(c_prefix_t, n_features=X_val.shape[1])
-                champion_p = load_ensemble_regressor(c_prefix_p, n_features=X_val.shape[1])
+                champion_t = load_ensemble_classifier(c_prefix_t, n_features=X_holdout.shape[1])
+                champion_p = load_ensemble_regressor(c_prefix_p, n_features=X_holdout.shape[1])
                 
-                # Evaluate champion on the last validation fold
-                champ_pred_t = champion_t.predict(X_val)
-                champ_pred_p = champion_p.predict(X_val)
-                champ_acc = balanced_accuracy_score(y_val_t, champ_pred_t)
-                champ_mae = mean_absolute_error(y_val_p, champ_pred_p)
+                # Evaluate champion on frozen 15% out-of-sample hold-out dataset
+                champ_pred_t = champion_t.predict(X_holdout)
+                champ_pred_p = champion_p.predict(X_holdout)
+                champ_acc = balanced_accuracy_score(y_holdout_trend, champ_pred_t)
+                champ_mae = mean_absolute_error(y_holdout_price, champ_pred_p)
                 
-                # Evaluate challenger on the last validation fold
-                chal_pred_t = final_ensemble_t.predict(X_val)
-                chal_pred_p = final_ensemble_p.predict(X_val)
-                chal_acc = balanced_accuracy_score(y_val_t, chal_pred_t)
-                chal_mae = mean_absolute_error(y_val_p, chal_pred_p)
+                # Evaluate challenger on frozen 15% out-of-sample hold-out dataset
+                chal_pred_t = final_ensemble_t.predict(X_holdout)
+                chal_pred_p = final_ensemble_p.predict(X_holdout)
+                chal_acc = balanced_accuracy_score(y_holdout_trend, chal_pred_t)
+                chal_mae = mean_absolute_error(y_holdout_price, chal_pred_p)
                 
-                print(f"  [Champion-Challenger] Validation Comparison for {name.upper()}:")
+                print(f"  [Champion-Challenger] Frozen Hold-Out Comparison for {name.upper()}:")
                 print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
                 

@@ -169,50 +169,54 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         else:
             results["1h_Trend"] = {"pass": True, "detail": "Bypassed (Insufficient 1h data)", "weight": 0}
 
-        results["4h_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
-        results["4h_RSI"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
+    # Evaluate 4h Trend & RSI Hard Gates for ALL timeframes
+    df_4h = get_valid_htf_cache(htf_cache, (symbol, "240"))
+    if df_4h is None and get_history_fn:
+        try:
+            df_4h = get_history_fn(symbol=symbol, interval="240", limit=100)
+            set_valid_htf_cache(htf_cache, (symbol, "240"), df_4h)
+        except Exception:
+            df_4h = None
+
+    if df_4h is None or len(df_4h) < 21:
+        results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data [HARD GATE]", "weight": weight_4h}
+        results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data [HARD GATE]", "weight": weight_4h}
+        hard_gate_failed = True
+        max_score += weight_4h * 2
     else:
-        df_4h = get_valid_htf_cache(htf_cache, (symbol, "240"))
-        if df_4h is None and get_history_fn:
-            try:
-                df_4h = get_history_fn(symbol=symbol, interval="240", limit=100)
-                set_valid_htf_cache(htf_cache, (symbol, "240"), df_4h)
-            except Exception:
-                df_4h = None
+        df_4h_completed = df_4h.iloc[:-1].copy()
+        s_ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator()
+        s_ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator()
+        s_rsi_4h = RSIIndicator(df_4h_completed["close"], window=14).rsi()
+        
+        ema9_4h = float(s_ema9_4h.iloc[-1]) if len(s_ema9_4h) > 0 and pd.notna(s_ema9_4h.iloc[-1]) else 0.0
+        ema21_4h = float(s_ema21_4h.iloc[-1]) if len(s_ema21_4h) > 0 and pd.notna(s_ema21_4h.iloc[-1]) else 0.0
+        rsi_4h = float(s_rsi_4h.iloc[-1]) if len(s_rsi_4h) > 0 and pd.notna(s_rsi_4h.iloc[-1]) else 50.0
 
-        if df_4h is None or len(df_4h) < 21:
-            results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data", "weight": weight_4h}
-            results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data", "weight": weight_4h}
-            max_score += weight_4h * 2
-        else:
-            df_4h_completed = df_4h.iloc[:-1].copy()
-            s_ema9_4h = EMAIndicator(df_4h_completed["close"], window=9).ema_indicator()
-            s_ema21_4h = EMAIndicator(df_4h_completed["close"], window=21).ema_indicator()
-            s_rsi_4h = RSIIndicator(df_4h_completed["close"], window=14).rsi()
-            
-            ema9_4h = float(s_ema9_4h.iloc[-1]) if len(s_ema9_4h) > 0 and pd.notna(s_ema9_4h.iloc[-1]) else 0.0
-            ema21_4h = float(s_ema21_4h.iloc[-1]) if len(s_ema21_4h) > 0 and pd.notna(s_ema21_4h.iloc[-1]) else 0.0
-            rsi_4h = float(s_rsi_4h.iloc[-1]) if len(s_rsi_4h) > 0 and pd.notna(s_rsi_4h.iloc[-1]) else 50.0
+        trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
+        trend_4h_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")
+        rsi_4h_pass = (rsi_4h < 75.0) if ml_trend == "Bullish" else (rsi_4h > 25.0)
 
-            trend_4h = "Bullish" if ema9_4h > ema21_4h else "Bearish"
-            trend_4h_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")
-            rsi_4h_pass = (rsi_4h < 75.0) if ml_trend == "Bullish" else (rsi_4h > 25.0)
+        if not trend_4h_pass:
+            hard_gate_failed = True
+        if not rsi_4h_pass:
+            hard_gate_failed = True
 
-            results["4h_Trend"] = {
-                "pass": trend_4h_pass,
-                "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f})",
-                "weight": weight_4h
-            }
-            results["4h_RSI"] = {
-                "pass": rsi_4h_pass,
-                "detail": f"4h RSI is {rsi_4h:.1f}",
-                "weight": weight_4h
-            }
-            max_score += weight_4h * 2
-            if trend_4h_pass:
-                total_score += weight_4h
-            if rsi_4h_pass:
-                total_score += weight_4h
+        results["4h_Trend"] = {
+            "pass": trend_4h_pass,
+            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f}) [HARD GATE]",
+            "weight": weight_4h
+        }
+        results["4h_RSI"] = {
+            "pass": rsi_4h_pass,
+            "detail": f"4h RSI is {rsi_4h:.1f} [HARD GATE]",
+            "weight": weight_4h
+        }
+        max_score += weight_4h * 2
+        if trend_4h_pass:
+            total_score += weight_4h
+        if rsi_4h_pass:
+            total_score += weight_4h
 
     # CHECK 3: Orderbook Imbalance & L2 Depth
     weight_ob = 1

@@ -26,6 +26,8 @@ parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol")
 parser.add_argument("--fee-rate", type=float, default=0.002, help="Trading fee rate")
 parser.add_argument("--min-confidence", type=float, default=0.70, help="Minimum confidence threshold")
 parser.add_argument("--pages", type=int, default=40, help="History pages count")
+parser.add_argument("--pessimistic", action="store_true", default=True, help="Use pessimistic fill model (next-bar open + spread/slippage)")
+parser.add_argument("--optimistic", action="store_true", default=False, help="Use optimistic fill model (signal close price)")
 
 args, _ = parser.parse_known_args()
 INTERVAL = args.interval
@@ -33,6 +35,7 @@ SYMBOL = args.symbol
 FEE_RATE = args.fee_rate
 MIN_CONFIDENCE = args.min_confidence
 PAGES = args.pages
+PESSIMISTIC_MODE = not args.optimistic
 
 INTERVAL_SLIPPAGE = {
     "5": 0.0005,   # 0.05% base slippage for 5m
@@ -48,7 +51,7 @@ def calculate_backtest_slippage(interval: str, atr_norm: float = 0.0) -> float:
     return base + volatility_premium
 
 
-def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60"):
+def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True):
     df = df.reset_index(drop=True)
     trades = []
     equity_compounded = 100.0
@@ -220,7 +223,25 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                 continue
 
         # Trade execution
-        entry_price = close_price
+        if pessimistic_mode:
+            # F-01 Fill Model: Next-bar open for market orders
+            if i + 1 >= total_candles:
+                break
+            raw_entry = df.loc[i + 1, "open"]
+            half_spread = 0.00015  # 0.015% half spread floor
+            taker_fee = 0.0006     # 0.06% taker fee per leg
+            vol_slippage = calculate_backtest_slippage(interval, atr_norm)
+            
+            if ml_trend == "Bullish":
+                entry_price = raw_entry * (1.0 + half_spread + vol_slippage)
+            else:
+                entry_price = raw_entry * (1.0 - half_spread - vol_slippage)
+        else:
+            entry_price = close_price
+            half_spread = 0.0
+            taker_fee = fee_rate / 2.0
+            vol_slippage = 0.0
+
         atr_dollars = atr_norm * entry_price
         
         # Regime-Adaptive Take-Profit & Stop-Loss Multipliers from TIMEFRAME_CONFIG
@@ -239,11 +260,12 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         cfg = TIMEFRAME_CONFIG.get(str(INTERVAL), {"lookahead": 10})
         lookahead = cfg.get("lookahead", 10)
         
+        start_step = 1 if pessimistic_mode else 1
         exit_price = df.loc[min(i + lookahead, total_candles - 1), "close"]
         exit_reason = "Timer Elapsed"
         candles_elapsed = lookahead
 
-        for step in range(1, lookahead + 1):
+        for step in range(start_step, lookahead + 1):
             if i + step >= total_candles:
                 candles_elapsed = step - 1
                 break
@@ -288,15 +310,17 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                     candles_elapsed = step
                     break
 
-        atr_norm_val = df.loc[i, "ATR_norm"] if "ATR_norm" in df.columns else 0.005
-        slippage = 0.0003 + (0.0007 if atr_norm_val >= 0.01 else 0.0)
-
         if ml_trend == "Bullish":
             gross_return = (exit_price - entry_price) / entry_price
         else:
             gross_return = (entry_price - exit_price) / entry_price
             
-        net_return = gross_return - fee_rate - slippage
+        if pessimistic_mode:
+            # Exit leg taker fee + half spread
+            exit_cost = taker_fee + half_spread
+            net_return = gross_return - exit_cost
+        else:
+            net_return = gross_return - fee_rate - vol_slippage
         
         equity_compounded = equity_compounded * (1.0 + net_return)
         equity_simple += net_return
@@ -457,27 +481,41 @@ def run_backtest():
 
     results = []
     for name, cfg in scenarios.items():
-        t_count, win_rate, pf, mdd, ret = run_single_backtest(
+        # Execute pessimistic (realistic) run
+        t_count_p, win_rate_p, pf_p, mdd_p, ret_p = run_single_backtest(
             df, models_trending, models_ranging, p95, max_conf,
             min_confidence=cfg["min_confidence"],
             use_regressor_fee_check=cfg["use_regressor_fee_check"],
             require_trend_alignment=cfg["require_trend_alignment"],
             fee_rate=0.002,
-            interval=INTERVAL
+            interval=INTERVAL,
+            pessimistic_mode=True
         )
+
+        # Execute optimistic (signal close) run for comparison
+        t_count_o, win_rate_o, pf_o, mdd_o, ret_o = run_single_backtest(
+            df, models_trending, models_ranging, p95, max_conf,
+            min_confidence=cfg["min_confidence"],
+            use_regressor_fee_check=cfg["use_regressor_fee_check"],
+            require_trend_alignment=cfg["require_trend_alignment"],
+            fee_rate=0.002,
+            interval=INTERVAL,
+            pessimistic_mode=False
+        )
+
         results.append({
             "Scenario": name,
-            "Trades": t_count,
-            "Win Rate": f"{win_rate:.2f}%" if t_count > 0 else "N/A",
-            "Profit Factor": f"{pf:.2f}" if t_count > 0 else "N/A",
-            "Max Drawdown": f"{mdd:.2f}%" if t_count > 0 else "N/A",
-            "Cumulative Return": f"{ret:+.2f}%" if t_count > 0 else "0.00%"
+            "Trades": t_count_p,
+            "Pessimistic Return": f"{ret_p:+.2f}%" if t_count_p > 0 else "0.00%",
+            "Optimistic Return": f"{ret_o:+.2f}%" if t_count_o > 0 else "0.00%",
+            "Pessimistic MDD": f"{mdd_p:.2f}%" if t_count_p > 0 else "N/A",
+            "Pessimistic WinRate": f"{win_rate_p:.2f}%" if t_count_p > 0 else "N/A"
         })
 
     # Print Comparison Table
     results_df = pd.DataFrame(results)
     print("\n" + "=" * 90)
-    print("SCENARIO COMPARISON (FEE RATE: 0.20% ROUNDTRIP)")
+    print("F-01 REALISM COMPARISON: OPTIMISTIC VS PESSIMISTIC FILL MODEL")
     print("=" * 90)
     print(results_df.to_string(index=False))
     print("=" * 90 + "\n")
