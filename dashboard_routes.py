@@ -592,7 +592,7 @@ def api_institutional_summary():
                 {"name": "Calibration",       "score": 20 if ece_val<=5 else (12 if ece_val<=10 else 5),  "max": 20, "status": "EXCELLENT" if ece_val<=5 else "DEGRADED"},
                 {"name": "Drift",             "score": 20 if psi_val<=0.10 else (12 if psi_val<=0.20 else 5), "max": 20, "status": "PERFECT" if psi_val<=0.10 else "ELEVATED"},
                 {"name": "Live Profit Factor","score": 20 if calculated_pf>=1.80 else (14 if calculated_pf>=1.40 else (8 if calculated_pf>=1.10 else 0)), "max": 20, "status": "EXCELLENT" if calculated_pf>=1.80 else ("GOOD" if calculated_pf>=1.10 else "POOR")},
-                {"name": "Drawdown Safety",  "score": 15 if dynamic_dd<=5 else (9 if dynamic_dd<=10 else 4),  "max": 15, "status": "PERFECT" if dynamic_dd<=5 else "ELEVATED"},
+                {"name": "Drawdown Safety",  "score": 15 if dynamic_dd<=5 else (9 if dynamic_dd<=10 else (4 if dynamic_dd<=15 else 0)),  "max": 15, "status": "PERFECT" if dynamic_dd<=5 else ("ELEVATED" if dynamic_dd<=15 else "CRITICAL")},
                 {"name": "Win Rate Stability","score": 15 if win_rate_var<=5 else (9 if win_rate_var<=10 else 0), "max": 15, "status": "STABLE" if win_rate_var<=5 else "VOLATILE"},
                 {"name": "Latency & Slippage","score": 10 if api_lat<=150 else (5 if api_lat<=300 else 0),  "max": 10, "status": "EXCELLENT" if api_lat<=150 else "SLOW"}
             ],
