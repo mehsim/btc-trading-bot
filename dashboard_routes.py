@@ -489,11 +489,23 @@ def api_institutional_summary():
     losing_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) < 0]
     
     win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 0.0
-    today_trades = valid_trades[-6:] if valid_trades else []
+    import datetime
+    today_start_utc = datetime.datetime.now(datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    today_trades = [
+        t for t in valid_trades 
+        if isinstance(t, dict) and float(t.get("exit_time", 0.0)) >= today_start_utc
+    ]
+    if not today_trades:
+        twenty_four_hours_ago = time.time() - 86400.0
+        today_trades = [
+            t for t in valid_trades
+            if isinstance(t, dict) and float(t.get("exit_time", 0.0)) >= twenty_four_hours_ago
+        ]
+
     today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in today_trades)
-    today_volume = sum(float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 22.84)))) for t in today_trades)
+    today_volume = sum(float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 15.0)))) for t in today_trades)
     today_leveraged_volume = sum(
-        float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 22.84)))) * float(t.get("leverage", 10.0))
+        float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 15.0)))) * float(t.get("leverage", 10.0))
         for t in today_trades
     )
 
