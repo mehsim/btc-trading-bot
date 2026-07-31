@@ -361,13 +361,13 @@
         }
 
         .card {
-            background: linear-gradient(145deg, rgba(17, 24, 39, 0.75) 0%, rgba(10, 15, 29, 0.85) 100%);
-            border: 1px solid var(--card-border);
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.78) 0%, rgba(10, 15, 29, 0.90) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border-radius: 20px;
             padding: 24px;
-            box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.3);
+            box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.12), 0 12px 36px 0 rgba(0, 0, 0, 0.35);
             transition: var(--transition-smooth);
             position: relative;
             overflow: hidden;
@@ -380,24 +380,24 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 100%);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0) 100%);
             pointer-events: none;
         }
 
         .card:hover {
-            border-color: var(--card-hover-border);
-            transform: translateY(-3px);
-            box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.4), 0 0 24px rgba(59, 130, 246, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-4px) scale(1.005);
+            box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.18), 0 20px 48px 0 rgba(0, 0, 0, 0.45), 0 0 28px rgba(56, 189, 248, 0.1);
         }
 
         .card-title {
             font-family: 'Outfit', sans-serif;
-            font-size: 12px;
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 1.8px;
             color: var(--text-secondary);
             margin-bottom: 12px;
-            font-weight: 600;
+            font-weight: 700;
         }
 
         .card-value {
@@ -408,6 +408,7 @@
             align-items: baseline;
             gap: 8px;
             letter-spacing: -0.5px;
+            font-variant-numeric: tabular-nums;
             transition: var(--transition-smooth);
         }
 
@@ -424,8 +425,9 @@
         .hero-command-card {
             margin-bottom: 24px;
             padding: 24px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: linear-gradient(135deg, rgba(17, 24, 39, 0.8) 0%, rgba(13, 19, 36, 0.9) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(11, 17, 32, 0.95) 100%);
+            box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.15), 0 16px 40px rgba(0, 0, 0, 0.4);
         }
 
         .stat-tile-grid {
@@ -436,37 +438,41 @@
         }
 
         .stat-tile {
-            background: rgba(255, 255, 255, 0.025);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 12px 14px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            padding: 14px 16px;
             transition: var(--transition-smooth);
         }
 
         .stat-tile:hover {
-            background: rgba(255, 255, 255, 0.04);
-            border-color: rgba(255, 255, 255, 0.09);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+            border-color: rgba(255, 255, 255, 0.14);
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 6px 20px rgba(0, 0, 0, 0.3);
         }
 
         .stat-tile-label {
             font-size: 10px;
             color: var(--text-secondary);
             margin-bottom: 4px;
-            font-weight: 500;
+            font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.8px;
         }
 
         .stat-tile-val {
             font-family: 'Outfit', sans-serif;
-            font-size: 18px;
+            font-size: 19px;
             font-weight: 800;
+            font-variant-numeric: tabular-nums;
         }
 
         .subcard-box {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 14px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(255, 255, 255, 0.008) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
             padding: 18px 20px;
             transition: var(--transition-smooth);
             display: flex;
@@ -477,18 +483,21 @@
         }
 
         .subcard-box:hover {
-            background: rgba(255, 255, 255, 0.035);
-            border-color: rgba(255, 255, 255, 0.1);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.015) 100%);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.35);
             transform: translateY(-2px);
         }
 
         /* Dynamic classes for values */
         .color-bullish {
             color: var(--accent-green) !important;
+            text-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
         }
 
         .color-bearish {
             color: var(--accent-red) !important;
+            text-shadow: 0 0 16px rgba(244, 63, 94, 0.2);
         }
 
         .color-neutral {
@@ -509,7 +518,9 @@
             height: 100%;
             border-radius: 10px;
             width: 0%;
-            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.5s ease;
+            background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+            box-shadow: 0 0 12px rgba(192, 132, 252, 0.5);
+            transition: width 1s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.5s ease;
         }
 
         /* Active Position Layout */
