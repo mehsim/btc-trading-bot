@@ -57,7 +57,9 @@ class TradeFrequencyOptimizer:
         if adx_val >= 25.0:
             return 0.55  # High-conviction trend regime threshold
         elif adx_val <= 15.0:
-            return 0.75  # High-chop regime requiring strict threshold
+            return 0.75  # Extreme-chop regime requiring strict 75% threshold
+        elif adx_val < 20.0:
+            return 0.65  # Ranging regime requiring elevated 65% threshold
         return base_threshold
 
 trade_frequency_optimizer = TradeFrequencyOptimizer()
