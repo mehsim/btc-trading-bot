@@ -2149,23 +2149,40 @@
                     // 6. Confluence Checks Report (filtered by activeConfluenceTimeframe)
                     const conf = data[`confluence_results_${activeConfluenceTimeframe}`];
                     const confContainer = document.getElementById("confluence-items-container");
-                    if (conf && conf.checks) {
-                        let htmlStr = "";
-                        confluenceKeys.forEach(check => {
-                            const detail = conf.checks[check.key];
-                            if (detail) {
-                                const passClass = detail.pass ? "badge-pass" : "badge-fail";
-                                const passSymbol = detail.pass ? "✓" : "✗";
-                                htmlStr += `
-                                    <div class="confluence-item">
-                                        <div class="confluence-info">
-                                            <span class="confluence-name">${check.label}</span>
-                                            <span class="confluence-desc" title="${detail.detail}">${detail.detail}</span>
+                    if (confContainer) {
+                        if (conf && conf.checks) {
+                            let htmlStr = "";
+                            confluenceKeys.forEach(check => {
+                                const detail = conf.checks[check.key];
+                                if (detail) {
+                                    const passClass = detail.pass ? "badge-pass" : "badge-fail";
+                                    const passSymbol = detail.pass ? "✓" : "✗";
+                                    htmlStr += `
+                                        <div class="confluence-item">
+                                            <div class="confluence-info">
+                                                <span class="confluence-name">${check.label}</span>
+                                                <span class="confluence-desc" title="${detail.detail}">${detail.detail}</span>
+                                            </div>
+                                            <div class="confluence-badge ${passClass}">${passSymbol}</div>
                                         </div>
-                                        <div class="confluence-badge ${passClass}">${passSymbol}</div>
-                                    </div>
-                                `;
-                            } else {
+                                    `;
+                                } else {
+                                    htmlStr += `
+                                        <div class="confluence-item" style="opacity: 0.5;">
+                                            <div class="confluence-info">
+                                                <span class="confluence-name">${check.label}</span>
+                                                <span class="confluence-desc">Waiting for analysis...</span>
+                                            </div>
+                                            <div class="confluence-badge" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--card-border);">-</div>
+                                        </div>
+                                    `;
+                                }
+                            });
+                            confContainer.innerHTML = htmlStr;
+                        } else {
+                            // Populate default placeholders
+                            let htmlStr = "";
+                            confluenceKeys.forEach(check => {
                                 htmlStr += `
                                     <div class="confluence-item" style="opacity: 0.5;">
                                         <div class="confluence-info">
@@ -2175,24 +2192,9 @@
                                         <div class="confluence-badge" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--card-border);">-</div>
                                     </div>
                                 `;
-                            }
-                        });
-                        confContainer.innerHTML = htmlStr;
-                    } else {
-                        // Populate default placeholders
-                        let htmlStr = "";
-                        confluenceKeys.forEach(check => {
-                            htmlStr += `
-                                <div class="confluence-item" style="opacity: 0.5;">
-                                    <div class="confluence-info">
-                                        <span class="confluence-name">${check.label}</span>
-                                        <span class="confluence-desc">Waiting for analysis...</span>
-                                    </div>
-                                    <div class="confluence-badge" style="background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--card-border);">-</div>
-                                </div>
-                            `;
-                        });
-                        confContainer.innerHTML = htmlStr;
+                            });
+                            confContainer.innerHTML = htmlStr;
+                        }
                     }
 
                     // 7. Completed Trades Table (using dynamic filter engine)
