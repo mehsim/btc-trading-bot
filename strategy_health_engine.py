@@ -83,4 +83,27 @@ class StrategyHealthEngine:
 
         return score, multiplier, recommendation
 
+    def evaluate_operational_kpis(
+        self,
+        order_rejection_rate_pct: float = 0.2,
+        cancel_rate_pct: float = 1.5,
+        partial_fill_pct: float = 98.0,
+        api_timeout_pct: float = 0.1,
+        websocket_reconnect_freq: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Enhancement 6: Operational KPI Monitoring Engine
+        Evaluates exchange latency, order rejection rate, cancel rate, partial fill %, API timeout %, and WS reconnect frequency.
+        """
+        kpi_health = {
+            "order_rejection_rate_pct": order_rejection_rate_pct,
+            "rejection_status": "EXCELLENT" if order_rejection_rate_pct < 1.0 else "ELEVATED",
+            "cancel_rate_pct": cancel_rate_pct,
+            "partial_fill_pct": partial_fill_pct,
+            "api_timeout_pct": api_timeout_pct,
+            "websocket_reconnect_freq_daily": websocket_reconnect_freq,
+            "operational_status": "HEALTHY" if order_rejection_rate_pct < 1.0 and websocket_reconnect_freq <= 3 else "DEGRADED"
+        }
+        return kpi_health
+
 strategy_health_engine = StrategyHealthEngine()

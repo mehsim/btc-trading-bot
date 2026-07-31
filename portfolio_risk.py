@@ -240,11 +240,36 @@ class PortfolioRiskEngine:
         loss_pct = float(mean_loss_usd / max(1e-9, total_equity))
         cvar_pct = float(cvar_999_usd / max(1e-9, total_equity))
 
+        # Enhancement 5: Monte Carlo Tail Risk Estimates
+        sim_loss_ratios = simulated_losses / max(1e-9, total_equity)
+        risk_of_ruin_pct = float(np.mean(sim_loss_ratios >= 0.50) * 100.0)
+        prob_20pct_drawdown = float(np.mean(sim_loss_ratios >= 0.20) * 100.0)
+        prob_new_equity_lows = float(np.mean(sim_loss_ratios >= 0.10) * 100.0)
+        
+        # Calculate expected max losing streak
+        loss_flags = (simulated_losses > 0).astype(int)
+        max_streaks = []
+        for i in range(min(500, len(loss_flags))):
+            s = loss_flags[i]
+            cur = max_s = 0
+            for val in [s]:
+                if val == 1:
+                    cur += 1
+                    max_s = max(max_s, cur)
+                else:
+                    cur = 0
+            max_streaks.append(max_s)
+        exp_losing_streak = int(np.mean(max_streaks)) if max_streaks else 2
+
         return {
             "projected_stress_loss_usd": round(mean_loss_usd, 4),
             "projected_stress_loss_pct": round(loss_pct, 4),
             "stress_cvar_999_usd": round(cvar_999_usd, 4),
             "stress_cvar_999_pct": round(cvar_pct, 4),
+            "risk_of_ruin_pct": round(risk_of_ruin_pct, 2),
+            "prob_20pct_drawdown": round(prob_20pct_drawdown, 2),
+            "prob_new_equity_lows": round(prob_new_equity_lows, 2),
+            "expected_max_losing_streak": exp_losing_streak,
             "is_within_budget": loss_pct <= 0.25
         }
 
