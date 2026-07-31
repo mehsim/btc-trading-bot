@@ -703,7 +703,7 @@ def api_institutional_summary():
                 "effect_size": eff
             }
         )())(),
-        "attribution_table": [
+        "attribution_table": state_manager.get("attribution_table", [
             {"component": "4H Hard Gate", "improvement": "+0.31 PF", "status": "HIGH VALUE"},
             {"component": "ATR Position Sizing", "improvement": "+0.18 PF", "status": "HIGH VALUE"},
             {"component": "Daily Loss Cap", "improvement": "+0.11 PF", "status": "PROTECTION"},
@@ -711,8 +711,8 @@ def api_institutional_summary():
             {"component": "Expectancy Gate", "improvement": "+0.14 PF", "status": "HIGH VALUE"},
             {"component": "Isotonic Calibration", "improvement": "+0.07 PF", "status": "CALIBRATION"},
             {"component": "Drift Monitor", "improvement": "+0.04 PF", "status": "STABILITY"}
-        ],
-        "walk_forward_folds": [
+        ]),
+        "walk_forward_folds": state_manager.get("walk_forward_folds", [
             {"fold": "Fold 1", "pf": 1.28, "win_rate": "49.3%", "drawdown": "5.5%", "sharpe": 1.15, "status": "PASS"},
             {"fold": "Fold 2", "pf": 1.32, "win_rate": "50.1%", "drawdown": "4.9%", "sharpe": 1.22, "status": "PASS"},
             {"fold": "Fold 3", "pf": 0.94, "win_rate": "44.7%", "drawdown": "14.4%", "sharpe": 0.41, "status": "WARNING"},
@@ -723,6 +723,6 @@ def api_institutional_summary():
             {"fold": "Fold 8", "pf": 1.74, "win_rate": "56.0%", "drawdown": "2.9%", "sharpe": 2.10, "status": "PASS"},
             {"fold": "Fold 9", "pf": 1.45, "win_rate": "52.4%", "drawdown": "3.6%", "sharpe": 1.62, "status": "PASS"},
             {"fold": "Fold 10", "pf": 1.37, "win_rate": "50.5%", "drawdown": "4.0%", "sharpe": 1.40, "status": "PASS"}
-        ]
+        ])
     }
     return jsonify(data)
