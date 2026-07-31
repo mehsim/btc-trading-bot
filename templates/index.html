@@ -3466,6 +3466,31 @@
                         if (document.getElementById("today-dd-val")) document.getElementById("today-dd-val").innerText = `${qs.today_drawdown_pct}%`;
                     }
 
+                    // Section 2 Strategy Health Breakdown
+                    if (data.shs_breakdown) {
+                        const shsb = data.shs_breakdown;
+                        if (document.getElementById("shs-total-score")) document.getElementById("shs-total-score").innerText = shsb.total_score;
+
+                        if (Array.isArray(shsb.components)) {
+                            shsb.components.forEach(comp => {
+                                let valEl = null;
+                                if (comp.name === "Calibration") valEl = document.getElementById("shs-calib");
+                                else if (comp.name === "Drift" || comp.name === "Drift Monitor") valEl = document.getElementById("shs-drift");
+                                else if (comp.name === "Live Profit Factor") valEl = document.getElementById("shs-pf");
+                                else if (comp.name === "Drawdown Safety") valEl = document.getElementById("shs-dd");
+                                else if (comp.name === "Win Rate Stability") valEl = document.getElementById("shs-wr");
+                                else if (comp.name === "Latency & Slippage") valEl = document.getElementById("shs-latency");
+
+                                if (valEl) {
+                                    valEl.innerText = `${comp.score} / ${comp.max}`;
+                                    const tagEl = valEl.closest('div') ? valEl.closest('div').nextElementSibling : null;
+                                    if (tagEl && comp.status) tagEl.innerText = comp.status;
+                                }
+                            });
+                        }
+                    }
+
+
                     // Section 3 Live Performance
                     if (data.live_performance) {
                         const lp = data.live_performance;
