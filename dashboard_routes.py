@@ -518,6 +518,18 @@ def api_institutional_summary():
         for t in today_trades
     )
 
+    today_winning_trades = [t for t in today_trades if float(t.get("pnl_usd", 0.0)) > 0]
+    today_losing_trades = [t for t in today_trades if float(t.get("pnl_usd", 0.0)) < 0]
+    today_win_rate = (len(today_winning_trades) / len(today_trades)) * 100.0 if today_trades else 0.0
+
+    today_gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in today_winning_trades)
+    today_gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in today_losing_trades))
+    today_pf = round(today_gross_gains / today_gross_losses, 2) if today_gross_losses > 0 else (1.00 if today_gross_gains > 0 else 0.00)
+
+    today_returns = [float(t.get("pnl_usd", 0.0)) for t in today_trades]
+    today_stats = calculate_replay_statistics(today_returns, initial_equity=100.0) if today_returns else {}
+    today_dd = round(today_stats.get("max_drawdown_pct", 0.0), 1)
+
     gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades)
     gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades))
     calculated_pf = round(gross_gains / gross_losses, 2) if gross_losses > 0 else (1.00 if gross_gains > 0 else 0.00)
@@ -611,9 +623,9 @@ def api_institutional_summary():
             "today_pnl_usd": float(round(today_pnl, 2)),
             "today_volume_usd": float(round(today_volume, 2)),
             "today_leveraged_volume_usd": float(round(today_leveraged_volume, 2)),
-            "today_win_rate_pct": float(round(win_rate, 1)),
-            "today_pf": calculated_pf,
-            "today_drawdown_pct": float(dynamic_dd)
+            "today_win_rate_pct": float(round(today_win_rate, 1)),
+            "today_pf": today_pf,
+            "today_drawdown_pct": float(today_dd)
         },
         "shs_breakdown": {
             "total_score": shs_val,
@@ -647,7 +659,7 @@ def api_institutional_summary():
             "opportunity_loss_r": "0.82R",
             "risk_reward_ratio": f"{rr_val:.2f}",
             "avg_hold_time": "2.4h",
-            "trades_today": len(winning_trades) + len(losing_trades),
+            "trades_today": len(today_trades),
             "trades_week": total_trades_count,
             "trades_month": total_trades_count
         },
