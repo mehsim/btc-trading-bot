@@ -1205,6 +1205,23 @@
                             Syncing with Bybit APIs...
                         </div>
                     </div>
+
+                    <!-- Live Reality Gap Monitoring Card -->
+                    <div class="card" id="reality-gap-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 140px; flex: 1; min-width: 230px; margin-bottom: 0;">
+                        <div>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                                <span>Live Reality Gap</span>
+                                <span id="reality-gap-status-badge" style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">MONITORING</span>
+                            </div>
+                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 36px; margin-top: 15px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
+                        </div>
+                        <div style="margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                            <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">3.5 bps</strong></div>
+                            <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">48 ms</strong></div>
+                            <div>Fill Quality: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
+                            <div>Exp/Act PF: <strong id="reality-pf-val" style="color: var(--text-primary);">1.38 / 1.31</strong></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2704,6 +2721,32 @@
                 });
             }
         }
+
+        function updateRealityGap() {
+            fetch('/api/reality_gap')
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.status === "ok") {
+                        const gapVal = document.getElementById("reality-gap-pct-val");
+                        const slipVal = document.getElementById("reality-slippage-val");
+                        const latVal = document.getElementById("reality-latency-val");
+                        const fillVal = document.getElementById("reality-fill-val");
+                        const pfVal = document.getElementById("reality-pf-val");
+                        const statusBadge = document.getElementById("reality-gap-status-badge");
+
+                        if (gapVal) gapVal.innerText = `${parseFloat(data.reality_gap_pct).toFixed(1)}%`;
+                        if (slipVal) slipVal.innerText = `${parseFloat(data.slippage_diff_bp).toFixed(1)} bps`;
+                        if (latVal) latVal.innerText = `${data.execution_latency_ms} ms`;
+                        if (fillVal) fillVal.innerText = `${parseFloat(data.fill_quality_pct).toFixed(1)}%`;
+                        if (pfVal) pfVal.innerText = `${parseFloat(data.expected_pf).toFixed(2)} / ${parseFloat(data.actual_pf).toFixed(2)}`;
+                        if (statusBadge) statusBadge.innerText = data.status_tag || "MONITORING";
+                    }
+                })
+                .catch(err => console.log("[Reality Gap Update Warning]:", err));
+        }
+
+        setInterval(updateRealityGap, 10000);
+        updateRealityGap();
 
         function clearTradeHistory() {
             if (confirm("Are you sure you want to clear the entire trade and prediction history from the backend and Hugging Face space? This will reset the simulated balance back to $80.00.")) {
