@@ -1736,143 +1736,152 @@
             </div>
         </div>
 
-        <!-- SECTION 6: SYSTEM MONITORING & TELEMETRY DASHBOARD -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header">
-                <div class="section-title">🖥️ System Telemetry & Infrastructure Health</div>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Feature Drift</div>
-                    <div id="mon-drift" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">Normal</div>
+        <!-- PARALLEL 3-COLUMN GRID: SYSTEM TELEMETRY, RISK DASHBOARD & ML RESEARCH LAB -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 24px;">
+            <!-- CARD 1: SYSTEM MONITORING & TELEMETRY DASHBOARD -->
+            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+                <div>
+                    <div class="section-header" style="margin-bottom: 16px;">
+                        <div class="section-title" style="font-size: 15px;">🖥️ System Telemetry & Infrastructure</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Feature Drift</div>
+                            <div id="mon-drift" class="stat-tile-val" style="color: var(--accent-green); font-size: 15px;">Normal</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">PSI Index</div>
+                            <div id="mon-psi" class="stat-tile-val" style="color: var(--text-primary);">0.04</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">CUSUM</div>
+                            <div id="mon-cusum" class="stat-tile-val" style="color: var(--accent-blue);">0.82</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">ECE Calibration</div>
+                            <div id="mon-ece" class="stat-tile-val" style="color: var(--accent-purple);">0.038</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Brier Score</div>
+                            <div id="mon-brier" class="stat-tile-val" style="color: var(--text-primary);">0.214</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Data Quality</div>
+                            <div id="mon-dq" class="stat-tile-val" style="color: var(--accent-green);">97</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">API Latency</div>
+                            <div id="mon-apilat" class="stat-tile-val" style="color: var(--accent-green);">18 ms</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">DB Latency</div>
+                            <div id="mon-dblat" class="stat-tile-val" style="color: var(--accent-green);">3 ms</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Clock Drift</div>
+                            <div id="mon-clock" class="stat-tile-val" style="color: var(--text-primary);">0.3 ms</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Memory Usage</div>
+                            <div id="mon-mem" class="stat-tile-val" style="color: var(--accent-orange);">52%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">CPU Usage</div>
+                            <div id="mon-cpu" class="stat-tile-val" style="color: var(--accent-blue);">31%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">WebSocket / REST</div>
+                            <div id="mon-ws" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">Healthy</div>
+                        </div>
+                    </div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">PSI Index</div>
-                    <div id="mon-psi" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.04</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">CUSUM</div>
-                    <div id="mon-cusum" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">0.82</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">ECE Calibration</div>
-                    <div id="mon-ece" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">0.038</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Brier Score</div>
-                    <div id="mon-brier" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.214</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Data Quality</div>
-                    <div id="mon-dq" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">97</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">API Latency</div>
-                    <div id="mon-apilat" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">18 ms</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">DB Latency</div>
-                    <div id="mon-dblat" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">3 ms</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Clock Drift</div>
-                    <div id="mon-clock" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.3 ms</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Memory Usage</div>
-                    <div id="mon-mem" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">52%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">CPU Usage</div>
-                    <div id="mon-cpu" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">31%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">WebSocket / REST</div>
-                    <div id="mon-ws" style="font-size: 14px; font-weight: 800; color: var(--accent-green);">Healthy</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- SECTION 7: RISK & PORTFOLIO EXPOSURE DASHBOARD -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header">
-                <div class="section-title">🛡️ Risk & Portfolio Exposure Dashboard</div>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Open Risk</div>
-                    <div id="rk-open" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">1.2%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Max Allowed Risk</div>
-                    <div id="rk-max" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">5.0%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Portfolio VaR (99%)</div>
-                    <div id="rk-var" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">2.1%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">CVaR (99.9%)</div>
-                    <div id="rk-cvar" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">3.6%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Asset Exposures</div>
-                    <div id="rk-exposures" style="font-size: 11px; font-weight: 700; color: var(--text-primary);">BTC 22% | ETH 18% | SOL 15% | XRP 12%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Correlation Risk</div>
-                    <div id="rk-corr" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">Medium</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Net Exposure</div>
-                    <div id="rk-net" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">42%</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- SECTION 8: ML RESEARCH LABORATORY (CHAMPION VS SHADOW CHALLENGER) -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
-                <div class="section-title">🧪 ML Research Laboratory (Champion vs. Shadow Challenger)</div>
-                <span style="font-size: 10px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">SHADOW GATE: 186 / 200 TRADES</span>
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Current Champion</div>
-                    <div id="ml-champ" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">v6.2</div>
+            <!-- CARD 2: RISK & PORTFOLIO EXPOSURE DASHBOARD -->
+            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+                <div>
+                    <div class="section-header" style="margin-bottom: 16px;">
+                        <div class="section-title" style="font-size: 15px;">🛡️ Risk & Portfolio Exposure</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Open Risk</div>
+                            <div id="rk-open" class="stat-tile-val" style="color: var(--accent-green);">1.2%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Max Allowed Risk</div>
+                            <div id="rk-max" class="stat-tile-val" style="color: var(--accent-orange);">5.0%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Portfolio VaR (99%)</div>
+                            <div id="rk-var" class="stat-tile-val" style="color: var(--accent-blue);">2.1%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">CVaR (99.9%)</div>
+                            <div id="rk-cvar" class="stat-tile-val" style="color: var(--accent-purple);">3.6%</div>
+                        </div>
+                        <div class="stat-tile" style="grid-column: span 2;">
+                            <div class="stat-tile-label">Asset Exposures</div>
+                            <div id="rk-exposures" class="stat-tile-val" style="font-size: 12px; color: var(--text-primary);">BTC 22% | ETH 18% | SOL 15%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Correlation Risk</div>
+                            <div id="rk-corr" class="stat-tile-val" style="color: var(--accent-orange); font-size: 14px;">Medium</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Net Exposure</div>
+                            <div id="rk-net" class="stat-tile-val" style="color: var(--accent-blue);">42%</div>
+                        </div>
+                    </div>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Shadow Challenger</div>
-                    <div id="ml-chall" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">v6.3</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Shadow Trades</div>
-                    <div id="ml-trades" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">186</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Champion PF vs Shadow PF</div>
-                    <div id="ml-pfs" style="font-size: 15px; font-weight: 800; color: var(--accent-green);">1.34 / 1.47</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Promotion Status</div>
-                    <div id="ml-promo" style="font-size: 13px; font-weight: 800; color: var(--accent-orange);">Waiting (186/200)</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Release Gates</div>
-                    <div id="ml-gates" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">8 / 8 Passed</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Holdout Accuracy</div>
-                    <div id="ml-holdout" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">61.8%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Bootstrap CI</div>
-                    <div id="ml-bootstrap" style="font-size: 15px; font-weight: 800; color: var(--text-primary);">1.22 - 1.45</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Effect Size</div>
-                    <div id="ml-effect" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">+0.08 PF</div>
+            </div>
+
+            <!-- CARD 3: ML RESEARCH LABORATORY (CHAMPION VS SHADOW CHALLENGER) -->
+            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+                <div>
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <div class="section-title" style="font-size: 15px;">🧪 ML Research Laboratory</div>
+                        <span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">SHADOW GATE</span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Current Champion</div>
+                            <div id="ml-champ" class="stat-tile-val" style="color: var(--accent-green);">v6.2</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Shadow Challenger</div>
+                            <div id="ml-chall" class="stat-tile-val" style="color: var(--accent-purple);">v6.3</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Shadow Trades</div>
+                            <div id="ml-trades" class="stat-tile-val" style="color: var(--accent-blue);">186</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Champ vs Shadow PF</div>
+                            <div id="ml-pfs" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">1.34 / 1.47</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Promotion Status</div>
+                            <div id="ml-promo" class="stat-tile-val" style="color: var(--accent-orange); font-size: 12px;">Waiting (186/200)</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Release Gates</div>
+                            <div id="ml-gates" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">8/8 PASS</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Holdout Accuracy</div>
+                            <div id="ml-holdout" class="stat-tile-val" style="color: var(--accent-blue);">61.8%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Bootstrap CI</div>
+                            <div id="ml-bootstrap" class="stat-tile-val" style="color: var(--text-primary); font-size: 13px;">1.22 - 1.45</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Effect Size</div>
+                            <div id="ml-effect" class="stat-tile-val" style="color: var(--accent-green);">+0.08 PF</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
