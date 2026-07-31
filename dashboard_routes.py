@@ -884,6 +884,7 @@ def api_strategy_health():
     import numpy as np
     from exit_policy_engine import exit_policy_engine
     from state_manager import state_manager
+    bot_state = state_manager
     from trade_calculators import calculate_replay_statistics
 
     # 1. Fetch live trade history from DB or memory
