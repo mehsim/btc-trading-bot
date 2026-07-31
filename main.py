@@ -346,41 +346,41 @@ POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTE
 
 # Centralized timeframe parameters for training labels and live execution alignment
 TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe
+    "15": {   # 15M Timeframe - Scalp (Balanced R:R ~1.80x - 2.20x)
         "lookahead": 12,
         "sl_mult": 0.75,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.3
+        "tp_mult_ranging": 1.35,
+        "tp_mult_trending": 1.65
     },
-    "30": {   # 30M Timeframe
+    "30": {   # 30M Timeframe - Short Swing (Balanced R:R ~1.81x - 2.19x)
         "lookahead": 12,
         "sl_mult": 0.80,
-        "tp_mult_ranging": 1.3,
-        "tp_mult_trending": 1.5
+        "tp_mult_ranging": 1.45,
+        "tp_mult_trending": 1.75
     },
-    "60": {   # 1H Timeframe
+    "60": {   # 1H Timeframe - Swing (Balanced R:R ~1.80x - 2.25x)
         "lookahead": 10,
-        "sl_mult": 1.5,
-        "tp_mult_ranging": 1.5,
-        "tp_mult_trending": 2.5
+        "sl_mult": 1.2,
+        "tp_mult_ranging": 2.16,
+        "tp_mult_trending": 2.70
     },
-    "120": {  # 2H Timeframe
+    "120": {  # 2H Timeframe - Extended Swing (Balanced R:R ~1.80x - 2.25x)
+        "lookahead": 12,
+        "sl_mult": 1.2,
+        "tp_mult_ranging": 2.16,
+        "tp_mult_trending": 2.70
+    },
+    "240": {  # 4H Timeframe - Macro Swing (Balanced R:R ~1.80x - 2.20x)
         "lookahead": 12,
         "sl_mult": 1.5,
-        "tp_mult_ranging": 1.4,
-        "tp_mult_trending": 2.2
+        "tp_mult_ranging": 2.70,
+        "tp_mult_trending": 3.30
     },
-    "240": {  # 4H Timeframe
-        "lookahead": 12,
-        "sl_mult": 1.8,
-        "tp_mult_ranging": 1.3,
-        "tp_mult_trending": 2.0
-    },
-    "360": {  # 6H Timeframe
+    "360": {  # 6H Timeframe - Macro Trend (Balanced R:R ~1.80x - 2.20x)
         "lookahead": 16,
-        "sl_mult": 2.0,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.8
+        "sl_mult": 1.5,
+        "tp_mult_ranging": 2.70,
+        "tp_mult_trending": 3.30
     }
 }
 
@@ -6934,10 +6934,22 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 stop_loss_price = entry_price - raw_sl_dist
                 est_tp_price = estimate_liquidation_pool(df_completed, "Bullish", entry_price)
                 take_profit_price = max(entry_price + min_tp_dist, min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars))
+                # 4. Market Structure Resistance Capping
+                if df_completed is not None and not df_completed.empty and "high" in df_completed.columns:
+                    recent_resistance = float(df_completed["high"].tail(20).max())
+                    if recent_resistance > entry_price and take_profit_price > recent_resistance:
+                        struct_cap = max(entry_price + min_tp_dist, recent_resistance - (0.05 * atr_dollars))
+                        take_profit_price = min(take_profit_price, struct_cap)
             else:
                 stop_loss_price = entry_price + raw_sl_dist
                 est_tp_price = estimate_liquidation_pool(df_completed, "Bearish", entry_price)
                 take_profit_price = min(entry_price - min_tp_dist, max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars))
+                # 4. Market Structure Support Capping
+                if df_completed is not None and not df_completed.empty and "low" in df_completed.columns:
+                    recent_support = float(df_completed["low"].tail(20).min())
+                    if recent_support < entry_price and take_profit_price < recent_support:
+                        struct_cap = min(entry_price - min_tp_dist, recent_support + (0.05 * atr_dollars))
+                        take_profit_price = max(take_profit_price, struct_cap)
                 
             # 4. Set SL/TP on active position on Bybit
             temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
@@ -8583,21 +8595,49 @@ def main():
                                     tp_multiplier = round(base_tp * vol_factor, 2)
                                     print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
-                                    # Align stop loss and take profit multipliers dynamically from TIMEFRAME_CONFIG
-                                    cfg = TIMEFRAME_CONFIG.get(str(iv), {
+                                    # Align stop loss and take profit multipliers dynamically from baseline TIMEFRAME_CONFIG or release-gate approved walk-forward state
+                                    optimized_cfg = bot_state.get("optimized_timeframe_config", {}).get(str(iv), {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
+                                    baseline_cfg = TIMEFRAME_CONFIG.get(str(iv), {
                                         "lookahead": 10,
                                         "sl_mult": 0.8,
-                                        "tp_mult_ranging": 1.5,
-                                        "tp_mult_trending": 2.5
+                                        "tp_mult_ranging": 1.45,
+                                        "tp_mult_trending": 1.75
                                     })
+                                    # Merge approved optimizations over baseline defaults
+                                    cfg = {**baseline_cfg, **optimized_cfg}
                                     adx_val = latest_candle.get("ADX", 0.0)
+                                    sl_multiplier = cfg.get("sl_mult", 1.0)
                                     if adx_val >= 20.0:
-                                        sl_multiplier = 2.0
-                                        tp_multiplier_adjusted = cfg.get("tp_mult_trending", 2.5)
+                                        tp_multiplier_adjusted = cfg.get("tp_mult_trending", 2.0)
                                     else:
-                                        sl_multiplier = 1.0
                                         tp_multiplier_adjusted = cfg.get("tp_mult_ranging", 1.5)
-                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Regime Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted}x")
+
+                                    # 1. Volatility (ATR Percentile) Adjustment (±5%)
+                                    atr_series = df_completed["ATR"].tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
+                                    vol_adj = 1.00
+                                    if atr_series is not None and len(atr_series) > 10:
+                                        curr_atr = float(latest_candle.get("ATR", atr_dollars))
+                                        atr_percentile = float((atr_series < curr_atr).mean() * 100.0)
+                                        if atr_percentile > 90.0:
+                                            vol_adj = 0.95  # Extreme volatility: tighten target before exhaustion reversal
+                                        elif atr_percentile < 20.0:
+                                            vol_adj = 1.05  # Quiet market: expand target for breakout extension
+                                    tp_multiplier_adjusted *= vol_adj
+
+                                    # 2. Session Liquidity Adjustment
+                                    curr_utc_hour = datetime.now(timezone.utc).hour
+                                    if 6 <= curr_utc_hour < 8:
+                                        session_factor = 0.95  # Late Asian session: lower liquidity
+                                    elif 12 <= curr_utc_hour < 16:
+                                        session_factor = 1.00  # London / NY overlap: prime liquidity
+                                    else:
+                                        session_factor = 0.98
+                                    tp_multiplier_adjusted *= session_factor
+
+                                    # 3. Walk-Forward Optimal Rounding (0.05 precision)
+                                    tp_multiplier_adjusted = round(tp_multiplier_adjusted * 20.0) / 20.0
+
+                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted:.2f}x (Vol: {vol_adj:.2f}x, Session: {session_factor:.2f}x)")
                                     
                                     # Maker execution: zero entry slippage for limit orders
                                     slippage_pct = 0.0

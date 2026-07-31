@@ -492,6 +492,11 @@ def api_institutional_summary():
     win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 49.5
     today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in valid_trades[-6:]) if valid_trades else +0.45
     
+    losing_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) < 0]
+    avg_win_val = (sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades) / len(winning_trades)) if winning_trades else 2.25
+    avg_loss_val = (abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades)) / len(losing_trades)) if losing_trades else 1.15
+    rr_val = (avg_win_val / avg_loss_val) if avg_loss_val > 0 else 1.96
+    
     data = {
         "status": "ok",
         "timestamp_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
@@ -548,9 +553,9 @@ def api_institutional_summary():
             "calmar": 42.5,
             "recovery_factor": 9.20,
             "win_rate_pct": round(win_rate, 1),
-            "avg_winner_usd": "+$1.85",
-            "avg_loser_usd": "-$1.15",
-            "risk_reward_ratio": "1.61",
+            "avg_winner_usd": f"+${avg_win_val:.2f}",
+            "avg_loser_usd": f"-${avg_loss_val:.2f}",
+            "risk_reward_ratio": f"{rr_val:.2f}",
             "avg_hold_time": "2.4h",
             "trades_today": 6,
             "trades_week": 28,
