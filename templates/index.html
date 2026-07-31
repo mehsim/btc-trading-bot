@@ -3467,7 +3467,13 @@
 
                         if (document.getElementById("today-pnl-val")) {
                             const pnlVal = parseFloat(qs.today_pnl_usd);
-                            document.getElementById("today-pnl-val").innerText = !isNaN(pnlVal) ? `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}` : qs.today_pnl_usd;
+                            const pnlEl = document.getElementById("today-pnl-val");
+                            if (!isNaN(pnlVal)) {
+                                pnlEl.innerText = `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}`;
+                                pnlEl.style.color = pnlVal >= 0 ? "var(--accent-green)" : "var(--accent-red)";
+                            } else {
+                                pnlEl.innerText = qs.today_pnl_usd;
+                            }
                         }
                         if (document.getElementById("today-trades-count-val")) {
                             document.getElementById("today-trades-count-val").innerText = qs.today_trades_count ?? 0;
