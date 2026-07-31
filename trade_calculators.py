@@ -87,12 +87,13 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
     sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * np.sqrt(min(total_trades, 252)) if pct_std > 0 else 0.0
     sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * np.sqrt(min(total_trades, 252)) if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
 
-    # Equity Curve & Drawdown
-    equity_curve = initial_equity * np.cumprod(np.maximum(0.001, 1.0 + returns))
-    peak = np.maximum.accumulate(equity_curve)
-    dd_curve = (peak - equity_curve) / peak * 100.0
+    # Equity Curve & Drawdown (additive cumsum for raw PnL dollar returns)
+    equity_curve = initial_equity + np.cumsum(returns)
+    full_equity = np.insert(equity_curve, 0, initial_equity)
+    peak = np.maximum.accumulate(full_equity)
+    dd_curve = (peak - full_equity) / np.maximum(1e-8, peak) * 100.0
     max_drawdown = float(np.max(dd_curve)) if len(dd_curve) > 0 else 0.0
-    ending_return = float(((equity_curve[-1] - initial_equity) / initial_equity) * 100.0) if len(equity_curve) > 0 else 0.0
+    ending_return = float(((full_equity[-1] - initial_equity) / initial_equity) * 100.0) if len(full_equity) > 0 else 0.0
 
     # Institutional Metrics: Calmar Ratio & Recovery Factor
     safe_dd = max(0.01, max_drawdown)
