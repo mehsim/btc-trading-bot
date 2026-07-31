@@ -489,8 +489,10 @@ def api_institutional_summary():
     losing_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) < 0]
     
     win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 0.0
-    today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in valid_trades[-6:]) if valid_trades else 0.0
-    
+    today_trades = valid_trades[-6:] if valid_trades else []
+    today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in today_trades)
+    today_volume = sum(float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 22.84)))) for t in today_trades)
+
     gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades)
     gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades))
     calculated_pf = round(gross_gains / gross_losses, 2) if gross_losses > 0 else (1.00 if gross_gains > 0 else 0.00)
@@ -581,6 +583,7 @@ def api_institutional_summary():
             "position_size_usd": float(current_position_size_usd),
             "portfolio_exposure_pct": float(portfolio_exposure_pct),
             "today_pnl_usd": float(round(today_pnl, 2)),
+            "today_volume_usd": float(round(today_volume, 2)),
             "today_win_rate_pct": float(round(win_rate, 1)),
             "today_pf": calculated_pf,
             "today_drawdown_pct": float(dynamic_dd)
@@ -599,6 +602,7 @@ def api_institutional_summary():
             "position_multiplier_pct": int(shs_multiplier * 100) if 'shs_multiplier' in dir() else (100 if shs_val>=85 else (50 if shs_val>=70 else (25 if shs_val>=50 else 0))),
             "step_ladder": ["100%", "50%", "25%", "Paper Trading", "Disabled"]
         },
+        
         "live_performance": {
             "profit_factor": calculated_pf,
             "expectancy_r": dynamic_exp_r,

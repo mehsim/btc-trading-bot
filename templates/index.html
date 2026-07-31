@@ -1044,10 +1044,14 @@
             </div>
 
             <!-- Today's Metrics Bar -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; background: rgba(13,15,26,0.6); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; background: rgba(13,15,26,0.6); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);">
                 <div>
                     <div style="font-size: 10px; color: var(--text-secondary);">Today's PnL</div>
                     <div id="today-pnl-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">+$0.45</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">Today's Volume</div>
+                    <div id="today-vol-val" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">$0.00</div>
                 </div>
                 <div>
                     <div style="font-size: 10px; color: var(--text-secondary);">Today's Win Rate</div>
@@ -3460,6 +3464,10 @@
                         if (document.getElementById("today-pnl-val")) {
                             const pnlVal = parseFloat(qs.today_pnl_usd);
                             document.getElementById("today-pnl-val").innerText = !isNaN(pnlVal) ? `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}` : qs.today_pnl_usd;
+                        }
+                        if (document.getElementById("today-vol-val")) {
+                            const volVal = parseFloat(qs.today_volume_usd);
+                            document.getElementById("today-vol-val").innerText = !isNaN(volVal) ? `$${volVal.toFixed(2)}` : (qs.today_volume_usd || "$0.00");
                         }
                         if (document.getElementById("today-wr-val")) document.getElementById("today-wr-val").innerText = `${qs.today_win_rate_pct}%`;
                         if (document.getElementById("today-pf-val")) document.getElementById("today-pf-val").innerText = qs.today_pf;
