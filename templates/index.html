@@ -1518,30 +1518,51 @@
                     </div>
                 </div>
 
-                <!-- Right: Position Multiplier Step Ladder -->
-                <div style="background: rgba(13,15,26,0.4); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
-                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; font-weight: 700;">Position Multiplier Step Ladder</h4>
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(16,185,129,0.15); border-left: 3px solid var(--accent-green); border-radius: 6px;">
-                            <span style="font-size: 12px; font-weight: 700; color: var(--accent-green);">100% Risk Allocation</span>
-                            <span style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">SHS ≥ 85 (CURRENT)</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-yellow); border-radius: 6px;">
-                            <span style="font-size: 12px; font-weight: 600;">50% Risk Allocation</span>
-                            <span style="font-size: 11px; color: var(--text-secondary);">SHS 70–84</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-orange); border-radius: 6px;">
-                            <span style="font-size: 12px; font-weight: 600;">25% Risk Allocation</span>
-                            <span style="font-size: 11px; color: var(--text-secondary);">SHS 55–69</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-blue); border-radius: 6px;">
-                            <span style="font-size: 12px; font-weight: 600;">Paper Trading Mode</span>
-                            <span style="font-size: 11px; color: var(--text-secondary);">SHS 40–54</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-red); border-radius: 6px;">
-                            <span style="font-size: 12px; font-weight: 600;">Disabled (Halt Trading)</span>
-                            <span style="font-size: 11px; color: var(--text-secondary);">SHS &lt; 40</span>
-                        </div>
+                <!-- Right: Live Performance Attribution Table (Parallel) -->
+                <div style="background: rgba(13,15,26,0.4); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; justify-content: space-between;">
+                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; font-weight: 700;">📌 Live Performance Attribution</h4>
+                    <div class="table-container" style="max-height: 200px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr>
+                                    <th style="font-size: 10px; padding: 6px 8px;">Component</th>
+                                    <th style="font-size: 10px; padding: 6px 8px;">PF Contrib</th>
+                                    <th style="font-size: 10px; padding: 6px 8px;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="attribution-table-body">
+                                <tr>
+                                    <td style="font-size: 11px; padding: 6px 8px;">4H Hard Gate</td>
+                                    <td style="font-size: 11px; padding: 6px 8px; color: var(--accent-green); font-weight: 800;">+0.31 PF</td>
+                                    <td style="padding: 6px 8px;"><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 11px; padding: 6px 8px;">ATR Sizing</td>
+                                    <td style="font-size: 11px; padding: 6px 8px; color: var(--accent-green); font-weight: 800;">+0.18 PF</td>
+                                    <td style="padding: 6px 8px;"><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 11px; padding: 6px 8px;">Daily Loss Cap</td>
+                                    <td style="font-size: 11px; padding: 6px 8px; color: var(--accent-green); font-weight: 800;">+0.11 PF</td>
+                                    <td style="padding: 6px 8px;"><span style="font-size: 9px; font-weight: 800; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">PROTECTION</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 11px; padding: 6px 8px;">EQS Gate</td>
+                                    <td style="font-size: 11px; padding: 6px 8px; color: var(--accent-green); font-weight: 800;">+0.09 PF</td>
+                                    <td style="padding: 6px 8px;"><span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">VALUE ADD</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 11px; padding: 6px 8px;">Expectancy Gate</td>
+                                    <td style="font-size: 11px; padding: 6px 8px; color: var(--accent-green); font-weight: 800;">+0.14 PF</td>
+                                    <td style="padding: 6px 8px;"><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
+                                </tr>
+                                <tr>
+                                    <td style="font-size: 11px; padding: 6px 8px;">Isotonic Calib</td>
+                                    <td style="font-size: 11px; padding: 6px 8px; color: var(--accent-green); font-weight: 800;">+0.07 PF</td>
+                                    <td style="padding: 6px 8px;"><span style="font-size: 9px; font-weight: 800; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">CALIBRATION</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -1865,60 +1886,7 @@
             </div>
         </div>
 
-        <!-- SECTION 9: LIVE COMPONENT PERFORMANCE ATTRIBUTION TABLE -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header">
-                <div class="section-title">📌 Live Performance Attribution</div>
-            </div>
-            <div class="table-container" style="margin-top: 10px;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Component Name</th>
-                            <th>PF Improvement Contribution</th>
-                            <th>Status Tag</th>
-                        </tr>
-                    </thead>
-                    <tbody id="attribution-table-body">
-                        <tr>
-                            <td>4H Hard Gate</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.31 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
-                        </tr>
-                        <tr>
-                            <td>ATR Position Sizing</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.18 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
-                        </tr>
-                        <tr>
-                            <td>Daily Loss Cap</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.11 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">PROTECTION</span></td>
-                        </tr>
-                        <tr>
-                            <td>EQS Gate</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.09 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">VALUE ADD</span></td>
-                        </tr>
-                        <tr>
-                            <td>Expectancy Gate</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.14 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">HIGH VALUE</span></td>
-                        </tr>
-                        <tr>
-                            <td>Isotonic Calibration</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.07 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">CALIBRATION</span></td>
-                        </tr>
-                        <tr>
-                            <td>Drift Monitor</td>
-                            <td style="color: var(--accent-green); font-weight: 800;">+0.04 PF</td>
-                            <td><span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">STABILITY</span></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+
 
         <!-- SECTION 10: WALK-FORWARD MULTI-FOLD REPORT TABLE -->
         <div class="card" style="margin-top: 15px; padding: 20px;">
