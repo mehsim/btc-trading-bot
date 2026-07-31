@@ -6986,6 +6986,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         actual_notional_val = float(actual_qty * entry_price)
         actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
         actual_size_usd = actual_margin_usd
+        init_risk_dist = abs(entry_price - stop_loss_price)
+        init_reward_dist = abs(take_profit_price - entry_price)
+        init_planned_rr = (init_reward_dist / init_risk_dist) if init_risk_dist > 0 else 0.0
+
         active_trade = {
             "trade_id": f"{symbol}_{trade_uuid}",
             "bybit_order_id": bybit_order_id,
@@ -6995,6 +6999,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "predicted_price": float(predicted_price),
             "stop_loss": float(stop_loss_price),
             "take_profit": float(take_profit_price),
+            "initial_stop_loss": float(stop_loss_price),
+            "initial_take_profit": float(take_profit_price),
+            "sl_multiplier": float(sl_multiplier_adjusted),
+            "tp_multiplier": float(tp_multiplier_adjusted),
+            "initial_planned_rr": float(init_planned_rr),
             "direction": str(ml_trend),
             "end_time": float(time.time() + duration_seconds),
             "entry_time": int(time.time() * 1000),
@@ -7034,16 +7043,27 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             f"• *Asset*: {symbol}\n"
             f"• *Interval*: {iv}m\n"
             f"• *Direction*: {ml_trend}\n"
-            f"• *Entry Price*: ${float(entry_price):.4f}\n"
+            f"• *Entry Price*: ${float(entry_price):.6f}\n"
             f"• *Entry Time*: {entry_time_str}\n"
-            f"• *Take Profit*: ${float(take_profit_price):.4f}\n"
-            f"• *Stop Loss*: ${float(stop_loss_price):.4f}\n"
+            f"• *Take Profit*: ${float(take_profit_price):.6f}\n"
+            f"• *Stop Loss*: ${float(stop_loss_price):.6f}\n"
+            f"• *Planned R:R*: {init_planned_rr:.2f}\n"
             f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
             f"• *Leverage*: {leverage_val:.1f}x\n"
             f"• *Position Size (Margin)*: ${actual_margin_usd:.2f} (Value: ${actual_notional_val:.2f})\n"
             f"• *Execution Mode*: {TRADE_MODE.upper()}"
         )
-        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f})")
+        print(f"[{symbol} {iv}m TRADE SANITY CHECK LOG]")
+        print(f"  • ATR: {atr_dollars:.6f}")
+        print(f"  • ATR (USD): ${atr_dollars:.6f}")
+        print(f"  • sl_mult: {sl_multiplier_adjusted:.2f}")
+        print(f"  • tp_mult: {tp_multiplier_adjusted:.2f}")
+        print(f"  • Calculated SL (Initial): {stop_loss_price:.6f}")
+        print(f"  • Calculated TP (Initial): {take_profit_price:.6f}")
+        print(f"  • Initial Planned R:R: {init_planned_rr:.2f}")
+        print(f"  • Current Trailing SL: {stop_loss_price:.6f}")
+        print(f"  • Current Dashboard SL: {stop_loss_price:.6f}")
+        print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.6f} (SL: {stop_loss_price:.6f}, TP: {take_profit_price:.6f}, Planned R:R: {init_planned_rr:.2f})")
     else:
         err_msg = order_res.get('retMsg') if 'order_res' in locals() else "Execution failed"
         err_code = order_res.get('retCode') if 'order_res' in locals() else "N/A"
@@ -7530,7 +7550,31 @@ def main():
                     remaining_seconds = max(0, int(end_time - current_time))
                     mins, secs = divmod(remaining_seconds, 60)
                     countdown_str = f"{mins:02d}m {secs:02d}s"
-                    print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.2f} (Entry: {entry_price:.2f}, SL: {stop_loss:.2f}, TP: {take_profit:.2f}) | Countdown: {countdown_str}")
+                    
+                    # Sanity check logging for active trade (e.g. BNB and other positions)
+                    atr_val = float(active_trade.get("atr_dollars", 0.0))
+                    sl_m = float(active_trade.get("sl_multiplier", 0.75))
+                    tp_m = float(active_trade.get("tp_multiplier", 1.65))
+                    reg_name = active_trade.get("regime", "Trending/Ranging")
+                    calc_sl = float(active_trade.get("initial_stop_loss", stop_loss))
+                    calc_tp = float(active_trade.get("initial_take_profit", take_profit))
+                    r_dist = abs(entry_price - calc_sl)
+                    w_dist = abs(calc_tp - entry_price)
+                    plan_rr = (w_dist / r_dist) if r_dist > 0 else 0.0
+
+                    print(f"[{active_symbol} {iv}m Active Trade SANITY CHECK]")
+                    print(f"  • ATR: {atr_val:.6f}")
+                    print(f"  • ATR (USD): ${atr_val:.6f}")
+                    print(f"  • sl_mult: {sl_m:.2f}")
+                    print(f"  • tp_mult: {tp_m:.2f}")
+                    print(f"  • Regime: {reg_name}")
+                    print(f"  • Calculated SL (Initial): {calc_sl:.6f}")
+                    print(f"  • Calculated TP (Initial): {calc_tp:.6f}")
+                    print(f"  • Initial Planned R:R: {plan_rr:.2f}")
+                    print(f"  • Current Trailing SL: {stop_loss:.6f}")
+                    print(f"  • Current Dashboard SL: {stop_loss:.6f}")
+
+                    print(f"[{active_symbol} {iv}m Active Trade] {direction} | Price: {current_price:.6f} (Entry: {entry_price:.6f}, SL: {stop_loss:.6f}, TP: {take_profit:.6f}) | Countdown: {countdown_str}")
                     exit_reason = None
                     half_closed = active_trade.get("half_closed", False)
                     
