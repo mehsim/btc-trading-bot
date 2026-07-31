@@ -456,17 +456,32 @@ def api_reality_gap():
         needed = 20 - len(trades_comparison)
         trades_comparison = sample_trades[:needed] + trades_comparison
 
+    # Dynamic Reality Gap Calculations across trade comparisons
+    tot_exp = sum(float(t.get("expected_pnl", 0.0)) for t in trades_comparison)
+    tot_act = sum(float(t.get("actual_pnl", 0.0)) for t in trades_comparison)
+    
+    exp_wins = sum(float(t.get("expected_pnl", 0.0)) for t in trades_comparison if float(t.get("expected_pnl", 0.0)) > 0)
+    exp_losses = abs(sum(float(t.get("expected_pnl", 0.0)) for t in trades_comparison if float(t.get("expected_pnl", 0.0)) < 0))
+    exp_pf_val = round(exp_wins / exp_losses, 2) if exp_losses > 0 else (2.0 if exp_wins > 0 else 1.0)
+
+    act_wins = sum(float(t.get("actual_pnl", 0.0)) for t in trades_comparison if float(t.get("actual_pnl", 0.0)) > 0)
+    act_losses = abs(sum(float(t.get("actual_pnl", 0.0)) for t in trades_comparison if float(t.get("actual_pnl", 0.0)) < 0))
+    act_pf_val = round(act_wins / act_losses, 2) if act_losses > 0 else (1.0 if act_wins > 0 else 0.0)
+
+    gap_pct = round(abs(tot_exp - tot_act) / max(1.0, abs(tot_exp)) * 100.0, 1)
+    status_tag = "REALITY_GAP_NORMAL" if gap_pct <= 15.0 else ("REALITY_GAP_ELEVATED" if gap_pct <= 30.0 else "REALITY_GAP_HIGH")
+
     reality_gap_data = {
         "status": "ok",
         "timestamp_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-        "reality_gap_pct": 2.4,
-        "slippage_diff_bp": 3.5,
-        "fee_diff_bp": 0.5,
-        "fill_quality_pct": 98.2,
+        "reality_gap_pct": gap_pct,
+        "slippage_diff_bp": round(float(state_manager.get("last_slippage_bp", 3.5)), 1),
+        "fee_diff_bp": round(float(state_manager.get("last_fee_bp", 0.5)), 1),
+        "fill_quality_pct": round(float(state_manager.get("fill_quality_pct", 98.2)), 1),
         "execution_latency_ms": int(round(float(state_manager.get("last_api_latency_ms", 18)))),
-        "expected_pf": 1.38,
-        "actual_pf": 1.31,
-        "status_tag": "REALITY_GAP_NORMAL",
+        "expected_pf": exp_pf_val,
+        "actual_pf": act_pf_val,
+        "status_tag": status_tag,
         "latest_20_closed_trades": trades_comparison
     }
     return jsonify(reality_gap_data)
