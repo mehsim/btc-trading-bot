@@ -405,24 +405,24 @@ def api_reality_gap():
         tf = str(t.get("interval", t.get("timeframe", "1h")))
         act_pnl = float(t.get("pnl_usd", 0.0))
 
-        # Calculate Stage-1 Scale-Out Target Expectancy (50% TP Target * Confidence * Leverage * Position Size)
-        entry = float(t.get("entry_price", 0.0))
-        tp = float(t.get("take_profit", 0.0))
-        pos_size = float(t.get("position_size_usd", t.get("original_size", 4.0)))
-        lev = float(t.get("leverage", 1.0))
-        direction = str(t.get("direction", "Bullish")).capitalize()
-        conf = float(t.get("confidence", 0.85))
-        if conf <= 0.0 or conf > 1.0: conf = 0.85
+        sl = float(t.get("stop_loss", 0.0))
+        if entry > 0 and sl > 0:
+            sl_pct = abs((entry - sl) / entry)
+            exp_loss = pos_size * sl_pct * lev
+        else:
+            exp_loss = pos_size * 0.010 * lev
 
         if entry > 0 and tp > 0:
-            full_tp_pct = ((tp - entry) / entry) if direction == "Bullish" else ((entry - tp) / entry)
-            # Stage 1 Target is 50% scale-out target
-            stage1_target_pct = abs(full_tp_pct) * 0.50
-            exp_pnl = pos_size * stage1_target_pct * conf * lev
+            full_tp_pct = abs((tp - entry) / entry)
+            exp_gain = pos_size * full_tp_pct * 0.50 * conf * lev
         else:
-            exp_pnl = pos_size * 0.012 * conf * lev
+            exp_gain = pos_size * 0.012 * conf * lev
 
-        exp_pnl = max(0.08, round(exp_pnl, 2))
+        # If actual trade lost, compare against expected SL risk; if won, compare against expected TP gain
+        if act_pnl < 0:
+            exp_pnl = -max(0.05, round(exp_loss, 2))
+        else:
+            exp_pnl = max(0.05, round(exp_gain, 2))
 
         trades_comparison.append({
             "label": f"#{idx+1} {sym} ({tf})",
