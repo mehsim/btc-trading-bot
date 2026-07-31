@@ -1362,148 +1362,147 @@
         </div>
 
         <!-- SECTION 2: STRATEGY HEALTH DASHBOARD (SHS & POSITION MULTIPLIER LADDER) -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div class="section-title">🏥 Strategy Health Dashboard (SHS Engine)</div>
-                <div style="font-size: 14px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 4px 12px; border-radius: 20px;">Score: <span id="shs-total-score">94</span> / 100</div>
+        <div class="card" style="margin-top: 20px; padding: 28px;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px;">
+                <div class="section-title" style="font-size: 16px; font-weight: 700; letter-spacing: 0.3px;">🏥 Strategy Health Dashboard (SHS Engine)</div>
+                <div style="font-size: 14px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 6px 16px; border-radius: 20px; border: 1px solid rgba(16,185,129,0.3);">Score: <span id="shs-total-score">94</span> / 100</div>
             </div>
-            <div class="section-desc" style="margin-bottom: 15px;">
+            <div class="section-desc" style="margin-bottom: 24px; color: var(--text-secondary); font-size: 13px;">
                 Real-time 6-factor institutional strategy health evaluation & automatic position sizing risk throttling.
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <!-- Top Grid: Component Breakdown (Left) & Position Multiplier Ladder (Right) -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; width: 100%;">
                 <!-- Left: SHS Component Breakdown -->
-                <div>
-                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px;">Component Breakdown</h4>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                <div style="background: rgba(13,15,26,0.4); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; font-weight: 700;">Component Breakdown</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div style="background: rgba(255,255,255,0.025); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Calibration</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">Calibration</div>
                                 <strong id="shs-calib" style="font-size: 14px; color: var(--text-primary);">19 / 20</strong>
                             </div>
-                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">EXCELLENT</span>
+                            <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 4px;">EXCELLENT</span>
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: rgba(255,255,255,0.025); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Drift Monitor</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">Drift Monitor</div>
                                 <strong id="shs-drift" style="font-size: 14px; color: var(--text-primary);">20 / 20</strong>
                             </div>
-                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">PERFECT</span>
+                            <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 4px;">PERFECT</span>
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: rgba(255,255,255,0.025); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Live Profit Factor</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">Live Profit Factor</div>
                                 <strong id="shs-pf" style="font-size: 14px; color: var(--text-primary);">18 / 20</strong>
                             </div>
-                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">EXCELLENT</span>
+                            <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 4px;">EXCELLENT</span>
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: rgba(255,255,255,0.025); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Drawdown Safety</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">Drawdown Safety</div>
                                 <strong id="shs-dd" style="font-size: 14px; color: var(--text-primary);">15 / 15</strong>
                             </div>
-                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">PERFECT</span>
+                            <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 4px;">PERFECT</span>
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: rgba(255,255,255,0.025); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Win Rate Stability</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">Win Rate Stability</div>
                                 <strong id="shs-wr" style="font-size: 14px; color: var(--text-primary);">13 / 15</strong>
                             </div>
-                            <span style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">STABLE</span>
+                            <span style="font-size: 10px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 3px 8px; border-radius: 4px;">STABLE</span>
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: rgba(255,255,255,0.025); padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">Latency & Slippage</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">Latency & Slippage</div>
                                 <strong id="shs-latency" style="font-size: 14px; color: var(--text-primary);">9 / 10</strong>
                             </div>
-                            <span style="font-size: 9px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">EXCELLENT</span>
+                            <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 4px;">EXCELLENT</span>
                         </div>
-                    </div>
-                </div>
-
-                <!-- 5 Operational Telemetry Panels -->
-                <div style="grid-column: 1 / -1; margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                    <!-- 1. Governance Panel -->
-                    <div style="background: rgba(13,15,26,0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                        <div style="font-size: 11px; font-weight: 800; color: var(--accent-blue); text-transform: uppercase; margin-bottom: 8px;">🏛️ Governance</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Champion:</span><strong id="sh-champ" style="color: var(--text-primary);">policy_v3.0.0</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Shadow:</span><strong id="sh-shadow" style="color: var(--text-primary);">policy_v4.0.0</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Rollback:</span><strong id="sh-rollback" style="color: var(--text-primary);">policy_v2.0.0</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Engine Ver:</span><strong id="sh-engine" style="color: var(--text-primary);">3.0.0</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Gate Status:</span><strong id="sh-gate" style="color: var(--accent-green);">PASSED (8/8)</strong></div>
-                    </div>
-
-                    <!-- 2. Statistical Health Panel -->
-                    <div style="background: rgba(13,15,26,0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                        <div style="font-size: 11px; font-weight: 800; color: var(--accent-green); text-transform: uppercase; margin-bottom: 8px;">📊 Statistical Health</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Rolling PF (30):</span><strong id="sh-pf30" style="color: var(--text-primary);">1.84</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Expectancy:</span><strong id="sh-exp" style="color: var(--accent-green);">+0.36R</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>SQN:</span><strong id="sh-sqn" style="color: var(--text-primary);">5.42</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>MAR Ratio:</span><strong id="sh-mar" style="color: var(--text-primary);">4.85</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Ulcer Index:</span><strong id="sh-ulcer" style="color: var(--text-primary);">1.12</strong></div>
-                    </div>
-
-                    <!-- 3. Drift Panel -->
-                    <div style="background: rgba(13,15,26,0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                        <div style="font-size: 11px; font-weight: 800; color: var(--accent-yellow); text-transform: uppercase; margin-bottom: 8px;">🌀 Drift & Calibration</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>PSI Score:</span><strong id="sh-psi" style="color: var(--text-primary);">0.04</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>ECE Score:</span><strong id="sh-ece" style="color: var(--text-primary);">3.8%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Calibration:</span><strong id="sh-cal-status" style="color: var(--accent-green);">Normal</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Feature Drift:</span><strong id="sh-fdrift" style="color: var(--accent-green);">Normal</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Regime Drift:</span><strong id="sh-rdrift" style="color: var(--accent-green);">Normal</strong></div>
-                    </div>
-
-                    <!-- 4. Execution Panel -->
-                    <div style="background: rgba(13,15,26,0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                        <div style="font-size: 11px; font-weight: 800; color: var(--accent-purple, #a855f7); text-transform: uppercase; margin-bottom: 8px;">⚡ Execution Metrics</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Exit Efficiency:</span><strong id="sh-exeff" style="color: var(--accent-green);">74.2%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Opp. Loss:</span><strong id="sh-opploss" style="color: var(--text-primary);">0.41R</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Avg MFE / MAE:</span><strong id="sh-mfemae" style="color: var(--text-primary);">2.41R / 0.88R</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Slippage:</span><strong id="sh-slippage" style="color: var(--text-primary);">0.04%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Maker/Taker:</span><strong id="sh-makertaker" style="color: var(--text-primary);">0.82</strong></div>
-                    </div>
-
-                    <!-- 5. Risk Panel -->
-                    <div style="background: rgba(13,15,26,0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
-                        <div style="font-size: 11px; font-weight: 800; color: var(--accent-red); text-transform: uppercase; margin-bottom: 8px;">🛡️ Risk & Exposure</div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Current DD:</span><strong id="sh-cdd" style="color: var(--text-primary);">2.4%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Daily DD:</span><strong id="sh-ddd" style="color: var(--text-primary);">0.8%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Exposure:</span><strong id="sh-expo" style="color: var(--text-primary);">15.0%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Open Risk:</span><strong id="sh-orisk" style="color: var(--text-primary);">0.85%</strong></div>
-                        <div style="font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Correlation:</span><strong id="sh-corr" style="color: var(--accent-green);">Low</strong></div>
                     </div>
                 </div>
 
                 <!-- Right: Position Multiplier Step Ladder -->
-                <div>
-                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px;">Position Multiplier Step Ladder</h4>
-                    <div style="background: rgba(13,15,26,0.6); padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 8px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(16,185,129,0.15); border-left: 3px solid var(--accent-green); border-radius: 4px;">
+                <div style="background: rgba(13,15,26,0.4); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                    <h4 style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; font-weight: 700;">Position Multiplier Step Ladder</h4>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(16,185,129,0.15); border-left: 3px solid var(--accent-green); border-radius: 6px;">
                             <span style="font-size: 12px; font-weight: 700; color: var(--accent-green);">100% Risk Allocation</span>
-                            <span style="font-size: 10px; color: var(--text-secondary);">SHS ≥ 85 (CURRENT)</span>
+                            <span style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">SHS ≥ 85 (CURRENT)</span>
                         </div>
-                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-yellow); border-radius: 4px;">
-                            <span style="font-size: 12px; font-weight: 700;">50% Risk Allocation</span>
-                            <span style="font-size: 10px; color: var(--text-secondary);">SHS 70–84</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-yellow); border-radius: 6px;">
+                            <span style="font-size: 12px; font-weight: 600;">50% Risk Allocation</span>
+                            <span style="font-size: 11px; color: var(--text-secondary);">SHS 70–84</span>
                         </div>
-                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-orange); border-radius: 4px;">
-                            <span style="font-size: 12px; font-weight: 700;">25% Risk Allocation</span>
-                            <span style="font-size: 10px; color: var(--text-secondary);">SHS 55–69</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-orange); border-radius: 6px;">
+                            <span style="font-size: 12px; font-weight: 600;">25% Risk Allocation</span>
+                            <span style="font-size: 11px; color: var(--text-secondary);">SHS 55–69</span>
                         </div>
-                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-blue); border-radius: 4px;">
-                            <span style="font-size: 12px; font-weight: 700;">Paper Trading Mode</span>
-                            <span style="font-size: 10px; color: var(--text-secondary);">SHS 40–54</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-blue); border-radius: 6px;">
+                            <span style="font-size: 12px; font-weight: 600;">Paper Trading Mode</span>
+                            <span style="font-size: 11px; color: var(--text-secondary);">SHS 40–54</span>
                         </div>
-                        <div style="text-align: center; font-size: 10px; color: var(--text-secondary);">↓</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.02); opacity: 0.6; border-left: 3px solid var(--accent-red); border-radius: 4px;">
-                            <span style="font-size: 12px; font-weight: 700;">Disabled (Halt Trading)</span>
-                            <span style="font-size: 10px; color: var(--text-secondary);">SHS < 40</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: rgba(255,255,255,0.02); opacity: 0.7; border-left: 3px solid var(--accent-red); border-radius: 6px;">
+                            <span style="font-size: 12px; font-weight: 600;">Disabled (Halt Trading)</span>
+                            <span style="font-size: 11px; color: var(--text-secondary);">SHS &lt; 40</span>
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Bottom Row: 5 Operational Telemetry Panels -->
+            <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; width: 100%;">
+                <!-- 1. Governance Panel -->
+                <div style="background: rgba(13,15,26,0.7); padding: 16px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                    <div style="font-size: 12px; font-weight: 800; color: var(--accent-blue); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.05);">🏛️ Governance</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Champion:</span><strong id="sh-champ" style="color: var(--text-primary); font-family: monospace;">policy_v3.0.0</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Shadow:</span><strong id="sh-shadow" style="color: var(--text-primary); font-family: monospace;">policy_v4.0.0</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Rollback:</span><strong id="sh-rollback" style="color: var(--text-primary); font-family: monospace;">policy_v2.0.0</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Engine Ver:</span><strong id="sh-engine" style="color: var(--text-primary);">3.0.0</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Gate Status:</span><strong id="sh-gate" style="color: var(--accent-green); font-weight: 800;">PASSED (8/8)</strong></div>
+                </div>
+
+                <!-- 2. Statistical Health Panel -->
+                <div style="background: rgba(13,15,26,0.7); padding: 16px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                    <div style="font-size: 12px; font-weight: 800; color: var(--accent-green); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.05);">📊 Statistical Health</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Rolling PF (30):</span><strong id="sh-pf30" style="color: var(--text-primary);">1.84</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Expectancy:</span><strong id="sh-exp" style="color: var(--accent-green); font-weight: 800;">+0.36R</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>SQN:</span><strong id="sh-sqn" style="color: var(--text-primary);">5.42</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>MAR Ratio:</span><strong id="sh-mar" style="color: var(--text-primary);">4.85</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Ulcer Index:</span><strong id="sh-ulcer" style="color: var(--text-primary);">1.12</strong></div>
+                </div>
+
+                <!-- 3. Drift Panel -->
+                <div style="background: rgba(13,15,26,0.7); padding: 16px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                    <div style="font-size: 12px; font-weight: 800; color: var(--accent-yellow); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.05);">🌀 Drift & Calibration</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>PSI Score:</span><strong id="sh-psi" style="color: var(--text-primary);">0.04</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>ECE Score:</span><strong id="sh-ece" style="color: var(--text-primary);">3.8%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Calibration:</span><strong id="sh-cal-status" style="color: var(--accent-green); font-weight: 800;">Normal</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Feature Drift:</span><strong id="sh-fdrift" style="color: var(--accent-green); font-weight: 800;">Normal</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Regime Drift:</span><strong id="sh-rdrift" style="color: var(--accent-green); font-weight: 800;">Normal</strong></div>
+                </div>
+
+                <!-- 4. Execution Panel -->
+                <div style="background: rgba(13,15,26,0.7); padding: 16px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                    <div style="font-size: 12px; font-weight: 800; color: var(--accent-purple, #a855f7); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.05);">⚡ Execution Metrics</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Exit Efficiency:</span><strong id="sh-exeff" style="color: var(--accent-green); font-weight: 800;">74.2%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Opp. Loss:</span><strong id="sh-opploss" style="color: var(--text-primary);">0.41R</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Avg MFE / MAE:</span><strong id="sh-mfemae" style="color: var(--text-primary);">2.41R / 0.88R</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Slippage:</span><strong id="sh-slippage" style="color: var(--text-primary);">0.04%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Maker/Taker:</span><strong id="sh-makertaker" style="color: var(--text-primary);">0.82</strong></div>
+                </div>
+
+                <!-- 5. Risk Panel -->
+                <div style="background: rgba(13,15,26,0.7); padding: 16px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                    <div style="font-size: 12px; font-weight: 800; color: var(--accent-red); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.05);">🛡️ Risk & Exposure</div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Current DD:</span><strong id="sh-cdd" style="color: var(--text-primary);">2.4%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Daily DD:</span><strong id="sh-ddd" style="color: var(--text-primary);">0.8%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Exposure:</span><strong id="sh-expo" style="color: var(--text-primary);">15.0%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Open Risk:</span><strong id="sh-orisk" style="color: var(--text-primary);">0.85%</strong></div>
+                    <div style="font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; padding: 3px 0;"><span>Correlation:</span><strong id="sh-corr" style="color: var(--accent-green); font-weight: 800;">Low</strong></div>
+                </div>
+            </div>
+        </div>
             </div>
         </div>
 
