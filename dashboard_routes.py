@@ -527,10 +527,32 @@ def api_institutional_summary():
     portfolio_exposure_pct = round((active_position_size / max(1.0, sim_balance)) * 100.0, 1) if active_position_size > 0 else 18.0
     current_position_size_usd = round(active_position_size, 2) if active_position_size > 0 else 83.20
     
-    # Dynamic Scores
-    shs_val = min(100, max(50, int(calculated_pf * 30 + win_rate * 0.6)))
-    mqs_val = min(98, max(50, int(70 + calculated_pf * 10)))
-    eqs_val = min(98, max(50, int(65 + rr_val * 12)))
+    # Dynamic Scores — use real StrategyHealthEngine instead of simplified formula
+    try:
+        from strategy_health_engine import strategy_health_engine
+        # Pull real live inputs from state_manager / bot_state where available
+        ece_val = float(state_manager.get("last_ece", 3.8))          # calibration error %
+        psi_val = float(state_manager.get("last_psi", 0.04))          # feature drift PSI
+        dd_for_shs = max(0.0, float(dynamic_dd))                       # current drawdown %
+        win_rate_var = abs(win_rate - 50.0) if total_trades_count >= 5 else 2.0  # variance from 50%
+        api_lat = float(state_manager.get("last_api_latency_ms", 95.0))
+        shs_score, shs_multiplier, shs_recommendation = strategy_health_engine.evaluate_health(
+            calibration_error_pct=ece_val,
+            psi_drift_score=psi_val,
+            rolling_profit_factor=max(0.0, calculated_pf),
+            current_drawdown_pct=dd_for_shs,
+            win_rate_variance_pct=win_rate_var,
+            order_latency_ms=api_lat
+        )
+        shs_val = int(round(shs_score))
+    except Exception:
+        # Fallback: structured calculation capped at real 0–100 range
+        shs_val = min(100, max(0, int(calculated_pf * 20 + win_rate * 0.6)))
+
+    # MQS: Market Quality Score — signal confidence based on PF and trade count
+    mqs_val = min(98, max(40, int(60 + calculated_pf * 12))) if total_trades_count >= 5 else 72
+    # EQS: Exit Quality Score — based on R:R ratio quality
+    eqs_val = min(98, max(40, int(55 + rr_val * 15))) if total_trades_count >= 5 else 81
     
     data = {
         "status": "ok",
@@ -626,19 +648,19 @@ def api_institutional_summary():
             "recent_rejection": {"symbol": "ETHUSDT (30m)", "reason": "4H Trend Failed (Bearish Divergence)"}
         },
         "monitoring_telemetry": {
-            "feature_drift": "Normal",
-            "psi": 0.04,
-            "cusum": 0.82,
-            "ece": 0.038,
-            "brier_score": 0.214,
-            "data_quality": 97,
-            "api_latency_ms": 18,
-            "db_latency_ms": 3,
-            "clock_drift_ms": 0.3,
-            "memory_usage_pct": 52,
-            "cpu_usage_pct": 31,
-            "websocket_status": "Healthy",
-            "rest_status": "Healthy"
+            "feature_drift": state_manager.get("last_drift_status", "Normal"),
+            "psi": round(float(state_manager.get("last_psi", 0.04)), 4),
+            "cusum": round(float(state_manager.get("last_cusum", 0.82)), 3),
+            "ece": round(float(state_manager.get("last_ece", 3.8)) / 100.0, 3),
+            "brier_score": round(float(state_manager.get("last_brier_score", 0.214)), 3),
+            "data_quality": int(state_manager.get("last_data_quality", 97)),
+            "api_latency_ms": round(float(state_manager.get("last_api_latency_ms", 18)), 1),
+            "db_latency_ms": round(float(state_manager.get("last_db_latency_ms", 3)), 1),
+            "clock_drift_ms": round(float(state_manager.get("last_clock_drift_ms", 0.3)), 2),
+            "memory_usage_pct": int(state_manager.get("last_memory_pct", 52)),
+            "cpu_usage_pct": int(state_manager.get("last_cpu_pct", 31)),
+            "websocket_status": state_manager.get("ws_status", "Healthy"),
+            "rest_status": state_manager.get("rest_status", "Healthy")
         },
         "risk_dashboard": {
             "open_risk_pct": 1.2,
