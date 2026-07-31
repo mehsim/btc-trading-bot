@@ -346,7 +346,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         stats["ending_return_pct"],
         stats["expectancy_r"],
         stats["sharpe_ratio"],
-        stats["sortino_ratio"]
+        stats["sortino_ratio"],
+        stats["calmar_ratio"],
+        stats["recovery_factor"]
     )
 
 def run_backtest():

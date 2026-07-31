@@ -125,7 +125,9 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
             "profit_factor": stats["profit_factor"],
             "expectancy_r": stats["expectancy_r"],
             "sharpe_ratio": stats["sharpe_ratio"],
-            "sortino_ratio": stats["sortino_ratio"]
+            "sortino_ratio": stats["sortino_ratio"],
+            "calmar_ratio": stats["calmar_ratio"],
+            "recovery_factor": stats["recovery_factor"]
         })
         
         start_idx += step_bars
@@ -137,6 +139,8 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
     expectancies = [w["expectancy_r"] for w in window_results]
     sharpes = [w["sharpe_ratio"] for w in window_results]
     sortinos = [w["sortino_ratio"] for w in window_results]
+    calmars = [w["calmar_ratio"] for w in window_results]
+    recoveries = [w["recovery_factor"] for w in window_results]
     
     summary = {
         "status": "success",
@@ -148,6 +152,8 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
         "mean_expectancy_r": float(np.mean(expectancies)) if expectancies else 0.0,
         "mean_sharpe_ratio": float(np.mean(sharpes)) if sharpes else 0.0,
         "mean_sortino_ratio": float(np.mean(sortinos)) if sortinos else 0.0,
+        "mean_calmar_ratio": float(np.mean(calmars)) if calmars else 0.0,
+        "mean_recovery_factor": float(np.mean(recoveries)) if recoveries else 0.0,
         "windows": window_results
     }
     return summary

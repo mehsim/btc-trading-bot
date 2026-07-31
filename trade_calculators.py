@@ -87,6 +87,12 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
     max_drawdown = float(np.max(dd_curve)) if len(dd_curve) > 0 else 0.0
     ending_return = float(((equity_curve[-1] - initial_equity) / initial_equity) * 100.0) if len(equity_curve) > 0 else 0.0
 
+    # Institutional Metrics: Calmar Ratio & Recovery Factor
+    safe_dd = max(0.01, max_drawdown)
+    recovery_factor = ending_return / safe_dd
+    annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
+    calmar_ratio = annualized_return / safe_dd
+
     return {
         "total_trades": total_trades,
         "win_rate": float(win_rate),
@@ -94,6 +100,8 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
         "expectancy_r": float(expectancy_r),
         "sharpe_ratio": float(sharpe_ratio),
         "sortino_ratio": float(sortino_ratio),
+        "calmar_ratio": float(calmar_ratio),
+        "recovery_factor": float(recovery_factor),
         "max_drawdown_pct": float(max_drawdown),
         "ending_return_pct": float(ending_return)
     }
