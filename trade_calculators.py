@@ -66,19 +66,26 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
     
     profit_factor = gross_gains / max(1e-9, gross_losses) if gross_losses > 0 else (10.0 if gross_gains > 0 else 0.0)
 
-    # Convert trade returns to R-multiples (assuming risk_per_trade_pct baseline)
-    r_multiples = returns / max(1e-4, risk_per_trade_pct)
+    # Convert trade returns to R-multiples (R = pnl / (initial_equity * risk_per_trade_pct))
+    risk_usd = max(0.01, initial_equity * risk_per_trade_pct)
+    r_multiples = returns / risk_usd
     expectancy_r = float(np.mean(r_multiples))
 
-    # Sharpe & Sortino Ratios (Trade-level annualized assuming ~252 trading windows per year)
+    # Sharpe & Sortino Ratios (Trade-level annualized)
     mean_ret = float(np.mean(returns))
     std_ret = float(np.std(returns)) if len(returns) > 1 else 0.0
     
     downside_returns = returns[returns < 0]
     std_downside = float(np.std(downside_returns)) if len(downside_returns) > 1 else (std_ret if len(returns) > 1 else 0.0)
 
-    sharpe_ratio = (mean_ret / max(1e-8, std_ret)) * np.sqrt(min(total_trades, 252)) if std_ret > 0 else 0.0
-    sortino_ratio = (mean_ret / max(1e-8, std_downside)) * np.sqrt(min(total_trades, 252)) if std_downside > 0 else (sharpe_ratio if mean_ret > 0 else 0.0)
+    # Convert absolute dollar returns to % returns for Sharpe/Sortino if returns are raw PnL
+    pct_returns = returns / initial_equity
+    pct_mean = float(np.mean(pct_returns))
+    pct_std = float(np.std(pct_returns)) if len(pct_returns) > 1 else 0.0
+    pct_downside_std = float(np.std(pct_returns[pct_returns < 0])) if len(pct_returns[pct_returns < 0]) > 1 else (pct_std if len(pct_returns) > 1 else 0.0)
+
+    sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * np.sqrt(min(total_trades, 252)) if pct_std > 0 else 0.0
+    sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * np.sqrt(min(total_trades, 252)) if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
 
     # Equity Curve & Drawdown
     equity_curve = initial_equity * np.cumprod(np.maximum(0.001, 1.0 + returns))
