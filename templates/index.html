@@ -1552,71 +1552,24 @@
             </div>
         </div>
 
-        <!-- SECTION 5: SIGNAL DECISION TREE PIPELINE -->
+         <!-- SECTION 5: SIGNAL DECISION TREE PIPELINE -->
         <div class="card" style="margin-top: 15px; padding: 20px;">
             <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <div class="section-title">🌳 Signal Decision Tree (Pass / Fail Pipeline)</div>
-                <span style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">LATEST SIGNAL: APPROVED</span>
+                <span id="signal-tree-status-badge" style="font-size: 10px; font-weight: 800; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 3px 8px; border-radius: 6px;">LATEST SIGNAL: —</span>
             </div>
             <div class="section-desc" style="margin-bottom: 15px;">
                 Visual multi-stage decision pipeline showing why trade signals pass or fail governance gates.
             </div>
-
-            <!-- Pipeline Flow Horizontal Container -->
-            <div style="display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 10px;">
-                <div style="background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">1. Signal</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-purple);">Triggered</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">2. Predict</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-blue);">83%</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">3. Calibrate</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">71%</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">4. MQS</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">84 PASS</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">5. 4H Trend</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">PASS</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">6. RSI Guard</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">PASS</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">7. EQS</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">91 PASS</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 95px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">8. Expectancy</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">+0.42R</div>
-                </div>
-                <div style="color: var(--text-secondary); font-size: 12px;">→</div>
-                <div style="background: rgba(16,185,129,0.2); border: 1px solid var(--accent-green); border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 105px;">
-                    <div style="font-size: 9px; color: var(--text-secondary);">9. Execution</div>
-                    <div style="font-size: 11px; font-weight: 800; color: var(--accent-green);">EXECUTED</div>
-                </div>
-            </div>
-
-            <!-- Rejection Callout Box -->
-            <div style="margin-top: 10px; background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.25); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <!-- Pipeline rendered by JS -->
+            <div id="signal-tree-pipeline" style="display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 10px;"></div>
+            <!-- Rejection Callout -->
+            <div id="signal-rejection-box" style="margin-top: 10px; background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.25); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; display: none;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="color: var(--accent-red); font-weight: 800;">🚫 Recent Rejection:</span>
-                    <span style="font-size: 11px; color: var(--text-primary);">ETHUSDT (30m)</span>
+                    <span id="signal-rejection-symbol" style="font-size: 11px; color: var(--text-primary);">—</span>
                 </div>
-                <div style="font-size: 11px; color: var(--accent-red); font-weight: 700;">Reason: 4H Trend Failed (Bearish Divergence)</div>
+                <div id="signal-rejection-reason" style="font-size: 11px; color: var(--accent-red); font-weight: 700;">—</div>
             </div>
         </div>
 
@@ -3616,22 +3569,55 @@
                         shadowBadges.forEach(b => b.innerText = `SHADOW GATE: ${ml.shadow_trades_count} / 200 TRADES`);
                     }
 
-                    // Section 5: Signal Decision Tree — update live values
-                    if (data.signal_decision_tree && Array.isArray(data.signal_decision_tree.pipeline)) {
-                        const pipeline = data.signal_decision_tree.pipeline;
-                        // Step 2: Prediction confidence
-                        const predEl = document.querySelector("#signal-tree-step-2");
-                        if (predEl && pipeline[1]) predEl.innerText = pipeline[1].value;
-                        // Step 3: Calibrated probability
-                        const calibEl = document.querySelector("#signal-tree-step-3");
-                        if (calibEl && pipeline[2]) calibEl.innerText = pipeline[2].value;
-                        // Step 4: MQS
-                        const mqsEl = document.querySelector("#signal-tree-step-4");
-                        if (mqsEl && pipeline[3]) mqsEl.innerText = `${pipeline[3].value} PASS`;
-                        // Step 8: Expectancy
-                        const expEl = document.querySelector("#signal-tree-step-8");
-                        if (expEl && pipeline[8]) expEl.innerText = pipeline[8].value;
+                     // Section 5: Signal Decision Tree — full dynamic render
+                    if (data.signal_decision_tree) {
+                        const sdt = data.signal_decision_tree;
+                        const pipeline = sdt.pipeline || [];
+                        const container = document.getElementById("signal-tree-pipeline");
+                        const badge = document.getElementById("signal-tree-status-badge");
+                        const rejBox = document.getElementById("signal-rejection-box");
+                        const rejSymbol = document.getElementById("signal-rejection-symbol");
+                        const rejReason = document.getElementById("signal-rejection-reason");
+
+                        // Status badge
+                        if (badge) {
+                            const isPass = sdt.status === "PASS";
+                            badge.innerText = `LATEST SIGNAL: ${isPass ? "APPROVED" : (sdt.status || "—")}`;
+                            badge.style.color = isPass ? "var(--accent-green)" : "var(--accent-red)";
+                            badge.style.background = isPass ? "rgba(16,185,129,0.15)" : "rgba(244,63,94,0.15)";
+                        }
+
+                        // Pipeline boxes
+                        if (container && pipeline.length > 0) {
+                            const stepLabels = ["1. Signal","2. Predict","3. Calibrate","4. MQS","5. 4H Trend","6. Regime","7. EQS","8. Expectancy","9. Risk Cap","10. Execution"];
+                            const stepColors = {
+                                "PASS": {bg:"rgba(16,185,129,0.15)", border:"rgba(16,185,129,0.3)", color:"var(--accent-green)"},
+                                "WARN": {bg:"rgba(249,115,22,0.15)", border:"rgba(249,115,22,0.3)", color:"var(--accent-orange)"},
+                                "FAIL": {bg:"rgba(244,63,94,0.15)", border:"rgba(244,63,94,0.3)", color:"var(--accent-red)"},
+                                "EXECUTED": {bg:"rgba(16,185,129,0.20)", border:"var(--accent-green)", color:"var(--accent-green)"},
+                            };
+                            const firstStep = {bg:"rgba(139,92,246,0.15)", border:"rgba(139,92,246,0.3)", color:"var(--accent-purple)"};
+                            container.innerHTML = pipeline.map((step, i) => {
+                                const c = i === 0 ? firstStep : (stepColors[step.status] || stepColors["PASS"]);
+                                const arrow = i < pipeline.length - 1 ? `<div style="color:var(--text-secondary);font-size:12px;flex-shrink:0;">→</div>` : "";
+                                return `<div style="background:${c.bg};border:1px solid ${c.border};border-radius:8px;padding:8px 12px;text-align:center;min-width:90px;flex-shrink:0;">
+                                    <div style="font-size:9px;color:var(--text-secondary);">${stepLabels[i] || step.step}</div>
+                                    <div style="font-size:11px;font-weight:800;color:${c.color};">${step.value}</div>
+                                </div>${arrow}`;
+                            }).join("");
+                        }
+
+                        // Rejection box
+                        const rej = sdt.recent_rejection;
+                        if (rejBox && rej && rej.symbol && rej.symbol !== "N/A") {
+                            rejBox.style.display = "flex";
+                            if (rejSymbol) rejSymbol.innerText = rej.symbol;
+                            if (rejReason) rejReason.innerText = `Reason: ${rej.reason}`;
+                        } else if (rejBox) {
+                            rejBox.style.display = "none";
+                        }
                     }
+
 
                     // Section 9: Attribution Table
                     if (data.attribution_table && Array.isArray(data.attribution_table)) {
