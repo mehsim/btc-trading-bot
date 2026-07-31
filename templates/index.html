@@ -2078,6 +2078,22 @@
     </div>
 
     <script>
+        function formatSmartPrice(val, defaultDecimals = 2) {
+            if (val === null || val === undefined || val === '—' || val === '') return '—';
+            const num = parseFloat(val);
+            if (isNaN(num)) return '—';
+            const absVal = Math.abs(num);
+            if (absVal === 0) return '0.00';
+            if (absVal < 1.0) {
+                // Sub-$1 asset: show at least 6 decimal places for exact R:R and precision
+                return num.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+            } else if (absVal < 10.0) {
+                return num.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+            } else {
+                return num.toLocaleString('en-US', { minimumFractionDigits: defaultDecimals, maximumFractionDigits: defaultDecimals });
+            }
+        }
+
         const confluenceKeys = [
             { key: "1d_Trend", label: "1. 1d Structural Trend" },
             { key: "4h_Trend", label: "2. 4h Tactical Trend" },
@@ -2570,11 +2586,11 @@
                         <td class="hide-mobile" style="font-weight: 700;">
                             <span class="badge" style="background: ${marginPresentBg}; color: ${marginPresentColor}; padding: 4px 8px; border-radius: 6px; font-size: 11px;">${marginPresentStr}</span>
                         </td>
-                        <td style="font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                        <td class="hide-mobile" style="font-weight: 600; color: var(--text-primary);">${currentPriceVal ? '$' + currentPriceVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}</td>
+                        <td style="font-weight: 600;">$${formatSmartPrice(entryPrice)}</td>
+                        <td class="hide-mobile" style="font-weight: 600; color: var(--text-primary);">${currentPriceVal ? '$' + formatSmartPrice(currentPriceVal) : '-'}</td>
                         <td>
-                            <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(4)}</span> / 
-                            <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(4)}</span>
+                            <span style="color: var(--accent-green); font-weight: 700;">$${formatSmartPrice(exitTarget)}</span> / 
+                            <span style="color: var(--accent-red); font-weight: 700;">$${formatSmartPrice(stopTarget)}</span>
                         </td>
                         <td class="hide-mobile">${(() => {
                             const liqP = parseFloat(trade.liq_price) || 0;
@@ -2584,7 +2600,7 @@
                             const isClose = distPct < 3;
                             const liqColor = isClose ? 'var(--accent-red)' : 'var(--accent-orange)';
                             const glow = isClose ? 'text-shadow: 0 0 8px rgba(244,63,94,0.6);' : '';
-                            return `<span style="color: ${liqColor}; font-weight: 700; ${glow}">$${liqP.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>`;
+                            return `<span style="color: ${liqColor}; font-weight: 700; ${glow}">$${formatSmartPrice(liqP)}</span>`;
                         })()}</td>
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</td>
                         <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
@@ -2740,10 +2756,7 @@
                         const val = data[`live_price_${sym}USDT`];
                         const elem = document.getElementById(`live-price-${sym.toLowerCase()}`);
                         if (val && elem) {
-                            elem.innerText = `$${val.toLocaleString(undefined, { 
-                                minimumFractionDigits: 2, 
-                                maximumFractionDigits: 2 
-                            })}`;
+                            elem.innerText = `$${formatSmartPrice(val)}`;
                             
                             const prevVal = lastPrices[sym];
                             if (prevVal !== null && prevVal !== undefined) {
@@ -3152,23 +3165,23 @@
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Take Profit (Original Target)</span>
-                    <span style="font-weight:700; color:var(--accent-green);">${t.take_profit ? '$' + t.take_profit.toFixed(4) : '—'}</span>
+                    <span style="font-weight:700; color:var(--accent-green);">${t.take_profit ? '$' + formatSmartPrice(t.take_profit) : '—'}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Stop Loss (Original Target)</span>
-                    <span style="font-weight:700; color:var(--accent-red);">${t.stop_loss ? '$' + t.stop_loss.toFixed(4) : '—'}</span>
+                    <span style="font-weight:700; color:var(--accent-red);">${t.stop_loss ? '$' + formatSmartPrice(t.stop_loss) : '—'}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">ATR at Entry</span>
-                    <span style="font-weight:700; color:var(--accent-blue);">${t.atr_dollars ? '$' + t.atr_dollars.toFixed(4) : '—'}</span>
+                    <span style="font-weight:700; color:var(--accent-blue);">${t.atr_dollars ? '$' + formatSmartPrice(t.atr_dollars) : '—'}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Entry Price</span>
-                    <span style="font-weight:700; color:var(--text-primary);">$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span style="font-weight:700; color:var(--text-primary);">$${formatSmartPrice(t.entry_price)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Exit Price</span>
-                    <span style="font-weight:700; color:var(--text-primary);">$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span style="font-weight:700; color:var(--text-primary);">$${formatSmartPrice(t.exit_price)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.04); padding-bottom:8px;">
                     <span style="opacity:0.6;">Target Leverage</span>
@@ -3385,7 +3398,11 @@
                         <div style="font-size: 11px; display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary);">
                             <div style="display: flex; justify-content: space-between;">
                                 <span>Entry Price:</span>
-                                <span style="color: var(--text-primary); font-weight: 600;">$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                <span style="color: var(--text-primary); font-weight: 600;">$${formatSmartPrice(entryPrice)}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Current Price:</span>
+                                <span style="color: var(--text-primary); font-weight: 600;">${currentPriceVal ? '$' + formatSmartPrice(currentPriceVal) : '-'}</span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
                                 <span>Confidence:</span>
@@ -3394,8 +3411,8 @@
                             <div style="display: flex; justify-content: space-between;">
                                 <span>TP / SL:</span>
                                 <span>
-                                    <span style="color: var(--accent-green); font-weight: 700;">$${exitTarget.toFixed(4)}</span> / 
-                                    <span style="color: var(--accent-red); font-weight: 700;">$${stopTarget.toFixed(4)}</span>
+                                    <span style="color: var(--accent-green); font-weight: 700;">$${formatSmartPrice(exitTarget)}</span> / 
+                                    <span style="color: var(--accent-red); font-weight: 700;">$${formatSmartPrice(stopTarget)}</span>
                                 </span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
