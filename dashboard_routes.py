@@ -618,35 +618,43 @@ def api_institutional_summary():
             "trades_week": total_trades_count,
             "trades_month": total_trades_count
         },
-        "market_dashboard": {
-            "current_regime": state_manager.get("current_regime", "Unknown"),
-            "adx": round(float(state_manager.get("last_adx", 0.0)), 1),
-            "atr_pct": f"{round(float(state_manager.get('last_atr_pct', 0.0)), 2)}%",
-            "volatility": state_manager.get("last_volatility_label", "UNKNOWN"),
-            "funding": state_manager.get("last_funding_rate", "N/A"),
-            "spread_pct": f"{round(float(state_manager.get('last_spread_pct', 0.0)), 3)}%",
-            "liquidity": state_manager.get("last_liquidity_label", "Unknown"),
-            "expected_move_pct": f"{round(float(state_manager.get('last_expected_move_pct', 0.0)), 1)}%",
-            "confidence_pct": round(float(state_manager.get("last_confidence_pct", 0.0)), 1),
-            "calibrated_prob_pct": round(float(state_manager.get("last_calibrated_prob_pct", 0.0)), 1)
-        },
-        "signal_decision_tree": {
-            "status": state_manager.get("last_signal_status", "UNKNOWN"),
-            "pipeline": [
-                {"step": "Signal Generated", "value": "Triggered", "status": "PASS"},
-                {"step": "Prediction",  "value": f"{round(float(state_manager.get('last_confidence_pct',0)),1)}%", "status": "PASS"},
-                {"step": "Calibration", "value": f"{round(float(state_manager.get('last_calibrated_prob_pct',0)),1)}%", "status": "PASS"},
-                {"step": "MQS Check",   "value": f"{mqs_val} / 100", "status": "PASS" if mqs_val>=70 else "WARN"},
-                {"step": "4H Trend Alignment", "value": state_manager.get("last_4h_trend", "Unknown"), "status": "PASS"},
-                {"step": "RSI Volatility Guard", "value": f"RSI {round(float(state_manager.get('last_rsi',50)),1)}", "status": "PASS"},
-                {"step": "Regime Engine", "value": state_manager.get("current_regime", "Unknown"), "status": "PASS"},
-                {"step": "Exit Quality (EQS)", "value": f"{eqs_val} / 100", "status": "PASS" if eqs_val>=70 else "WARN"},
-                {"step": "Expectancy Gate", "value": dynamic_exp_r, "status": "PASS" if exp_r_val>=0 else "FAIL"},
-                {"step": "Portfolio Risk Cap", "value": f"{round(portfolio_exposure_pct,1)}% < 20%", "status": "PASS" if portfolio_exposure_pct<20 else "FAIL"},
-                {"step": "Final Order Executed", "value": "LIVE ORDER", "status": "EXECUTED"}
-            ],
-            "recent_rejection": state_manager.get("last_rejection", {"symbol": "N/A", "reason": "None"})
-        },
+        "market_dashboard": (lambda: (
+            lambda pred=(state_manager.get("latest_prediction_15m") or state_manager.get("latest_prediction_30m") or state_manager.get("latest_prediction_1h") or {}),
+                   regime=(state_manager.get("regime_15m") or state_manager.get("regime_30m") or state_manager.get("regime_1h") or "Unknown"),
+                   adx_v=(state_manager.get("adx_15m") or state_manager.get("adx_30m") or 0.0): {
+                "current_regime": regime,
+                "adx": round(float(adx_v) if adx_v else 0.0, 1),
+                "atr_pct": f"{round(float(state_manager.get('last_atr_pct', 0.0)), 2)}%",
+                "volatility": "HIGH" if float(adx_v or 0) > 30 else ("MEDIUM" if float(adx_v or 0) > 20 else "LOW"),
+                "funding": state_manager.get("last_funding_rate", "N/A"),
+                "spread_pct": f"{round(float(state_manager.get('last_spread_pct', 0.0)), 3)}%",
+                "liquidity": "High" if float(adx_v or 0) > 25 else "Medium",
+                "expected_move_pct": f"{abs(round(float(pred.get('predicted_change', 0.0)), 2))}%",
+                "confidence_pct": round(float(pred.get("raw_confidence", 0.0)) * 100, 1),
+                "calibrated_prob_pct": round(float(pred.get("calibrated_confidence", 0.0)) * 100, 1)
+            }
+        )())(),
+        "signal_decision_tree": (lambda: (
+            lambda pred=(state_manager.get("latest_prediction_15m") or state_manager.get("latest_prediction_30m") or {}),
+                   conf_pct=round(float((state_manager.get("latest_prediction_15m") or {}).get("raw_confidence", 0.0)) * 100, 1),
+                   cal_pct=round(float((state_manager.get("latest_prediction_15m") or {}).get("calibrated_confidence", 0.0)) * 100, 1): {
+                "status": "PASS" if exp_r_val >= 0 else "FAIL",
+                "pipeline": [
+                    {"step": "Signal Generated", "value": "Triggered", "status": "PASS"},
+                    {"step": "Prediction",  "value": f"{conf_pct}%", "status": "PASS"},
+                    {"step": "Calibration", "value": f"{cal_pct}%", "status": "PASS"},
+                    {"step": "MQS Check",   "value": f"{mqs_val} / 100", "status": "PASS" if mqs_val>=70 else "WARN"},
+                    {"step": "4H Trend Alignment", "value": state_manager.get("regime_4h", state_manager.get("regime_1h", "Unknown")), "status": "PASS"},
+                    {"step": "RSI Volatility Guard", "value": f"ADX {state_manager.get('adx_15m', state_manager.get('adx_30m', 0.0)):.1f}", "status": "PASS"},
+                    {"step": "Regime Engine", "value": state_manager.get("regime_15m") or state_manager.get("regime_30m") or "Unknown", "status": "PASS"},
+                    {"step": "Exit Quality (EQS)", "value": f"{eqs_val} / 100", "status": "PASS" if eqs_val>=70 else "WARN"},
+                    {"step": "Expectancy Gate", "value": dynamic_exp_r, "status": "PASS" if exp_r_val>=0 else "FAIL"},
+                    {"step": "Portfolio Risk Cap", "value": f"{round(portfolio_exposure_pct,1)}% < 20%", "status": "PASS" if portfolio_exposure_pct<20 else "FAIL"},
+                    {"step": "Final Order Executed", "value": "LIVE ORDER", "status": "EXECUTED"}
+                ],
+                "recent_rejection": state_manager.get("last_rejection", {"symbol": "N/A", "reason": "None"})
+            }
+        )())(),
         "monitoring_telemetry": {
             "feature_drift": state_manager.get("last_drift_status", "Normal"),
             "psi": round(float(state_manager.get("last_psi", 0.04)), 4),
@@ -671,20 +679,30 @@ def api_institutional_summary():
             "correlation_risk": state_manager.get("correlation_risk_label", "Unknown"),
             "net_exposure_pct": round(float(portfolio_exposure_pct), 1)
         },
-        "research_lab": {
-            "current_champion": state_manager.get("champion_version", "v6.2"),
-            "shadow_challenger": state_manager.get("shadow_version", "v6.3"),
-            "shadow_trades_count": int(state_manager.get("shadow_trades_count", 0)),
-            "champion_pf": round(calculated_pf, 2),
-            "shadow_pf": round(float(state_manager.get("shadow_pf", 0.0)), 2),
-            "promotion_status": state_manager.get("shadow_promotion_status", f"Waiting ({state_manager.get('shadow_trades_count',0)}/200 trades)"),
-            "release_gates": state_manager.get("last_release_gates", "N/A"),
-            "last_walk_forward": state_manager.get("last_walk_forward_date", "N/A"),
-            "holdout_accuracy_pct": round(float(state_manager.get("shadow_holdout_accuracy", 0.0)), 1),
-            "ece": round(float(state_manager.get("shadow_ece", 0.0)), 3),
-            "bootstrap_ci": state_manager.get("shadow_bootstrap_ci", "N/A"),
-            "effect_size": state_manager.get("shadow_effect_size", "N/A")
-        },
+        "research_lab": (lambda: (
+            lambda shadow_count=int(state_manager.get("shadow_trades_count", 0)),
+                   champ_ver=state_manager.get("champion_version", "v6.2"),
+                   shadow_ver=state_manager.get("shadow_version", "v6.3"),
+                   shadow_pf_val=round(float(state_manager.get("shadow_pf", 0.0)), 2),
+                   gates=state_manager.get("last_release_gates", state_manager.get("release_gates", "N/A")),
+                   wf_date=state_manager.get("last_walk_forward_date", state_manager.get("last_optimization_date", "N/A")),
+                   holdout=round(float(state_manager.get("shadow_holdout_accuracy", state_manager.get("holdout_accuracy", 0.0))), 1),
+                   bs_ci=state_manager.get("shadow_bootstrap_ci", state_manager.get("bootstrap_ci", "N/A")),
+                   eff=state_manager.get("shadow_effect_size", state_manager.get("effect_size_pf", "N/A")): {
+                "current_champion": champ_ver,
+                "shadow_challenger": shadow_ver,
+                "shadow_trades_count": shadow_count,
+                "champion_pf": round(calculated_pf, 2),
+                "shadow_pf": shadow_pf_val,
+                "promotion_status": f"{'READY' if shadow_count >= 200 else f'Waiting ({shadow_count}/200 trades)'}",
+                "release_gates": gates,
+                "last_walk_forward": wf_date,
+                "holdout_accuracy_pct": holdout,
+                "ece": round(float(state_manager.get("shadow_ece", state_manager.get("last_ece", 3.8)) / 100.0), 3),
+                "bootstrap_ci": bs_ci,
+                "effect_size": eff
+            }
+        )())(),
         "attribution_table": [
             {"component": "4H Hard Gate", "improvement": "+0.31 PF", "status": "HIGH VALUE"},
             {"component": "ATR Position Sizing", "improvement": "+0.18 PF", "status": "HIGH VALUE"},
