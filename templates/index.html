@@ -1602,108 +1602,115 @@
             </div>
         </div>
 
-        <!-- SECTION 3: LIVE PERFORMANCE INSTITUTIONAL METRICS PANEL -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header">
-                <div class="section-title">📊 Live Performance Metrics (Institutional Deck)</div>
+        <!-- PARALLEL SIDE-BY-SIDE GRID: LIVE PERFORMANCE & MARKET TELEMETRY CARDS -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; margin-top: 24px;">
+            <!-- SECTION 3: LIVE PERFORMANCE INSTITUTIONAL METRICS PANEL -->
+            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+                <div>
+                    <div class="section-header" style="margin-bottom: 16px;">
+                        <div class="section-title" style="font-size: 15px;">📊 Live Performance Metrics (Institutional Deck)</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;">
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Profit Factor</div>
+                            <div id="lp-pf" class="stat-tile-val" style="color: var(--accent-green);">1.38</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Expectancy</div>
+                            <div id="lp-exp" class="stat-tile-val" style="color: var(--accent-blue);">+0.42R</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Sharpe Ratio</div>
+                            <div id="lp-sharpe" class="stat-tile-val" style="color: var(--accent-purple);">1.45</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Sortino Ratio</div>
+                            <div id="lp-sortino" class="stat-tile-val" style="color: var(--accent-purple);">1.88</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Calmar Ratio</div>
+                            <div id="lp-calmar" class="stat-tile-val" style="color: var(--accent-green);">42.5</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Recovery Factor</div>
+                            <div id="lp-recovery" class="stat-tile-val" style="color: var(--accent-blue);">9.20</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Win Rate</div>
+                            <div id="lp-wr" class="stat-tile-val" style="color: var(--accent-green);">49.5%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Average Winner</div>
+                            <div id="lp-avgwin" class="stat-tile-val" style="color: var(--accent-green);">+$1.85</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Average Loser</div>
+                            <div id="lp-avgloss" class="stat-tile-val" style="color: var(--accent-red);">-$1.15</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Risk Reward Ratio</div>
+                            <div id="lp-rr" class="stat-tile-val" style="color: var(--accent-orange);">1.61</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Avg Hold Time</div>
+                            <div id="lp-hold" class="stat-tile-val" style="color: var(--text-primary);">2.4h</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Trades (Today/Wk/Mo)</div>
+                            <div id="lp-trades" class="stat-tile-val" style="color: var(--accent-purple); font-size: 15px;">6 / 28 / 112</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Profit Factor</div>
-                    <div id="lp-pf" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">1.38</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Expectancy</div>
-                    <div id="lp-exp" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">+0.42R</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Sharpe Ratio</div>
-                    <div id="lp-sharpe" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.45</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Sortino Ratio</div>
-                    <div id="lp-sortino" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.88</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Calmar Ratio</div>
-                    <div id="lp-calmar" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">42.5</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Recovery Factor</div>
-                    <div id="lp-recovery" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">9.20</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Win Rate</div>
-                    <div id="lp-wr" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">49.5%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Average Winner</div>
-                    <div id="lp-avgwin" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">+$1.85</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Average Loser</div>
-                    <div id="lp-avgloss" style="font-size: 18px; font-weight: 800; color: var(--accent-red);">-$1.15</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Risk Reward Ratio</div>
-                    <div id="lp-rr" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">1.61</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Avg Hold Time</div>
-                    <div id="lp-hold" style="font-size: 18px; font-weight: 800; color: var(--text-primary);">2.4h</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Trades (Today/Wk/Mo)</div>
-                    <div id="lp-trades" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">6 / 28 / 112</div>
-                </div>
-            </div>
-        </div>
 
-        <!-- SECTION 4: MARKET DASHBOARD -->
-        <div class="card" style="margin-top: 15px; padding: 20px;">
-            <div class="section-header">
-                <div class="section-title">🌐 Market State Telemetry</div>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px;">
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Regime</div>
-                    <div id="mk-regime" style="font-size: 15px; font-weight: 800; color: var(--accent-orange);">Strong Trend</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">ADX Indicator</div>
-                    <div id="mk-adx" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">38.4</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">ATR %</div>
-                    <div id="mk-atr" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">1.12%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Volatility</div>
-                    <div id="mk-vol" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">HIGH</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Funding Rate</div>
-                    <div id="mk-funding" style="font-size: 14px; font-weight: 800; color: var(--accent-green);">+0.0100%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Spread</div>
-                    <div id="mk-spread" style="font-size: 16px; font-weight: 800; color: var(--text-primary);">0.014%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Liquidity</div>
-                    <div id="mk-liquidity" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">High</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Expected Move</div>
-                    <div id="mk-move" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">2.8%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Confidence</div>
-                    <div id="mk-conf" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">83%</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
-                    <div style="font-size: 10px; color: var(--text-secondary);">Calibrated Prob</div>
-                    <div id="mk-calib" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">71%</div>
+            <!-- SECTION 4: MARKET DASHBOARD -->
+            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+                <div>
+                    <div class="section-header" style="margin-bottom: 16px;">
+                        <div class="section-title" style="font-size: 15px;">🌐 Market State Telemetry</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;">
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Regime</div>
+                            <div id="mk-regime" class="stat-tile-val" style="color: var(--accent-orange); font-size: 15px;">Strong Trend</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">ADX Indicator</div>
+                            <div id="mk-adx" class="stat-tile-val" style="color: var(--accent-blue);">38.4</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">ATR %</div>
+                            <div id="mk-atr" class="stat-tile-val" style="color: var(--text-primary);">1.12%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Volatility</div>
+                            <div id="mk-vol" class="stat-tile-val" style="color: var(--accent-purple);">HIGH</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Funding Rate</div>
+                            <div id="mk-funding" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">+0.0100%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Spread</div>
+                            <div id="mk-spread" class="stat-tile-val" style="color: var(--text-primary);">0.014%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Liquidity</div>
+                            <div id="mk-liquidity" class="stat-tile-val" style="color: var(--accent-green);">High</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Expected Move</div>
+                            <div id="mk-move" class="stat-tile-val" style="color: var(--accent-blue);">2.8%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Confidence</div>
+                            <div id="mk-conf" class="stat-tile-val" style="color: var(--accent-purple);">83%</div>
+                        </div>
+                        <div class="stat-tile">
+                            <div class="stat-tile-label">Calibrated Prob</div>
+                            <div id="mk-calib" class="stat-tile-val" style="color: var(--accent-green);">71%</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
