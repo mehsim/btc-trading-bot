@@ -35,6 +35,47 @@ MIN_RR_RATIO = {
 }
 
 
+def calculate_fixed_risk_position_size(
+    account_equity: float,
+    entry_price: float,
+    stop_loss_price: float,
+    risk_fraction: float = 0.01,
+    leverage: float = 1.0,
+    volatility_scalar: float = 1.0
+) -> dict:
+    """
+    F-04 Risk-per-trade Position Sizing Engine:
+    Quantity = (Account Equity * Risk Fraction) / abs(Entry - Stop)
+    Constrained by account margin capacity and volatility scalar.
+    """
+    if account_equity <= 0 or entry_price <= 0 or stop_loss_price <= 0:
+        return {"quantity": 0.0, "position_size_usd": 0.0, "notional_usd": 0.0, "risk_usd": 0.0}
+
+    stop_distance = abs(entry_price - stop_loss_price)
+    if stop_distance <= 0:
+        return {"quantity": 0.0, "position_size_usd": 0.0, "notional_usd": 0.0, "risk_usd": 0.0}
+
+    target_risk_usd = account_equity * max(0.001, min(0.05, risk_fraction))
+    raw_qty = (target_risk_usd / stop_distance) * max(0.2, min(2.0, volatility_scalar))
+    
+    notional_usd = raw_qty * entry_price
+    margin_required = notional_usd / max(1.0, leverage)
+    
+    # Cap margin required to max 30% of account equity per trade
+    max_margin_allowed = account_equity * 0.30
+    if margin_required > max_margin_allowed:
+        margin_required = max_margin_allowed
+        notional_usd = margin_required * leverage
+        raw_qty = notional_usd / entry_price
+
+    return {
+        "quantity": float(raw_qty),
+        "position_size_usd": float(margin_required),
+        "notional_usd": float(notional_usd),
+        "risk_usd": float(raw_qty * stop_distance)
+    }
+
+
 def calculate_uncertainty_tp_scaling(prediction_confidence: float, expected_move_pct: float) -> float:
     """
     Component 2: Uncertainty-Aware TP Scaling based on prediction confidence
