@@ -3542,6 +3542,139 @@
                         if (document.getElementById("lp-rr-mid")) document.getElementById("lp-rr-mid").innerText = lp.risk_reward_ratio;
                         if (document.getElementById("lp-trades-mid")) document.getElementById("lp-trades-mid").innerText = `${lp.trades_today} / ${lp.trades_week} / ${lp.trades_month}`;
                     }
+
+                    // Section 4: Market Dashboard
+                    if (data.market_dashboard) {
+                        const mk = data.market_dashboard;
+                        if (document.getElementById("mk-regime")) document.getElementById("mk-regime").innerText = mk.current_regime || "—";
+                        if (document.getElementById("mk-adx")) document.getElementById("mk-adx").innerText = mk.adx || "—";
+                        if (document.getElementById("mk-atr")) document.getElementById("mk-atr").innerText = mk.atr_pct || "—";
+                        if (document.getElementById("mk-vol")) document.getElementById("mk-vol").innerText = mk.volatility || "—";
+                        if (document.getElementById("mk-funding")) document.getElementById("mk-funding").innerText = mk.funding || "—";
+                        if (document.getElementById("mk-spread")) document.getElementById("mk-spread").innerText = mk.spread_pct || "—";
+                        if (document.getElementById("mk-liquidity")) document.getElementById("mk-liquidity").innerText = mk.liquidity || "—";
+                        if (document.getElementById("mk-move")) document.getElementById("mk-move").innerText = mk.expected_move_pct || "—";
+                        if (document.getElementById("mk-conf")) document.getElementById("mk-conf").innerText = `${mk.confidence_pct}%` || "—";
+                        if (document.getElementById("mk-calib")) document.getElementById("mk-calib").innerText = `${mk.calibrated_prob_pct}%` || "—";
+                    }
+
+                    // Section 6: System Monitoring Telemetry
+                    if (data.monitoring_telemetry) {
+                        const mon = data.monitoring_telemetry;
+                        if (document.getElementById("mon-drift")) document.getElementById("mon-drift").innerText = mon.feature_drift || "—";
+                        if (document.getElementById("mon-psi")) document.getElementById("mon-psi").innerText = mon.psi ?? "—";
+                        if (document.getElementById("mon-cusum")) document.getElementById("mon-cusum").innerText = mon.cusum ?? "—";
+                        if (document.getElementById("mon-ece")) document.getElementById("mon-ece").innerText = mon.ece ?? "—";
+                        if (document.getElementById("mon-brier")) document.getElementById("mon-brier").innerText = mon.brier_score ?? "—";
+                        if (document.getElementById("mon-dq")) document.getElementById("mon-dq").innerText = mon.data_quality ?? "—";
+                        if (document.getElementById("mon-apilat")) document.getElementById("mon-apilat").innerText = `${mon.api_latency_ms} ms`;
+                        if (document.getElementById("mon-dblat")) document.getElementById("mon-dblat").innerText = `${mon.db_latency_ms} ms`;
+                        if (document.getElementById("mon-clock")) document.getElementById("mon-clock").innerText = `${mon.clock_drift_ms} ms`;
+                        if (document.getElementById("mon-mem")) {
+                            const memEl = document.getElementById("mon-mem");
+                            const memVal = mon.memory_usage_pct;
+                            memEl.innerText = `${memVal}%`;
+                            memEl.style.color = memVal > 80 ? "var(--accent-red)" : memVal > 60 ? "var(--accent-orange)" : "var(--accent-green)";
+                        }
+                        if (document.getElementById("mon-cpu")) {
+                            const cpuEl = document.getElementById("mon-cpu");
+                            const cpuVal = mon.cpu_usage_pct;
+                            cpuEl.innerText = `${cpuVal}%`;
+                            cpuEl.style.color = cpuVal > 80 ? "var(--accent-red)" : cpuVal > 50 ? "var(--accent-orange)" : "var(--accent-blue)";
+                        }
+                        if (document.getElementById("mon-ws")) document.getElementById("mon-ws").innerText = mon.websocket_status || "—";
+                    }
+
+                    // Section 7: Risk & Portfolio Dashboard
+                    if (data.risk_dashboard) {
+                        const rk = data.risk_dashboard;
+                        if (document.getElementById("rk-open")) document.getElementById("rk-open").innerText = `${rk.open_risk_pct}%`;
+                        if (document.getElementById("rk-max")) document.getElementById("rk-max").innerText = `${rk.max_allowed_risk_pct}%`;
+                        if (document.getElementById("rk-var")) document.getElementById("rk-var").innerText = `${rk.portfolio_var_pct}%`;
+                        if (document.getElementById("rk-cvar")) document.getElementById("rk-cvar").innerText = `${rk.cvar_pct}%`;
+                        if (document.getElementById("rk-corr")) document.getElementById("rk-corr").innerText = rk.correlation_risk || "—";
+                        if (document.getElementById("rk-net")) document.getElementById("rk-net").innerText = `${rk.net_exposure_pct}%`;
+                        if (document.getElementById("rk-exposures") && Array.isArray(rk.exposures)) {
+                            document.getElementById("rk-exposures").innerText = rk.exposures.map(e => `${e.symbol} ${e.pct}%`).join(" | ");
+                        }
+                    }
+
+                    // Section 8: ML Research Laboratory
+                    if (data.research_lab) {
+                        const ml = data.research_lab;
+                        if (document.getElementById("ml-champ")) document.getElementById("ml-champ").innerText = ml.current_champion || "—";
+                        if (document.getElementById("ml-chall")) document.getElementById("ml-chall").innerText = ml.shadow_challenger || "—";
+                        if (document.getElementById("ml-trades")) document.getElementById("ml-trades").innerText = ml.shadow_trades_count ?? "—";
+                        if (document.getElementById("ml-pfs")) document.getElementById("ml-pfs").innerText = `${ml.champion_pf} / ${ml.shadow_pf}`;
+                        if (document.getElementById("ml-promo")) document.getElementById("ml-promo").innerText = ml.promotion_status || "—";
+                        if (document.getElementById("ml-gates")) document.getElementById("ml-gates").innerText = ml.release_gates || "—";
+                        if (document.getElementById("ml-holdout")) document.getElementById("ml-holdout").innerText = `${ml.holdout_accuracy_pct}%`;
+                        if (document.getElementById("ml-bootstrap")) document.getElementById("ml-bootstrap").innerText = ml.bootstrap_ci || "—";
+                        if (document.getElementById("ml-effect")) document.getElementById("ml-effect").innerText = ml.effect_size || "—";
+                        // Update shadow gate badge in section header
+                        const shadowBadges = document.querySelectorAll("[data-ml-shadow-badge]");
+                        shadowBadges.forEach(b => b.innerText = `SHADOW GATE: ${ml.shadow_trades_count} / 200 TRADES`);
+                    }
+
+                    // Section 5: Signal Decision Tree — update live values
+                    if (data.signal_decision_tree && Array.isArray(data.signal_decision_tree.pipeline)) {
+                        const pipeline = data.signal_decision_tree.pipeline;
+                        // Step 2: Prediction confidence
+                        const predEl = document.querySelector("#signal-tree-step-2");
+                        if (predEl && pipeline[1]) predEl.innerText = pipeline[1].value;
+                        // Step 3: Calibrated probability
+                        const calibEl = document.querySelector("#signal-tree-step-3");
+                        if (calibEl && pipeline[2]) calibEl.innerText = pipeline[2].value;
+                        // Step 4: MQS
+                        const mqsEl = document.querySelector("#signal-tree-step-4");
+                        if (mqsEl && pipeline[3]) mqsEl.innerText = `${pipeline[3].value} PASS`;
+                        // Step 8: Expectancy
+                        const expEl = document.querySelector("#signal-tree-step-8");
+                        if (expEl && pipeline[8]) expEl.innerText = pipeline[8].value;
+                    }
+
+                    // Section 9: Attribution Table
+                    if (data.attribution_table && Array.isArray(data.attribution_table)) {
+                        const tbody = document.getElementById("attribution-table-body");
+                        if (tbody) {
+                            const tagColors = {
+                                "HIGH VALUE": "var(--accent-green)", "PROTECTION": "var(--accent-blue)",
+                                "VALUE ADD": "var(--accent-purple)", "CALIBRATION": "var(--accent-blue)",
+                                "STABILITY": "var(--accent-purple)"
+                            };
+                            const tagBgs = {
+                                "HIGH VALUE": "rgba(16,185,129,0.15)", "PROTECTION": "rgba(59,130,246,0.15)",
+                                "VALUE ADD": "rgba(139,92,246,0.15)", "CALIBRATION": "rgba(59,130,246,0.15)",
+                                "STABILITY": "rgba(139,92,246,0.15)"
+                            };
+                            tbody.innerHTML = data.attribution_table.map(row => `
+                                <tr>
+                                    <td>${row.component}</td>
+                                    <td style="color: var(--accent-green); font-weight: 800;">${row.improvement}</td>
+                                    <td><span style="font-size: 9px; font-weight: 800; color: ${tagColors[row.status] || "var(--text-secondary)"}; background: ${tagBgs[row.status] || "rgba(255,255,255,0.08)"}; padding: 2px 6px; border-radius: 4px;">${row.status}</span></td>
+                                </tr>`).join("");
+                        }
+                    }
+
+                    // Section 10: Walk-Forward Folds Table
+                    if (data.walk_forward_folds && Array.isArray(data.walk_forward_folds)) {
+                        const tbody = document.getElementById("walk-forward-folds-body");
+                        if (tbody) {
+                            tbody.innerHTML = data.walk_forward_folds.map(fold => {
+                                const pfColor = fold.pf >= 1.25 ? "var(--accent-green)" : fold.pf >= 1.0 ? "var(--accent-orange)" : "var(--accent-red)";
+                                const stColor = fold.status === "PASS" ? "var(--accent-green)" : "var(--accent-orange)";
+                                const stBg = fold.status === "PASS" ? "rgba(16,185,129,0.15)" : "rgba(249,115,22,0.15)";
+                                return `<tr>
+                                    <td>${fold.fold}</td>
+                                    <td style="font-weight:800; color:${pfColor};">${fold.pf}</td>
+                                    <td>${fold.win_rate}</td>
+                                    <td>${fold.drawdown}</td>
+                                    <td>${fold.sharpe}</td>
+                                    <td><span style="font-size:9px; font-weight:800; color:${stColor}; background:${stBg}; padding:2px 6px; border-radius:4px;">${fold.status}</span></td>
+                                </tr>`;
+                            }).join("");
+                        }
+                    }
                 })
                 .catch(err => console.log("[Institutional Summary Error]:", err));
         }
