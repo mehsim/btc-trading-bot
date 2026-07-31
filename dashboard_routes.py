@@ -463,7 +463,7 @@ def api_reality_gap():
         "slippage_diff_bp": 3.5,
         "fee_diff_bp": 0.5,
         "fill_quality_pct": 98.2,
-        "execution_latency_ms": 48,
+        "execution_latency_ms": int(round(float(state_manager.get("last_api_latency_ms", 18)))),
         "expected_pf": 1.38,
         "actual_pf": 1.31,
         "status_tag": "REALITY_GAP_NORMAL",
