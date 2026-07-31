@@ -3330,16 +3330,16 @@
                         {
                             label: 'Expected Result (PnL $)',
                             data: expectedData,
-                            backgroundColor: 'rgba(139, 92, 246, 0.75)',
-                            borderColor: 'rgba(139, 92, 246, 1)',
+                            backgroundColor: (c) => (c.raw < 0 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(139, 92, 246, 0.75)'),
+                            borderColor: (c) => (c.raw < 0 ? 'rgba(239, 68, 68, 1)' : 'rgba(139, 92, 246, 1)'),
                             borderWidth: 1,
                             borderRadius: 4
                         },
                         {
                             label: 'Real Live Result (PnL $)',
                             data: actualData,
-                            backgroundColor: 'rgba(16, 185, 129, 0.75)',
-                            borderColor: 'rgba(16, 185, 129, 1)',
+                            backgroundColor: (c) => (c.raw < 0 ? 'rgba(244, 63, 94, 0.75)' : 'rgba(16, 185, 129, 0.75)'),
+                            borderColor: (c) => (c.raw < 0 ? 'rgba(244, 63, 94, 1)' : 'rgba(16, 185, 129, 1)'),
                             borderWidth: 1,
                             borderRadius: 4
                         }
@@ -3484,7 +3484,19 @@
                                 if (valEl) {
                                     valEl.innerText = `${comp.score} / ${comp.max}`;
                                     const tagEl = valEl.closest('div') ? valEl.closest('div').nextElementSibling : null;
-                                    if (tagEl && comp.status) tagEl.innerText = comp.status;
+                                    if (tagEl && comp.status) {
+                                        tagEl.innerText = comp.status;
+                                        if (comp.status === "EXCELLENT" || comp.status === "PERFECT" || comp.status === "STABLE" || comp.status === "GOOD") {
+                                            tagEl.style.color = "var(--accent-green)";
+                                            tagEl.style.background = "rgba(16,185,129,0.15)";
+                                        } else if (comp.status === "ELEVATED" || comp.status === "DEGRADED" || comp.status === "VOLATILE") {
+                                            tagEl.style.color = "var(--accent-orange)";
+                                            tagEl.style.background = "rgba(249,115,22,0.15)";
+                                        } else if (comp.status === "CRITICAL" || comp.status === "POOR" || comp.status === "SLOW") {
+                                            tagEl.style.color = "var(--accent-red)";
+                                            tagEl.style.background = "rgba(244,63,94,0.15)";
+                                        }
+                                    }
                                 }
                             });
                         }
@@ -3500,7 +3512,7 @@
                         if (document.getElementById("lp-sortino")) document.getElementById("lp-sortino").innerText = lp.sortino;
                         if (document.getElementById("lp-calmar")) document.getElementById("lp-calmar").innerText = lp.calmar;
                         if (document.getElementById("lp-recovery")) document.getElementById("lp-recovery").innerText = lp.recovery_factor;
-                        if (document.getElementById("lp-wr")) document.getElementById("lp-wr").innerText = `${lp.win_rate_pct}%`;
+                        if (document.getElementById("lp-wr")) document.getElementById("lp-wr").innerText = String(lp.win_rate_pct).includes('%') ? lp.win_rate_pct : `${lp.win_rate_pct}%`;
                         if (document.getElementById("lp-avgwin")) document.getElementById("lp-avgwin").innerText = lp.avg_winner_usd;
                         if (document.getElementById("lp-avgloss")) document.getElementById("lp-avgloss").innerText = lp.avg_loser_usd;
                         if (document.getElementById("lp-rr")) document.getElementById("lp-rr").innerText = lp.risk_reward_ratio;
@@ -3514,7 +3526,7 @@
                         if (document.getElementById("lp-sortino-mid")) document.getElementById("lp-sortino-mid").innerText = lp.sortino;
                         if (document.getElementById("lp-calmar-mid")) document.getElementById("lp-calmar-mid").innerText = lp.calmar;
                         if (document.getElementById("lp-recovery-mid")) document.getElementById("lp-recovery-mid").innerText = lp.recovery_factor;
-                        if (document.getElementById("lp-wr-mid")) document.getElementById("lp-wr-mid").innerText = `${lp.win_rate_pct}%`;
+                        if (document.getElementById("lp-wr-mid")) document.getElementById("lp-wr-mid").innerText = String(lp.win_rate_pct).includes('%') ? lp.win_rate_pct : `${lp.win_rate_pct}%`;
                         if (document.getElementById("lp-avgwin-mid")) document.getElementById("lp-avgwin-mid").innerText = lp.avg_winner_usd;
                         if (document.getElementById("lp-avgloss-mid")) document.getElementById("lp-avgloss-mid").innerText = lp.avg_loser_usd;
                         if (document.getElementById("lp-rr-mid")) document.getElementById("lp-rr-mid").innerText = lp.risk_reward_ratio;
