@@ -462,14 +462,14 @@
             margin: 18px 0;
         }
 
-        /* Balanced Main Panel Grid */
+        /* Balanced 3-Column Main Panel Grid */
         .main-panels-grid {
             display: grid;
-            grid-template-columns: 1.15fr 0.85fr;
-            gap: 24px;
+            grid-template-columns: 0.75fr 1fr 1fr;
+            gap: 16px;
         }
 
-        @media (max-width: 1100px) {
+        @media (max-width: 1200px) {
             .main-panels-grid {
                 grid-template-columns: 1fr;
             }
@@ -1205,59 +1205,114 @@
             </div>
         </div>
 
-        <!-- Balanced Main Layout Grid -->
+        <!-- Balanced 3-Column Main Layout Grid -->
         <div class="main-panels-grid">
-            <!-- LEFT COLUMN: Key Performance & Reality Metrics -->
+            <!-- COLUMN 1 (LEFT): Key Performance & Reality Metrics -->
             <div class="panel-column">
-                <div class="pnl-balance-container" style="display: flex; flex-direction: column; gap: 16px; width: 100%;">
+                <div class="pnl-balance-container" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
                     <!-- Cumulative Profit / Loss (All-Time) Card -->
-                    <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 22px; min-height: 135px; width: 100%;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
+                    <div class="card" id="daily-pnl-card" onclick="openDailyPnlModal()" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; transition: transform 0.2s, box-shadow 0.2s; padding: 14px 16px; min-height: 120px; width: 100%;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 24px rgba(139,92,246,0.15)'" onmouseout="this.style.transform='none'; this.style.boxShadow='none'">
                         <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
-                                <span>Cumulative Profit / Loss (All-Time)</span>
-                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 6px; border-radius: 4px;">HISTORY ➔</span>
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 2px;">
+                                <span>Cumulative PnL</span>
+                                <span style="font-size: 8px; opacity: 0.8; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 5px; border-radius: 4px;">HISTORY ➔</span>
                             </div>
-                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 32px; margin-top: 10px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
+                            <div class="card-value color-bullish" id="daily-pnl-value" style="font-size: 24px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">+$0.00</div>
                         </div>
-                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 10px; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+                        <div class="card-subtitle" id="daily-pnl-subtitle" style="margin-top: 4px; font-size: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px;">
                             Daily Goal: $1,000 (Min)
                         </div>
                     </div>
                     
                     <!-- Real Bybit Balance Card -->
-                    <div class="card" id="bybit-balance-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 135px; width: 100%;">
+                    <div class="card" id="bybit-balance-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; min-height: 120px; width: 100%;">
                         <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 2px;">
                                 <span>Real Bybit Balance</span>
-                                <span style="font-size: 9px; opacity: 0.8; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 6px; border-radius: 4px;">LIVE</span>
+                                <span style="font-size: 8px; opacity: 0.8; font-weight: 700; color: var(--accent-green); background: rgba(16,185,129,0.15); padding: 2px 5px; border-radius: 4px;">LIVE</span>
                             </div>
-                            <div class="card-value" id="bybit-balance-value" style="font-size: 32px; margin-top: 10px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
+                            <div class="card-value" id="bybit-balance-value" style="font-size: 24px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif; color: var(--text-primary);">--</div>
                         </div>
-                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 10px; font-size: 11px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; color: var(--text-secondary);">
+                        <div class="card-subtitle" id="bybit-balance-subtitle" style="margin-top: 4px; font-size: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px; color: var(--text-secondary);">
                             Syncing with Bybit APIs...
                         </div>
                     </div>
 
                     <!-- Live Reality Gap Monitoring Card -->
-                    <div class="card" id="reality-gap-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 22px; min-height: 135px; width: 100%;">
+                    <div class="card" id="reality-gap-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; min-height: 120px; width: 100%;">
                         <div>
-                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 5px;">
+                            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 2px;">
                                 <span>Live Reality Gap</span>
-                                <span id="reality-gap-status-badge" style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">MONITORING</span>
+                                <span id="reality-gap-status-badge" style="font-size: 8px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 2px 5px; border-radius: 4px;">MONITORING</span>
                             </div>
-                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 32px; margin-top: 10px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
+                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 24px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
                         </div>
-                        <div style="margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+                        <div style="margin-top: 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px;">
                             <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">3.5 bps</strong></div>
                             <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">48 ms</strong></div>
-                            <div>Fill Quality: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
-                            <div>Exp/Act PF: <strong id="reality-pf-val" style="color: var(--text-primary);">1.38 / 1.31</strong></div>
+                            <div>Fill: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
+                            <div>Exp/Act: <strong id="reality-pf-val" style="color: var(--text-primary);">1.38 / 1.31</strong></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- RIGHT COLUMN: Console Logs -->
+            <!-- COLUMN 2 (CENTER): Live Performance Metrics Deck -->
+            <div class="panel-column">
+                <div class="card" style="padding: 16px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div class="section-title" style="font-size: 12px; margin-bottom: 10px;">📊 Live Performance Metrics</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Profit Factor</div>
+                                <div id="lp-pf-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">1.38</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Expectancy</div>
+                                <div id="lp-exp-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">+0.42R</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Sharpe Ratio</div>
+                                <div id="lp-sharpe-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">1.45</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Sortino Ratio</div>
+                                <div id="lp-sortino-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-purple);">1.88</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Calmar Ratio</div>
+                                <div id="lp-calmar-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">42.5</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Recovery Factor</div>
+                                <div id="lp-recovery-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-blue);">9.20</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Win Rate</div>
+                                <div id="lp-wr-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-green);">49.5%</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Risk Reward</div>
+                                <div id="lp-rr-mid" style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">1.61</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Avg Winner</div>
+                                <div id="lp-avgwin-mid" style="font-size: 15px; font-weight: 800; color: var(--accent-green);">+$1.85</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                <div style="font-size: 9px; color: var(--text-secondary);">Avg Loser</div>
+                                <div id="lp-avgloss-mid" style="font-size: 15px; font-weight: 800; color: var(--accent-red);">-$1.15</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 6px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary);">
+                        <span>Trades (Today/Wk/Mo):</span>
+                        <strong id="lp-trades-mid" style="color: var(--accent-purple);">6 / 28 / 112</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COLUMN 3 (RIGHT): Console Logs -->
             <div class="panel-column">
                 <!-- Terminal Console Card -->
                 <div class="card" style="padding: 16px; height: 100%;">
@@ -3454,6 +3509,19 @@
                         if (document.getElementById("lp-rr")) document.getElementById("lp-rr").innerText = lp.risk_reward_ratio;
                         if (document.getElementById("lp-hold")) document.getElementById("lp-hold").innerText = lp.avg_hold_time;
                         if (document.getElementById("lp-trades")) document.getElementById("lp-trades").innerText = `${lp.trades_today} / ${lp.trades_week} / ${lp.trades_month}`;
+
+                        // Populate Middle Column Deck
+                        if (document.getElementById("lp-pf-mid")) document.getElementById("lp-pf-mid").innerText = lp.profit_factor;
+                        if (document.getElementById("lp-exp-mid")) document.getElementById("lp-exp-mid").innerText = lp.expectancy_r;
+                        if (document.getElementById("lp-sharpe-mid")) document.getElementById("lp-sharpe-mid").innerText = lp.sharpe;
+                        if (document.getElementById("lp-sortino-mid")) document.getElementById("lp-sortino-mid").innerText = lp.sortino;
+                        if (document.getElementById("lp-calmar-mid")) document.getElementById("lp-calmar-mid").innerText = lp.calmar;
+                        if (document.getElementById("lp-recovery-mid")) document.getElementById("lp-recovery-mid").innerText = lp.recovery_factor;
+                        if (document.getElementById("lp-wr-mid")) document.getElementById("lp-wr-mid").innerText = `${lp.win_rate_pct}%`;
+                        if (document.getElementById("lp-avgwin-mid")) document.getElementById("lp-avgwin-mid").innerText = lp.avg_winner_usd;
+                        if (document.getElementById("lp-avgloss-mid")) document.getElementById("lp-avgloss-mid").innerText = lp.avg_loser_usd;
+                        if (document.getElementById("lp-rr-mid")) document.getElementById("lp-rr-mid").innerText = lp.risk_reward_ratio;
+                        if (document.getElementById("lp-trades-mid")) document.getElementById("lp-trades-mid").innerText = `${lp.trades_today} / ${lp.trades_week} / ${lp.trades_month}`;
                     }
                 })
                 .catch(err => console.log("[Institutional Summary Error]:", err));
