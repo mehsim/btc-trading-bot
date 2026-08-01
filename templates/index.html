@@ -1800,68 +1800,9 @@
             </div>
         </div>
 
-        <!-- PARALLEL 3-COLUMN GRID: SYSTEM TELEMETRY, RISK DASHBOARD & ML RESEARCH LAB -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 20px; margin-bottom: 20px;">
-            <!-- CARD 1: SYSTEM MONITORING & TELEMETRY DASHBOARD -->
-            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
-                <div>
-                    <div class="section-header" style="margin-bottom: 16px;">
-                        <div class="section-title" style="font-size: 15px;">🖥️ System Telemetry & Infrastructure</div>
-                    </div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Feature Drift</div>
-                            <div id="mon-drift" class="stat-tile-val" style="color: var(--accent-green); font-size: 15px;">Normal</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">PSI Index</div>
-                            <div id="mon-psi" class="stat-tile-val" style="color: var(--text-primary);">0.04</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">CUSUM</div>
-                            <div id="mon-cusum" class="stat-tile-val" style="color: var(--accent-blue);">0.82</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">ECE Calibration</div>
-                            <div id="mon-ece" class="stat-tile-val" style="color: var(--accent-purple);">0.038</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Brier Score</div>
-                            <div id="mon-brier" class="stat-tile-val" style="color: var(--text-primary);">0.214</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Data Quality</div>
-                            <div id="mon-dq" class="stat-tile-val" style="color: var(--accent-green);">97</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">API Latency</div>
-                            <div id="mon-apilat" class="stat-tile-val" style="color: var(--accent-green);">18 ms</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">DB Latency</div>
-                            <div id="mon-dblat" class="stat-tile-val" style="color: var(--accent-green);">3 ms</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Clock Drift</div>
-                            <div id="mon-clock" class="stat-tile-val" style="color: var(--text-primary);">0.3 ms</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Memory Usage</div>
-                            <div id="mon-mem" class="stat-tile-val" style="color: var(--accent-orange);">52%</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">CPU Usage</div>
-                            <div id="mon-cpu" class="stat-tile-val" style="color: var(--accent-blue);">31%</div>
-                        </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">WebSocket / REST</div>
-                            <div id="mon-ws" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">Healthy</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- CARD 2: RISK & PORTFOLIO EXPOSURE DASHBOARD -->
+        <!-- PARALLEL 2-COLUMN GRID: RISK DASHBOARD & ML RESEARCH LAB -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-top: 20px; margin-bottom: 20px;">
+            <!-- CARD 1: RISK & PORTFOLIO EXPOSURE DASHBOARD -->
             <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
                 <div>
                     <div class="section-header" style="margin-bottom: 16px;">
