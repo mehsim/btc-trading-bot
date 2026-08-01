@@ -849,3 +849,30 @@ def scale_leverage_for_fixed_risk(
     return scaled_lev, is_valid
 
 
+class TransactionCostModel:
+    """
+    Transaction Cost Model (TCM).
+    Estimates total execution cost in basis points (fees + slippage + market impact).
+    """
+    @staticmethod
+    def estimate_transaction_cost(
+        order_size_usd: float = 1000.0,
+        volume_24h_usd: float = 50_000_000.0,
+        is_maker: bool = True
+    ) -> Dict[str, float]:
+        fee_bps = 2.0 if is_maker else 5.5
+        slippage_bps = max(0.5, 3.5 * (order_size_usd / max(1.0, volume_24h_usd))**0.5)
+        market_impact_bps = 0.5
+        total_cost_bps = round(fee_bps + slippage_bps + market_impact_bps, 2)
+        return {
+            "fee_bps": fee_bps,
+            "slippage_bps": round(slippage_bps, 2),
+            "market_impact_bps": market_impact_bps,
+            "total_cost_bps": total_cost_bps
+        }
+
+
+transaction_cost_model = TransactionCostModel()
+
+
+

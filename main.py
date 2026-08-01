@@ -29,6 +29,7 @@ from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 import database
 import trade_calculators
+from trade_calculators import transaction_cost_model
 from statistical_validation import statistical_validation
 from decision_outcome_db import decision_outcome_db
 from meta_learning_engine import meta_learning_engine
