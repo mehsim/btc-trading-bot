@@ -7,6 +7,7 @@ import urllib.parse
 import threading
 import asyncio
 import aiohttp
+from typing import Dict, List, Tuple, Optional, Any, Union
 from dotenv import load_dotenv
 load_dotenv()
 

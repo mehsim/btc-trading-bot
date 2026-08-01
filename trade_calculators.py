@@ -9,7 +9,7 @@ import json
 import time
 import numpy as np
 import pandas as pd
-from datetime import datetime, timezone
+from typing import Dict, List, Tuple, Optional, Any, Union
 import database
 
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]

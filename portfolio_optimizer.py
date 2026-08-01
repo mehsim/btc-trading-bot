@@ -6,11 +6,11 @@ and Black-Litterman allocation methods.
 """
 
 import numpy as np
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 class PortfolioOptimizer:
 
-    def hierarchical_risk_parity(self, cov_matrix: np.ndarray, assets: List[str] = None) -> Dict[str, Any]:
+    def hierarchical_risk_parity(self, cov_matrix: np.ndarray, assets: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         HRP: clusters by correlation, inverse-variance weights within each cluster.
         Robust to estimation error — no matrix inversion needed.
@@ -37,7 +37,7 @@ class PortfolioOptimizer:
         }
 
     def mean_variance_optimization(self, expected_returns: np.ndarray,
-                                    cov_matrix: np.ndarray, assets: List[str] = None,
+                                    cov_matrix: np.ndarray, assets: Optional[List[str]] = None,
                                     risk_free_rate: float = 0.04) -> Dict[str, Any]:
         """
         Max-Sharpe mean-variance optimization.
@@ -70,8 +70,8 @@ class PortfolioOptimizer:
         }
 
     def black_litterman(self, market_weights: np.ndarray, cov_matrix: np.ndarray,
-                        views_returns: np.ndarray = None, tau: float = 0.05,
-                        assets: List[str] = None) -> Dict[str, Any]:
+                        views_returns: Optional[np.ndarray] = None, tau: float = 0.05,
+                        assets: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Black-Litterman: blends market equilibrium returns with investor views.
         Posterior: mu_BL = [(tau*Sigma)^-1 + P'Omega^-1 P]^-1 [(tau*Sigma)^-1 * Pi + P'Omega^-1 * q]

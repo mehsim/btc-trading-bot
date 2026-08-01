@@ -63,7 +63,7 @@ class SHAPExplainer:
                   "feature_value": round(float(feature_values[f]), 4),
                   "direction": "↑ BULLISH" if v > 0 else "↓ BEARISH"}
                  for f, v in zip(features, shap_vals)],
-                key=lambda x: abs(x["shap_value"]), reverse=True
+                key=lambda x: abs(float(x["shap_value"])), reverse=True
             )
 
             return {
@@ -97,17 +97,17 @@ class SHAPExplainer:
             per_model_results[model_name] = result
             if result["status"] == "ok":
                 for feat in result["top_features"]:
-                    fname = feat["feature"]
+                    fname = str(feat["feature"])
                     if fname not in all_contributions:
                         all_contributions[fname] = []
-                    all_contributions[fname].append(feat["shap_value"])
+                    all_contributions[fname].append(float(feat["shap_value"]))
 
         # Average SHAP across models
         consensus = sorted(
             [{"feature": f, "mean_shap": round(float(np.mean(vals)), 5),
               "agreement": "STRONG" if np.std(vals) < 0.02 else "MODERATE" if np.std(vals) < 0.05 else "WEAK"}
              for f, vals in all_contributions.items()],
-            key=lambda x: abs(x["mean_shap"]), reverse=True
+            key=lambda x: abs(float(x["mean_shap"])), reverse=True
         )
 
         return {

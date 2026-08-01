@@ -6,14 +6,14 @@ Order Flow Imbalance (OFI), VPIN, Kyle's Lambda, and cancel-to-trade ratio analy
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 class OrderFlowAnalyzer:
     def __init__(self, depth_levels: int = 5):
         self.depth_levels = depth_levels
 
     def compute_ofi_delta(self, orderbook_bids: list, orderbook_asks: list,
-                          prev_bids: list = None, prev_asks: list = None) -> float:
+                          prev_bids: Optional[list] = None, prev_asks: Optional[list] = None) -> float:
         """OFI: normalized [-1.0 sell pressure, +1.0 buy pressure]."""
         if not orderbook_bids or not orderbook_asks:
             return 0.0

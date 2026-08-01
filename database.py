@@ -5,7 +5,10 @@ import json
 import threading
 from decimal import Decimal, ROUND_HALF_UP
 
-def round_monetary(val, decimals=4):
+import time
+from typing import Dict, List, Tuple, Optional, Any, Union
+
+def round_monetary(val: Any, decimals: int = 4) -> float:
     if val is None or (isinstance(val, float) and math.isnan(val)):
         return 0.0
     try:
@@ -17,6 +20,7 @@ def round_monetary(val, decimals=4):
 
 DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
 db_lock = threading.Lock()
+
 
 def get_db_connection():
     for attempt in range(3):

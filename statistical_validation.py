@@ -7,7 +7,7 @@ Benjamini-Hochberg FDR Correction, and 8 Production Release Gates.
 """
 
 import numpy as np
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 import config
 
 class StatisticalValidation:
@@ -166,8 +166,8 @@ class StatisticalValidation:
 
     def compute_ensemble_uncertainty_weighting(
         self,
-        individual_predictions: Dict[str, float] = None,
-        model_weights: Dict[str, float] = None,
+        individual_predictions: Optional[Dict[str, float]] = None,
+        model_weights: Optional[Dict[str, float]] = None,
         atr_expansion_ratio: float = 1.12,
         spread_bp: float = 3.5,
         brier_score: float = 0.214
