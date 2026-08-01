@@ -470,8 +470,37 @@ class PortfolioRiskEngine:
             "severity": "CRITICAL" if z_score > 3.5 else "WARNING" if alert_triggered else "NORMAL"
         }
 
+    def calculate_cvar_expected_shortfall(
+        self,
+        returns: list,
+        confidence: float = 0.95
+    ) -> dict:
+        """
+        CVaR (Conditional Value at Risk) / Expected Shortfall (ES).
+        CVaR_95% = -E[R | R <= VaR_95%]
+        Answers: "On my worst 5% of days, how much do I lose on average?"
+        """
+        import numpy as np
+        if not returns or len(returns) < 10:
+            return {"status": "insufficient_data"}
+        arr = np.array(returns, dtype=float)
+        var = float(np.percentile(arr, (1 - confidence) * 100))
+        tail = arr[arr <= var]
+        cvar = float(-np.mean(tail)) if len(tail) > 0 else 0.0
+        worst_loss = float(-np.min(arr))
+        return {
+            "confidence": confidence,
+            "var": round(-var, 4),          # VaR as positive loss
+            "cvar": round(cvar, 4),          # CVaR / ES as positive loss
+            "expected_shortfall": round(cvar, 4),
+            "worst_single_loss": round(worst_loss, 4),
+            "tail_observations": len(tail),
+            "total_observations": len(arr)
+        }
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
+
 
 
 

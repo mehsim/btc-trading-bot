@@ -770,10 +770,109 @@
                 <span class="file-name">transaction_cost_model.py</span>
                 <span class="file-tag badge-risk">Transaction Cost Modeling</span>
             </div>
-            <p><strong>Purpose:</strong> Institutional Transaction Cost Model (TCM) estimating exchange fees, bid-ask spread impact, and orderbook market impact based on trade size relative to 24-hour volume.</p>
+            <p><strong>Purpose:</strong> Institutional TCM with <strong>Almgren-Chriss volatility-adjusted market impact</strong>. Uses live GARCH sigma to scale market impact with realized volatility. Calibrated γ = 0.42 from historical fills.</p>
             <div class="formula-box">
-                \text{Slippage}_{\text{bps}} = \text{Half\_Spread}_{\text{bps}} + \gamma \cdot \sqrt{\frac{\text{Order\_Size\_USD}}{\text{Volume\_24h\_USD}}} \cdot 10000
+                \text{Slippage}_{\text{bps}} = \text{Half\_Spread} + \gamma \cdot \sigma_{\text{GARCH}} \cdot \sqrt{\frac{\text{Order\_Size}}{\text{Volume}_{24h}}} \cdot 10000
             </div>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">estimate_transaction_cost(garch_sigma)</span> — Returns total cost in bps including volatility-adjusted Almgren-Chriss impact</li>
+            </ul>
+        </div>
+
+        <!-- portfolio_optimizer.py -->
+        <div id="portfolio_optimizer_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">portfolio_optimizer.py</span>
+                <span class="file-tag badge-ml">Portfolio Optimization</span>
+            </div>
+            <p><strong>Purpose:</strong> Multi-method portfolio optimization engine implementing <strong>Hierarchical Risk Parity (HRP)</strong>, <strong>Mean-Variance (Max-Sharpe)</strong>, and <strong>Black-Litterman</strong> allocation methods.</p>
+            <div class="formula-box">
+                \mathbf{w}^* = \arg\max_{\mathbf{w}} \frac{\mathbf{w}^T \boldsymbol{\mu} - r_f}{\sqrt{\mathbf{w}^T \boldsymbol{\Sigma} \mathbf{w}}} \quad (\text{Mean-Variance Max-Sharpe})
+            </div>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">hierarchical_risk_parity(cov_matrix)</span> — Inverse-variance HRP weights, robust to estimation error</li>
+                <li><span class="code-inline">mean_variance_optimization(expected_returns, cov_matrix)</span> — Max-Sharpe long-only MV optimization</li>
+                <li><span class="code-inline">black_litterman(market_weights, cov_matrix, views_returns)</span> — Blends market equilibrium returns with investor views via Bayesian posterior</li>
+            </ul>
+        </div>
+
+        <!-- execution_simulator.py -->
+        <div id="execution_simulator_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">execution_simulator.py</span>
+                <span class="file-tag badge-core">Pre-Trade Execution Simulator</span>
+            </div>
+            <p><strong>Purpose:</strong> Pre-trade simulation of execution quality before any live order is submitted. Estimates queue position, partial fill probability, network latency, Almgren-Chriss slippage, and provides an <span class="code-inline">execution_grade</span> (EXCELLENT / GOOD / FAIR / POOR) with a PROCEED / ABORT recommendation.</p>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">simulate(order_size_usd, orderbook_depth_usd, garch_sigma)</span> — Returns full pre-trade simulation report including queue position %, partial fill risk, expected fill latency, and net cost in bps</li>
+            </ul>
+        </div>
+
+        <!-- shap_explainer.py -->
+        <div id="shap_explainer_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">shap_explainer.py</span>
+                <span class="file-tag badge-ml">Cross-Model SHAP Explainability</span>
+            </div>
+            <p><strong>Purpose:</strong> SHAP (SHapley Additive exPlanations) explainability engine using <code>TreeExplainer</code> on XGBoost, LightGBM, and CatBoost. Returns top-N feature contributions per prediction with direction (↑ BULLISH / ↓ BEARISH) and cross-model consensus SHAP values.</p>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">explain_prediction(model, feature_values, top_n)</span> — Per-model SHAP values sorted by absolute impact</li>
+                <li><span class="code-inline">explain_ensemble(models, feature_values, top_n)</span> — Consensus top features averaged across all ensemble models with agreement score (STRONG / MODERATE / WEAK)</li>
+            </ul>
+        </div>
+
+        <!-- order_flow_analyzer.py -->
+        <div id="order_flow_analyzer_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">order_flow_analyzer.py</span>
+                <span class="file-tag badge-risk">Market Microstructure</span>
+            </div>
+            <p><strong>Purpose:</strong> Advanced market microstructure module. Computes OFI, VPIN, Kyle's Lambda, and Cancel-to-Trade Ratio to detect informed trading activity and order book manipulation.</p>
+            <div class="formula-box">
+                \text{VPIN} = \frac{|V_{\text{buy}} - V_{\text{sell}}|}{V_{\text{total}}} \quad \lambda_{\text{Kyle}} = \frac{\text{Cov}(\Delta P, \Delta \text{Flow})}{\text{Var}(\Delta \text{Flow})}
+            </div>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">compute_ofi_delta(bids, asks)</span> — Order Flow Imbalance [-1.0, +1.0]</li>
+                <li><span class="code-inline">compute_vpin(bucket_volumes, buy_volumes)</span> — Probability of Informed Trading; &gt;0.5 signals whale activity</li>
+                <li><span class="code-inline">compute_kyle_lambda(price_changes, signed_order_flow)</span> — Market impact per unit flow; higher = less liquid</li>
+                <li><span class="code-inline">cancel_to_trade_ratio(cancels, executions)</span> — &gt;10x flagged as SUSPICIOUS_SPOOFING</li>
+            </ul>
+        </div>
+
+        <!-- portfolio_risk.py -->
+        <div id="portfolio_risk_cvar" class="file-card">
+            <div class="file-header">
+                <span class="file-name">portfolio_risk.py — CVaR / Expected Shortfall</span>
+                <span class="file-tag badge-risk">Probabilistic Risk Forecasting</span>
+            </div>
+            <p><strong>Purpose:</strong> Extends risk estimates with <strong>Conditional Value at Risk (CVaR)</strong> and <strong>Expected Shortfall (ES)</strong> — answers "On my worst 5% of days, how much do I lose on average?"</p>
+            <div class="formula-box">
+                \text{CVaR}_{95\%} = -\mathbb{E}[R \mid R \leq \text{VaR}_{95\%}]
+            </div>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">calculate_cvar_expected_shortfall(returns, confidence=0.95)</span> — Returns VaR, CVaR, ES, worst single loss, tail observation count</li>
+                <li><span class="code-inline">calculate_volatility_normalized_drawdown_alert()</span> — Normalized DD = MaxDD / σ₃₀ᵈ; alerts at 2.5σ above rolling mean</li>
+            </ul>
+        </div>
+
+        <!-- walk_forward_engine.py -->
+        <div id="walk_forward_calendar" class="file-card">
+            <div class="file-header">
+                <span class="file-name">walk_forward_engine.py — Calendar Walk-Forward</span>
+                <span class="file-tag badge-ml">Look-Ahead Bias Prevention</span>
+            </div>
+            <p><strong>Purpose:</strong> Calendar-date anchored walk-forward framework. Each fold: Train [T-2yr → T], Validate [T → T+3m], Trade [T+3m → T+6m]. Eliminates look-ahead bias that bar-count windows cannot prevent.</p>
+            <div class="section-heading">Core Functions</div>
+            <ul>
+                <li><span class="code-inline">run_walk_forward_backtest(df, train_window_bars)</span> — Bar-count sliding window walk-forward</li>
+                <li><span class="code-inline">run_calendar_walk_forward(df, train_years=2, validate_months=3, trade_months=3)</span> — Calendar-anchored rolling folds with explicit date boundaries</li>
+            </ul>
         </div>
 
         <!-- feature_store.py -->
@@ -791,7 +890,7 @@
                 <span class="file-name">order_executor.py</span>
                 <span class="file-tag badge-core">Decoupled OMS / EMS Queue</span>
             </div>
-            <p><strong>Purpose:</strong> Order Management & Execution System (OMS/EMS). Decouples strategy signal generation from exchange REST API calls using an asynchronous, thread-safe queue with automated retries and order state transitions (<span class="code-inline">PENDING_SUBMIT</span> &rarr; <span class="code-inline">ACKNOWLEDGED</span> &rarr; <span class="code-inline">FILLED</span>).</p>
+            <p><strong>Purpose:</strong> OMS/EMS with <strong>SQLite-backed persistent queue</strong>, <strong>token bucket rate limiter</strong> (80 RPS), exponential backoff on HTTP 429, crash recovery of PENDING orders on restart, and SIGTERM-safe flush. States: <span class="code-inline">PENDING_SUBMIT</span> &rarr; <span class="code-inline">ACKNOWLEDGED</span> &rarr; <span class="code-inline">FILLED</span>.</p>
         </div>
 
         <!-- secret_manager.py -->

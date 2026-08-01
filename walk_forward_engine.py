@@ -162,3 +162,45 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
     }
     return summary
 
+
+def run_calendar_walk_forward(df: pd.DataFrame, train_years: int = 2,
+                               validate_months: int = 3, trade_months: int = 3) -> dict:
+    """
+    Calendar-anchored Walk-Forward: prevents look-ahead bias using date boundaries.
+    Fold: Train [T-train_years, T] -> Validate [T, T+validate_months] -> Trade [T+validate_months, T+trade_months]
+    """
+    if df is None or len(df) == 0 or "timestamp" not in df.columns:
+        return {"status": "no_timestamp_column", "folds": []}
+
+    df = df.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    min_date = df["timestamp"].min()
+    max_date = df["timestamp"].max()
+    folds = []
+    fold_start = min_date + pd.DateOffset(years=train_years)
+
+    while fold_start + pd.DateOffset(months=validate_months + trade_months) <= max_date:
+        train_start = fold_start - pd.DateOffset(years=train_years)
+        train_end = fold_start
+        val_end = fold_start + pd.DateOffset(months=validate_months)
+        trade_end = val_end + pd.DateOffset(months=trade_months)
+
+        train_df = df[(df["timestamp"] >= train_start) & (df["timestamp"] < train_end)]
+        val_df = df[(df["timestamp"] >= train_end) & (df["timestamp"] < val_end)]
+        trade_df = df[(df["timestamp"] >= val_end) & (df["timestamp"] < trade_end)]
+
+        folds.append({
+            "train_period": f"{train_start.date()} to {train_end.date()}",
+            "validate_period": f"{train_end.date()} to {val_end.date()}",
+            "trade_period": f"{val_end.date()} to {trade_end.date()}",
+            "train_bars": len(train_df),
+            "validate_bars": len(val_df),
+            "trade_bars": len(trade_df)
+        })
+        fold_start += pd.DateOffset(months=trade_months)
+
+    return {"status": "ok", "total_folds": len(folds), "folds": folds}
+
+
