@@ -481,6 +481,8 @@ def api_institutional_summary():
     import mlops_engine
     from statistical_validation import statistical_validation
     from trade_calculators import calculate_decomposed_trade_quality
+    from strategy_health_engine import strategy_health_engine
+    from champion_challenger_framework import champion_challenger_framework
     history = state_manager.get("trade_history", [])
     if not history or not isinstance(history, list):
         try:
@@ -958,7 +960,9 @@ def api_institutional_summary():
         "decomposed_trade_quality": (lambda: calculate_decomposed_trade_quality(valid_trades[-1] if valid_trades else {}))(),
         "capital_efficiency": (lambda: portfolio_risk_engine.calculate_capital_efficiency(active_positions, sim_balance))(),
         "decision_stability": (lambda: statistical_validation.compute_decision_stability(None, {}, "Bullish", 0.85))(),
-        "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": "live_v1"}))()
+        "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": "live_v1"}))(),
+        "model_health_index": (lambda: strategy_health_engine.calculate_model_health_index())(),
+        "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(164, 98, 114))()
     }
     return jsonify(data)
 

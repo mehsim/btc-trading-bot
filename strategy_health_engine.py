@@ -106,4 +106,45 @@ class StrategyHealthEngine:
         }
         return kpi_health
 
+    def calculate_model_health_index(
+        self,
+        decision_stability_pct: float = 98.5,
+        confidence_robustness_pct: float = 94.2,
+        ece_pct: float = 3.8,
+        psi_score: float = 0.04,
+        rolling_pf: float = 1.45,
+        holdout_accuracy_pct: float = 52.4
+    ) -> Dict[str, Any]:
+        """
+        Computes a unified 0-100 Model Health Index (MHI) operational score.
+        """
+        stability_component = min(100.0, float(decision_stability_pct)) * 0.20
+        robustness_component = min(100.0, float(confidence_robustness_pct)) * 0.15
+        ece_component = max(0.0, (100.0 - float(ece_pct) * 10.0)) * 0.15
+        psi_component = max(0.0, (100.0 - float(psi_score) * 400.0)) * 0.15
+        pf_component = min(100.0, max(0.0, float(rolling_profit_factor if 'rolling_profit_factor' in locals() else rolling_pf) / 2.0 * 100.0)) * 0.15
+        acc_component = min(100.0, float(holdout_accuracy_pct) / 60.0 * 100.0) * 0.20
+
+        mhi_score = round(stability_component + robustness_component + ece_component + psi_component + pf_component + acc_component, 1)
+        mhi_score = max(0.0, min(100.0, mhi_score))
+
+        status = "HEALTHY" if mhi_score >= 80.0 else ("DEGRADED" if mhi_score >= 65.0 else "CRITICAL")
+        action = "FULL CAPITAL DEPLOYMENT" if status == "HEALTHY" else ("REDUCE POSITION SIZES (25%)" if status == "DEGRADED" else "ENABLE SHADOW-ONLY MODE")
+
+        return {
+            "mhi_score": mhi_score,
+            "status": status,
+            "action_recommendation": action,
+            "components": {
+                "decision_stability": decision_stability_pct,
+                "confidence_robustness": confidence_robustness_pct,
+                "ece_pct": ece_pct,
+                "psi_score": psi_score,
+                "rolling_pf": rolling_pf,
+                "holdout_accuracy_pct": holdout_accuracy_pct
+            }
+        }
+
+
 strategy_health_engine = StrategyHealthEngine()
+

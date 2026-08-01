@@ -396,6 +396,34 @@ def calculate_entry_signal_attribution(
         "regime_score": regime_score,
         "macro_score": macro_score,
         "orderbook_score": orderbook_score,
-        "final_confidence": round(float(calibrated_confidence), 4)
+        "final_confidence": round(float(calibrated_confidence), 4),
+        "attribution_pct": calculate_confidence_attribution_breakdown(trend_score, momentum_score, volume_score, liquidity_score, macro_score, orderbook_score, regime_score)
     }
+
+
+def calculate_confidence_attribution_breakdown(
+    trend_score: float,
+    momentum_score: float,
+    volume_score: float,
+    liquidity_score: float,
+    macro_score: float,
+    orderbook_score: float,
+    regime_score: float
+) -> dict:
+    """
+    Computes percentage contribution of each feature component to final confidence.
+    """
+    total = (trend_score * 0.25) + (momentum_score * 0.20) + (volume_score * 0.15) + (liquidity_score * 0.10) + (macro_score * 0.10) + (orderbook_score * 0.10) + (regime_score * 0.10)
+    total_val = max(1e-6, total)
+
+    return {
+        "trend_pct": round(((trend_score * 0.25) / total_val) * 100.0, 1),
+        "momentum_pct": round(((momentum_score * 0.20) / total_val) * 100.0, 1),
+        "volume_pct": round(((volume_score * 0.15) / total_val) * 100.0, 1),
+        "liquidity_pct": round(((liquidity_score * 0.10) / total_val) * 100.0, 1),
+        "macro_pct": round(((macro_score * 0.10) / total_val) * 100.0, 1),
+        "orderbook_pct": round(((orderbook_score * 0.10) / total_val) * 100.0, 1),
+        "regime_pct": round(((regime_score * 0.10) / total_val) * 100.0, 1)
+    }
+
 

@@ -346,4 +346,39 @@ class ExitPolicyEngine:
             except Exception as shadow_err:
                 pass
 
+    def select_and_lock_meta_policy(
+        self,
+        regime: str = "Trending",
+        garch_vol: float = 0.015,
+        adx_val: float = 25.0
+    ) -> Dict[str, str]:
+        """
+        Evaluates market context at trade entry and LOCKS the selected Meta-Policy.
+        Mid-trade policy switching is explicitly prohibited to prevent attribution contamination.
+        """
+        regime_upper = str(regime).upper()
+        if "TRENDING" in regime_upper and garch_vol <= 0.015:
+            policy_id = "Trail_Wide"
+            reason = "Trending regime with low volatility — using wide trailing stop (2.5x ATR)"
+        elif "TRENDING" in regime_upper and garch_vol > 0.015:
+            policy_id = "Trail_Tight"
+            reason = "Trending regime with high volatility — using tight trailing stop (1.2x ATR) + scale-out"
+        elif "RANGING" in regime_upper:
+            policy_id = "Structure_Bound"
+            reason = "Ranging regime — using structural swing high/low barrier exit"
+        else:
+            policy_id = "Time_Decay"
+            reason = "Choppy regime — using linear time-decay exit"
+
+        return {
+            "locked_policy": policy_id,
+            "policy_reason": reason,
+            "entry_regime": regime,
+            "entry_volatility": f"{garch_vol*100:.2f}%",
+            "entry_adx": f"{adx_val:.1f}",
+            "locked_timestamp": time.time()
+        }
+
+
 exit_policy_engine = ExitPolicyEngine()
+
