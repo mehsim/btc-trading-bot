@@ -754,8 +754,14 @@
                 <span class="file-tag badge-ml">Statistical & Quality Calculators</span>
             </div>
             <p><strong>Purpose:</strong> Standalone statistical calculators computing Profit Factor, Expectancy ($R$),
-                Sharpe, Sortino ratios, and Decomposed Trade Quality vectors (Entry Edge, Exit Edge, Execution Edge,
-                Market Tailwind, Risk Management).</p>
+                Sharpe, Sortino ratios, Decomposed Trade Quality vectors, and 15m Institutional Hardening routines:</p>
+            <div class="section-heading">15m Hardening Functions</div>
+            <ul>
+                <li><span class="code-inline">calculate_adaptive_15m_threshold()</span> — Adaptive Confidence Threshold Matrix ($68.0\%\text{--}78.0\%$).</li>
+                <li><span class="code-inline">calculate_adaptive_structural_stop()</span> — Adaptive 5-bar to 12-bar Swing Low/High stops with Fresh Pivot Recency Guard ($12\text{ bars}$).</li>
+                <li><span class="code-inline">calculate_structural_quality_score()</span> — $0\text{--}100$ score based on pivot recency, liquidity sweep, volume, and trend alignment.</li>
+                <li><span class="code-inline">scale_leverage_for_fixed_risk()</span> — Scales leverage down dynamically when stop distance expands, keeping total dollar risk fixed ($1.89$).</li>
+            </ul>
         </div>
 
         <!-- feature_pipeline.py -->

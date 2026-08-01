@@ -731,3 +731,121 @@ def calculate_decomposed_trade_quality(trade: dict) -> dict:
         "overall_trade_quality": overall
     }
 
+
+def calculate_adaptive_15m_threshold(
+    regime: str = "Trending",
+    drift_p_val: float = 0.50,
+    u_total: float = 0.04,
+    symbol_sharpe: float = 1.2
+) -> float:
+    """
+    Refinement 1: Adaptive Confidence Threshold Matrix.
+    Threshold = Base (0.68) + Regime Adj + Drift Adj + Uncertainty Adj + Symbol Alpha Adj
+    """
+    base = 0.68
+    regime_upper = str(regime).upper()
+    regime_adj = 0.00 if "TRENDING" in regime_upper else (0.03 if "RANGING" in regime_upper else 0.05)
+    drift_adj = 0.03 if drift_p_val < 0.05 else 0.00
+    u_adj = 0.02 if (0.10 <= u_total < 0.20) else (0.05 if u_total >= 0.20 else 0.00)
+    alpha_adj = 0.03 if symbol_sharpe < 1.0 else 0.00
+
+    final_threshold = round(min(0.78, base + regime_adj + drift_adj + u_adj + alpha_adj), 4)
+    return final_threshold
+
+
+def calculate_structural_quality_score(
+    pivot_recency_bars: int,
+    has_liquidity_sweep: bool,
+    volume_confirmed: bool,
+    trend_aligned: bool
+) -> float:
+    """
+    Refinement 7: Structural Quality Score (0-100).
+    Score = 0.30(Recency) + 0.25(LiquiditySweep) + 0.25(VolumeConf) + 0.20(TrendAlign)
+    """
+    recency_score = max(0.0, 100.0 - (pivot_recency_bars * 7.5))
+    sweep_score = 100.0 if has_liquidity_sweep else 40.0
+    vol_score = 100.0 if volume_confirmed else 50.0
+    trend_score = 100.0 if trend_aligned else 30.0
+
+    score = round(0.30 * recency_score + 0.25 * sweep_score + 0.25 * vol_score + 0.20 * trend_score, 1)
+    return score
+
+
+def calculate_adaptive_structural_stop(
+    df_recent: pd.DataFrame,
+    entry_price: float,
+    direction: str,
+    atr_val: float,
+    regime: str = "Trending",
+    volatility: float = 0.015
+) -> Tuple[float, float, Dict[str, Any]]:
+    """
+    Refining 3 & 4: Adaptive Swing Window & Fresh Pivot Recency Guard.
+    Window length: Trending (8-10 bars), Ranging (5 bars), High Vol (12 bars).
+    Fallback to ATR floor if pivot is >12 bars old.
+    Returns: (stop_loss, sl_distance_pct, metadata)
+    """
+    regime_upper = str(regime).upper()
+    if volatility > 0.020:
+        window = 12
+    elif "TRENDING" in regime_upper:
+        window = 8
+    else:
+        window = 5
+
+    is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]
+    recent = df_recent.tail(window) if len(df_recent) >= window else df_recent
+
+    if is_long:
+        swing_price = float(recent["low"].min()) if not recent.empty else (entry_price - 1.25 * atr_val)
+        pivot_idx = recent["low"].idxmin() if not recent.empty else None
+        bars_ago = (len(df_recent) - 1 - df_recent.index.get_loc(pivot_idx)) if (pivot_idx is not None and pivot_idx in df_recent.index) else 99
+    else:
+        swing_price = float(recent["high"].max()) if not recent.empty else (entry_price + 1.25 * atr_val)
+        pivot_idx = recent["high"].idxmax() if not recent.empty else None
+        bars_ago = (len(df_recent) - 1 - df_recent.index.get_loc(pivot_idx)) if (pivot_idx is not None and pivot_idx in df_recent.index) else 99
+
+    # Refinement 4: Recency Guard — fallback to ATR floor if pivot > 12 bars old
+    recency_passed = bars_ago <= 12
+    if is_long:
+        structural_sl = swing_price - (0.20 * atr_val) if recency_passed else (entry_price - 1.25 * atr_val)
+        final_sl = min(entry_price - (0.5 * atr_val), structural_sl)
+    else:
+        structural_sl = swing_price + (0.20 * atr_val) if recency_passed else (entry_price + 1.25 * atr_val)
+        final_sl = max(entry_price + (0.5 * atr_val), structural_sl)
+
+    sl_dist_pct = abs(entry_price - final_sl) / entry_price * 100.0
+    quality_score = calculate_structural_quality_score(bars_ago, recency_passed, True, "TRENDING" in regime_upper)
+
+    return round(final_sl, 6), round(sl_dist_pct, 3), {
+        "window": window,
+        "bars_ago": bars_ago,
+        "recency_passed": recency_passed,
+        "quality_score": quality_score
+    }
+
+
+def scale_leverage_for_fixed_risk(
+    base_leverage: float,
+    base_sl_pct: float,
+    structural_sl_pct: float,
+    max_leverage: float = 10.0,
+    min_leverage_floor: float = 1.5
+) -> Tuple[float, bool]:
+    """
+    Refinement 5 & 6: Dynamic Leverage Scaling & Position Size Floor.
+    Scales leverage down when stop expands, keeping total dollar risk fixed.
+    Returns: (scaled_leverage, is_valid_size)
+    """
+    if structural_sl_pct <= 0:
+        return base_leverage, True
+
+    ratio = float(base_sl_pct) / max(1e-6, float(structural_sl_pct))
+    scaled_lev = round(max(0.5, min(max_leverage, base_leverage * ratio)), 2)
+
+    # Refinement 6: Floor check (reject if scaled leverage < 1.5x)
+    is_valid = scaled_lev >= min_leverage_floor
+    return scaled_lev, is_valid
+
+

@@ -346,9 +346,10 @@ POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTE
 
 # Centralized timeframe parameters for training labels and live execution alignment
 TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe - Scalp (Balanced R:R ~1.80x - 2.20x)
+    "15": {   # 15M Timeframe - Hardened Institutional Scalp
         "lookahead": 12,
-        "sl_mult": 0.75,
+        "sl_mult": 1.25,
+        "base_confidence_threshold": 0.68,
         "tp_mult_ranging": 1.35,
         "tp_mult_trending": 1.65
     },
@@ -8463,11 +8464,19 @@ def main():
                         floor_val = interval_conf_floors.get(str(iv), 0.55)
                         dynamic_conf_threshold = max(floor_val, dynamic_conf_threshold)
 
-                        # Cap threshold for short scalp timeframes (15m/30m) to prevent filter stacking
+                        # Refinement 1: Adaptive Confidence Threshold Matrix for 15m Timeframe
                         if str(iv) == "15":
-                            dynamic_conf_threshold = min(0.56, dynamic_conf_threshold)
+                            drift_p = bot_state.get("drift_p_val", 0.50) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.50
+                            u_tot = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
+                            sym_sharpe = float(bot_state.get("symbol_sharpe", 1.2)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1.2
+                            dynamic_conf_threshold = trade_calculators.calculate_adaptive_15m_threshold(
+                                regime=regime_name,
+                                drift_p_val=drift_p,
+                                u_total=u_tot,
+                                symbol_sharpe=sym_sharpe
+                            )
                         elif str(iv) == "30":
-                            dynamic_conf_threshold = min(0.58, dynamic_conf_threshold)
+                            dynamic_conf_threshold = min(0.60, max(0.58, dynamic_conf_threshold))
 
                         # Bayesian Cold-Start Adjustment (Trades 3-9)
                         bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))
@@ -8630,6 +8639,39 @@ def main():
                             print(f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
 
                         if status_msg == "Pending":
+                            # Refinements 2, 8, 9, 10: 15m Institutional Hardening Filters
+                            if str(iv) == "15":
+                                # Refinement 2: Liquidity & Volatility Compression Filter
+                                vol_20th = float(df["volume"].quantile(0.20)) if (df is not None and "volume" in df.columns and len(df) >= 20) else 0.0
+                                curr_vol = float(latest_candle.get("volume", 0.0))
+                                mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
+                                current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
+                                u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
+                                exp_r_val = abs(float(expected_pct_change)) / max(1e-4, atr_norm_val)
+
+                                tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=1000.0, volume_24h_usd=50_000_000.0, is_maker=True).get("total_cost_bps", 5.0)
+                                exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
+
+                                if curr_vol < vol_20th and vol_20th > 0:
+                                    status_msg = "Skipped (Volume Compression <20th Pct)"
+                                    print(f"[{symbol} 15m Filter] Trade skipped: Volume ({curr_vol:.1f}) < 20th percentile ({vol_20th:.1f}).")
+                                elif atr_norm_val > (1.5 * mean_atr_24h):
+                                    status_msg = "Skipped (ATR Spike >1.5x Mean)"
+                                    print(f"[{symbol} 15m Filter] Trade skipped: ATR spike ({atr_norm_val*100:.2f}%) > 1.5x 24h mean ({mean_atr_24h*100:.2f}%).")
+                                elif current_spread_bps > 4.5:
+                                    status_msg = "Skipped (Spread Widening >4.5 bps)"
+                                    print(f"[{symbol} 15m Filter] Trade skipped: Spread ({current_spread_bps:.1f} bps) exceeds 4.5 bps limit.")
+                                elif exp_r_val < 1.0:
+                                    status_msg = "Skipped (Expected R < 1.0R)"
+                                    print(f"[{symbol} 15m Filter] Trade skipped: Expected R ({exp_r_val:.2f}R) < 1.00R floor.")
+                                elif exp_edge_bps <= 0:
+                                    status_msg = "Skipped (TCM Net Edge <= 0)"
+                                    print(f"[{symbol} 15m Filter] Trade skipped: TCM Expected Net Edge ({exp_edge_bps:.1f} bps) is non-positive.")
+                                elif u_tot_live >= 0.20:
+                                    status_msg = "Skipped (Uncertainty U >= 0.20)"
+                                    print(f"[{symbol} 15m Filter] Trade skipped: Total Ensemble Uncertainty ({u_tot_live:.3f}) >= 0.20 threshold.")
+
+                        if status_msg == "Pending":
                             # Check news window proximity status for logging/blocking purposes
                             in_news_window, news_event = is_high_impact_news_window()
                             if in_news_window:
@@ -8742,17 +8784,45 @@ def main():
                                         # Scale SL down by up to 30% for maximum confidence trades
                                         sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
                                         
-                                    raw_sl_dist = risk_engine.calculate_final_stop_distance(
-                                        entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
-                                    )
-                                    
-                                    if ml_trend == "Bullish":
-                                        stop_loss_price = entry_price - raw_sl_dist
-                                        take_profit_price = entry_price + tp_change
+                                    # Refinements 3, 4, 7: Adaptive Structural Swing Stop & Recency Guard for 15m
+                                    if str(iv) == "15":
+                                        struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
+                                            df_recent=df_completed,
+                                            entry_price=entry_price,
+                                            direction=ml_trend,
+                                            atr_val=atr_dollars,
+                                            regime=regime_name,
+                                            volatility=atr_norm_val
+                                        )
+                                        stop_loss_price = struct_sl
+                                        raw_sl_dist = abs(entry_price - stop_loss_price)
+                                        
+                                        # Refinements 5 & 6: Dynamic Leverage Scaling & Floor
+                                        base_sl_pct = max(0.4, (atr_dollars * 0.75 / entry_price) * 100.0)
+                                        scaled_lev, is_valid_lev = trade_calculators.scale_leverage_for_fixed_risk(
+                                            base_leverage=7.5,
+                                            base_sl_pct=base_sl_pct,
+                                            structural_sl_pct=struct_sl_dist_pct
+                                        )
+                                        if not is_valid_lev:
+                                            print(f"[{symbol} 15m Filter] Trade skipped: Scaled leverage ({scaled_lev}x) below 1.5x floor limit.")
+                                            status_msg = "Skipped (Leverage Floor < 1.5x)"
+                                            all_pass = False
+
+                                        take_profit_price = (entry_price + tp_change) if ml_trend == "Bullish" else (entry_price - tp_change)
+                                        print(f"[15m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
                                     else:
-                                        stop_loss_price = entry_price + raw_sl_dist
-                                        take_profit_price = entry_price - tp_change
-                                    print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
+                                        raw_sl_dist = risk_engine.calculate_final_stop_distance(
+                                            entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
+                                        )
+                                        if ml_trend == "Bullish":
+                                            stop_loss_price = entry_price - raw_sl_dist
+                                            take_profit_price = entry_price + tp_change
+                                        else:
+                                            stop_loss_price = entry_price + raw_sl_dist
+                                            take_profit_price = entry_price - tp_change
+                                        print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
+
 
                                     # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
                                     c_prob = float(calibrated_confidence)
