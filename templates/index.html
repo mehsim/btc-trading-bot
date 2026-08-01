@@ -1916,12 +1916,21 @@
                         </div>
 
                         <div class="stat-tile" style="padding: 5px 7px;">
-                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Entry Efficiency</div>
-                            <div id="ml-entry-eff" class="stat-tile-val" style="color: var(--accent-blue); font-size: 10.5px;">81.4% / 87.2%</div>
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Winner Exit Eff</div>
+                            <div id="ml-winner-exit" class="stat-tile-val" style="color: var(--accent-green); font-size: 10.5px;">76.5% / 81.8%</div>
                         </div>
                         <div class="stat-tile" style="padding: 5px 7px;">
-                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Exit Efficiency</div>
-                            <div id="ml-exit-eff" class="stat-tile-val" style="color: var(--accent-purple); font-size: 10.5px;">73.0% / 78.5%</div>
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Portfolio Exit Eff</div>
+                            <div id="ml-portfolio-exit" class="stat-tile-val" style="color: var(--accent-purple); font-size: 10.5px;">73.0% / 78.5%</div>
+                        </div>
+                        <div class="stat-tile" style="padding: 5px 7px;">
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Opportunity Loss</div>
+                            <div id="ml-opp-loss" class="stat-tile-val" style="color: var(--accent-orange); font-size: 10.5px;">0.82R / 0.54R</div>
+                        </div>
+
+                        <div class="stat-tile" style="padding: 5px 7px;">
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Entry Efficiency</div>
+                            <div id="ml-entry-eff" class="stat-tile-val" style="color: var(--accent-blue); font-size: 10.5px;">81.4% / 87.2%</div>
                         </div>
                         <div class="stat-tile" style="padding: 5px 7px;">
                             <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Trade Quality Score</div>
@@ -3866,6 +3875,9 @@
                         if (document.getElementById("ml-pfs")) document.getElementById("ml-pfs").innerText = `${ml.champion_pf} / ${ml.shadow_pf}`;
                         if (document.getElementById("ml-exp")) document.getElementById("ml-exp").innerText = ml.expectancy_champ_vs_shadow || "—";
                         if (document.getElementById("ml-dd")) document.getElementById("ml-dd").innerText = ml.drawdown_champ_vs_shadow || "—";
+                        if (document.getElementById("ml-winner-exit")) document.getElementById("ml-winner-exit").innerText = ml.winner_exit_eff_champ_vs_shadow || "—";
+                        if (document.getElementById("ml-portfolio-exit")) document.getElementById("ml-portfolio-exit").innerText = ml.portfolio_exit_eff_champ_vs_shadow || "—";
+                        if (document.getElementById("ml-opp-loss")) document.getElementById("ml-opp-loss").innerText = ml.opp_loss_champ_vs_shadow || "—";
                         if (document.getElementById("ml-entry-eff")) document.getElementById("ml-entry-eff").innerText = ml.entry_eff_champ_vs_shadow || "—";
                         if (document.getElementById("ml-exit-eff")) document.getElementById("ml-exit-eff").innerText = ml.exit_eff_champ_vs_shadow || "—";
                         if (document.getElementById("ml-trade-quality")) document.getElementById("ml-trade-quality").innerText = ml.trade_quality_champ_vs_shadow || "—";
