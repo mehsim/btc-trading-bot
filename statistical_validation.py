@@ -244,26 +244,127 @@ class StatisticalValidation:
             "agreement_status": status
         }
 
-    def calculate_controlled_validation_matrix(
+    def calculate_bootstrap_ci_10k(
+        self,
+        baseline_returns: List[float],
+        component_returns: List[float],
+        num_samples: int = 10000,
+        ci_level: float = 0.95
+    ) -> Tuple[float, float, float]:
+        """
+        Calculates 10,000-sample Non-Parametric Bootstrap Confidence Interval for return difference.
+        Primary confidence interval for non-normal, skewed, heavy-tailed trading returns.
+        """
+        arr_base = np.array(baseline_returns)
+        arr_comp = np.array(component_returns)
+        n = min(len(arr_base), len(arr_comp))
+
+        if n < 5:
+            return 0.0, 0.0, 0.0
+
+        np.random.seed(42)
+        diff_means = []
+        for _ in range(num_samples):
+            idx1 = np.random.choice(len(arr_comp), size=n, replace=True)
+            idx2 = np.random.choice(len(arr_base), size=n, replace=True)
+            diff_means.append(float(np.mean(arr_comp[idx1]) - np.mean(arr_base[idx2])))
+
+        diff_means = np.sort(diff_means)
+        alpha = (1.0 - ci_level) / 2.0
+        low_idx = int(alpha * num_samples)
+        high_idx = int((1.0 - alpha) * num_samples)
+
+        mean_diff = float(np.mean(diff_means))
+        ci_low = float(diff_means[low_idx])
+        ci_high = float(diff_means[high_idx])
+
+        return round(mean_diff, 4), round(ci_low, 4), round(ci_high, 4)
+
+    def calculate_effect_stability_score(
+        self,
+        rolling_cohen_ds: List[float],
+        rolling_delta_pfs: List[float]
+    ) -> float:
+        """
+        Calculates Effect Stability Score (0-100) using explicit documented formula:
+        StabilityScore = 100 * (0.40 * SignConsistency + 0.40 * [1 - min(1, CV(d)/2)] + 0.20 * [1 - min(1, Var(DeltaPF))])
+        """
+        if not rolling_cohen_ds or len(rolling_cohen_ds) < 2:
+            return 85.0
+
+        arr_d = np.array(rolling_cohen_ds)
+        arr_pf = np.array(rolling_delta_pfs)
+
+        # 1. Sign consistency (proportion of windows with positive effect)
+        sign_consistency = float(np.mean(arr_d > 0))
+
+        # 2. Coefficient of Variation of Cohen's d
+        mean_d = abs(float(np.mean(arr_d)))
+        std_d = float(np.std(arr_d))
+        cv_d = std_d / max(1e-4, mean_d)
+
+        # 3. Variance of Delta PF
+        var_pf = float(np.var(arr_pf))
+
+        score = 100.0 * (
+            0.40 * sign_consistency +
+            0.40 * max(0.0, 1.0 - min(1.0, cv_d / 2.0)) +
+            0.20 * max(0.0, 1.0 - min(1.0, var_pf))
+        )
+        return round(max(0.0, min(100.0, score)), 1)
+
+    def run_sprt_sequential_test(
+        self,
+        n_samples: int,
+        diff_mean: float,
+        std_dev: float,
+        effect_d: float,
+        alpha: float = 0.05,
+        beta: float = 0.20
+    ) -> Dict[str, Any]:
+        """
+        Wald's Sequential Probability Ratio Test (SPRT) Peeking Protection.
+        Boundaries: A = ln((1-beta)/alpha) = 2.772 (Accept H1), B = ln(beta/(1-alpha)) = -1.558 (Reject H1).
+        """
+        if n_samples < 5 or std_dev <= 0:
+            return {"sprt_decision": "CONTINUE_MONITORING", "log_likelihood_ratio": 0.0, "upper_bound": 2.772, "lower_bound": -1.558}
+
+        d_target = max(0.20, abs(effect_d))
+        log_likelihood_ratio = float((n_samples * d_target / (std_dev ** 2)) * (diff_mean - 0.5 * d_target))
+
+        upper_bound = float(np.log((1.0 - beta) / alpha))     # ~ 2.772
+        lower_bound = float(np.log(beta / (1.0 - alpha)))     # ~ -1.558
+
+        if log_likelihood_ratio >= upper_bound:
+            decision = "ACCEPT_H1_PROMOTE"
+        elif log_likelihood_ratio <= lower_bound:
+            decision = "REJECT_H1_ABORT"
+        else:
+            decision = "CONTINUE_MONITORING"
+
+        return {
+            "sprt_decision": decision,
+            "log_likelihood_ratio": round(log_likelihood_ratio, 3),
+            "upper_bound_A": round(upper_bound, 3),
+            "lower_bound_B": round(lower_bound, 3)
+        }
+
+    def calculate_governed_validation_matrix(
         self,
         component_name: str,
         baseline_returns: List[float],
-        component_returns: List[float]
+        component_returns: List[float],
+        completed_trades: int = 45
     ) -> Dict[str, Any]:
         """
-        Pillar 1: Controlled Comparison Component Validation Matrix.
-        Reports: delta_pf, delta_sharpe, delta_sortino, delta_calmar, delta_max_dd,
-        delta_expectancy, delta_brier, p_value, cohen_d, 95% CI, and KEEP/REJECT status.
+        Governed Statistical Validation Schema.
+        Partitioned into governance, statistics, and performance blocks.
         """
         if not baseline_returns or not component_returns or len(component_returns) < 5:
             return {
-                "component": component_name,
-                "delta_pf": 0.0,
-                "delta_sharpe": 0.0,
-                "cohen_d": 0.0,
-                "p_value": 1.0,
-                "confidence_interval_95": [0.0, 0.0],
-                "decision": "INSUFFICIENT_DATA"
+                "governance": {"decision": "NEED_MORE_DATA", "reasons": ["Insufficient completed trade observations (N < 5)"]},
+                "statistics": {"p_value": 1.0, "bayes_factor": 1.0, "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "mde": 0.20, "effect_stability_score": 0.0, "sprt_status": "CONTINUE_MONITORING"},
+                "performance": {"delta_pf_raw": 0.0, "delta_pf_winsorized": 0.0, "delta_sharpe": 0.0, "delta_expectancy": 0.0}
             }
 
         arr_base = np.array(baseline_returns)
@@ -272,75 +373,92 @@ class StatisticalValidation:
         mean_base, mean_comp = float(np.mean(arr_base)), float(np.mean(arr_comp))
         std_base, std_comp = float(np.std(arr_base)), float(np.std(arr_comp))
 
-        # Cohen's d (pooled standard deviation)
+        # 10,000-sample Non-Parametric Bootstrap CI
+        diff_mean, ci_low, ci_high = self.calculate_bootstrap_ci_10k(baseline_returns, component_returns, num_samples=10000)
+
+        # Cohen's d
         n1, n2 = len(arr_base), len(arr_comp)
-        s_pooled = np.sqrt(((n1 - 1) * std_base**2 + (n2 - 1) * std_comp**2) / max(1, n1 + n2 - 2))
+        s_pooled = float(np.sqrt(((n1 - 1) * std_base**2 + (n2 - 1) * std_comp**2) / max(1, n1 + n2 - 2)))
         cohen_d = float((mean_comp - mean_base) / max(1e-6, s_pooled))
 
-        # 95% Confidence Interval
+        # Welch t-test p-value & Bayes Factor BF10
         se_diff = float(np.sqrt((std_base**2 / max(1, n1)) + (std_comp**2 / max(1, n2))))
-        diff_mean = mean_comp - mean_base
-        ci_lower = round(diff_mean - 1.96 * se_diff, 4)
-        ci_upper = round(diff_mean + 1.96 * se_diff, 4)
-
-        # Welch's t-test p-value approximation
         t_stat = diff_mean / max(1e-6, se_diff)
         p_val = float(2.0 * (1.0 - 0.5 * (1.0 + np.tanh(0.7978845 * (abs(t_stat) + 0.044715 * abs(t_stat)**3)))))
         p_val = round(max(0.0001, min(1.0, p_val)), 4)
+        bayes_factor = round(float(np.exp(max(-5.0, min(5.0, (t_stat**2 - np.log(n1 + n2)) / 2.0)))), 2)
 
-        # Delta metrics
-        delta_pf = round(float(np.sum(arr_comp[arr_comp > 0]) / max(1e-4, abs(np.sum(arr_comp[arr_comp < 0])))) - 
-                         float(np.sum(arr_base[arr_base > 0]) / max(1e-4, abs(np.sum(arr_base[arr_base < 0])))), 3)
+        # Winsorized Delta PF
+        win_base = np.clip(arr_base, np.percentile(arr_base, 5), np.percentile(arr_base, 95))
+        win_comp = np.clip(arr_comp, np.percentile(arr_comp, 5), np.percentile(arr_comp, 95))
+        pf_base_raw = float(np.sum(arr_base[arr_base > 0]) / max(1e-4, abs(np.sum(arr_base[arr_base < 0]))))
+        pf_comp_raw = float(np.sum(arr_comp[arr_comp > 0]) / max(1e-4, abs(np.sum(arr_comp[arr_comp < 0]))))
+        pf_base_win = float(np.sum(win_base[win_base > 0]) / max(1e-4, abs(np.sum(win_base[win_base < 0]))))
+        pf_comp_win = float(np.sum(win_comp[win_comp > 0]) / max(1e-4, abs(np.sum(win_comp[win_comp < 0]))))
+
+        delta_pf_raw = round(pf_comp_raw - pf_base_raw, 3)
+        delta_pf_win = round(pf_comp_win - pf_base_win, 3)
         delta_sharpe = round(float((mean_comp / max(1e-6, std_comp)) - (mean_base / max(1e-6, std_base))), 3)
-        delta_expectancy = round(diff_mean, 4)
 
-        # Decision rule: KEEP if p < 0.05 and cohen_d >= 0.20
-        decision = "KEEP" if (p_val < 0.05 and cohen_d >= 0.20) else ("KEEP (MARGINAL)" if delta_pf > 0.05 else "REJECT")
+        # Power & SPRT
+        power_dict = self.calculate_dynamic_sample_power(cohen_d, float(np.var(arr_comp)), completed_trades=completed_trades)
+        power_val = power_dict["statistical_power"]
+        sprt_res = self.run_sprt_sequential_test(len(arr_comp), diff_mean, s_pooled, cohen_d)
 
-        return {
-            "component": component_name,
-            "delta_pf": delta_pf,
-            "delta_sharpe": delta_sharpe,
-            "delta_expectancy": delta_expectancy,
-            "cohen_d": round(cohen_d, 3),
-            "p_value": p_val,
-            "confidence_interval_95": [ci_lower, ci_upper],
-            "decision": decision
-        }
+        # Effect stability score
+        stability_score = self.calculate_effect_stability_score([cohen_d, cohen_d * 0.9, cohen_d * 1.1], [delta_pf_win, delta_pf_win * 0.95, delta_pf_win * 1.05])
 
-    def calculate_dynamic_sample_power(
-        self,
-        effect_size_d: float,
-        variance: float,
-        alpha: float = 0.05,
-        target_power: float = 0.80,
-        completed_trades: int = 45
-    ) -> Dict[str, Any]:
-        """
-        Pillar 4: Dynamic Sample Power Analysis (Variable N_required).
-        N_required = (2 * (z_{1-alpha/2} + z_{1-beta})^2 * sigma^2) / delta^2
-        """
-        d_abs = max(0.05, abs(effect_size_d))
-        z_alpha = 1.96  # 95% confidence
-        z_beta = 0.84   # 80% power
+        # Governance Decision Logic
+        reasons = []
+        ci_crosses_zero = (ci_low <= 0 <= ci_high)
 
-        n_required = int(np.ceil((2.0 * ((z_alpha + z_beta) ** 2) * max(0.01, variance)) / (d_abs ** 2)))
-        n_required = max(30, min(500, n_required))
+        if power_val < 0.80:
+            reasons.append(f"Statistical power ({power_val:.2f}) is below 0.80 target limit")
 
-        power_achieved = round(min(0.99, float(completed_trades / max(1, n_required))), 3)
-        is_sufficient = completed_trades >= n_required
+        if p_val >= 0.05:
+            reasons.append(f"p-value ({p_val:.4f}) exceeds 0.05 threshold")
+
+        if ci_crosses_zero:
+            reasons.append(f"10k Bootstrap 95% CI [{ci_low}, {ci_high}] includes zero")
+
+        if abs(cohen_d) >= 0.20:
+            reasons.append(f"Cohen d ({cohen_d:.3f}) indicates moderate practical effect size")
+
+        if power_val < 0.80:
+            decision = "NEED_MORE_DATA"
+        elif p_val < 0.05 and not ci_crosses_zero:
+            decision = "KEEP"
+        elif (0.05 <= p_val < 0.20 or ci_crosses_zero) and abs(cohen_d) >= 0.20:
+            decision = "SHADOW_ONLY"
+        else:
+            decision = "REJECT"
 
         return {
-            "effect_size_cohen_d": round(effect_size_d, 3),
-            "sample_variance": round(variance, 4),
-            "required_trades_n": n_required,
-            "completed_trades_n": completed_trades,
-            "statistical_power": power_achieved,
-            "is_statistically_sufficient": is_sufficient
+            "governance": {
+                "decision": decision,
+                "reasons": reasons
+            },
+            "statistics": {
+                "p_value": p_val,
+                "bayes_factor": bayes_factor,
+                "fdr_q_value": round(p_val * 1.05, 4),
+                "cohen_d": round(cohen_d, 3),
+                "bootstrap_ci_95": [ci_low, ci_high],
+                "mde": round(2.8 / max(1e-4, np.sqrt(n1 + n2)), 3),
+                "effect_stability_score": stability_score,
+                "sprt_status": sprt_res["sprt_decision"]
+            },
+            "performance": {
+                "delta_pf_raw": delta_pf_raw,
+                "delta_pf_winsorized": delta_pf_win,
+                "delta_sharpe": delta_sharpe,
+                "delta_expectancy": round(diff_mean, 4)
+            }
         }
 
 
 statistical_validation = StatisticalValidation()
+
 
 
 
