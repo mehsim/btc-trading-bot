@@ -4531,7 +4531,7 @@ from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_m
 models_by_interval = {}
 model_files_mtime = {}
 
-for iv in ["15", "30", "60", "120"]:
+for iv in ["15", "30", "60", "120", "240"]:
     models_by_interval[iv] = {
         "trending": {
             "trend": None,
@@ -4679,7 +4679,7 @@ def load_model_weights(iv):
 
 def check_and_hot_reload_models():
     reloaded = []
-    for iv in ["15", "30", "60", "120"]:
+    for iv in ["15", "30", "60", "120", "240"]:
         filenames = {
             "trending_trend": f"ensemble_trending_trend_{iv}_xgb.json",
             "trending_price": f"ensemble_trending_price_{iv}_xgb.json",
@@ -4703,7 +4703,7 @@ def check_and_hot_reload_models():
             load_model_weights(iv)
             try:
                 p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
-                tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
+                tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
                 tf_key = tf_map_startup[iv]
                 bot_state[f"calibration_{tf_key}"] = {
                     "p95": p95,
@@ -7106,7 +7106,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 def main():
     global live_price, last_ws_update_time
     # Load model weights here (deferred from module level)
-    for iv in ["15", "30", "60", "120"]:
+    for iv in ["15", "30", "60", "120", "240"]:
         load_model_weights(iv)
     load_history()
     print(f"{SYMBOL} LIVE BOT RUNNING...")
@@ -7144,8 +7144,8 @@ def main():
     bot_state["live_price"] = live_price
 
     # Calculate calibration boundaries at startup for each interval
-    tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
-    for iv in ["15", "30", "60", "120"]:
+    tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
+    for iv in ["15", "30", "60", "120", "240"]:
         if iv in models_by_interval:
             p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
             tf_key = tf_map_startup[iv]
@@ -7162,7 +7162,8 @@ def main():
         "last_processed_15_ts": None,
         "last_processed_30_ts": None,
         "last_processed_60_ts": None,
-        "last_processed_120_ts": None
+        "last_processed_120_ts": None,
+        "last_processed_240_ts": None
     }
     startup_check_done = False
     last_check_hour = -1
@@ -7203,10 +7204,10 @@ def main():
             continue
 
         # 2. Check Exits for each timeframe if a trade is active
-        tf_map = {"15": "15m", "30": "30m", "60": "1h", "120": "2h"}
+        tf_map = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
         active_trades_updated = False
         with active_trades_lock:
-            for iv in ["15", "30", "60", "120"]:
+            for iv in ["15", "30", "60", "120", "240"]:
                 tf = tf_map[iv]
                 active_trade_key = f"active_trade_{tf}"
                 active_trades_list = bot_state.get(active_trade_key, [])
@@ -8066,7 +8067,7 @@ def main():
                 if is_startup:
                     # Startup initial check: query all supported symbols for all intervals in parallel
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] Startup initial fast check: checking all {len(SUPPORTED_SYMBOLS)} symbols across all timeframes...")
-                    check_queue = [(symbol, iv) for iv in ["15", "30", "60", "120"] for symbol in SUPPORTED_SYMBOLS]
+                    check_queue = [(symbol, iv) for iv in ["15", "30", "60", "120", "240"] for symbol in SUPPORTED_SYMBOLS]
                     startup_check_done = True
                 else:
                     # Regular transition checks: determine active intervals for this 15m boundary
@@ -8077,6 +8078,8 @@ def main():
                         active_intervals.append("60")
                         if current_utc_hour % 2 == 0:
                             active_intervals.append("120")
+                        if current_utc_hour % 4 == 0:
+                            active_intervals.append("240")
                     
                     # We check how many of the currently expected ones are completed
                     expected_pairs = [(symbol, iv) for iv in active_intervals for symbol in SUPPORTED_SYMBOLS]
