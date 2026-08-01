@@ -1881,49 +1881,69 @@
             </div>
 
             <!-- CARD 3: ML RESEARCH LABORATORY (CHAMPION VS SHADOW CHALLENGER) -->
-            <div class="card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+            <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
                 <div>
-                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <div class="section-title" style="font-size: 15px;">🧪 ML Research Laboratory</div>
-                        <span style="font-size: 9px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 3px 8px; border-radius: 6px;">SHADOW GATE</span>
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div class="section-title" style="font-size: 14px;">🧪 ML Research Laboratory</div>
+                        <span style="font-size: 8px; font-weight: 800; color: var(--accent-purple); background: rgba(139,92,246,0.15); padding: 2px 7px; border-radius: 6px;">SHADOW GATE</span>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;">
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Current Champion</div>
-                            <div id="ml-champ" class="stat-tile-val" style="color: var(--accent-green);">v6.2</div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Current Champion</div>
+                            <div id="ml-champ" class="stat-tile-val" style="color: var(--accent-green); font-size: 13px;">v6.2</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Shadow Challenger</div>
-                            <div id="ml-chall" class="stat-tile-val" style="color: var(--accent-purple);">v6.3</div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Shadow Challenger</div>
+                            <div id="ml-chall" class="stat-tile-val" style="color: var(--accent-purple); font-size: 13px;">v6.3</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Shadow Trades</div>
-                            <div id="ml-trades" class="stat-tile-val" style="color: var(--accent-blue);">186</div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Shadow Trades</div>
+                            <div id="ml-trades" class="stat-tile-val" style="color: var(--accent-blue); font-size: 13px;">164</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Champ vs Shadow PF</div>
-                            <div id="ml-pfs" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">1.34 / 1.47</div>
+
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Champ vs Shadow PF</div>
+                            <div id="ml-pfs" class="stat-tile-val" style="color: var(--accent-green); font-size: 11px;">0.83 / 0.88</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Promotion Status</div>
-                            <div id="ml-promo" class="stat-tile-val" style="color: var(--accent-orange); font-size: 12px;">Waiting (186/200)</div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Champ vs Shadow Exp</div>
+                            <div id="ml-exp" class="stat-tile-val" style="color: var(--accent-blue); font-size: 11px;">+0.36R / +0.48R</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Release Gates</div>
-                            <div id="ml-gates" class="stat-tile-val" style="color: var(--accent-green); font-size: 14px;">8/8 PASS</div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Champ vs Shadow DD</div>
+                            <div id="ml-dd" class="stat-tile-val" style="color: var(--accent-orange); font-size: 11px;">5.2% / 4.4%</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Holdout Accuracy</div>
-                            <div id="ml-holdout" class="stat-tile-val" style="color: var(--accent-blue);">61.8%</div>
+
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Exit Efficiency</div>
+                            <div id="ml-exit-eff" class="stat-tile-val" style="color: var(--accent-purple); font-size: 11px;">73.0% / 78.5%</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Bootstrap CI</div>
-                            <div id="ml-bootstrap" class="stat-tile-val" style="color: var(--text-primary); font-size: 13px;">1.22 - 1.45</div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Composite Score</div>
+                            <div id="ml-score" class="stat-tile-val" style="color: var(--accent-green); font-size: 11px;">68 / 74</div>
                         </div>
-                        <div class="stat-tile">
-                            <div class="stat-tile-label">Effect Size</div>
-                            <div id="ml-effect" class="stat-tile-val" style="color: var(--accent-green);">+0.08 PF</div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Holdout Accuracy</div>
+                            <div id="ml-holdout" class="stat-tile-val" style="color: var(--accent-blue); font-size: 12px;">42.7%</div>
+                        </div>
+
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Release Gates</div>
+                            <div id="ml-gates" class="stat-tile-val" style="color: var(--accent-green); font-size: 11px;">8/8 PASS</div>
+                        </div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Bootstrap CI</div>
+                            <div id="ml-bootstrap" class="stat-tile-val" style="color: var(--text-primary); font-size: 11px;">[1.08, 1.42]</div>
+                        </div>
+                        <div class="stat-tile" style="padding: 6px 8px;">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 2px;">Effect Size</div>
+                            <div id="ml-effect" class="stat-tile-val" style="color: var(--accent-green); font-size: 12px;">+0.14 PF</div>
+                        </div>
+
+                        <div class="stat-tile" style="grid-column: span 3; padding: 6px 10px; background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2);">
+                            <div class="stat-tile-label" style="font-size: 8px; margin-bottom: 1px; color: var(--accent-orange);">Promotion Status</div>
+                            <div id="ml-promo" class="stat-tile-val" style="color: var(--accent-orange); font-size: 11px;">Waiting (164/200 trades)</div>
                         </div>
                     </div>
                 </div>
@@ -3806,6 +3826,10 @@
                         if (document.getElementById("ml-chall")) document.getElementById("ml-chall").innerText = ml.shadow_challenger || "—";
                         if (document.getElementById("ml-trades")) document.getElementById("ml-trades").innerText = ml.shadow_trades_count ?? "—";
                         if (document.getElementById("ml-pfs")) document.getElementById("ml-pfs").innerText = `${ml.champion_pf} / ${ml.shadow_pf}`;
+                        if (document.getElementById("ml-exp")) document.getElementById("ml-exp").innerText = ml.expectancy_champ_vs_shadow || "—";
+                        if (document.getElementById("ml-dd")) document.getElementById("ml-dd").innerText = ml.drawdown_champ_vs_shadow || "—";
+                        if (document.getElementById("ml-exit-eff")) document.getElementById("ml-exit-eff").innerText = ml.exit_eff_champ_vs_shadow || "—";
+                        if (document.getElementById("ml-score")) document.getElementById("ml-score").innerText = ml.composite_score_champ_vs_shadow || "—";
                         if (document.getElementById("ml-promo")) document.getElementById("ml-promo").innerText = ml.promotion_status || "—";
                         if (document.getElementById("ml-gates")) document.getElementById("ml-gates").innerText = ml.release_gates || "—";
                         if (document.getElementById("ml-holdout")) document.getElementById("ml-holdout").innerText = `${ml.holdout_accuracy_pct}%`;
