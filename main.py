@@ -29,6 +29,11 @@ from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 import database
 import trade_calculators
+from decision_outcome_db import decision_outcome_db
+from meta_learning_engine import meta_learning_engine
+from causal_attribution_engine import causal_attribution_engine
+from counterfactual_replay_engine import counterfactual_replay_engine
+from probabilistic_policy_selector import probabilistic_policy_selector
 from secret_manager import get_secure_env
 
 from bybit_client import (
@@ -7789,9 +7794,37 @@ def main():
                         else:
                             print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
                             print(f"Realized PnL: ${realized_pnl:+.2f}")
-                        print(f"New Balance: ${new_bal:.2f} | Predicted Signal: {direction} ({trend_status})")
-                        print("==================================================")
-                        
+                        # 81-Scenario Counterfactual Replay Matrix & Regret Analysis
+                        try:
+                            risk_usd_ref = active_trade.get("atr_dollars") or (entry_price * 0.01)
+                            actual_r_val = round((actual_price - entry_price) / max(1e-6, risk_usd_ref) if direction == "Bullish" else (entry_price - actual_price) / max(1e-6, risk_usd_ref), 3)
+                            
+                            cf_res = counterfactual_replay_engine.run_81_scenario_replay(
+                                trade_id=str(active_trade.get("trade_id", active_symbol)),
+                                symbol=active_symbol,
+                                interval=str(iv),
+                                entry_price=entry_price,
+                                exit_price=actual_price,
+                                actual_sl=float(active_trade.get("stop_loss", entry_price * 0.99)),
+                                actual_tp=float(active_trade.get("take_profit", entry_price * 1.02)),
+                                actual_r=actual_r_val,
+                                risk_usd=float(position_size_usd)
+                            )
+                            
+                            best_cf = cf_res.get("best_scenario", {})
+                            decision_outcome_db.update_outcome_and_regret(
+                                decision_id=str(active_trade.get("trade_id", active_symbol)),
+                                outcome_details={"realized_pnl": realized_pnl, "actual_r": actual_r_val, "exit_reason": exit_reason},
+                                counterfactual_matrix=cf_res,
+                                best_counterfactual_r=float(best_cf.get("simulated_r", actual_r_val)),
+                                actual_r=actual_r_val
+                            )
+                            
+                            regret_r = max(0.0, float(best_cf.get("simulated_r", actual_r_val)) - actual_r_val)
+                            print(f"[{active_symbol} {iv}m Replay Matrix] 81 Scenarios Evaluated | Best Alternative: {best_cf.get('scenario_id')} (+{best_cf.get('simulated_r'):.2f}R) | Regret: +{regret_r:.2f}R")
+                        except Exception as e:
+                            print(f"[Counterfactual Replay Warning] {e}")
+
                         # Update Completed Trade History in global state
                         bot_state["trade_history"].append({
                             "symbol": active_symbol,

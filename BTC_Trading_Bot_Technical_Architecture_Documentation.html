@@ -983,6 +983,51 @@
             <p><strong>Purpose:</strong> SQLite database backing the OMS persistent order queue in <span class="code-inline">order_executor.py</span>. Survives bot crashes, OS restarts, and SIGKILL. On startup, all <span class="code-inline">PENDING_SUBMIT</span> and <span class="code-inline">ACKNOWLEDGED</span> orders are recovered and re-enqueued automatically. On <span class="code-inline">SIGTERM</span>, current queue state is flushed to disk before exit. Schema: <span class="code-inline">order_id, symbol, direction, status, created_at, filled_at, payload (JSON)</span>.</p>
         </div>
 
+        <!-- decision_outcome_db.py -->
+        <div id="decision_outcome_db_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">decision_outcome_db.py</span>
+                <span class="file-tag badge-ml">Decision Lineage Store</span>
+            </div>
+            <p><strong>Purpose:</strong> Institutional Decision Lineage Database. Records 100% reproducible lineage for every decision: <span class="code-inline">Features</span> &rarr; <span class="code-inline">Prediction</span> &rarr; <span class="code-inline">Execution</span> &rarr; <span class="code-inline">Outcome</span> &rarr; <span class="code-inline">Counterfactual Replay</span> &rarr; <span class="code-inline">Regret</span> &rarr; <span class="code-inline">Model/Policy Version</span>. Saved to <span class="code-inline">decision_outcome_db.json</span>.</p>
+        </div>
+
+        <!-- meta_learning_engine.py -->
+        <div id="meta_learning_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">meta_learning_engine.py</span>
+                <span class="file-tag badge-ml">Regret &amp; Meta-Learning Auto-Tuner</span>
+            </div>
+            <p><strong>Purpose:</strong> Calculates trade Regret ($\text{Regret} = \text{Best Counterfactual R} - \text{Actual R}$) to measure dollar R-multiples left on the table. When average regret exceeds $0.35\text{R}$, triggers automated policy auto-tuning evaluated in Shadow Mode.</p>
+        </div>
+
+        <!-- causal_attribution_engine.py -->
+        <div id="causal_attribution_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">causal_attribution_engine.py</span>
+                <span class="file-tag badge-ml">Causal Attribution Engine</span>
+            </div>
+            <p><strong>Purpose:</strong> Decomposes overall Profit Factor (PF) gains into individual component contributions ($\Delta PF_{\text{Confidence}}$, $\Delta PF_{\text{StructuralStop}}$, $\Delta PF_{\text{LiquidityFilter}}$, $\Delta PF_{\text{ExpectedRGate}}$).</p>
+        </div>
+
+        <!-- probabilistic_policy_selector.py -->
+        <div id="probabilistic_policy_selector_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">probabilistic_policy_selector.py</span>
+                <span class="file-tag badge-core">Risk-Adjusted Utility Selector</span>
+            </div>
+            <p><strong>Purpose:</strong> Evaluates candidate policy options under Risk-Adjusted Utility ($Utility(P) = \mathbb{E}[R] - 0.5 \operatorname{Var}[R]$) and selects policy maximizing risk-adjusted utility.</p>
+        </div>
+
+        <!-- counterfactual_replay_engine.py -->
+        <div id="counterfactual_replay_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">counterfactual_replay_engine.py</span>
+                <span class="file-tag badge-ml">81-Scenario Replay Matrix</span>
+            </div>
+            <p><strong>Purpose:</strong> Simulates an 81-scenario $3 \times 3 \times 3 \times 3$ replay matrix (Stop $\times$ TP $\times$ Scale $\times$ Leverage) for every completed trade. Generates ranked alternative recommendations and runs 5% experimental variants in Shadow Mode to prevent local optima traps.</p>
+        </div>
+
     </div>
 
 </body>
