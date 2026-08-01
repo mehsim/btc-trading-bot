@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC Trading Bot — Technical Architecture & Codebase Deep Analysis</title>
+    <style>
+        :root {
+            --bg-primary: #0a0f1d;
+            --bg-card: #121829;
+            --bg-card-hover: #1a2238;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --accent-red: #ef4444;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --font-code: 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            padding: 0;
+            margin: 0;
+            display: flex;
+        }
+
+        #sidebar {
+            width: 300px;
+            background: #070b14;
+            border-right: 1px solid var(--border-color);
+            height: 100vh;
+            position: fixed;
+            overflow-y: auto;
+            padding: 20px 15px;
+        }
+
+        #sidebar h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent-blue);
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        #sidebar ul { list-style: none; }
+        #sidebar li { margin-bottom: 8px; }
+
+        #sidebar a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            display: block;
+            padding: 6px 10px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        #sidebar a:hover, #sidebar a.active {
+            background: var(--bg-card-hover);
+            color: var(--accent-green);
+        }
+
+        #content {
+            margin-left: 300px;
+            padding: 40px 60px;
+            max-width: 1200px;
+            width: calc(100% - 300px);
+        }
+
+        .header-title {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .header-subtitle {
+            color: var(--text-muted);
+            font-size: 15px;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .file-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 35px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .file-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .file-name {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent-green);
+            font-family: var(--font-code);
+        }
+
+        .file-tag {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .section-heading {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--accent-purple);
+            margin: 18px 0 8px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        p, ul { margin-bottom: 12px; font-size: 14.5px; color: #cbd5e1; }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 6px; }
+
+        .formula-box {
+            background: #090d16;
+            border-left: 4px solid var(--accent-green);
+            padding: 14px 18px;
+            margin: 15px 0;
+            border-radius: 4px;
+            font-family: var(--font-code);
+            font-size: 13.5px;
+            color: #38bdf8;
+            overflow-x: auto;
+        }
+
+        .func-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            font-size: 13px;
+        }
+
+        .func-table th, .func-table td {
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        .func-table th {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--accent-orange);
+        }
+
+        .code-inline {
+            font-family: var(--font-code);
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #f43f5e;
+            font-size: 13px;
+        }
+
+        .badge-core { background: rgba(16,185,129,0.2); color: var(--accent-green); border: 1px solid var(--accent-green); }
+        .badge-ml { background: rgba(139,92,246,0.2); color: var(--accent-purple); border: 1px solid var(--accent-purple); }
+        .badge-risk { background: rgba(245,158,11,0.2); color: var(--accent-orange); border: 1px solid var(--accent-orange); }
+        .badge-ui { background: rgba(59,130,246,0.2); color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <div id="sidebar">
+        <h2>Architecture Map</h2>
+        <ul>
+            <li><a href="#overview">System Architecture</a></li>
+            <li><a href="#main_py">main.py</a></li>
+            <li><a href="#bybit_client_py">bybit_client.py</a></li>
+            <li><a href="#confluence_engine_py">confluence_engine.py</a></li>
+            <li><a href="#portfolio_risk_py">portfolio_risk.py</a></li>
+            <li><a href="#statistical_validation_py">statistical_validation.py</a></li>
+            <li><a href="#mlops_engine_py">mlops_engine.py</a></li>
+            <li><a href="#strategy_health_engine_py">strategy_health_engine.py</a></li>
+            <li><a href="#exit_policy_engine_py">exit_policy_engine.py</a></li>
+            <li><a href="#drift_detector_py">drift_detector.py</a></li>
+            <li><a href="#champion_challenger_framework_py">champion_challenger.py</a></li>
+            <li><a href="#train_py">train.py</a></li>
+            <li><a href="#dashboard_routes_py">dashboard_routes.py</a></li>
+            <li><a href="#templates_index_html">templates/index.html</a></li>
+            <li><a href="#state_manager_py">state_manager.py</a></li>
+            <li><a href="#database_py">database.py</a></li>
+            <li><a href="#trade_calculators_py">trade_calculators.py</a></li>
+            <li><a href="#feature_pipeline_py">feature_pipeline.py</a></li>
+            <li><a href="#config_py">config.py</a></li>
+        </ul>
+    </div>
+
+    <!-- Main Content -->
+    <div id="content">
+        <div class="header-title">Institutional Trading Bot — Deep Architecture Analysis</div>
+        <div class="header-subtitle">Comprehensive file-by-file technical documentation, mathematical formulas, state machine logic, MLOps pipelines, and API routes.</div>
+
+        <!-- System Overview -->
+        <div id="overview" class="file-card">
+            <div class="file-header">
+                <span class="file-name">System Overview & Pipeline Architecture</span>
+                <span class="file-tag badge-core">Core System</span>
+            </div>
+            <p>The BTC Trading Bot is an institutional-grade automated quantitative trading platform. It features multi-timeframe ML model ensembles (5m, 15m, 30m, 1h, 2h, 4h, 6h), Triple-Barrier labeling, Purged K-Fold Cross-Validation, Bayesian dual-governance release gates, continuous CUSUM/PSI drift detection, portfolio risk controls, and a full-featured real-time dashboard.</p>
+            <div class="formula-box">
+                Pipeline: Market Data (Bybit WS/REST) -> Feature Engineering -> ML Ensembles (XGB/LGB/Cat) -> Isotonic Calibration -> Confluence Meta-Gates -> Portfolio Risk & Sizing -> Exchange Execution -> Trailing Engine -> MLOps Telemetry
+            </div>
+        </div>
+
+        <!-- main.py -->
+        <div id="main_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">main.py</span>
+                <span class="file-tag badge-core">Core Execution Engine</span>
+            </div>
+            <p><strong>Purpose:</strong> Main system orchestrator and execution entry point. Houses the main asynchronous event loop, candle aggregation threads, multi-timeframe prediction polling, order execution, and live trailing stop monitoring.</p>
+            
+            <div class="section-heading">Key Formulas & Strategies</div>
+            <ul>
+                <li><strong>Dynamic Kelly Criterion Sizing:</strong> Sizes position leverage based on calibrated model win rate $p$, loss rate $q=1-p$, and reward-to-risk ratio $b$:
+                    <div class="formula-box">f^* = \frac{p \cdot b - q}{b}, \quad \text{Applied Fractional Kelly: } f_{\text{actual}} = f^* \cdot \text{Kelly\_Fraction} \cdot \text{Covariance\_Mult}</div>
+                </li>
+                <li><strong>ATR-Based Dynamic Stop-Loss & Take-Profit:</strong>
+                    <div class="formula-box">\text{SL} = \text{Entry} \mp (1.44 \cdot \text{ATR}_{14}), \quad \text{TP} = \text{Entry} \pm (3.25 \cdot \text{ATR}_{14})</div>
+                </li>
+                <li><strong>Multi-Timeframe Boundary Alignment:</strong> Triggers 4H strategy evaluation strictly when <span class="code-inline">current_utc_hour % 4 == 0</span>.</li>
+            </ul>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">main()</span></td><td>Initializes state, loads ML models for all intervals, launches background WebSocket & trading loops.</td></tr>
+                <tr><td><span class="code-inline">check_queue(interval)</span></td><td>Fetches recent OHLCV, computes 26 technical features, queries ML ensemble, and evaluates Meta-Gates.</td></tr>
+                <tr><td><span class="code-inline">check_and_hot_reload_models()</span></td><td>Monitors model file modification timestamps on disk and reloads weights into live memory without interrupting bot execution.</td></tr>
+                <tr><td><span class="code-inline">monitor_exit_conditions()</span></td><td>High-frequency 1-second loop checking trailing stops, scale-out orders, and exchange sync.</td></tr>
+            </table>
+        </div>
+
+        <!-- bybit_client.py -->
+        <div id="bybit_client_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">bybit_client.py</span>
+                <span class="file-tag badge-core">Exchange Execution API</span>
+            </div>
+            <p><strong>Purpose:</strong> Standardized Bybit V5 Unified Trading Account REST API & WebSocket client wrapper handling HMAC-SHA256 authentication, order placement, order status polling, and position management.</p>
+            
+            <div class="section-heading">Authentication Signature Formula</div>
+            <div class="formula-box">\text{Signature} = \text{HMAC\_SHA256}\left(\text{api\_secret}, \text{timestamp} + \text{api\_key} + \text{recv\_window} + \text{payload}\right)</div>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">place_order()</span></td><td>Executes market/limit orders on Bybit V5 with automated retry logic and slippage tracking.</td></tr>
+                <tr><td><span class="code-inline">set_leverage()</span></td><td>Configures isolated leverage ($1\times$ to $20\times$) per symbol.</td></tr>
+                <tr><td><span class="code-inline">get_open_positions()</span></td><td>Queries active position contracts, unrealized PnL, and mark prices.</td></tr>
+            </table>
+        </div>
+
+        <!-- confluence_engine.py -->
+        <div id="confluence_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">confluence_engine.py</span>
+                <span class="file-tag badge-ml">Signal Attribution & Meta-Gates</span>
+            </div>
+            <p><strong>Purpose:</strong> Evaluates multi-timeframe structural confluence, technical indicator alignment, and decomposes trade signals into 7 distinct attribution sub-scores and percentage contributions.</p>
+            
+            <div class="section-heading">Signal Attribution Breakdown</div>
+            <div class="formula-box">
+                \text{Total Score} = 0.25(\text{Trend}) + 0.20(\text{Momentum}) + 0.15(\text{Volume}) + 0.10(\text{Liquidity}) + 0.10(\text{Macro}) + 0.10(\text{Orderbook}) + 0.10(\text{Regime})
+            </div>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">evaluate_confluence()</span></td><td>Checks 1D, 4H, 1H trend alignment and validates entry filters.</td></tr>
+                <tr><td><span class="code-inline">calculate_entry_signal_attribution()</span></td><td>Decomposes entry into 7 sub-scores (0.0 to 1.0).</td></tr>
+                <tr><td><span class="code-inline">calculate_confidence_attribution_breakdown()</span></td><td>Computes percentage contribution of each feature to final confidence.</td></tr>
+            </table>
+        </div>
+
+        <!-- portfolio_risk.py -->
+        <div id="portfolio_risk_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">portfolio_risk.py</span>
+                <span class="file-tag badge-risk">Portfolio Risk Engine</span>
+            </div>
+            <p><strong>Purpose:</strong> Institutional portfolio risk management, VaR/CVaR calculation, Volatility Parity sizing, correlation exposure scaling, and Portfolio Heat telemetry.</p>
+            
+            <div class="section-heading">Key Formulas</div>
+            <ul>
+                <li><strong>Correlation Penalty Factor:</strong> Scales down total position size when multiple correlated assets trigger simultaneously:
+                    <div class="formula-box">\text{Correlation\_Multiplier} = \frac{1}{\sqrt{1 + \rho_{\text{avg}} (N_{\text{corr}} - 1)}}</div>
+                </li>
+                <li><strong>Portfolio Heat %:</strong> Total unhedged risk exposure relative to account equity:
+                    <div class="formula-box">\text{Portfolio\_Heat\_Pct} = \frac{\sum_i (\text{Position\_Size}_i \cdot |\text{Entry}_i - \text{SL}_i| / \text{Entry}_i)}{\text{Total\_Equity}} \times 100\%</div>
+                </li>
+            </ul>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">calculate_volatility_parity_sizes()</span></td><td>Allocates capital proportional to inverse volatility ($1/\sigma_i$).</td></tr>
+                <tr><td><span class="code-inline">calculate_portfolio_heat_telemetry()</span></td><td>Computes BTC Beta, Net/Gross exposure, and sector concentration.</td></tr>
+                <tr><td><span class="code-inline">calculate_capital_efficiency()</span></td><td>Tracks capital utilization %, idle capital %, and rolling average exposure.</td></tr>
+            </table>
+        </div>
+
+        <!-- statistical_validation.py -->
+        <div id="statistical_validation_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">statistical_validation.py</span>
+                <span class="file-tag badge-ml">Statistical Validation & Uncertainty</span>
+            </div>
+            <p><strong>Purpose:</strong> Validates model significance via 95% Bootstrap Confidence Intervals, Benjamini-Hochberg FDR correction, Performance-Weighted Ensembling, and Dual Uncertainty Decomposition.</p>
+            
+            <div class="section-heading">Dual Uncertainty Synthesis</div>
+            <div class="formula-box">
+                m = \frac{\sum w_i p_i}{\sum w_i}, \quad U_{\text{ensemble}} = \min(0.50, \sigma_w \cdot \text{mult}), \quad U_{\text{market}} = \text{ATR\_Risk} + \text{Spread\_Risk} \\
+                U_{\text{total}} = 0.60 \cdot U_{\text{ensemble}} + 0.40 \cdot U_{\text{market}}
+            </div>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">compute_bootstrap_ci()</span></td><td>Calculates 95% Bootstrap CI over 1,000 resamples.</td></tr>
+                <tr><td><span class="code-inline">compute_ensemble_uncertainty_weighting()</span></td><td>Computes performance-weighted prediction mean, disagreement std, and dual uncertainty.</td></tr>
+                <tr><td><span class="code-inline">compute_decision_stability()</span></td><td>Tests input perturbation sensitivity ($\text{ATR}\pm 1\%$, $\text{Vol}\pm 2\%$, $\text{Price}\pm 0.1\%$).</td></tr>
+                <tr><td><span class="code-inline">compute_live_vs_replay_checksum()</span></td><td>Generates SHA256 checksums for deterministic backtest verification.</td></tr>
+            </table>
+        </div>
+
+        <!-- mlops_engine.py -->
+        <div id="mlops_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">mlops_engine.py</span>
+                <span class="file-tag badge-ml">MLOps & Calibration Engine</span>
+            </div>
+            <p><strong>Purpose:</strong> Continuous MLOps tracking, Brier Score calibration, Expected Calibration Error (ECE), Feature Importance Drift (FID), Confidence Bucketing, and Expected R Regression Meta-Modeling.</p>
+            
+            <div class="section-heading">Calibration & Drift Formulas</div>
+            <div class="formula-box">
+                \text{Brier Score} = \frac{1}{N} \sum_{i=1}^N (p_i - y_i)^2, \quad \text{ECE} = \sum_{b=1}^B \frac{|B_b|}{N} |\text{acc}(B_b) - \text{conf}(B_b)|
+            </div>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">calculate_brier_score()</span></td><td>Computes probability calibration accuracy (0.0 is perfect).</td></tr>
+                <tr><td><span class="code-inline">calculate_confidence_calibration_buckets()</span></td><td>Groups trades into 8 discrete confidence ranges (50-55% to 85-90%).</td></tr>
+                <tr><td><span class="code-inline">calculate_feature_importance_drift()</span></td><td>Measures structural feature weight shifts (FID score) across retraining cycles.</td></tr>
+                <tr><td><span class="code-inline">estimate_expected_r_multiple()</span></td><td>Regression meta-model estimating $\mathbb{E}[R \mid \text{Context}]$.</td></tr>
+            </table>
+        </div>
+
+        <!-- strategy_health_engine.py -->
+        <div id="strategy_health_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">strategy_health_engine.py</span>
+                <span class="file-tag badge-risk">Model Health Index & State Machine</span>
+            </div>
+            <p><strong>Purpose:</strong> Computes the 0-100 Model Health Index (MHI) using a 40/60 Operational/Statistical split and governs position sizing via a 5-Stage Hysteresis State Machine.</p>
+            
+            <div class="section-heading">40/60 Score Allocation & State Machine</div>
+            <ul>
+                <li><strong>Operational Health (40 pts):</strong> Decision Stability (10), Confidence Robustness (10), Calibration ECE (10), PSI Feature Drift (10).</li>
+                <li><strong>Statistical Edge (60 pts):</strong> Rolling PF (15), Expectancy (15), SQN (10), Recovery Factor (10), Calmar Ratio (10).</li>
+                <li><strong>5 States:</strong> <span class="code-inline">HEALTHY</span> (100% size), <span class="code-inline">WATCH</span> (100% size, elevated watch), <span class="code-inline">DEGRADED</span> (75% size), <span class="code-inline">RECOVERY</span> (85% size), <span class="code-inline">CRITICAL</span> (0% shadow mode).</li>
+            </ul>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">calculate_model_health_index()</span></td><td>Calculates composite MHI score, state, and sizing multiplier.</td></tr>
+                <tr><td><span class="code-inline">evaluate_health()</span></td><td>Legacy 6-metric strategy health evaluator.</td></tr>
+            </table>
+        </div>
+
+        <!-- exit_policy_engine.py -->
+        <div id="exit_policy_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">exit_policy_engine.py</span>
+                <span class="file-tag badge-core">Exit Policy & Trailing Engine</span>
+            </div>
+            <p><strong>Purpose:</strong> Evaluates market context at order entry to select and lock exit policies (<span class="code-inline">Trail_Wide</span>, <span class="code-inline">Trail_Tight</span>, <span class="code-inline">Structure_Bound</span>, <span class="code-inline">Time_Decay</span>) and maps uncertainty to execution strategies.</p>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">select_and_lock_meta_policy()</span></td><td>Evaluates regime and GARCH volatility at entry and locks policy to prevent attribution contamination.</td></tr>
+                <tr><td><span class="code-inline">calculate_uncertainty_execution_policy()</span></td><td>Maps $U_{\text{total}}$ to execution adjustments (sizing, SL width, scale-out %).</td></tr>
+                <tr><td><span class="code-inline">evaluate_exit_conditions()</span></td><td>Monitors active stop-loss, take-profit, and trailing updates.</td></tr>
+            </table>
+        </div>
+
+        <!-- drift_detector.py -->
+        <div id="drift_detector_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">drift_detector.py</span>
+                <span class="file-tag badge-ml">Statistical Process Control</span>
+            </div>
+            <p><strong>Purpose:</strong> Online concept drift detection using Upper CUSUM Statistical Process Control and Population Stability Index (PSI).</p>
+            
+            <div class="section-heading">CUSUM Recurrence Relation</div>
+            <div class="formula-box">
+                e_t = 1 - \text{actual\_outcome}, \quad S_t = \max\left(0, S_{t-1} + (e_t - \mu - K)\right)
+            </div>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">update()</span></td><td>Updates CUSUM accumulator $S_t$ with latest trade outcome.</td></tr>
+                <tr><td><span class="code-inline">calculate_psi()</span></td><td>Computes PSI between baseline training distribution and live distribution.</td></tr>
+            </table>
+        </div>
+
+        <!-- champion_challenger_framework.py -->
+        <div id="champion_challenger_framework_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">champion_challenger_framework.py</span>
+                <span class="file-tag badge-ml">Bayesian Dual-Governance</span>
+            </div>
+            <p><strong>Purpose:</strong> Evaluates Shadow Challenger models vs Production Champions using Beta-Binomial Monte Carlo posterior density estimation and 7 strict release gates.</p>
+
+            <div class="section-heading">Bayesian Posterior Formula</div>
+            <div class="formula-box">
+                \text{Posterior: } \theta_{\text{Champ}} \sim \text{Beta}(\alpha_1, \beta_1), \quad \theta_{\text{Chall}} \sim \text{Beta}(\alpha_2, \beta_2) \\
+                P(\text{Challenger} > \text{Champion} \mid \text{Data}) \ge 95\%
+            </div>
+
+            <div class="section-heading">Core Functions</div>
+            <table class="func-table">
+                <tr><th>Function</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">evaluate_bayesian_dual_governance_gate()</span></td><td>Enforces 5,000-sample Beta-Binomial Monte Carlo evaluation across 7 release gates.</td></tr>
+            </table>
+        </div>
+
+        <!-- train.py -->
+        <div id="train_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">train.py</span>
+                <span class="file-tag badge-ml">ML Model Training Pipeline</span>
+            </div>
+            <p><strong>Purpose:</strong> Off-line model training pipeline executing Triple Barrier labeling, Purged K-Fold Cross Validation, GMM regime clustering, and training XGBoost, LightGBM, CatBoost ensembles, and Isotonic calibrators across all timeframes (5m to 6h).</p>
+            
+            <div class="section-heading">Triple Barrier Labeling</div>
+            <div class="formula-box">
+                \text{Upper Barrier} = P_0 + (\text{TP\_Mult} \cdot \text{ATR}), \quad \text{Lower Barrier} = P_0 - (\text{SL\_Mult} \cdot \text{ATR}), \quad \text{Time Barrier} = t_0 + \Delta t
+            </div>
+        </div>
+
+        <!-- dashboard_routes.py -->
+        <div id="dashboard_routes_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">dashboard_routes.py</span>
+                <span class="file-tag badge-ui">Flask REST API Routes</span>
+            </div>
+            <p><strong>Purpose:</strong> Flask blueprint defining REST endpoints for the frontend dashboard, aggregating system metrics, institutional summaries, risk data, and ML Research Laboratory telemetry.</p>
+
+            <div class="section-heading">Key Endpoints</div>
+            <table class="func-table">
+                <tr><th>Endpoint</th><th>Description</th></tr>
+                <tr><td><span class="code-inline">/api/status</span></td><td>Returns real-time bot status, active trades, active intervals, and latest predictions.</td></tr>
+                <tr><td><span class="code-inline">/api/institutional_summary</span></td><td>Consolidated endpoint powering all dashboard cards (Portfolio Heat, MHI, Bayesian Posterior, Uncertainty, Capital Efficiency).</td></tr>
+                <tr><td><span class="code-inline">/api/strategy_health</span></td><td>Returns detailed Strategy Health Score (SHS) metrics.</td></tr>
+            </table>
+        </div>
+
+        <!-- templates/index.html -->
+        <div id="templates_index_html" class="file-card">
+            <div class="file-header">
+                <span class="file-name">templates/index.html</span>
+                <span class="file-tag badge-ui">Frontend Dashboard UI</span>
+            </div>
+            <p><strong>Purpose:</strong> High-performance single-page web dashboard built with vanilla CSS and JavaScript. Features dark mode, sticky top health banner, 4H Strategy KPI card, parallel 2-column Risk & ML Research Lab grid layout, and real-time polling/WebSocket updates.</p>
+        </div>
+
+        <!-- state_manager.py -->
+        <div id="state_manager_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">state_manager.py</span>
+                <span class="file-tag badge-core">State Synchronization Engine</span>
+            </div>
+            <p><strong>Purpose:</strong> Thread-safe state manager providing seamless synchronization between in-memory thread states and persistent Redis key-value storage with automatic fallback.</p>
+        </div>
+
+        <!-- database.py -->
+        <div id="database_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">database.py</span>
+                <span class="file-tag badge-core">SQLite Database Layer</span>
+            </div>
+            <p><strong>Purpose:</strong> SQLite database persistence engine handling completed trade records, execution logs, performance metrics, and automated database integrity healing.</p>
+        </div>
+
+        <!-- trade_calculators.py -->
+        <div id="trade_calculators_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">trade_calculators.py</span>
+                <span class="file-tag badge-ml">Statistical & Quality Calculators</span>
+            </div>
+            <p><strong>Purpose:</strong> Standalone statistical calculators computing Profit Factor, Expectancy ($R$), Sharpe, Sortino ratios, and Decomposed Trade Quality vectors (Entry Edge, Exit Edge, Execution Edge, Market Tailwind, Risk Management).</p>
+        </div>
+
+        <!-- feature_pipeline.py -->
+        <div id="feature_pipeline_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">feature_pipeline.py</span>
+                <span class="file-tag badge-ml">Technical Feature Engineering</span>
+            </div>
+            <p><strong>Purpose:</strong> Computes 26 normalized technical features from raw OHLCV data including Kalman Filter trend, Garman-Klass Volatility, ADX, RSI, EMA ratios, and Orderbook Imbalance.</p>
+        </div>
+
+        <!-- config.py -->
+        <div id="config_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">config.py</span>
+                <span class="file-tag badge-core">Global System Configuration</span>
+            </div>
+            <p><strong>Purpose:</strong> Central configuration repository storing API keys, risk limits, trading pairs (BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, etc.), default thresholds, and timeframe definitions.</p>
+        </div>
+
+    </div>
+
+</body>
+</html>
