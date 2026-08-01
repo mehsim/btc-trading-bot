@@ -393,7 +393,163 @@ class ExitPolicyEngine:
         else:
             return {"execution_policy": "Paper trade or shadow-only evaluation", "sizing_mult": 0.00, "sl_mult": 1.50, "scaleout_pct": 0.00, "shadow_only": True}
 
+    def evaluate_10_level_exit_hierarchy(
+        self,
+        symbol: str,
+        interval: str,
+        current_price: float,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        direction: str,
+        candles_elapsed: int,
+        expected_r: float = 1.20,
+        mfe_r: float = 0.0,
+        entry_regime: str = "Trending",
+        current_regime: str = "Trending",
+        garch_vol: float = 0.015,
+        rolling_vol_20th_pct: float = 0.010,
+        atr_ratio: float = 1.0,
+        mhi_status: str = "HEALTHY",
+        incoming_signal_expected_r: Optional[float] = None,
+        portfolio_heat_full: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Evaluates active trade against 10-level institutional exit hierarchy:
+          1. Take Profit
+          2. Stop Loss
+          3. Catastrophic Risk
+          4. Expected R Collapse
+          5. Opportunity Cost Rotation
+          6. Regime Shift
+          7. Volatility Collapse
+          8. MFE Stagnation
+          9. Adaptive Time Decay
+          10. Conditional Hard Timeout Safety Net
+        """
+        tf_clean = str(interval).replace("m", "")
+        # Timeframe Timeout Config (Soft, Hard)
+        timeout_config = {
+            "15": (15, 24), "30": (15, 24),
+            "60": (12, 20), "120": (10, 16),
+            "240": (8, 12), "360": (6, 10)
+        }
+        base_soft, hard_limit = timeout_config.get(tf_clean, (10, 18))
+
+        # Recommendation 8: ATR Expansion/Compression Soft Timeout Adjustment
+        atr_adj = 2 if atr_ratio > 1.2 else (-2 if atr_ratio < 0.8 else 0)
+        
+        # Recommendation 9: Model Health Index (MHI) Scaling
+        mhi_mult = 1.0 if mhi_status == "HEALTHY" else (0.9 if mhi_status == "WATCH" else (0.8 if mhi_status == "DEGRADED" else 0.6))
+        soft_limit = max(4, int(round((base_soft + atr_adj) * mhi_mult)))
+
+        is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]
+        pnl_dist = (current_price - entry_price) if is_long else (entry_price - current_price)
+        risk_dist = abs(entry_price - stop_loss) if abs(entry_price - stop_loss) > 1e-6 else 1.0
+        current_r = round(pnl_dist / risk_dist, 2)
+
+        # Recommendation 5: Regime-Adaptive Time Decay Rate
+        decay_rate = 0.10 if "TRENDING" in current_regime.upper() else (0.25 if "RANGING" in current_regime.upper() else 0.40)
+        age_ratio = float(candles_elapsed) / max(1, soft_limit)
+        
+        # Recommendation 2: Time decay affects Expected R only
+        decay_factor = max(0.20, 1.0 - decay_rate * max(0.0, age_ratio - 1.0))
+        decayed_expected_r = round(expected_r * decay_factor, 3)
+
+        # Recommendation 10: Unified Exit Score Calculation
+        norm_r = min(1.0, max(0.0, decayed_expected_r / 2.0))
+        regime_intact = 1.0 if entry_regime.upper() == current_regime.upper() else 0.0
+        vol_pct_score = 1.0 if garch_vol >= rolling_vol_20th_pct else 0.0
+        opp_score = 1.0 if not (portfolio_heat_full and incoming_signal_expected_r and incoming_signal_expected_r > (expected_r * 1.5)) else 0.0
+        
+        exit_score = round(
+            0.30 * norm_r +
+            0.20 * regime_intact +
+            0.20 * vol_pct_score +
+            0.15 * decay_factor +
+            0.15 * opp_score, 3
+        )
+
+        # LEVEL 1: Take Profit
+        if (is_long and current_price >= take_profit) or (not is_long and current_price <= take_profit):
+            return self._build_exit_result(1, "Take Profit Hit", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 2: Stop Loss
+        if (is_long and current_price <= stop_loss) or (not is_long and current_price >= stop_loss):
+            return self._build_exit_result(2, "Stop Loss Hit", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 3: Catastrophic Risk Controls
+        if current_r <= -3.0:
+            return self._build_exit_result(3, "Catastrophic Risk Limit Breach", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 4: Expected R Collapse (after soft timeout)
+        if candles_elapsed >= soft_limit and decayed_expected_r < 0.25:
+            return self._build_exit_result(4, "Expected R Collapse (<0.25R)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 5: Opportunity Cost Rotation (Recommendation 3)
+        if portfolio_heat_full and incoming_signal_expected_r and incoming_signal_expected_r > (expected_r * 1.5):
+            return self._build_exit_result(5, f"Opportunity Cost Rotation (New signal {incoming_signal_expected_r:.2f}R > 1.5x active {expected_r:.2f}R)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 6: Regime Shift
+        if entry_regime.upper() == "TRENDING" and current_regime.upper() == "RANGING" and candles_elapsed >= soft_limit:
+            return self._build_exit_result(6, "Regime Shift (Trending -> Ranging)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 7: Volatility Collapse (Recommendation 6: relative to 20th percentile)
+        if candles_elapsed >= soft_limit and garch_vol < rolling_vol_20th_pct and abs(current_r) < 0.2:
+            return self._build_exit_result(7, "Volatility Collapse (<20th percentile vol)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 8: MFE Stagnation (Recommendation 4)
+        if mfe_r >= 2.0 and current_r < 0.3 and candles_elapsed >= 12:
+            return self._build_exit_result(8, f"MFE Stagnation (Reached +{mfe_r:.1f}R MFE but current PnL is +{current_r:.1f}R)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 9: Adaptive Time Decay & Exit Score
+        if candles_elapsed >= soft_limit and exit_score < 0.35:
+            return self._build_exit_result(9, f"Adaptive Time Decay Exit (Unified Exit Score {exit_score:.2f} < 0.35)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        # LEVEL 10: Conditional Hard Timeout Safety Net (Recommendation 1)
+        if candles_elapsed >= hard_limit:
+            # Runner Exception: Allow extension if PnL > +2.0R, Expected R >= 0.20R and Regime intact
+            if current_r >= 2.0 and decayed_expected_r >= 0.20 and regime_intact == 1.0:
+                return self._build_exit_result(10, f"Hard Timeout Runner Extension Granted (PnL: +{current_r:.1f}R, Exp R: {decayed_expected_r:.2f}R)", False, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+            else:
+                return self._build_exit_result(10, "Conditional Hard Timeout Reached", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+        return self._build_exit_result(0, "Hold Active Trade", False, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
+
+    def _build_exit_result(
+        self,
+        level: int,
+        reason: str,
+        should_exit: bool,
+        current_r: float,
+        decayed_expected_r: float,
+        exit_score: float,
+        candles_elapsed: int,
+        soft_limit: int,
+        hard_limit: int
+    ) -> Dict[str, Any]:
+        """Builds structured attribution report for exit decisions."""
+        return {
+            "should_exit": should_exit,
+            "exit_level": level,
+            "exit_reason": reason,
+            "current_r": current_r,
+            "decayed_expected_r": decayed_expected_r,
+            "exit_score": exit_score,
+            "candles_elapsed": candles_elapsed,
+            "soft_limit_candles": soft_limit,
+            "hard_limit_candles": hard_limit,
+            "attribution": {
+                "level": level,
+                "reason": reason,
+                "timestamp": time.time(),
+                "exit_score": exit_score,
+                "decayed_expected_r": decayed_expected_r
+            }
+        }
+
 
 exit_policy_engine = ExitPolicyEngine()
+
 
 

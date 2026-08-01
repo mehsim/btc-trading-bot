@@ -7607,27 +7607,39 @@ def main():
                     exit_reason = None
                     half_closed = active_trade.get("half_closed", False)
                     
-                    # 1. Check timer programmatic exit (applies to both simulation and live)
-                    if current_time >= end_time:
-                        cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
-                        lookahead = cfg.get("lookahead", 10)
-                        exit_reason = f"{int(iv)*lookahead}-MINUTE TIMER ELAPSED"
+                    # 1 & 2. 10-Level Institutional Adaptive Exit Hierarchy Evaluation
+                    entry_time_ms = active_trade.get("entry_time") or (current_time * 1000)
+                    tf_mins = max(1, int(iv))
+                    candles_elapsed = int((time.time() - (entry_time_ms / 1000.0)) / (tf_mins * 60))
                     
-                    # 2. Check stagnation programmatic exit (applies to both simulation and live)
-                    if not exit_reason:
-                        entry_time_ms = active_trade.get("entry_time")
-                        if entry_time_ms:
-                            trade_age_hours = (time.time() - (entry_time_ms / 1000.0)) / 3600.0
-                            cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
-                            lookahead = cfg.get("lookahead", 10)
-                            lookahead_duration_hours = (int(iv) * lookahead) / 60.0
-                            stagnation_age_hours = 0.6 * lookahead_duration_hours
-                            
-                            if trade_age_hours >= stagnation_age_hours:
-                                atr_dollars = active_trade.get("atr_dollars") or (entry_price * 0.01)
-                                price_dev = abs(current_price - entry_price)
-                                if price_dev < (0.5 * atr_dollars):
-                                    exit_reason = f"STAGNATION TIMEOUT (Age: {trade_age_hours:.1f}h, Price within 0.5 ATR)"
+                    atr_dollars = active_trade.get("atr_dollars") or max(1e-6, entry_price * 0.01)
+                    highest_p = active_trade.get("highest_price", current_price)
+                    lowest_p = active_trade.get("lowest_price", current_price)
+                    pnl_dist_mfe = (highest_p - entry_price) if direction == "Bullish" else (entry_price - lowest_p)
+                    risk_dist_mfe = abs(entry_price - stop_loss) if abs(entry_price - stop_loss) > 1e-6 else atr_dollars
+                    mfe_r = round(pnl_dist_mfe / risk_dist_mfe, 2)
+                    
+                    curr_regime = bot_state.get(f"regime_{iv}", "Trending") if "bot_state" in globals() and isinstance(bot_state, dict) else "Trending"
+                    
+                    hierarchy_eval = exit_policy_engine.evaluate_10_level_exit_hierarchy(
+                        symbol=active_symbol,
+                        interval=str(iv),
+                        current_price=current_price,
+                        entry_price=entry_price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        direction=direction,
+                        candles_elapsed=candles_elapsed,
+                        expected_r=float(active_trade.get("initial_planned_rr", 1.4)),
+                        mfe_r=mfe_r,
+                        entry_regime=str(active_trade.get("entry_regime", curr_regime)),
+                        current_regime=str(curr_regime)
+                    )
+                    
+                    if hierarchy_eval.get("should_exit"):
+                        exit_reason = f"EXIT HIERARCHY LEVEL {hierarchy_eval.get('exit_level')}: {hierarchy_eval.get('exit_reason')}"
+                        print(f"[{active_symbol} {iv}m Exit Hierarchy Triggered] Level {hierarchy_eval.get('exit_level')} -> {hierarchy_eval.get('exit_reason')} | Exit Score: {hierarchy_eval.get('exit_score')}")
+
                     
                     # 3. Simulation mode SL/TP price checks
                     if TRADE_MODE == "simulation" and not exit_reason:
