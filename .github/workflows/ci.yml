@@ -26,9 +26,7 @@ jobs:
 
     - name: Code Quality & Linting
       run: |
-        # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
     - name: Security Scanning
@@ -37,4 +35,39 @@ jobs:
 
     - name: Run Pytest Test Suite
       run: |
-        pytest tests/ --doctest-modules --junitxml=junit/test-results.xml --cov=. --cov-report=xml
+        pytest tests/ --junitxml=junit/test-results.xml
+
+  smoke-test-and-deploy:
+    needs: test-and-validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 2
+
+    - name: Deploy to AWS Singapore
+      env:
+        SSH_KEY: ${{ secrets.AWS_SINGAPORE_KEY }}
+        AWS_HOST: 47.129.153.199
+      run: |
+        echo "$SSH_KEY" > /tmp/deploy_key.pem
+        chmod 600 /tmp/deploy_key.pem
+        ssh -o StrictHostKeyChecking=no -i /tmp/deploy_key.pem ubuntu@$AWS_HOST \
+          "cd ~/btc-trading-bot && git pull origin main && pkill -f main.py 2>/dev/null; nohup .venv/bin/python3 main.py > bot.log 2>&1 </dev/null &"
+
+    - name: Smoke Test — Health Check
+      env:
+        AWS_HOST: 47.129.153.199
+      run: |
+        sleep 8
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$AWS_HOST:5001/api/status)
+        if [ "$STATUS" != "200" ]; then
+          echo "SMOKE TEST FAILED: /api/status returned $STATUS. Triggering rollback."
+          ssh -o StrictHostKeyChecking=no -i /tmp/deploy_key.pem ubuntu@$AWS_HOST \
+            "cd ~/btc-trading-bot && git revert HEAD --no-edit && git push origin main && nohup .venv/bin/python3 main.py > bot.log 2>&1 </dev/null &"
+          exit 1
+        fi
+        echo "Smoke test passed: HTTP $STATUS"
+

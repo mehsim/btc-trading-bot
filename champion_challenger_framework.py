@@ -34,6 +34,31 @@ class ChampionChallengerFramework:
         reason = f"Retained Champion baseline: Challenger accuracy ({challenger_accuracy:.2f}) < Champion ({champion_accuracy:.2f})"
         return self.champion_version, reason
 
+    def log_training_run(self, interval: str, holdout_accuracy: float, brier_score: float,
+                         feature_hash: str, training_period: str) -> Dict[str, Any]:
+        """Persists model training run metadata for governance audit trail."""
+        import json, time, hashlib, os
+        record = {
+            "timestamp": time.time(),
+            "interval": interval,
+            "holdout_accuracy": holdout_accuracy,
+            "brier_score": brier_score,
+            "feature_hash": feature_hash,
+            "training_period": training_period
+        }
+        try:
+            log_path = "model_governance_log.json"
+            history = []
+            if os.path.exists(log_path):
+                with open(log_path) as f:
+                    history = json.load(f)
+            history.append(record)
+            with open(log_path, "w") as f:
+                json.dump(history[-200:], f, indent=2)  # keep last 200 runs
+        except Exception as e:
+            print(f"[Governance] Failed to write training log: {e}")
+        return record
+
     def evaluate_bayesian_dual_governance_gate(
         self,
         shadow_trades_count: int,
@@ -46,8 +71,8 @@ class ChampionChallengerFramework:
         chall_stability_pct: float = 98.5
     ) -> Dict[str, Any]:
         """
-        Enforces 95% Bayesian Posterior Dual-Governance Promotion Criteria.
-        Challenger is promoted ONLY IF Bayesian P(Challenger > Champion) >= 95% and all 7 gates pass.
+        Enforces 99% Bayesian Posterior Dual-Governance Promotion Criteria (upgraded from 95%).
+        Challenger is promoted ONLY IF Bayesian P(Challenger > Champion) >= 99% and all 7 gates pass.
         """
         import numpy as np
 
@@ -67,7 +92,7 @@ class ChampionChallengerFramework:
 
         g1_count = shadow_trades_count >= 100
         g2_freq = frequentist_p_val < 0.05
-        g3_bayes = posterior_prob >= 0.95
+        g3_bayes = posterior_prob >= 0.99  # Upgraded: 95% -> 99% governance threshold
         g4_dd = chall_dd_pct <= (champ_dd_pct + 0.05)
         g5_calmar = True
         g6_recovery = True
@@ -82,7 +107,7 @@ class ChampionChallengerFramework:
             "gate_results": {
                 "Gate 1 (Adaptive Power Trades >= 100)": g1_count,
                 "Gate 2 (Frequentist p < 0.05)": g2_freq,
-                "Gate 3 (Bayesian P(Challenger > Champion) >= 95%)": g3_bayes,
+                "Gate 3 (Bayesian P(Challenger > Champion) >= 99%)": g3_bayes,
                 "Gate 4 (No Max DD Increase)": g4_dd,
                 "Gate 5 (Non-inferior Calmar Ratio)": g5_calmar,
                 "Gate 6 (Non-inferior Recovery Factor)": g6_recovery,

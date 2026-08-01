@@ -443,7 +443,35 @@ class PortfolioRiskEngine:
             "idle_capital_pct": idle_pct
         }
 
+    def calculate_volatility_normalized_drawdown_alert(
+        self,
+        max_drawdown_usd: float = 18.5,
+        realized_vol_30d: float = 0.015,
+        rolling_dd_mean_usd: float = 12.0,
+        rolling_dd_std_usd: float = 3.0
+    ) -> dict:
+        """
+        Volatility-normalized drawdown alert.
+        Normalized_DD = max_drawdown_usd / realized_vol_30d
+        Alert if DD > rolling_mean + 2.5 * rolling_std (2.5 sigma threshold)
+        """
+        normalized_dd = round(float(max_drawdown_usd) / max(1e-6, float(realized_vol_30d)), 4)
+        threshold = float(rolling_dd_mean_usd) + 2.5 * float(rolling_dd_std_usd)
+        alert_triggered = max_drawdown_usd > threshold
+        z_score = round((float(max_drawdown_usd) - float(rolling_dd_mean_usd)) / max(1e-6, float(rolling_dd_std_usd)), 3)
+
+        return {
+            "max_drawdown_usd": max_drawdown_usd,
+            "realized_vol_30d": realized_vol_30d,
+            "normalized_dd": normalized_dd,
+            "z_score": z_score,
+            "alert_threshold_usd": round(threshold, 2),
+            "alert_triggered": alert_triggered,
+            "severity": "CRITICAL" if z_score > 3.5 else "WARNING" if alert_triggered else "NORMAL"
+        }
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
+
 
 
