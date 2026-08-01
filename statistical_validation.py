@@ -166,44 +166,85 @@ class StatisticalValidation:
 
     def compute_ensemble_uncertainty_weighting(
         self,
-        individual_predictions: List[float] = None
+        individual_predictions: Dict[str, float] = None,
+        model_weights: Dict[str, float] = None,
+        atr_expansion_ratio: float = 1.12,
+        spread_bp: float = 3.5,
+        brier_score: float = 0.214
     ) -> Dict[str, Any]:
         """
-        Converts ensemble model diversity/disagreement into an explicit uncertainty risk adjustment.
-        Formula: Confidence = Prediction_Mean * (1.0 - Uncertainty_Penalty)
+        Institutional Weighted Ensemble & Dual Uncertainty Decomposition:
+        1. Weighted Ensemble Mean: m = sum(w_i * p_i) / sum(w_i) based on rolling out-of-sample Brier/Sharpe
+        2. Dual Uncertainty: U_total = 0.60 * U_ensemble + 0.40 * U_market
+        3. Adaptive Penalty Scaling Multiplier based on Brier Score calibration.
         """
         if not individual_predictions:
-            individual_predictions = [0.81, 0.79, 0.82, 0.80]
+            individual_predictions = {
+                "catboost": 0.82,
+                "xgboost": 0.80,
+                "lightgbm": 0.79,
+                "meta_model": 0.81
+            }
+        if not model_weights:
+            model_weights = {
+                "catboost": 0.35,
+                "xgboost": 0.30,
+                "lightgbm": 0.20,
+                "meta_model": 0.15
+            }
 
-        preds = [float(p) for p in individual_predictions]
-        pred_mean = float(np.mean(preds))
-        pred_std = float(np.std(preds))
+        names = list(individual_predictions.keys())
+        preds = np.array([float(individual_predictions[k]) for k in names])
+        weights = np.array([float(model_weights.get(k, 0.25)) for k in names])
+        weights = weights / max(1e-6, np.sum(weights))
 
-        # Uncertainty penalty scales linearly with ensemble std dev
-        uncertainty_penalty = round(min(0.50, pred_std * 2.5), 4)
-        adjusted_confidence = round(pred_mean * (1.0 - uncertainty_penalty), 4)
+        # 1. Performance-Weighted Mean & Weighted Std Dev
+        weighted_mean = float(np.sum(weights * preds))
+        weighted_var = float(np.sum(weights * ((preds - weighted_mean) ** 2)))
+        weighted_std = float(np.sqrt(max(1e-8, weighted_var)))
 
-        # Sizing multiplier decays if ensemble disagreement std >= 0.05
-        if pred_std <= 0.05:
+        # 2. Adaptive Penalty Scaling Multiplier (learned from Brier Score calibration)
+        adaptive_penalty_mult = round(float(np.clip(2.5 * (brier_score / 0.20), 1.8, 3.2)), 2)
+
+        # 3. Model Disagreement Uncertainty (U_ensemble)
+        u_ensemble = round(float(np.clip(weighted_std * adaptive_penalty_mult, 0.0, 0.50)), 4)
+
+        # 4. Market Uncertainty (U_market: ATR expansion + Spread widening)
+        atr_risk = max(0.0, (float(atr_expansion_ratio) - 1.0) * 0.30)
+        spread_risk = max(0.0, (float(spread_bp) / 10.0) * 0.20)
+        u_market = round(float(np.clip(atr_risk + spread_risk, 0.0, 0.50)), 4)
+
+        # 5. Dual Uncertainty Synthesis (60% Ensemble + 40% Market)
+        u_total = round(0.60 * u_ensemble + 0.40 * u_market, 4)
+
+        # 6. Uncertainty-Adjusted Confidence
+        adjusted_confidence = round(float(weighted_mean * (1.0 - u_total)), 4)
+
+        # 7. Sizing Multiplier
+        if u_total <= 0.08:
             sizing_mult = 1.00
-            agreement_status = "STRONG ENSEMBLE CONSENSUS"
-        elif pred_std <= 0.10:
-            sizing_mult = round(1.0 - (pred_std - 0.05) * 5.0, 2)
-            agreement_status = "MODERATE MODEL DISAGREEMENT"
+            status = "STRONG CONSENSUS & STABLE MARKET"
+        elif u_total <= 0.18:
+            sizing_mult = round(float(1.0 - (u_total - 0.08) * 3.0), 2)
+            status = "MODERATE UNCERTAINTY (SLIGHT SIZE REDUCTION)"
         else:
-            sizing_mult = round(max(0.25, 1.0 - (pred_std - 0.05) * 5.0), 2)
-            agreement_status = "HIGH MODEL DISAGREEMENT (SIZE PENALIZED)"
+            sizing_mult = round(float(max(0.20, 1.0 - (u_total - 0.08) * 3.0)), 2)
+            status = "HIGH DUAL UNCERTAINTY (SIZE PENALIZED)"
 
         return {
-            "ensemble_predictions": preds,
-            "prediction_mean": round(pred_mean, 4),
-            "prediction_std": round(pred_std, 4),
-            "uncertainty_penalty": uncertainty_penalty,
+            "weighted_prediction_mean": round(weighted_mean, 4),
+            "weighted_prediction_std": round(weighted_std, 4),
+            "model_weights": {k: round(v, 3) for k, v in zip(names, weights)},
+            "adaptive_penalty_multiplier": adaptive_penalty_mult,
+            "u_ensemble": u_ensemble,
+            "u_market": u_market,
+            "u_total": u_total,
             "uncertainty_adjusted_confidence": adjusted_confidence,
             "sizing_multiplier": sizing_mult,
-            "agreement_status": agreement_status
+            "agreement_status": status
         }
 
 
 statistical_validation = StatisticalValidation()
+
 
