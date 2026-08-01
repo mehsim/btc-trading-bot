@@ -113,38 +113,86 @@ class StrategyHealthEngine:
         ece_pct: float = 3.8,
         psi_score: float = 0.04,
         rolling_pf: float = 1.45,
-        holdout_accuracy_pct: float = 52.4
+        expectancy_r: float = 0.45,
+        sqn_score: float = 2.40,
+        recovery_factor: float = 3.20,
+        calmar_ratio: float = 2.80,
+        trades_count: int = 172
     ) -> Dict[str, Any]:
         """
-        Computes a unified 0-100 Model Health Index (MHI) operational score.
+        Computes the 0-100 Model Health Index (MHI) using a 40/60 Operational/Statistical Split,
+        with 5-Stage Hysteresis State Machine persistence.
         """
-        stability_component = min(100.0, float(decision_stability_pct)) * 0.20
-        robustness_component = min(100.0, float(confidence_robustness_pct)) * 0.15
-        ece_component = max(0.0, (100.0 - float(ece_pct) * 10.0)) * 0.15
-        psi_component = max(0.0, (100.0 - float(psi_score) * 400.0)) * 0.15
-        pf_component = min(100.0, max(0.0, float(rolling_profit_factor if 'rolling_profit_factor' in locals() else rolling_pf) / 2.0 * 100.0)) * 0.15
-        acc_component = min(100.0, float(holdout_accuracy_pct) / 60.0 * 100.0) * 0.20
+        # OPERATIONAL HEALTH (40%)
+        stability_component = min(10.0, (float(decision_stability_pct) / 100.0) * 10.0)
+        robustness_component = min(10.0, (float(confidence_robustness_pct) / 100.0) * 10.0)
+        ece_component = max(0.0, min(10.0, (1.0 - (float(ece_pct) / 15.0)) * 10.0))
+        psi_component = max(0.0, min(10.0, (1.0 - (float(psi_score) / 0.25)) * 10.0))
+        operational_health_score = round(stability_component + robustness_component + ece_component + psi_component, 1)
 
-        mhi_score = round(stability_component + robustness_component + ece_component + psi_component + pf_component + acc_component, 1)
+        # STATISTICAL EDGE (60%)
+        pf_val = float(rolling_pf)
+        pf_component = min(15.0, max(0.0, (pf_val / 2.0) * 15.0))
+        exp_component = min(15.0, max(0.0, (float(expectancy_r) / 0.80) * 15.0))
+        sqn_component = min(10.0, max(0.0, (float(sqn_score) / 3.0) * 10.0))
+        recovery_component = min(10.0, max(0.0, (float(recovery_factor) / 4.0) * 10.0))
+        calmar_component = min(10.0, max(0.0, (float(calmar_ratio) / 3.5) * 10.0))
+        statistical_edge_score = round(pf_component + exp_component + sqn_component + recovery_component + calmar_component, 1)
+
+        mhi_score = round(operational_health_score + statistical_edge_score, 1)
         mhi_score = max(0.0, min(100.0, mhi_score))
 
-        status = "HEALTHY" if mhi_score >= 80.0 else ("DEGRADED" if mhi_score >= 65.0 else "CRITICAL")
-        action = "FULL CAPITAL DEPLOYMENT" if status == "HEALTHY" else ("REDUCE POSITION SIZES (25%)" if status == "DEGRADED" else "ENABLE SHADOW-ONLY MODE")
+        # 5-STAGE HYSTERESIS STATE MACHINE
+        # Persistence rules prevent oscillation:
+        # PF < 0.90 over 30 trades -> DEGRADED
+        # PF > 1.15 over 50 trades -> FULL CAPITAL
+        persistent_degraded = (pf_val < 0.90 and trades_count >= 30)
+        persistent_full = (pf_val >= 1.15 and trades_count >= 50)
+
+        if mhi_score >= 80.0 and persistent_full:
+            state = "HEALTHY"
+            action = "FULL CAPITAL DEPLOYMENT (100% Size)"
+            sizing_multiplier = 1.00
+        elif mhi_score >= 70.0:
+            state = "WATCH"
+            action = "ELEVATED MONITORING (100% Size, Watch State)"
+            sizing_multiplier = 1.00
+        elif persistent_degraded or (55.0 <= mhi_score < 70.0):
+            state = "DEGRADED"
+            action = "SCALE DOWN POSITION SIZES (75% Size, 25% Reduction)"
+            sizing_multiplier = 0.75
+        elif mhi_score >= 45.0:
+            state = "RECOVERY"
+            action = "RECOVERY MODE (85% Size, Sustaining Evidence Required)"
+            sizing_multiplier = 0.85
+        else:
+            state = "CRITICAL"
+            action = "SHADOW-ONLY MODE (0% Real Capital, Retraining Triggered)"
+            sizing_multiplier = 0.00
 
         return {
             "mhi_score": mhi_score,
-            "status": status,
+            "state": state,
             "action_recommendation": action,
+            "sizing_multiplier": sizing_multiplier,
+            "split": {
+                "operational_health_score": operational_health_score,
+                "statistical_edge_score": statistical_edge_score
+            },
             "components": {
                 "decision_stability": decision_stability_pct,
                 "confidence_robustness": confidence_robustness_pct,
                 "ece_pct": ece_pct,
                 "psi_score": psi_score,
                 "rolling_pf": rolling_pf,
-                "holdout_accuracy_pct": holdout_accuracy_pct
+                "expectancy_r": expectancy_r,
+                "sqn_score": sqn_score,
+                "recovery_factor": recovery_factor,
+                "calmar_ratio": calmar_ratio
             }
         }
 
 
 strategy_health_engine = StrategyHealthEngine()
+
 
