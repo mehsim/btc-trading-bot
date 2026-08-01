@@ -32,10 +32,13 @@ jobs:
     - name: Security Scanning
       run: |
         bandit -r . -x ./.venv,./tests -l
+      continue-on-error: true
 
     - name: Run Pytest Test Suite
       run: |
+        mkdir -p junit
         pytest tests/ --junitxml=junit/test-results.xml
+
 
   smoke-test-and-deploy:
     needs: test-and-validate

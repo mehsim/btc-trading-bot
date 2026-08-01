@@ -14,4 +14,4 @@ catboost
 PySocks
 aiohttp
 redis
-mlflow
+mlflowshap
