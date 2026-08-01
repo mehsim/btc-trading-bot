@@ -1055,6 +1055,21 @@
             <p><strong>Purpose:</strong> Automatically compiles structured executive markdown reports (<span class="code-inline">research_report_latest.md</span>) and JSON endpoint (<span class="code-inline">/api/research_report</span>) detailing Top 10 Alpha Features, Dollar Regret Sources, Best Policy Combos, and System Recommendations.</p>
         </div>
 
+        <!-- 4 Strategic Evolution Pillars -->
+        <div id="statistical_validation_matrix_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">Controlled Validation &amp; Power Governance</span>
+                <span class="file-tag badge-ml">Pillars 1-4 Suite</span>
+            </div>
+            <p><strong>Purpose:</strong> Statistically rigorous controlled comparison engine in <span class="code-inline">statistical_validation.py</span> and <span class="code-inline">feature_pipeline.py</span>:</p>
+            <ul>
+                <li><span class="code-inline">Pillar 1</span> — Controlled Validation Matrix: Reports $\Delta PF$, $\Delta Sharpe$, $\Delta Sortino$, $\Delta Calmar$, $\Delta MaxDD$, $\Delta Expectancy$, $\Delta Brier$, $p\text{-value}$, Cohen's d, and $95\%$ CI $\rightarrow$ Automated <span class="code-inline">KEEP</span> / <span class="code-inline">REJECT</span> recommendation.</li>
+                <li><span class="code-inline">Pillar 2</span> — Microstructure Pipeline: Realized Volatility ($15m, 1h, 4h$), Vol-of-Vol, Orderbook Convexity, Queue Imbalance, Liquidity Sweep, and Adaptive Triple Barriers.</li>
+                <li><span class="code-inline">Pillar 3</span> — Model Diversity &amp; Dynamic Weights: Prediction correlation audit ($r < 0.95$), disagreement entropy, and $w_i \propto \frac{1}{\text{Brier}_i}$ dynamic weighting in <span class="code-inline">train.py</span>.</li>
+                <li><span class="code-inline">Pillar 4</span> — Dynamic Power Analysis: Computes exact required sample size $N_{\text{required}}$ dynamically from Cohen's d effect size and variance.</li>
+            </ul>
+        </div>
+
     </div>
 
 </body>

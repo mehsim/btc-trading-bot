@@ -1366,6 +1366,56 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
         print(f"[Live Feedback] Error loading live trade samples: {e}")
         return None
 
+def audit_model_diversity_and_calculate_brier_weights(
+    preds_dict: Dict[str, np.ndarray],
+    y_true: np.ndarray
+) -> Dict[str, Any]:
+    """
+    Pillar 3: Model Diversity Audit & Dynamic Inverse-Brier Weighting.
+    Measures pairwise prediction correlations (r < 0.95 limit), disagreement entropy,
+    and calculates dynamic model weights inverse to Brier Score.
+    """
+    names = list(preds_dict.keys())
+    if len(names) < 2:
+        return {"weights": {n: 1.0 for n in names}, "correlation_matrix": {}, "disagreement_entropy": 0.0}
+
+    # 1. Pairwise prediction correlation matrix
+    corr_matrix = {}
+    is_diverse = True
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            p1, p2 = preds_dict[names[i]], preds_dict[names[j]]
+            corr = float(np.corrcoef(p1, p2)[0, 1]) if len(p1) > 1 else 1.0
+            corr_matrix[f"{names[i]}_vs_{names[j]}"] = round(corr, 4)
+            if corr > 0.95:
+                is_diverse = False
+
+    # 2. Disagreement Entropy
+    probs_stack = np.column_stack([preds_dict[n] for n in names])
+    mean_probs = np.mean(probs_stack, axis=1)
+    entropy_vals = - (mean_probs * np.log2(np.clip(mean_probs, 1e-6, 1.0)) + (1.0 - mean_probs) * np.log2(np.clip(1.0 - mean_probs, 1e-6, 1.0)))
+    avg_entropy = float(np.mean(entropy_vals))
+
+    # 3. Dynamic Inverse-Brier Model Weighting (w_i proportional to 1 / Brier_i)
+    brier_scores = {}
+    inv_briers = {}
+    for n in names:
+        brier = float(np.mean((preds_dict[n] - y_true) ** 2))
+        brier_scores[n] = round(brier, 4)
+        inv_briers[n] = 1.0 / max(1e-4, brier)
+
+    sum_inv = sum(inv_briers.values())
+    dynamic_weights = {n: round(inv_briers[n] / max(1e-6, sum_inv), 4) for n in names}
+
+    return {
+        "model_diversity_pass": is_diverse,
+        "pairwise_correlations": corr_matrix,
+        "disagreement_entropy": round(avg_entropy, 4),
+        "brier_scores": brier_scores,
+        "dynamic_inverse_brier_weights": dynamic_weights
+    }
+
+
 
 if __name__ == "__main__":
     import argparse

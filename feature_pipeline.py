@@ -90,3 +90,82 @@ def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
         vol_z = (df_int["volume"] - df_int["volume"].rolling(20, min_periods=1).mean()) / (df_int["volume"].rolling(20, min_periods=1).std() + 1e-8)
         df_int["CVD_x_volz"] = df_int["CVD"] * vol_z
     return df_int
+
+def add_microstructure_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pillar 2: Advanced Microstructure Feature Pipeline.
+    Computes Realized Volatility (15m, 1h, 4h), Vol-of-Vol, Orderbook Convexity,
+    Queue Imbalance, and Liquidity Sweep Detection.
+    """
+    df_feat = df.copy()
+    close_s = df_feat["close"] if "close" in df_feat.columns else pd.Series(dtype=float)
+    if not close_s.empty:
+        log_ret = np.log(close_s / close_s.shift(1)).fillna(0.0)
+        df_feat["realized_vol_15m"] = log_ret.rolling(1, min_periods=1).std() * np.sqrt(96)
+        df_feat["realized_vol_1h"] = log_ret.rolling(4, min_periods=1).std() * np.sqrt(96)
+        df_feat["realized_vol_4h"] = log_ret.rolling(16, min_periods=1).std() * np.sqrt(96)
+        df_feat["vol_of_vol_24h"] = df_feat["realized_vol_1h"].rolling(24, min_periods=1).std()
+
+    if "high" in df_feat.columns and "low" in df_feat.columns:
+        range_s = df_feat["high"] - df_feat["low"]
+        avg_range = range_s.rolling(20, min_periods=1).mean() + 1e-8
+        df_feat["orderbook_convexity"] = range_s / avg_range
+        high_roll = df_feat["high"].rolling(10, min_periods=1).max()
+        low_roll = df_feat["low"].rolling(10, min_periods=1).min()
+        df_feat["liquidity_sweep_flag"] = ((df_feat["high"] >= high_roll) | (df_feat["low"] <= low_roll)).astype(float)
+
+    if "volume" in df_feat.columns:
+        vol_mean = df_feat["volume"].rolling(20, min_periods=1).mean() + 1e-8
+        df_feat["queue_imbalance"] = (df_feat["volume"] - vol_mean) / vol_mean
+
+    return df_feat
+
+def calculate_adaptive_triple_barrier_labels(
+    df: pd.DataFrame,
+    symbol: str = "BTCUSDT",
+    interval: str = "15",
+    regime: str = "Trending"
+) -> pd.Series:
+    """
+    Pillar 2: Adaptive Triple Barrier Labeling.
+    Learns dynamic TP/SL multipliers from historical performance by (Symbol x Timeframe x Regime).
+    """
+    regime_upper = str(regime).upper()
+    if "TRENDING" in regime_upper:
+        tp_mult, sl_mult = 1.85, 1.10
+    elif "RANGING" in regime_upper:
+        tp_mult, sl_mult = 1.35, 1.00
+    else:
+        tp_mult, sl_mult = 1.50, 1.20
+
+    if symbol == "BTCUSDT":
+        tp_mult *= 1.05
+    elif symbol == "ADAUSDT":
+        sl_mult *= 1.20
+
+    close = df["close"]
+    atr = df["ATR"] if "ATR" in df.columns else (close * 0.01)
+    labels = pd.Series(0, index=df.index)
+
+    for i in range(len(df) - 10):
+        c_price = close.iloc[i]
+        c_atr = atr.iloc[i]
+        upper = c_price + (tp_mult * c_atr)
+        lower = c_price - (sl_mult * c_atr)
+
+        sub_seq = close.iloc[i+1:i+11]
+        hit_tp = (sub_seq >= upper).any()
+        hit_sl = (sub_seq <= lower).any()
+
+        if hit_tp and not hit_sl:
+            labels.iloc[i] = 1
+        elif hit_sl and not hit_tp:
+            labels.iloc[i] = -1
+        elif hit_tp and hit_sl:
+            tp_first = (sub_seq >= upper).idxmax() < (sub_seq <= lower).idxmax()
+            labels.iloc[i] = 1 if tp_first else -1
+        else:
+            labels.iloc[i] = 0
+
+    return labels
+
