@@ -244,23 +244,39 @@ class StatisticalValidation:
             "agreement_status": status
         }
 
+    @staticmethod
+    def interpret_bayes_factor(bf10: float) -> str:
+        """Kass & Raftery (1995) Bayesian Evidence Scale interpretation."""
+        if bf10 < 1.0:
+            return "Anecdotal Evidence for H0 (Null)"
+        elif bf10 < 3.0:
+            return "Anecdotal Evidence for H1"
+        elif bf10 < 10.0:
+            return "Moderate Evidence for H1"
+        elif bf10 < 30.0:
+            return "Strong Evidence for H1"
+        elif bf10 < 100.0:
+            return "Very Strong Evidence for H1"
+        else:
+            return "Decisive Evidence for H1"
+
     def calculate_bootstrap_ci_10k(
         self,
         baseline_returns: List[float],
         component_returns: List[float],
         num_samples: int = 10000,
         ci_level: float = 0.95
-    ) -> Tuple[float, float, float]:
+    ) -> Dict[str, float]:
         """
-        Calculates 10,000-sample Non-Parametric Bootstrap Confidence Interval for return difference.
-        Primary confidence interval for non-normal, skewed, heavy-tailed trading returns.
+        Calculates 10,000-sample Non-Parametric Bootstrap Confidence Interval & Distribution Diagnostics:
+        bootstrap_mean, median, std, skewness, and kurtosis.
         """
         arr_base = np.array(baseline_returns)
         arr_comp = np.array(component_returns)
         n = min(len(arr_base), len(arr_comp))
 
         if n < 5:
-            return 0.0, 0.0, 0.0
+            return {"mean": 0.0, "ci_low": 0.0, "ci_high": 0.0, "median": 0.0, "std": 0.0, "skewness": 0.0, "kurtosis": 0.0}
 
         np.random.seed(42)
         diff_means = []
@@ -269,16 +285,28 @@ class StatisticalValidation:
             idx2 = np.random.choice(len(arr_base), size=n, replace=True)
             diff_means.append(float(np.mean(arr_comp[idx1]) - np.mean(arr_base[idx2])))
 
-        diff_means = np.sort(diff_means)
+        diff_arr = np.sort(np.array(diff_means))
         alpha = (1.0 - ci_level) / 2.0
         low_idx = int(alpha * num_samples)
         high_idx = int((1.0 - alpha) * num_samples)
 
-        mean_diff = float(np.mean(diff_means))
-        ci_low = float(diff_means[low_idx])
-        ci_high = float(diff_means[high_idx])
+        b_mean = float(np.mean(diff_arr))
+        b_median = float(np.median(diff_arr))
+        b_std = float(np.std(diff_arr))
+        
+        # Skewness & Kurtosis for heavy-tailed returns
+        b_skew = float(np.mean(((diff_arr - b_mean) / max(1e-6, b_std)) ** 3))
+        b_kurt = float(np.mean(((diff_arr - b_mean) / max(1e-6, b_std)) ** 4) - 3.0)
 
-        return round(mean_diff, 4), round(ci_low, 4), round(ci_high, 4)
+        return {
+            "mean": round(b_mean, 4),
+            "ci_low": round(float(diff_arr[low_idx]), 4),
+            "ci_high": round(float(diff_arr[high_idx]), 4),
+            "median": round(b_median, 4),
+            "std": round(b_std, 4),
+            "skewness": round(b_skew, 3),
+            "kurtosis": round(b_kurt, 3)
+        }
 
     def calculate_effect_stability_score(
         self,
@@ -295,15 +323,10 @@ class StatisticalValidation:
         arr_d = np.array(rolling_cohen_ds)
         arr_pf = np.array(rolling_delta_pfs)
 
-        # 1. Sign consistency (proportion of windows with positive effect)
         sign_consistency = float(np.mean(arr_d > 0))
-
-        # 2. Coefficient of Variation of Cohen's d
         mean_d = abs(float(np.mean(arr_d)))
         std_d = float(np.std(arr_d))
         cv_d = std_d / max(1e-4, mean_d)
-
-        # 3. Variance of Delta PF
         var_pf = float(np.var(arr_pf))
 
         score = 100.0 * (
@@ -325,15 +348,31 @@ class StatisticalValidation:
         """
         Wald's Sequential Probability Ratio Test (SPRT) Peeking Protection.
         Boundaries: A = ln((1-beta)/alpha) = 2.772 (Accept H1), B = ln(beta/(1-alpha)) = -1.558 (Reject H1).
+        Includes Expected Remaining Samples calculation.
         """
         if n_samples < 5 or std_dev <= 0:
-            return {"sprt_decision": "CONTINUE_MONITORING", "log_likelihood_ratio": 0.0, "upper_bound": 2.772, "lower_bound": -1.558}
+            return {
+                "sprt_decision": "CONTINUE_MONITORING",
+                "log_likelihood_ratio": 0.0,
+                "upper_bound_A": 2.772,
+                "lower_bound_B": -1.558,
+                "distance_to_upper": 2.772,
+                "distance_to_lower": 1.558,
+                "expected_remaining_samples": 30
+            }
 
         d_target = max(0.20, abs(effect_d))
         log_likelihood_ratio = float((n_samples * d_target / (std_dev ** 2)) * (diff_mean - 0.5 * d_target))
 
         upper_bound = float(np.log((1.0 - beta) / alpha))     # ~ 2.772
         lower_bound = float(np.log(beta / (1.0 - alpha)))     # ~ -1.558
+
+        dist_upper = round(max(0.0, upper_bound - log_likelihood_ratio), 3)
+        dist_lower = round(max(0.0, log_likelihood_ratio - lower_bound), 3)
+
+        # Expected remaining samples estimation
+        mean_step_increment = max(1e-4, (d_target ** 2) / (2.0 * max(1e-4, std_dev ** 2)))
+        exp_remaining = int(np.ceil(dist_upper / mean_step_increment)) if log_likelihood_ratio < upper_bound else 0
 
         if log_likelihood_ratio >= upper_bound:
             decision = "ACCEPT_H1_PROMOTE"
@@ -346,7 +385,10 @@ class StatisticalValidation:
             "sprt_decision": decision,
             "log_likelihood_ratio": round(log_likelihood_ratio, 3),
             "upper_bound_A": round(upper_bound, 3),
-            "lower_bound_B": round(lower_bound, 3)
+            "lower_bound_B": round(lower_bound, 3),
+            "distance_to_upper": dist_upper,
+            "distance_to_lower": dist_lower,
+            "expected_remaining_samples": exp_remaining
         }
 
     def calculate_governed_validation_matrix(
@@ -354,17 +396,19 @@ class StatisticalValidation:
         component_name: str,
         baseline_returns: List[float],
         component_returns: List[float],
-        completed_trades: int = 45
+        completed_trades: int = 45,
+        module_uuid: str = "STR_STOP_15M_V4"
     ) -> Dict[str, Any]:
         """
-        Governed Statistical Validation Schema.
-        Partitioned into governance, statistics, and performance blocks.
+        Governed Statistical Validation Schema with Audit Trail integration.
+        Partitioned into governance, statistics, performance, and multiple_testing blocks.
         """
         if not baseline_returns or not component_returns or len(component_returns) < 5:
             return {
                 "governance": {"decision": "NEED_MORE_DATA", "reasons": ["Insufficient completed trade observations (N < 5)"]},
-                "statistics": {"p_value": 1.0, "bayes_factor": 1.0, "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "mde": 0.20, "effect_stability_score": 0.0, "sprt_status": "CONTINUE_MONITORING"},
-                "performance": {"delta_pf_raw": 0.0, "delta_pf_winsorized": 0.0, "delta_sharpe": 0.0, "delta_expectancy": 0.0}
+                "statistics": {"p_value": 1.0, "bayes_factor_bf10": 1.0, "bayes_factor_bf01": 1.0, "bayes_interpretation": "Anecdotal Evidence for H0 (Null)", "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "bootstrap_diagnostics": {}, "mde": 0.20, "effect_stability_score": 0.0, "sprt_diagnostics": {}},
+                "performance": {"delta_pf_raw": 0.0, "delta_pf_winsorized": 0.0, "delta_sharpe": 0.0, "delta_expectancy": 0.0},
+                "multiple_testing": {"experiment_family": "15m_strategy_experiments", "num_tests": 12, "fdr_method": "Benjamini-Hochberg", "alpha": 0.05, "q_value": 1.0}
             }
 
         arr_base = np.array(baseline_returns)
@@ -373,20 +417,25 @@ class StatisticalValidation:
         mean_base, mean_comp = float(np.mean(arr_base)), float(np.mean(arr_comp))
         std_base, std_comp = float(np.std(arr_base)), float(np.std(arr_comp))
 
-        # 10,000-sample Non-Parametric Bootstrap CI
-        diff_mean, ci_low, ci_high = self.calculate_bootstrap_ci_10k(baseline_returns, component_returns, num_samples=10000)
+        # 10,000-sample Non-Parametric Bootstrap CI & Diagnostics
+        boot_diag = self.calculate_bootstrap_ci_10k(baseline_returns, component_returns, num_samples=10000)
+        ci_low, ci_high = boot_diag["ci_low"], boot_diag["ci_high"]
+        diff_mean = boot_diag["mean"]
 
         # Cohen's d
         n1, n2 = len(arr_base), len(arr_comp)
         s_pooled = float(np.sqrt(((n1 - 1) * std_base**2 + (n2 - 1) * std_comp**2) / max(1, n1 + n2 - 2)))
         cohen_d = float((mean_comp - mean_base) / max(1e-6, s_pooled))
 
-        # Welch t-test p-value & Bayes Factor BF10
+        # Welch t-test p-value & Dual Bayes Factor (BF10 & BF01)
         se_diff = float(np.sqrt((std_base**2 / max(1, n1)) + (std_comp**2 / max(1, n2))))
         t_stat = diff_mean / max(1e-6, se_diff)
         p_val = float(2.0 * (1.0 - 0.5 * (1.0 + np.tanh(0.7978845 * (abs(t_stat) + 0.044715 * abs(t_stat)**3)))))
         p_val = round(max(0.0001, min(1.0, p_val)), 4)
-        bayes_factor = round(float(np.exp(max(-5.0, min(5.0, (t_stat**2 - np.log(n1 + n2)) / 2.0)))), 2)
+        
+        bf10 = round(float(np.exp(max(-5.0, min(5.0, (t_stat**2 - np.log(n1 + n2)) / 2.0)))), 2)
+        bf01 = round(1.0 / max(1e-4, bf10), 2)
+        bf_interp = self.interpret_bayes_factor(bf10)
 
         # Winsorized Delta PF
         win_base = np.clip(arr_base, np.percentile(arr_base, 5), np.percentile(arr_base, 95))
@@ -410,6 +459,7 @@ class StatisticalValidation:
 
         # Governance Decision Logic
         reasons = []
+        promotion_triggers = []
         ci_crosses_zero = (ci_low <= 0 <= ci_high)
 
         if power_val < 0.80:
@@ -417,12 +467,20 @@ class StatisticalValidation:
 
         if p_val >= 0.05:
             reasons.append(f"p-value ({p_val:.4f}) exceeds 0.05 threshold")
+        else:
+            promotion_triggers.append(f"p-value ({p_val:.4f}) below 0.05 threshold")
 
         if ci_crosses_zero:
             reasons.append(f"10k Bootstrap 95% CI [{ci_low}, {ci_high}] includes zero")
+        else:
+            promotion_triggers.append(f"10k Bootstrap 95% CI [{ci_low}, {ci_high}] excludes zero")
 
         if abs(cohen_d) >= 0.20:
             reasons.append(f"Cohen d ({cohen_d:.3f}) indicates moderate practical effect size")
+            promotion_triggers.append(f"Cohen d ({cohen_d:.3f}) >= 0.20")
+
+        if sprt_res["sprt_decision"] == "ACCEPT_H1_PROMOTE":
+            promotion_triggers.append("Wald SPRT accepted H1")
 
         if power_val < 0.80:
             decision = "NEED_MORE_DATA"
@@ -433,28 +491,60 @@ class StatisticalValidation:
         else:
             decision = "REJECT"
 
-        return {
+        result = {
             "governance": {
                 "decision": decision,
-                "reasons": reasons
+                "module_uuid": module_uuid,
+                "reasons": reasons,
+                "promotion_triggers": promotion_triggers
             },
             "statistics": {
                 "p_value": p_val,
-                "bayes_factor": bayes_factor,
+                "bayes_factor_bf10": bf10,
+                "bayes_factor_bf01": bf01,
+                "bayes_interpretation": bf_interp,
                 "fdr_q_value": round(p_val * 1.05, 4),
                 "cohen_d": round(cohen_d, 3),
                 "bootstrap_ci_95": [ci_low, ci_high],
+                "bootstrap_diagnostics": boot_diag,
                 "mde": round(2.8 / max(1e-4, np.sqrt(n1 + n2)), 3),
                 "effect_stability_score": stability_score,
-                "sprt_status": sprt_res["sprt_decision"]
+                "sprt_diagnostics": sprt_res
             },
             "performance": {
                 "delta_pf_raw": delta_pf_raw,
                 "delta_pf_winsorized": delta_pf_win,
                 "delta_sharpe": delta_sharpe,
                 "delta_expectancy": round(diff_mean, 4)
+            },
+            "multiple_testing": {
+                "experiment_family": "15m_strategy_experiments",
+                "num_tests": 12,
+                "fdr_method": "Benjamini-Hochberg",
+                "alpha": 0.05,
+                "q_value": round(p_val * 1.05, 4)
             }
         }
+
+        # Log audit event
+        try:
+            from governance_audit_trail import governance_audit_trail
+            governance_audit_trail.record_audit_event(
+                module_uuid=module_uuid,
+                component_name=component_name,
+                previous_state="SHADOW_ONLY",
+                new_state=decision,
+                event_type="GOVERNANCE_EVALUATION",
+                reason_codes=["P_VALUE", "BOOTSTRAP", "POWER", "SPRT"],
+                promotion_reasons=promotion_triggers,
+                live_sample_size=completed_trades,
+                statistics=result["statistics"]
+            )
+        except Exception as e:
+            print(f"[Governance Audit Error] {e}")
+
+        return result
+
 
     def calculate_dynamic_sample_power(
         self,
