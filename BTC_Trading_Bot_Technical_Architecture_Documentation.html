@@ -918,6 +918,61 @@
             </div>
         </div>
 
+        <!-- .github/workflows/ci.yml -->
+        <div id="ci_yml" class="file-card">
+            <div class="file-header">
+                <span class="file-name">.github/workflows/ci.yml</span>
+                <span class="file-tag badge-core">CI/CD Pipeline</span>
+            </div>
+            <p><strong>Purpose:</strong> GitHub Actions CI/CD pipeline with two jobs:</p>
+            <ul>
+                <li><strong>test-and-validate</strong>: Installs lightweight deps, runs <span class="code-inline">flake8</span> on all new modules (E9/F63/F7/F82 critical errors only), Bandit security scan, and <span class="code-inline">pytest tests/test_today_metrics.py</span>.</li>
+                <li><strong>smoke-test-and-deploy</strong>: Deploys to AWS Singapore (<span class="code-inline">47.129.153.199</span>) via SSH, waits 8s, curls <span class="code-inline">/api/status</span> and expects HTTP 200. Skips gracefully if <span class="code-inline">AWS_SINGAPORE_KEY</span> secret is not configured. Both steps have <span class="code-inline">continue-on-error: true</span>.</li>
+            </ul>
+            <div class="section-heading">Pipeline Flow</div>
+            <div class="formula-box" style="color: #a7f3d0; font-size: 12.5px;">
+                [Git Push] &rarr; [flake8 lint new modules] &rarr; [bandit security scan] &rarr; [pytest core tests]<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&darr; (on main branch only)<br>
+                [SSH git pull AWS Singapore] &rarr; [pkill + restart main.py] &rarr; [curl /api/status == 200]
+            </div>
+        </div>
+
+        <!-- .flake8 -->
+        <div id="flake8_config" class="file-card">
+            <div class="file-header">
+                <span class="file-name">.flake8</span>
+                <span class="file-tag badge-core">Lint Configuration</span>
+            </div>
+            <p><strong>Purpose:</strong> Flake8 lint configuration. Excludes pre-existing legacy files (<span class="code-inline">main.py</span>, <span class="code-inline">bybit_client.py</span>, <span class="code-inline">database.py</span>, etc.) that contain Python 3.14 syntax or known pre-existing issues, preventing false CI failures. Sets <span class="code-inline">max-line-length=120</span> and <span class="code-inline">max-complexity=10</span>.</p>
+        </div>
+
+        <!-- compliance_audit.log -->
+        <div id="compliance_audit_log" class="file-card">
+            <div class="file-header">
+                <span class="file-name">compliance_audit.log</span>
+                <span class="file-tag badge-risk">Compliance &amp; Audit Trail</span>
+            </div>
+            <p><strong>Purpose:</strong> Append-only order compliance log written by <span class="code-inline">audit_trail_logger.py</span>. Records every order submission and cancellation with: <span class="code-inline">timestamp</span>, <span class="code-inline">action</span> (ORDER_SUBMITTED / ORDER_CANCELLED), <span class="code-inline">order_id</span>, <span class="code-inline">symbol</span>, <span class="code-inline">direction</span>, <span class="code-inline">size_usd</span>, <span class="code-inline">triggered_by</span> (strategy interval), and <span class="code-inline">confidence</span>. Required for regulatory audit readiness.</p>
+        </div>
+
+        <!-- model_governance_log.json -->
+        <div id="model_governance_log" class="file-card">
+            <div class="file-header">
+                <span class="file-name">model_governance_log.json</span>
+                <span class="file-tag badge-ml">Model Governance Registry</span>
+            </div>
+            <p><strong>Purpose:</strong> JSON training run registry written by <span class="code-inline">champion_challenger_framework.py → log_training_run()</span>. Stores up to 200 most recent training runs. Each record contains: <span class="code-inline">timestamp</span>, <span class="code-inline">interval</span>, <span class="code-inline">holdout_accuracy</span>, <span class="code-inline">brier_score</span>, <span class="code-inline">feature_hash</span> (SHA256 of selected features), and <span class="code-inline">training_period</span>. Bayesian promotion gate upgraded from 95% → <strong>99%</strong> posterior probability required for challenger promotion.</p>
+        </div>
+
+        <!-- order_queue.db -->
+        <div id="order_queue_db" class="file-card">
+            <div class="file-header">
+                <span class="file-name">order_queue.db</span>
+                <span class="file-tag badge-core">Persistent Order Store</span>
+            </div>
+            <p><strong>Purpose:</strong> SQLite database backing the OMS persistent order queue in <span class="code-inline">order_executor.py</span>. Survives bot crashes, OS restarts, and SIGKILL. On startup, all <span class="code-inline">PENDING_SUBMIT</span> and <span class="code-inline">ACKNOWLEDGED</span> orders are recovered and re-enqueued automatically. On <span class="code-inline">SIGTERM</span>, current queue state is flushed to disk before exit. Schema: <span class="code-inline">order_id, symbol, direction, status, created_at, filled_at, payload (JSON)</span>.</p>
+        </div>
+
     </div>
 
 </body>
