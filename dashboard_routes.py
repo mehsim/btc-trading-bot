@@ -753,6 +753,7 @@ def api_institutional_summary():
 
     mqs_val = min(98, max(40, int(60 + calculated_pf * 12))) if total_trades_count >= 5 else 72
     eqs_val = min(98, max(40, int(55 + rr_val * 15))) if total_trades_count >= 5 else 81
+    holdout_val = round(float(state_manager.get("shadow_holdout_accuracy", state_manager.get("holdout_accuracy", win_rate if win_rate > 0 else 52.4))), 1)
 
     data = {
         "status": "ok",
@@ -895,7 +896,7 @@ def api_institutional_summary():
                    shadow_pf_val=round(float(state_manager.get("shadow_pf") or (calculated_pf * 1.06 if calculated_pf > 0 else 1.15)), 2),
                    gates=release_gates_str,
                    wf_date=state_manager.get("last_walk_forward_date", state_manager.get("last_optimization_date", time.strftime("%Y-%m-%d", time.gmtime()))),
-                   holdout=round(float(state_manager.get("shadow_holdout_accuracy", state_manager.get("holdout_accuracy", win_rate if win_rate > 0 else 52.4))), 1),
+                   holdout=holdout_val,
                    bs_ci=boot_ci_str,
                    eff=effect_size_str,
                    champ_exp=dynamic_exp_r,
@@ -961,7 +962,7 @@ def api_institutional_summary():
         "capital_efficiency": (lambda: portfolio_risk_engine.calculate_capital_efficiency(active_positions, sim_balance))(),
         "decision_stability": (lambda: statistical_validation.compute_decision_stability(None, {}, "Bullish", 0.85))(),
         "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": "live_v1"}))(),
-        "model_health_index": (lambda: strategy_health_engine.calculate_model_health_index())(),
+        "model_health_index": (lambda: strategy_health_engine.calculate_model_health_index(holdout_accuracy_pct=holdout_val, rolling_pf=calculated_pf))(),
         "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(164, 98, 114))()
     }
     return jsonify(data)
