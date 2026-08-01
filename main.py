@@ -28,6 +28,7 @@ from garch_monitor import garch_vol_monitor
 from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 import database
+import trade_calculators
 from secret_manager import get_secure_env
 
 from bybit_client import (
