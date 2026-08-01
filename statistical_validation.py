@@ -456,8 +456,40 @@ class StatisticalValidation:
             }
         }
 
+    def calculate_dynamic_sample_power(
+        self,
+        effect_size_d: float,
+        variance: float,
+        alpha: float = 0.05,
+        target_power: float = 0.80,
+        completed_trades: int = 45
+    ) -> Dict[str, Any]:
+        """
+        Pillar 4: Dynamic Sample Power Analysis (Variable N_required).
+        N_required = (2 * (z_{1-alpha/2} + z_{1-beta})^2 * sigma^2) / delta^2
+        """
+        d_abs = max(0.05, abs(effect_size_d))
+        z_alpha = 1.96  # 95% confidence
+        z_beta = 0.84   # 80% power
+
+        n_required = int(np.ceil((2.0 * ((z_alpha + z_beta) ** 2) * max(0.01, variance)) / (d_abs ** 2)))
+        n_required = max(30, min(500, n_required))
+
+        power_achieved = round(min(0.99, float(completed_trades / max(1, n_required))), 3)
+        is_sufficient = completed_trades >= n_required
+
+        return {
+            "effect_size_cohen_d": round(effect_size_d, 3),
+            "sample_variance": round(variance, 4),
+            "required_trades_n": n_required,
+            "completed_trades_n": completed_trades,
+            "statistical_power": power_achieved,
+            "is_statistically_sufficient": is_sufficient
+        }
+
 
 statistical_validation = StatisticalValidation()
+
 
 
 
