@@ -483,6 +483,7 @@ def api_institutional_summary():
     from trade_calculators import calculate_decomposed_trade_quality
     from strategy_health_engine import strategy_health_engine
     from champion_challenger_framework import champion_challenger_framework
+    from exit_policy_engine import exit_policy_engine
     history = state_manager.get("trade_history", [])
     if not history or not isinstance(history, list):
         try:
@@ -964,7 +965,9 @@ def api_institutional_summary():
         "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": "live_v1"}))(),
         "model_health_index": (lambda: strategy_health_engine.calculate_model_health_index(rolling_pf=calculated_pf, expectancy_r=exp_r_val, trades_count=total_trades_count))(),
         "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(164, 98, 114))(),
-        "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=float(state_manager.get("last_brier_score", 0.214))))()
+        "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=float(state_manager.get("last_brier_score", 0.214))))(),
+        "uncertainty_execution_policy": (lambda: exit_policy_engine.calculate_uncertainty_execution_policy(0.0609))(),
+        "expected_r_meta_model": (lambda: mlops_engine.estimate_expected_r_multiple())()
     }
     return jsonify(data)
 

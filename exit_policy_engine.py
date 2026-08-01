@@ -379,6 +379,21 @@ class ExitPolicyEngine:
             "locked_timestamp": time.time()
         }
 
+    def calculate_uncertainty_execution_policy(self, u_total: float = 0.06) -> Dict[str, Any]:
+        """
+        Ties total uncertainty (U_total) directly to execution management.
+        """
+        u = float(u_total)
+        if u < 0.05:
+            return {"execution_policy": "Full size, normal TP/SL", "sizing_mult": 1.00, "sl_mult": 1.00, "scaleout_pct": 0.50, "shadow_only": False}
+        elif u < 0.10:
+            return {"execution_policy": "Slight size reduction, standard exits", "sizing_mult": 0.90, "sl_mult": 1.00, "scaleout_pct": 0.50, "shadow_only": False}
+        elif u < 0.20:
+            return {"execution_policy": "Reduced size, wider stop, smaller initial scale-out", "sizing_mult": 0.65, "sl_mult": 1.25, "scaleout_pct": 0.25, "shadow_only": False}
+        else:
+            return {"execution_policy": "Paper trade or shadow-only evaluation", "sizing_mult": 0.00, "sl_mult": 1.50, "scaleout_pct": 0.00, "shadow_only": True}
+
 
 exit_policy_engine = ExitPolicyEngine()
+
 
