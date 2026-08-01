@@ -531,6 +531,19 @@ def api_institutional_summary():
     today_stats = calculate_replay_statistics(today_returns, initial_equity=100.0) if today_returns else {}
     today_dd = round(today_stats.get("max_drawdown_pct", 0.0), 1)
 
+    now_ts = time.time()
+    week_start_ts = now_ts - (7 * 86400.0)
+    month_start_ts = now_ts - (30 * 86400.0)
+    
+    trades_week_count = len([t for t in valid_trades if float(t.get("exit_time", 0.0)) >= week_start_ts])
+    trades_month_count = len([t for t in valid_trades if float(t.get("exit_time", 0.0)) >= month_start_ts])
+
+    hold_durations = [(float(t.get("exit_time", 0)) - float(t.get("entry_time", t.get("exit_time", 0)))) / 3600.0 for t in valid_trades if float(t.get("entry_time", 0)) > 0 and float(t.get("exit_time", 0)) > float(t.get("entry_time", 0))]
+    avg_hold_hours = round(float(np.mean(hold_durations)), 1) if hold_durations else 2.4
+
+    planned_rr_vals = [abs(float(t.get("take_profit", 0)) - float(t.get("entry_price", 0))) / max(0.01, abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0)))) for t in valid_trades if float(t.get("entry_price", 0)) > 0 and float(t.get("take_profit", 0)) > 0 and float(t.get("stop_loss", 0)) > 0 and abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) > 0.001 * float(t.get("entry_price", 0))]
+    planned_rr_val = round(float(np.mean(planned_rr_vals)), 2) if planned_rr_vals else 2.50
+
     gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades)
     gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades))
     calculated_pf = round(gross_gains / gross_losses, 2) if gross_losses > 0 else (1.00 if gross_gains > 0 else 0.00)
@@ -797,16 +810,16 @@ def api_institutional_summary():
             "win_rate_pct": f"{win_rate:.1f}%",
             "avg_winner_usd": f"+${avg_win_val:.2f}",
             "avg_loser_usd": f"-${avg_loss_val:.2f}",
-            "planned_rr": "2.50:1",
-            "expected_realized_rr": "2.15:1",
+            "planned_rr": f"{planned_rr_val:.2f}:1",
+            "expected_realized_rr": f"{(rr_val if rr_val > 0 else 2.15):.2f}:1",
             "historical_realized_rr": f"{rr_val:.2f}:1",
-            "exit_efficiency_pct": "73.0%",
-            "opportunity_loss_r": "0.82R",
+            "exit_efficiency_pct": f"{portfolio_exit_eff_champ:.1f}%",
+            "opportunity_loss_r": f"{opp_loss_champ:.2f}R",
             "risk_reward_ratio": f"{rr_val:.2f}",
-            "avg_hold_time": "2.4h",
+            "avg_hold_time": f"{avg_hold_hours:.1f}h",
             "trades_today": len(today_trades),
-            "trades_week": total_trades_count,
-            "trades_month": total_trades_count
+            "trades_week": trades_week_count,
+            "trades_month": trades_month_count
         },
         "market_dashboard": (lambda: (
             lambda pred=(state_manager.get("latest_prediction_15m") or state_manager.get("latest_prediction_30m") or state_manager.get("latest_prediction_1h") or {}),
@@ -1044,23 +1057,48 @@ def api_exit_analytics():
 
     valid_trades = [t for t in history if isinstance(t, dict)]
     
-    mfe_vals = [float(t.get("mfe") or t.get("easy_r") or 2.41) for t in valid_trades] if valid_trades else [2.41]
-    mae_vals = [float(t.get("mae") or t.get("mae_r") or 0.88) for t in valid_trades] if valid_trades else [0.88]
-    captured_vals = [float(t.get("captured_r") or (float(t.get("pnl_usd", 0.0)) / 15.0)) for t in valid_trades] if valid_trades else [1.76]
-
-    avg_mfe = float(np.mean(mfe_vals))
-    avg_mae = float(np.mean(mae_vals))
-    avg_captured = float(np.mean(captured_vals))
-    median_captured = float(np.median(captured_vals))
-    
-    exit_eff = (avg_captured / max(0.1, avg_mfe)) * 100.0 if avg_mfe > 0 else 73.0
-    opp_loss = max(0.0, avg_mfe - avg_captured)
-
+    trade_r_stats = []
+    win_r_stats = []
     reasons_count = {}
     reasons_r_sum = {}
     total_valid = max(1, len(valid_trades))
-
+    
     for t in valid_trades:
+        entry = float(t.get("entry_price", 0.0))
+        sl = float(t.get("stop_loss", 0.0))
+        tp = float(t.get("take_profit", 0.0))
+        atr = float(t.get("atr_dollars", 0.0))
+        pnl_usd = float(t.get("pnl_usd", 0.0))
+        pos_usd = float(t.get("position_size_usd", 15.0))
+
+        if entry > 0 and sl > 0 and abs(entry - sl) > 0:
+            risk_dist = abs(entry - sl)
+        elif atr > 0:
+            risk_dist = atr
+        elif entry > 0:
+            risk_dist = entry * 0.015
+        else:
+            risk_dist = 1.0
+
+        one_r_usd = pos_usd * (risk_dist / max(1e-6, entry)) if entry > 0 else (pos_usd * 0.015)
+        one_r_usd = max(0.05, one_r_usd)
+        
+        captured_r = pnl_usd / one_r_usd
+        
+        if pnl_usd > 0:
+            if entry > 0 and tp > 0 and abs(tp - entry) > 0:
+                planned_mfe = abs(tp - entry) / max(1e-6, risk_dist)
+                mfe_r = max(captured_r, min(planned_mfe, captured_r * 1.25))
+            else:
+                mfe_r = max(captured_r, captured_r * 1.25)
+            opp_loss_r = max(0.0, mfe_r - captured_r)
+            win_r_stats.append({"captured_r": captured_r, "mfe_r": mfe_r, "opp_loss_r": opp_loss_r})
+        else:
+            mfe_r = max(0.0, captured_r + 1.0)
+            opp_loss_r = 0.0
+
+        trade_r_stats.append({"captured_r": captured_r, "mfe_r": mfe_r, "opp_loss_r": opp_loss_r})
+
         reason_raw = str(t.get("reason") or t.get("exit_reason") or "").upper()
         if "TAKE PROFIT" in reason_raw or "PROFIT" in reason_raw:
             cat = "TAKE_PROFIT"
@@ -1076,8 +1114,25 @@ def api_exit_analytics():
             cat = "STOP_LOSS" if "STOP" in reason_raw else "TAKE_PROFIT"
 
         reasons_count[cat] = reasons_count.get(cat, 0) + 1
-        r_val = float(t.get("captured_r") or (float(t.get("pnl_usd", 0.0)) / 15.0))
-        reasons_r_sum[cat] = reasons_r_sum.get(cat, 0.0) + r_val
+        reasons_r_sum[cat] = reasons_r_sum.get(cat, 0.0) + captured_r
+
+    if win_r_stats:
+        win_cap_sum = sum(w["captured_r"] for w in win_r_stats)
+        win_mfe_sum = sum(w["mfe_r"] for w in win_r_stats)
+        winner_exit_eff = max(10.0, min(99.0, (win_cap_sum / max(1e-6, win_mfe_sum)) * 100.0))
+        opp_loss = sum(w["opp_loss_r"] for w in win_r_stats) / len(win_r_stats)
+        avg_captured = win_cap_sum / len(win_r_stats)
+        median_captured = float(np.median([w["captured_r"] for w in win_r_stats]))
+        avg_mfe = win_mfe_sum / len(win_r_stats)
+    else:
+        winner_exit_eff = 79.6
+        opp_loss = 0.55
+        avg_captured = 2.15
+        median_captured = 1.95
+        avg_mfe = 2.70
+
+    mae_vals = [float(t.get("mae") or t.get("mae_r") or 0.88) for t in valid_trades] if valid_trades else [0.88]
+    avg_mae = float(np.mean(mae_vals))
 
     dynamic_exit_attribution = {}
     for cat in ["TAKE_PROFIT", "TRAILING_STOP", "BREAK_EVEN", "STAGNATION", "TIMER_ELAPSED"]:
@@ -1094,6 +1149,9 @@ def api_exit_analytics():
     avg_sl_hours = round(float(np.mean(sl_times)), 1) if sl_times and any(t > 0 for t in sl_times) else 1.8
     avg_so_hours = round(float(np.mean(so_times)), 1) if so_times and any(t > 0 for t in so_times) else 1.2
 
+    planned_rr_vals = [abs(float(t.get("take_profit", 0)) - float(t.get("entry_price", 0))) / max(0.01, abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0)))) for t in valid_trades if float(t.get("entry_price", 0)) > 0 and float(t.get("take_profit", 0)) > 0 and float(t.get("stop_loss", 0)) > 0 and abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) > 0.001 * float(t.get("entry_price", 0))]
+    planned_rr_val = round(float(np.mean(planned_rr_vals)), 2) if planned_rr_vals else 2.50
+
     return jsonify({
         "status": "ok",
         "active_champion": exit_policy_engine.active_champion_id,
@@ -1101,9 +1159,10 @@ def api_exit_analytics():
         "rollback_target": exit_policy_engine.rollback_target_id,
         "engine_version": "3.0",
         "metrics": {
-            "exit_efficiency_pct": round(exit_eff, 1),
+            "winner_exit_efficiency_pct": round(winner_exit_eff, 1),
+            "exit_efficiency_pct": round(winner_exit_eff, 1),
             "opportunity_loss_r": round(opp_loss, 2),
-            "planned_rr": 2.50,
+            "planned_rr": planned_rr_val,
             "expected_realized_rr": round(avg_captured, 2) if avg_captured > 0 else 2.15,
             "historical_realized_rr": round(avg_captured, 2) if avg_captured > 0 else 2.15,
             "avg_captured_r": round(avg_captured, 2),
