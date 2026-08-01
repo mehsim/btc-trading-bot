@@ -3724,7 +3724,7 @@
                             if (document.getElementById("sh-ulcer")) document.getElementById("sh-ulcer").innerText = stat.ulcer_index || "1.12";
 
                             if (document.getElementById("sh-psi")) document.getElementById("sh-psi").innerText = dr.psi_score || "0.04";
-                            if (document.getElementById("sh-ece")) document.getElementById("sh-ece").innerText = `${dr.ece_score || 3.8}%`;
+                            if (document.getElementById("sh-ece")) { let ev = dr.ece_score !== undefined ? dr.ece_score : "3.8"; document.getElementById("sh-ece").innerText = String(ev).includes('%') ? ev : `${ev}%`; }
                             if (document.getElementById("sh-cal-status")) document.getElementById("sh-cal-status").innerText = dr.calibration_status || "Normal";
                             if (document.getElementById("sh-fdrift")) document.getElementById("sh-fdrift").innerText = dr.feature_drift_status || "Normal";
                             if (document.getElementById("sh-rdrift")) document.getElementById("sh-rdrift").innerText = dr.regime_drift_status || "Normal";
