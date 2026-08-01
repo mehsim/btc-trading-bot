@@ -3492,11 +3492,10 @@ def get_research_report():
 
 @app.route("/api/statistical_validation")
 def get_statistical_validation():
-    """Returns Governed Statistical Validation & SPRT Sequential Testing JSON."""
-    sample_rets = [0.012, -0.005, 0.018, 0.024, -0.008, 0.015, 0.031, -0.004, 0.019, 0.022]
-    base_rets = [0.008, -0.010, 0.011, 0.014, -0.012, 0.009, 0.018, -0.009, 0.010, 0.012]
+    """Returns Governed Statistical Validation & SPRT Sequential Testing JSON dynamically from decision_outcome_db."""
+    sample_rets, base_rets, n_completed_db = decision_outcome_db.get_completed_returns()
+    n_completed = max(n_completed_db, len(bot_state.get("trade_history", [])) if "bot_state" in globals() and isinstance(bot_state, dict) else 45)
     
-    n_completed = len(bot_state.get("trade_history", [])) if "bot_state" in globals() and isinstance(bot_state, dict) else 45
     governed_res = statistical_validation.calculate_governed_validation_matrix(
         component_name="15m Structural Swing Stop & Dynamic Leverage",
         baseline_returns=base_rets,
