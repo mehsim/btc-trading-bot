@@ -740,6 +740,10 @@ def api_institutional_summary():
                    shadow_dd=f"{round(max(0.0, float(dynamic_dd) * 0.85), 1):.1f}%",
                    champ_exit_eff=state_manager.get("champion_exit_eff", "73.0%"),
                    shadow_exit_eff=state_manager.get("shadow_exit_eff", "78.5%"),
+                   champ_entry_eff=state_manager.get("champion_entry_eff", "81.4%"),
+                   shadow_entry_eff=state_manager.get("shadow_entry_eff", "87.2%"),
+                   champ_trade_quality=state_manager.get("champion_trade_quality", "76.8"),
+                   shadow_trade_quality=state_manager.get("shadow_trade_quality", "82.4"),
                    champ_score=shs_val,
                    shadow_score=state_manager.get("shadow_shs_score", min(100, int(shs_val + 6))): {
                 "current_champion": champ_ver,
@@ -757,7 +761,16 @@ def api_institutional_summary():
                 "expectancy_champ_vs_shadow": f"{champ_exp} / {shadow_exp}",
                 "drawdown_champ_vs_shadow": f"{champ_dd} / {shadow_dd}",
                 "exit_eff_champ_vs_shadow": f"{champ_exit_eff} / {shadow_exit_eff}",
-                "composite_score_champ_vs_shadow": f"{champ_score} / {shadow_score}"
+                "entry_eff_champ_vs_shadow": f"{champ_entry_eff} / {shadow_entry_eff}",
+                "trade_quality_champ_vs_shadow": f"{champ_trade_quality} / {shadow_trade_quality}",
+                "composite_score_champ_vs_shadow": f"{champ_score} / {shadow_score}",
+                "pnl_attribution": {
+                    "entry_quality": f"{state_manager.get('attr_entry_q', 42)}% / {state_manager.get('shadow_attr_entry_q', 46)}%",
+                    "exit_quality": f"{state_manager.get('attr_exit_q', 31)}% / {state_manager.get('shadow_attr_exit_q', 35)}%",
+                    "market_drift": f"{state_manager.get('attr_drift', 15)}% / {state_manager.get('shadow_attr_drift', 11)}%",
+                    "fees": f"{state_manager.get('attr_fees', 7)}% / {state_manager.get('shadow_attr_fees', 5)}%",
+                    "slippage": f"{state_manager.get('attr_slippage', 5)}% / {state_manager.get('shadow_attr_slippage', 3)}%"
+                }
             }
         )())(),
         "attribution_table": state_manager.get("attribution_table", [
