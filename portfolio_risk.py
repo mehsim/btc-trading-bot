@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 class PortfolioRiskEngine:
     def __init__(self, var_confidence: float = 0.99, max_var_pct: float = 0.05):

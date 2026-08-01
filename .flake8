@@ -1,0 +1,17 @@
+[flake8]
+max-line-length = 120
+max-complexity = 10
+# Only check critical errors (syntax + critical undefined names)
+# Exclude pre-existing large files with known issues and vendored code
+exclude =
+    .venv,
+    main.py,
+    bybit_client.py,
+    database.py,
+    ensemble.py,
+    run_simulation.py,
+    simulate_skipped_daily.py,
+    trade_calculators.py,
+    websocket_client.py,
+    __pycache__,
+    *.egg-info
