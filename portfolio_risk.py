@@ -498,8 +498,75 @@ class PortfolioRiskEngine:
             "total_observations": len(arr)
         }
 
+    def calculate_portfolio_cvar_99_and_tail_contributions(
+        self,
+        open_positions: List[Dict[str, Any]],
+        returns_df: pd.DataFrame,
+        total_equity: float
+    ) -> Dict[str, Any]:
+        """
+        Capability 2: 99% Portfolio Expected Shortfall (CVaR) & Per-Position Marginal Tail-Risk Contribution.
+        CVaR_99 = (1 / 0.01) * integral_0^0.01 VaR_alpha(X) d_alpha
+        """
+        if not open_positions or returns_df is None or returns_df.empty or total_equity <= 0:
+            return {"cvar_99_dollars": 0.0, "cvar_99_pct": 0.0, "position_tail_contributions": {}}
+
+        symbol_sizes: Dict[str, float] = {}
+        for p in open_positions:
+            sym = p.get("symbol")
+            if sym and sym in returns_df.columns:
+                symbol_sizes[sym] = symbol_sizes.get(sym, 0.0) + float(p.get("position_size_usd", 0.0))
+
+        symbols = list(symbol_sizes.keys())
+        if not symbols:
+            return {"cvar_99_dollars": 0.0, "cvar_99_pct": 0.0, "position_tail_contributions": {}}
+
+        weights = np.array([symbol_sizes[s] for s in symbols])
+        portfolio_val = float(np.sum(weights))
+        if portfolio_val <= 0:
+            return {"cvar_99_dollars": 0.0, "cvar_99_pct": 0.0, "position_tail_contributions": {}}
+
+        weight_vector = weights / max(1e-9, portfolio_val)
+        sub_returns = returns_df[symbols].dropna()
+        if sub_returns.empty or len(sub_returns) < 10:
+            return {"cvar_99_dollars": 0.0, "cvar_99_pct": 0.0, "position_tail_contributions": {}}
+
+        port_returns = sub_returns.values @ weight_vector
+        tail_cutoff = np.percentile(port_returns, 1)  # 1st percentile for 99% confidence
+        tail_losses = port_returns[port_returns <= tail_cutoff]
+
+        if len(tail_losses) == 0:
+            cvar_pct = abs(float(tail_cutoff))
+        else:
+            cvar_pct = float(abs(np.mean(tail_losses)))
+
+        cvar_dollars = float(cvar_pct * portfolio_val)
+        cvar_equity_pct = float(cvar_dollars / max(1e-9, total_equity) * 100.0)
+
+        # Calculate per-position marginal tail-risk contribution
+        tail_contributions: Dict[str, float] = {}
+        total_weight_sum = float(np.sum(weights))
+        for idx, sym in enumerate(symbols):
+            w = weights[idx] / max(1e-9, total_weight_sum)
+            sym_ret = sub_returns[sym].values
+            tail_indices = np.where(port_returns <= tail_cutoff)[0]
+            if len(tail_indices) > 0:
+                sym_tail_mean = float(abs(np.mean(sym_ret[tail_indices])))
+            else:
+                sym_tail_mean = float(abs(np.percentile(sym_ret, 1)))
+            marginal_contrib = round(w * sym_tail_mean * 100.0, 2)
+            tail_contributions[sym] = marginal_contrib
+
+        return {
+            "cvar_99_dollars": round(cvar_dollars, 2),
+            "cvar_99_equity_pct": round(cvar_equity_pct, 2),
+            "portfolio_value_usd": round(portfolio_val, 2),
+            "position_tail_contributions": tail_contributions
+        }
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
+
 
 
 

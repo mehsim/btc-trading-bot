@@ -1028,8 +1028,36 @@
             <p><strong>Purpose:</strong> Simulates an 81-scenario $3 \times 3 \times 3 \times 3$ replay matrix (Stop $\times$ TP $\times$ Scale $\times$ Leverage) for every completed trade. Generates ranked alternative recommendations and runs 5% experimental variants in Shadow Mode to prevent local optima traps.</p>
         </div>
 
+        <!-- hierarchical_bayesian_engine.py -->
+        <div id="hierarchical_bayesian_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">hierarchical_bayesian_engine.py</span>
+                <span class="file-tag badge-ml">Hierarchical Bayesian Pooling</span>
+            </div>
+            <p><strong>Purpose:</strong> Performs partial parameter pooling across Global $\rightarrow$ Asset Class $\rightarrow$ Symbol $\rightarrow$ Timeframe tiers. Shares cross-asset market learning while preserving coin specialization.</p>
+        </div>
+
+        <!-- drift_attribution_engine.py -->
+        <div id="drift_attribution_engine_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">drift_attribution_engine.py</span>
+                <span class="file-tag badge-ml">Drift Root-Cause Diagnostic</span>
+            </div>
+            <p><strong>Purpose:</strong> Diagnoses model drift ($p < 0.05$) across 5 root-cause factors: Feature Distribution Shift, Volatility Regime Change, Liquidity Deterioration, Calibration Degradation, and Microstructure Shift.</p>
+        </div>
+
+        <!-- automatic_research_reporter.py -->
+        <div id="automatic_research_reporter_py" class="file-card">
+            <div class="file-header">
+                <span class="file-name">automatic_research_reporter.py</span>
+                <span class="file-tag badge-core">Executive Research Reporter</span>
+            </div>
+            <p><strong>Purpose:</strong> Automatically compiles structured executive markdown reports (<span class="code-inline">research_report_latest.md</span>) and JSON endpoint (<span class="code-inline">/api/research_report</span>) detailing Top 10 Alpha Features, Dollar Regret Sources, Best Policy Combos, and System Recommendations.</p>
+        </div>
+
     </div>
 
 </body>
+
 
 </html>

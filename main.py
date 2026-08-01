@@ -34,6 +34,9 @@ from meta_learning_engine import meta_learning_engine
 from causal_attribution_engine import causal_attribution_engine
 from counterfactual_replay_engine import counterfactual_replay_engine
 from probabilistic_policy_selector import probabilistic_policy_selector
+from hierarchical_bayesian_engine import hierarchical_bayesian_engine
+from drift_attribution_engine import drift_attribution_engine
+from automatic_research_reporter import automatic_research_reporter
 from secret_manager import get_secure_env
 
 from bybit_client import (
@@ -3478,6 +3481,12 @@ def get_status():
     state_copy["real_bybit_balance"] = get_real_bybit_balance_cached()
     
     return jsonify(state_copy)
+
+@app.route("/api/research_report")
+def get_research_report():
+    """Returns Executive Research Report JSON."""
+    report = automatic_research_reporter.generate_executive_report()
+    return jsonify(report)
 
 @app.route("/api/terminate", methods=["POST"])
 @require_api_key
