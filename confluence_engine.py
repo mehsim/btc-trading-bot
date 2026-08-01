@@ -348,3 +348,54 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         }
 
     return bool(approved), std_results, float(score_pct)
+
+
+def calculate_entry_signal_attribution(
+    confluence_results: dict,
+    calibrated_confidence: float,
+    regime_name: str = "Trending"
+) -> dict:
+    """
+    Decomposes entry decision into 7 sub-scores (0.0 to 1.0) and final confidence.
+    """
+    if not isinstance(confluence_results, dict):
+        confluence_results = {}
+
+    def _check_pass(k):
+        item = confluence_results.get(k, {})
+        return 1.0 if (isinstance(item, dict) and item.get("pass")) else 0.4
+
+    t1 = _check_pass("1d_Trend")
+    t2 = _check_pass("4h_Trend")
+    trend_score = round(float((t1 + t2) / 2.0), 2)
+
+    r1 = _check_pass("1h_RSI")
+    r2 = _check_pass("Counter_Momentum")
+    momentum_score = round(float((r1 + r2) / 2.0), 2)
+
+    v1 = _check_pass("Volume_Participation")
+    volume_score = round(float(v1), 2)
+
+    l1 = _check_pass("BB_Edge_Guard")
+    l2 = _check_pass("Volatility_Guard")
+    liquidity_score = round(float((l1 + l2) / 2.0), 2)
+
+    regime_score = round(0.95 if "Trending" in str(regime_name) else 0.75, 2)
+
+    m1 = _check_pass("News_Sentiment")
+    macro_score = round(float(m1), 2)
+
+    o1 = _check_pass("Orderbook_Imbalance")
+    orderbook_score = round(float(o1), 2)
+
+    return {
+        "trend_score": trend_score,
+        "momentum_score": momentum_score,
+        "volume_score": volume_score,
+        "liquidity_score": liquidity_score,
+        "regime_score": regime_score,
+        "macro_score": macro_score,
+        "orderbook_score": orderbook_score,
+        "final_confidence": round(float(calibrated_confidence), 4)
+    }
+

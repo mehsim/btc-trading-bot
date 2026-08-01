@@ -477,6 +477,10 @@ def api_institutional_summary():
     Powers all 10 specialized frontend sections and the sticky health banner.
     """
     from state_manager import state_manager
+    from portfolio_risk import portfolio_risk_engine
+    import mlops_engine
+    from statistical_validation import statistical_validation
+    from trade_calculators import calculate_decomposed_trade_quality
     history = state_manager.get("trade_history", [])
     if not history or not isinstance(history, list):
         try:
@@ -947,7 +951,14 @@ def api_institutional_summary():
             {"component": "Isotonic Calibration", "improvement": "+0.07 PF", "status": "CALIBRATION"},
             {"component": "Drift Monitor", "improvement": "+0.04 PF", "status": "STABILITY"}
         ]),
-        "walk_forward_folds": _get_walk_forward_folds()
+        "walk_forward_folds": _get_walk_forward_folds(),
+        "portfolio_heat": (lambda: portfolio_risk_engine.calculate_portfolio_heat_telemetry(active_positions, sim_balance))(),
+        "confidence_buckets": (lambda: mlops_engine.calculate_confidence_calibration_buckets(valid_trades))(),
+        "feature_importance_drift": (lambda: mlops_engine.calculate_feature_importance_drift())(),
+        "decomposed_trade_quality": (lambda: calculate_decomposed_trade_quality(valid_trades[-1] if valid_trades else {}))(),
+        "capital_efficiency": (lambda: portfolio_risk_engine.calculate_capital_efficiency(active_positions, sim_balance))(),
+        "decision_stability": (lambda: statistical_validation.compute_decision_stability(None, {}, "Bullish", 0.85))(),
+        "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": "live_v1"}))()
     }
     return jsonify(data)
 

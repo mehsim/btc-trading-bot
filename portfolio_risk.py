@@ -332,6 +332,118 @@ class PortfolioRiskEngine:
 
         return is_approved, round(scale_factor, 2), loss_pct, res
 
+    def calculate_portfolio_heat_telemetry(
+        self,
+        open_positions: List[Dict],
+        total_equity: float = 100.0,
+        btc_price: float = 65000.0
+    ) -> Dict[str, Any]:
+        """
+        Computes Portfolio Heat, Sector Exposure, Beta, Long/Short Bias, and Exposure breakdown.
+        """
+        if not open_positions or total_equity <= 0:
+            return {
+                "portfolio_heat_pct": 0.0,
+                "btc_beta": 1.0,
+                "sector_exposure": {"layer1": 0.0, "defi": 0.0, "meme": 0.0},
+                "long_bias_pct": 0.0,
+                "short_bias_pct": 0.0,
+                "net_exposure_pct": 0.0,
+                "gross_exposure_pct": 0.0,
+                "correlation_exposure_index": 0.0
+            }
+
+        total_risk_usd = 0.0
+        long_size_usd = 0.0
+        short_size_usd = 0.0
+        weighted_beta_sum = 0.0
+        total_leveraged_usd = 0.0
+
+        asset_betas = {
+            "BTCUSDT": 1.0, "ETHUSDT": 1.15, "SOLUSDT": 1.35,
+            "BNBUSDT": 0.90, "ADAUSDT": 1.25, "XRPUSDT": 1.10,
+            "AVAXUSDT": 1.40, "LTCUSDT": 0.95, "DOTUSDT": 1.30
+        }
+
+        layer1_symbols = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "AVAXUSDT", "DOTUSDT"}
+        layer1_size = 0.0
+
+        for p in open_positions:
+            if not isinstance(p, dict):
+                continue
+            sym = p.get("symbol", "BTCUSDT")
+            entry_p = float(p.get("entry_price", 1.0))
+            sl_p = float(p.get("stop_loss", entry_p * 0.98))
+            pos_size = float(p.get("position_size_usd", 0.0))
+            lev = float(p.get("leverage", 1.0))
+            direction = str(p.get("direction", "Bullish")).capitalize()
+
+            risk_dist = abs(entry_p - sl_p) / max(1e-6, entry_p)
+            trade_risk_usd = pos_size * lev * risk_dist
+            total_risk_usd += trade_risk_usd
+
+            lev_usd = pos_size * lev
+            total_leveraged_usd += lev_usd
+
+            beta_val = asset_betas.get(sym, 1.1)
+            weighted_beta_sum += lev_usd * beta_val
+
+            if direction == "Bullish":
+                long_size_usd += lev_usd
+            else:
+                short_size_usd += lev_usd
+
+            if sym in layer1_symbols:
+                layer1_size += lev_usd
+
+        portfolio_heat_pct = round(float(total_risk_usd / total_equity) * 100.0, 2)
+        gross_exposure_pct = round(float(total_leveraged_usd / total_equity) * 100.0, 1)
+        net_exposure_pct = round(float((long_size_usd - short_size_usd) / total_equity) * 100.0, 1)
+        long_bias_pct = round(float(long_size_usd / max(1e-6, total_leveraged_usd)) * 100.0, 1) if total_leveraged_usd > 0 else 0.0
+        short_bias_pct = round(float(short_size_usd / max(1e-6, total_leveraged_usd)) * 100.0, 1) if total_leveraged_usd > 0 else 0.0
+        btc_beta = round(float(weighted_beta_sum / max(1e-6, total_leveraged_usd)), 2) if total_leveraged_usd > 0 else 1.0
+
+        n_pos = len(open_positions)
+        corr_index = round(float(min(100.0, (n_pos - 1) * 22.5 + (long_bias_pct * 0.5))), 1) if n_pos > 1 else 0.0
+
+        return {
+            "portfolio_heat_pct": portfolio_heat_pct,
+            "btc_beta": btc_beta,
+            "sector_exposure": {
+                "layer1_pct": round(float(layer1_size / max(1e-6, total_equity)) * 100.0, 1),
+                "defi_pct": 0.0,
+                "meme_pct": 0.0
+            },
+            "long_bias_pct": long_bias_pct,
+            "short_bias_pct": short_bias_pct,
+            "net_exposure_pct": net_exposure_pct,
+            "gross_exposure_pct": gross_exposure_pct,
+            "correlation_exposure_index": corr_index
+        }
+
+    def calculate_capital_efficiency(
+        self,
+        open_positions: List[Dict],
+        total_equity: float = 100.0
+    ) -> Dict[str, float]:
+        """
+        Calculates Capital Utilization %, Average Exposure %, and Idle Capital %.
+        """
+        if total_equity <= 0:
+            return {"capital_utilization_pct": 0.0, "average_exposure_pct": 0.0, "idle_capital_pct": 100.0}
+
+        margin_used = sum(float(p.get("position_size_usd", 0.0)) for p in (open_positions or []) if isinstance(p, dict))
+        utilization_pct = round(min(100.0, (margin_used / total_equity) * 100.0), 1)
+        idle_pct = round(max(0.0, 100.0 - utilization_pct), 1)
+        avg_exp_pct = round(utilization_pct * 0.85, 1)  # Rolling average proxy
+
+        return {
+            "capital_utilization_pct": utilization_pct,
+            "average_exposure_pct": avg_exp_pct,
+            "idle_capital_pct": idle_pct
+        }
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
+
 

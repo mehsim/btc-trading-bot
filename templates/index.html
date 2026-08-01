@@ -1978,6 +1978,18 @@
                             <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Effect Size</div>
                             <div id="ml-effect" class="stat-tile-val" style="color: var(--accent-green); font-size: 11px;">+0.14 PF</div>
                         </div>
+                        <div class="stat-tile" style="padding: 5px 7px;">
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Portfolio Heat</div>
+                            <div id="ml-portfolio-heat" class="stat-tile-val" style="color: var(--accent-red); font-size: 10.5px;">0.85%</div>
+                        </div>
+                        <div class="stat-tile" style="padding: 5px 7px;">
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Decision Stability</div>
+                            <div id="ml-decision-stability" class="stat-tile-val" style="color: var(--accent-green); font-size: 10.5px;">98.5%</div>
+                        </div>
+                        <div class="stat-tile" style="padding: 5px 7px;">
+                            <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px;">Capital Utilization</div>
+                            <div id="ml-capital-efficiency" class="stat-tile-val" style="color: var(--accent-blue); font-size: 10.5px;">42.0%</div>
+                        </div>
                         <div class="stat-tile" style="padding: 5px 7px; background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2);">
                             <div class="stat-tile-label" style="font-size: 7.5px; margin-bottom: 1px; color: var(--accent-orange);">Promotion Status</div>
                             <div id="ml-promo" class="stat-tile-val" style="color: var(--accent-orange); font-size: 10.5px;">Waiting (164/200)</div>
@@ -3915,6 +3927,16 @@
                         if (document.getElementById("ml-holdout")) document.getElementById("ml-holdout").innerText = `${ml.holdout_accuracy_pct}%`;
                         if (document.getElementById("ml-bootstrap")) document.getElementById("ml-bootstrap").innerText = ml.bootstrap_ci || "—";
                         if (document.getElementById("ml-effect")) document.getElementById("ml-effect").innerText = ml.effect_size || "—";
+
+                        if (data.portfolio_heat && document.getElementById("ml-portfolio-heat")) {
+                            document.getElementById("ml-portfolio-heat").innerText = `${data.portfolio_heat.portfolio_heat_pct}%`;
+                        }
+                        if (data.decision_stability && document.getElementById("ml-decision-stability")) {
+                            document.getElementById("ml-decision-stability").innerText = `${data.decision_stability.decision_stability_pct}%`;
+                        }
+                        if (data.capital_efficiency && document.getElementById("ml-capital-efficiency")) {
+                            document.getElementById("ml-capital-efficiency").innerText = `${data.capital_efficiency.capital_utilization_pct}%`;
+                        }
                         
                         // PnL Profit Attribution Breakdown
                         if (ml.pnl_attribution) {
