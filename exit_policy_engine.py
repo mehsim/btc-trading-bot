@@ -549,7 +549,114 @@ class ExitPolicyEngine:
         }
 
 
+class PortfolioUtilityOptimizer:
+    """
+    Institutional Portfolio Utility Optimizer:
+    Evaluates all active open trades in the portfolio simultaneously.
+    Ranks trades by Net Utility, identifies low-utility trades (stagnant/low expected return)
+    and commands early close or scale-out to harvest margin for high-utility runner trades.
+    """
+    @staticmethod
+    def optimize_portfolio_capital(
+        active_trades: Dict[str, Dict[str, Any]],
+        portfolio_heat_max: float = 0.80
+    ) -> Dict[str, Any]:
+        """
+        Ranks active trades by current_r / net_utility.
+        Returns rebalancing recommendations dict:
+        - "close_trades": list of trade_ids to harvest margin
+        - "scale_out_trades": list of trade_ids to reduce size by 50%
+        - "prioritize_trades": list of high-utility trade_ids to hold/extend
+        """
+        if not active_trades:
+            return {"close_trades": [], "scale_out_trades": [], "prioritize_trades": []}
+
+        ranked_trades = []
+        for trade_id, trade in active_trades.items():
+            entry_price = trade.get("entry_price", 1.0)
+            current_price = trade.get("current_price", entry_price)
+            direction = trade.get("direction", "Bullish")
+            is_long = str(direction).upper() in ["BUY", "LONG", "BULLISH"]
+            
+            pnl_pct = ((current_price - entry_price) / max(1e-4, entry_price)) * 100.0 if is_long else ((entry_price - current_price) / max(1e-4, entry_price)) * 100.0
+            expected_r = trade.get("expected_r", 1.20)
+            net_utility = pnl_pct * expected_r
+            
+            ranked_trades.append((trade_id, net_utility, trade))
+
+        # Sort descending by net_utility
+        ranked_trades.sort(key=lambda x: x[1], reverse=True)
+
+        close_list = []
+        scale_out_list = []
+        prioritize_list = []
+
+        total_trades = len(ranked_trades)
+        for idx, (t_id, util, t_data) in enumerate(ranked_trades):
+            if util < -2.0 or (util < 0.2 and t_data.get("candles_elapsed", 0) > 15):
+                close_list.append(t_id)
+            elif idx >= total_trades // 2 and util < 0.5 and not t_data.get("half_closed", False):
+                scale_out_list.append(t_id)
+            else:
+                prioritize_list.append(t_id)
+
+        return {
+            "close_trades": close_list,
+            "scale_out_trades": scale_out_list,
+            "prioritize_trades": prioritize_list,
+            "ranked_utility": [(t_id, round(util, 2)) for t_id, util, _ in ranked_trades]
+        }
+
+
+def generate_continuous_policy_vector(regime: str, adx_val: float = 25.0, confidence: float = 0.80) -> Dict[str, Any]:
+    """
+    Generates continuous policy control vectors without bucket quantization loss.
+    """
+    r = regime.upper()
+    if "STRONG" in r:
+        target_mult = 2.2 + min(0.5, (adx_val - 25.0) * 0.02)
+        partial_split = [0.20, 0.20, 0.60]
+        ext_step = 0.15
+        trail = 0.70
+    elif "RANGING" in r or "CHOP" in r:
+        target_mult = 1.3 + min(0.3, confidence * 0.2)
+        partial_split = [0.40, 0.40, 0.20]
+        ext_step = 0.25
+        trail = 0.50
+    else: # MODERATE
+        target_mult = 1.6 + min(0.4, (adx_val - 15.0) * 0.02)
+        partial_split = [0.30, 0.30, 0.40]
+        ext_step = 0.20
+        trail = 0.60
+
+    return {
+        "target_multiplier": round(target_mult, 3),
+        "partial_split": partial_split,
+        "extension_step_r": round(ext_step, 2),
+        "trail_factor": round(trail, 2)
+    }
+
+
+def log_checksummed_exit_decision(record_dict: Dict[str, Any], filepath: str = "ExitDecisionDataset.jsonl"):
+    """
+    Logs checksummed exit decision trace record to ExitDecisionDataset.jsonl for counterfactual replay learning.
+    """
+    meta_record = {
+        "schema_version": "3.0.0",
+        "timestamp": time.time(),
+        "git_commit": "c65080f",
+        "policy_checksum": compute_file_sha256(REGISTRY_FILE) if os.path.exists(REGISTRY_FILE) else "DEFAULT_HASH",
+        "trade_data": record_dict
+    }
+    try:
+        with open(filepath, "a") as f:
+            f.write(json.dumps(meta_record) + "\n")
+    except Exception as e:
+        print(f"[ExitDecisionDataset Error] Failed to append decision record: {e}")
+
+
 exit_policy_engine = ExitPolicyEngine()
+
 
 
 

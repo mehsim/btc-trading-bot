@@ -910,5 +910,167 @@ def calculate_break_even_stop(
     return round(target_sl, 4)
 
 
+def calculate_probabilistic_utility_bootstrap(
+    symbol: str,
+    entry_price: float,
+    candidate_tp: float,
+    candidate_sl: float,
+    direction: str,
+    win_prob: float = 0.55,
+    loss_prob: float = 0.45,
+    leverage: float = 10.0,
+    position_size_usd: float = 100.0,
+    waiting_signals_utility: float = 0.0,
+    num_resamples: int = 1000
+) -> dict:
+    """
+    Computes Probabilistic Net Utility with 1,000 Non-Parametric Bootstrap resamples.
+    Net Utility = P(TP) * Reward_USD - P(SL) * Loss_USD - Full_Friction_USD - Dynamic_Opp_Cost
+    """
+    import numpy as np
+    reward_usd = abs(candidate_tp - entry_price) / max(1e-4, entry_price) * position_size_usd * leverage
+    loss_usd = abs(entry_price - candidate_sl) / max(1e-4, entry_price) * position_size_usd * leverage
+
+    # Full execution friction
+    tcm_cost = position_size_usd * leverage * (0.0011 + 0.0005) # Taker fees (entry+exit) + slippage
+    opp_cost = max(0.0, waiting_signals_utility - (reward_usd * win_prob - loss_usd * loss_prob))
+    
+    # Generate non-parametric bootstrap return outcomes
+    np.random.seed(42)
+    sample_outcomes = np.random.choice([reward_usd, -loss_usd], size=(num_resamples,), p=[win_prob, 1.0 - win_prob])
+    sample_utilities = sample_outcomes - tcm_cost - opp_cost
+
+    ci_lower = float(np.percentile(sample_utilities, 2.5))
+    ci_upper = float(np.percentile(sample_utilities, 97.5))
+    mean_utility = float(np.mean(sample_utilities))
+    std_utility = float(np.std(sample_utilities))
+
+    return {
+        "mean_utility": round(mean_utility, 4),
+        "std_utility": round(std_utility, 4),
+        "ci_lower": round(ci_lower, 4),
+        "ci_upper": round(ci_upper, 4),
+        "reward_usd": round(reward_usd, 4),
+        "loss_usd": round(loss_usd, 4),
+        "friction_cost": round(tcm_cost, 4),
+        "opp_cost": round(opp_cost, 4)
+    }
+
+
+class UnifiedTargetGenerator:
+    """
+    Institutional Unified Target Generator:
+    Translates continuous policy control vectors into exact price bounds,
+    enforcing learnable policy-driven hysteresis and structural capping.
+    """
+    @staticmethod
+    def compute_targets(
+        policy_vector: dict,
+        bootstrap_ci: dict,
+        entry_price: float,
+        direction: str,
+        atr_dollars: float,
+        symbol: str,
+        df_history: Any = None
+    ) -> dict:
+        target_mult = float(policy_vector.get("target_multiplier", 1.5))
+        partial_split = policy_vector.get("partial_split", [0.20, 0.30, 0.50])
+        
+        is_long = str(direction).upper() in ["BUY", "LONG", "BULLISH"]
+        dir_sign = 1 if is_long else -1
+
+        # Volatility & policy multiplier target
+        raw_dist = target_mult * atr_dollars
+        min_tp_dist = entry_price * 0.015
+        calc_dist = max(min_tp_dist, raw_dist)
+
+        raw_tp = entry_price + (dir_sign * calc_dist)
+
+        # Structural Capping against swing high/low
+        capped_tp = raw_tp
+        if df_history is not None and hasattr(df_history, "empty") and not df_history.empty:
+            if is_long and "high" in df_history.columns:
+                recent_res = float(df_history["high"].tail(20).max())
+                if recent_res > entry_price and raw_tp > recent_res:
+                    capped_tp = max(entry_price + min_tp_dist, recent_res - (0.05 * atr_dollars))
+            elif not is_long and "low" in df_history.columns:
+                recent_supp = float(df_history["low"].tail(20).min())
+                if recent_supp < entry_price and raw_tp < recent_supp:
+                    capped_tp = min(entry_price - min_tp_dist, recent_supp + (0.05 * atr_dollars))
+
+        # Calculate 3-stage partial TP targets from continuous partial_split
+        tp_dist = abs(capped_tp - entry_price)
+        s1 = partial_split[0] if len(partial_split) > 0 else 0.20
+        s2 = partial_split[1] if len(partial_split) > 1 else 0.30
+        s3 = partial_split[2] if len(partial_split) > 2 else 0.50
+
+        tp1 = entry_price + dir_sign * (tp_dist * 0.40)
+        tp2 = entry_price + dir_sign * (tp_dist * 0.70)
+        tp3 = capped_tp
+
+        return {
+            "take_profit_price": round(capped_tp, 4),
+            "raw_take_profit_price": round(raw_tp, 4),
+            "stage_1_tp": {"price": round(tp1, 4), "size_pct": s1},
+            "stage_2_tp": {"price": round(tp2, 4), "size_pct": s2},
+            "stage_3_runner": {"price": round(tp3, 4), "size_pct": s3},
+            "bootstrap_ci": bootstrap_ci,
+            "policy_vector": policy_vector
+        }
+
+    @staticmethod
+    def validate_extension_hysteresis(
+        current_tp: float,
+        candidate_tp: float,
+        entry_price: float,
+        direction: str,
+        atr_dollars: float,
+        policy_cfg: dict,
+        last_modified_time: float,
+        current_time: float,
+        candle_interval_sec: float,
+        utility_gain_pct: float
+    ) -> Tuple[bool, str]:
+        """
+        Validates learnable policy-driven hysteresis to prevent Bybit order thrashing.
+        Checks:
+        1. Delta R step >= policy_cfg["hysteresis"]["min_delta_r"]
+        2. Elapsed candles >= policy_cfg["hysteresis"]["min_candles_elapsed"]
+        3. Utility Gain >= policy_cfg["hysteresis"]["min_utility_gain_pct"]
+        """
+        is_long = str(direction).upper() in ["BUY", "LONG", "BULLISH"]
+        dir_sign = 1 if is_long else -1
+
+        hyst_cfg = policy_cfg.get("hysteresis", {
+            "min_delta_r": 0.20,
+            "min_candles_elapsed": 3,
+            "min_utility_gain_pct": 0.15
+        })
+
+        min_delta_r = hyst_cfg.get("min_delta_r", 0.20)
+        min_candles = hyst_cfg.get("min_candles_elapsed", 3)
+        min_utility_gain = hyst_cfg.get("min_utility_gain_pct", 0.15)
+
+        # Check Delta R extension step
+        dist_change = (candidate_tp - current_tp) * dir_sign
+        delta_r = dist_change / max(1e-4, atr_dollars)
+
+        if delta_r < min_delta_r:
+            return False, f"Delta R step {delta_r:.2f}R < min policy hysteresis {min_delta_r:.2f}R"
+
+        # Check Elapsed Candles
+        elapsed_sec = current_time - last_modified_time
+        elapsed_candles = elapsed_sec / max(1.0, candle_interval_sec)
+        if elapsed_candles < min_candles:
+            return False, f"Elapsed candles {elapsed_candles:.1f} < min policy hysteresis {min_candles}"
+
+        # Check Utility Gain
+        if utility_gain_pct < min_utility_gain:
+            return False, f"Utility gain {utility_gain_pct*100:.1f}% < min policy hysteresis {min_utility_gain*100:.1f}%"
+
+        return True, "Hysteresis validation passed"
+
+
+
 
 

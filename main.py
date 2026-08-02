@@ -35,7 +35,7 @@ from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 import database
 import trade_calculators
-from trade_calculators import transaction_cost_model, calculate_break_even_stop
+from trade_calculators import transaction_cost_model, calculate_break_even_stop, UnifiedTargetGenerator, calculate_probabilistic_utility_bootstrap
 from statistical_validation import statistical_validation
 from decision_outcome_db import decision_outcome_db
 from meta_learning_engine import meta_learning_engine
@@ -45,7 +45,7 @@ from probabilistic_policy_selector import probabilistic_policy_selector
 from hierarchical_bayesian_engine import hierarchical_bayesian_engine
 from drift_attribution_engine import drift_attribution_engine
 from automatic_research_reporter import automatic_research_reporter
-from exit_policy_engine import exit_policy_engine
+from exit_policy_engine import exit_policy_engine, PortfolioUtilityOptimizer, generate_continuous_policy_vector, log_checksummed_exit_decision
 from secret_manager import get_secure_env
 
 from bybit_client import (
@@ -6975,27 +6975,37 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 sl_source = "MIN_FLOOR"
                 sl_override_reason = f"Minimum Risk Floor ({min_sl_pct:.2f}%) Triggered"
             
-            min_tp_dist = entry_price * 0.015
-            if ml_trend == "Bullish":
-                stop_loss_price = entry_price - raw_sl_dist
-                est_tp_price = estimate_liquidation_pool(df_completed, "Bullish", entry_price)
-                take_profit_price = max(entry_price + min_tp_dist, min(est_tp_price, entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars))
-                # 4. Market Structure Resistance Capping
-                if df_completed is not None and not df_completed.empty and "high" in df_completed.columns:
-                    recent_resistance = float(df_completed["high"].tail(20).max())
-                    if recent_resistance > entry_price and take_profit_price > recent_resistance:
-                        struct_cap = max(entry_price + min_tp_dist, recent_resistance - (0.05 * atr_dollars))
-                        take_profit_price = min(take_profit_price, struct_cap)
-            else:
-                stop_loss_price = entry_price + raw_sl_dist
-                est_tp_price = estimate_liquidation_pool(df_completed, "Bearish", entry_price)
-                take_profit_price = min(entry_price - min_tp_dist, max(est_tp_price, entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars))
-                # 4. Market Structure Support Capping
-                if df_completed is not None and not df_completed.empty and "low" in df_completed.columns:
-                    recent_support = float(df_completed["low"].tail(20).min())
-                    if recent_support < entry_price and take_profit_price < recent_support:
-                        struct_cap = min(entry_price - min_tp_dist, recent_support + (0.05 * atr_dollars))
-                        take_profit_price = max(take_profit_price, struct_cap)
+            # Institutional Meta Exit Policy & Unified Target Generator
+            current_regime = "STRONG_TREND" if tp_multiplier_adjusted > 1.8 else "RANGING"
+            policy_vec = generate_continuous_policy_vector(current_regime, confidence=calibrated_confidence)
+            
+            cand_sl = (entry_price - raw_sl_dist) if ml_trend == "Bullish" else (entry_price + raw_sl_dist)
+            cand_tp_temp = (entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars) if ml_trend == "Bullish" else (entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars)
+            
+            boot_ci = calculate_probabilistic_utility_bootstrap(
+                symbol=symbol,
+                entry_price=entry_price,
+                candidate_tp=cand_tp_temp,
+                candidate_sl=cand_sl,
+                direction=ml_trend,
+                win_prob=max(0.50, min(0.90, calibrated_confidence)),
+                loss_prob=1.0 - max(0.50, min(0.90, calibrated_confidence)),
+                leverage=leverage_val,
+                position_size_usd=position_size_usd
+            )
+            
+            unified_res = UnifiedTargetGenerator.compute_targets(
+                policy_vector=policy_vec,
+                bootstrap_ci=boot_ci,
+                entry_price=entry_price,
+                direction=ml_trend,
+                atr_dollars=atr_dollars,
+                symbol=symbol,
+                df_history=df_completed
+            )
+            
+            stop_loss_price = cand_sl
+            take_profit_price = unified_res["take_profit_price"]
                 
             # 4. Set SL/TP on active position on Bybit
             temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
@@ -7235,6 +7245,17 @@ def main():
         tf_map = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
         active_trades_updated = False
         with active_trades_lock:
+            # Institutional Portfolio Utility Optimizer rebalancing across open positions
+            all_open_trades = {}
+            for iv_k in ["15", "30", "60", "120", "240"]:
+                tf_k = f"active_trade_{tf_map[iv_k]}"
+                for tr in bot_state.get(tf_k, []) or []:
+                    tr_id = tr.get("trade_id")
+                    if tr_id:
+                        all_open_trades[tr_id] = tr
+            if all_open_trades:
+                portfolio_rebal = PortfolioUtilityOptimizer.optimize_portfolio_capital(all_open_trades)
+
             for iv in ["15", "30", "60", "120", "240"]:
                 tf = tf_map[iv]
                 active_trade_key = f"active_trade_{tf}"
