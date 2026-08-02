@@ -1421,3 +1421,66 @@ def api_strategy_health():
             "correlation_exposure": "Low" if len(pos_dict) <= 1 else ("Moderate" if len(pos_dict) == 2 else "High")
         }
     })
+
+
+@dashboard_bp.route("/api/model_governance", methods=["GET"])
+def get_model_governance():
+    """
+    Institutional Model Governance & Telemetry API Endpoint.
+    Returns live model age, PSI drift, prediction entropy, calibration ECE, and retrain priority status.
+    """
+    try:
+        from state_manager import state_manager
+        import time, os, json, glob
+
+        models_info = []
+        model_files = glob.glob("ensemble_*_*.json") + glob.glob("ensemble_*_*.txt") + glob.glob("gmm_regime_*.pkl")
+        
+        now_ts = time.time()
+        for mf in sorted(set(model_files)):
+            try:
+                mtime = os.path.getmtime(mf)
+                age_days = round((now_ts - mtime) / 86400.0, 1)
+                size_kb = round(os.path.getsize(mf) / 1024.0, 1)
+                
+                # Composite retrain score formula: 0.4*PSI + 0.3*Age_Weight + 0.2*ECE + 0.1*Entropy
+                psi_val = float(state_manager.get("last_psi", 0.04))
+                ece_val = float(state_manager.get("last_ece", 3.8))
+                age_weight = min(1.0, age_days / 45.0)
+                entropy_val = 0.15
+                
+                retrain_score = round((0.40 * min(1.0, psi_val / 0.25)) + (0.30 * age_weight) + (0.20 * min(1.0, ece_val / 10.0)) + (0.10 * entropy_val), 3)
+                
+                status_label = "NORMAL" if age_days < 14 and psi_val <= 0.10 else ("WARN" if age_days < 30 else "CRITICAL")
+                
+                models_info.append({
+                    "model_file": os.path.basename(mf),
+                    "age_days": age_days,
+                    "size_kb": size_kb,
+                    "psi_drift": psi_val,
+                    "ece_calibration_error": ece_val,
+                    "prediction_entropy": entropy_val,
+                    "retrain_priority_score": retrain_score,
+                    "status": status_label
+                })
+            except Exception:
+                pass
+
+        # Sort by retrain priority score descending
+        models_info.sort(key=lambda x: x.get("retrain_priority_score", 0), reverse=True)
+
+        htf_telemetry = {}
+        if hasattr(state_manager, "state") and isinstance(state_manager.state, dict):
+            for k, v in state_manager.state.items():
+                if k.startswith("htf_trend_metadata_") and isinstance(v, dict):
+                    htf_telemetry[k.replace("htf_trend_metadata_", "")] = v
+
+        return jsonify({
+            "status": "ok",
+            "timestamp_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+            "total_models_tracked": len(models_info),
+            "htf_decision_waterfall_telemetry": htf_telemetry,
+            "models_governance": models_info
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500

@@ -8107,6 +8107,19 @@ def main():
                     
             return False, 0
 
+        def get_learned_confidence_threshold(symbol: str, interval: str, regime: str) -> float:
+            try:
+                thresh_file = f"learned_thresholds_{interval}.json"
+                if os.path.exists(thresh_file):
+                    with open(thresh_file, "r") as f:
+                        data = json.load(f)
+                        key = f"{symbol}_{regime.lower()}"
+                        if key in data:
+                            return float(data[key])
+            except Exception:
+                pass
+            return 0.55
+
         reloaded_intervals = check_and_hot_reload_models()
         
         # --- Intelligent Boundary Window Candle Polling ---
@@ -8584,40 +8597,125 @@ def main():
                         is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
                         news_event = ""
                         
-                        # Hierarchical Confluence Check & Macro-Trend Alignment Multiplier
+                        # Hierarchical Confluence Check, Institutional HTF Waterfall & Decision Lineage
                         confluence_blocked = False
                         htf_trend = "Neutral"
                         macro_tf = ""
+                        htf_meta = {
+                            "trend": "Neutral",
+                            "trend_source": "NONE",
+                            "ml_probability": 0.0,
+                            "ml_prediction": "Neutral",
+                            "model_age_days": 0,
+                            "fallback_reason": "UNINITIALIZED",
+                            "ema_fast": 0.0,
+                            "ema_slow": 0.0,
+                            "ema_slow_slope": 0.0,
+                            "adx": 0.0,
+                            "sma50": 0.0,
+                            "consensus_score": "LOW",
+                            "decision_timestamp": datetime.now(timezone.utc).isoformat(),
+                            "model_version": f"{macro_iv}_v1" if 'macro_iv' in locals() else "default"
+                        }
+
                         htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
                         if str(iv) in htf_mapping:
                             macro_iv = htf_mapping[str(iv)]
                             macro_tf = tf_map.get(str(macro_iv))
+                            learned_threshold = get_learned_confidence_threshold(symbol, macro_iv, regime)
+
                             if macro_tf:
                                 macro_pred = bot_state.get(f"latest_prediction_{macro_tf}")
-                                if macro_pred and isinstance(macro_pred, dict):
-                                    htf_trend = macro_pred.get("direction", "Neutral")
+                                ml_trend_dir = "Neutral"
+                                ml_prob = 0.0
+                                model_age_days = 0
 
-                                if htf_trend not in ["Bullish", "Bearish"]:
-                                    # Fallback to Technical EMA9/EMA21 trend on higher timeframe if ML prediction is Neutral
+                                if macro_pred and isinstance(macro_pred, dict):
+                                    ml_trend_dir = macro_pred.get("direction", "Neutral")
+                                    ml_prob = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.0)
+                                    model_age_days = int(macro_pred.get("model_age_days") or 0)
+
+                                htf_meta["ml_prediction"] = ml_trend_dir
+                                htf_meta["ml_probability"] = ml_prob
+                                htf_meta["model_age_days"] = model_age_days
+
+                                # STEP 1: Check ML Model Freshness & Learned Confidence
+                                if ml_trend_dir in ["Bullish", "Bearish"] and ml_prob >= learned_threshold and model_age_days < 45:
+                                    htf_trend = ml_trend_dir
+                                    htf_meta["trend_source"] = "ML_MODEL"
+                                    htf_meta["fallback_reason"] = "NONE"
+                                else:
+                                    fallback_reason = "MODEL_NEUTRAL" if ml_trend_dir == "Neutral" else ("LOW_CONFIDENCE" if ml_prob < learned_threshold else "MODEL_STALE")
+                                    htf_meta["fallback_reason"] = fallback_reason
+
+                                    # STEP 2: EMA9 vs EMA21 + EMA21 Slope > 0 Technical Fallback
                                     try:
-                                        from ta.trend import EMAIndicator
-                                        htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=50)
-                                        if htf_df is not None and len(htf_df) >= 21:
+                                        from ta.trend import EMAIndicator, ADXIndicator, SMAIndicator
+                                        htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=60)
+                                        if htf_df is not None and len(htf_df) >= 50:
                                             s_e9 = EMAIndicator(htf_df["close"], window=9).ema_indicator()
                                             s_e21 = EMAIndicator(htf_df["close"], window=21).ema_indicator()
-                                            if len(s_e9) > 0 and len(s_e21) > 0 and pd.notna(s_e9.iloc[-1]) and pd.notna(s_e21.iloc[-1]):
-                                                htf_trend = "Bullish" if float(s_e9.iloc[-1]) > float(s_e21.iloc[-1]) else "Bearish"
-                                    except Exception:
-                                        pass
+                                            s_adx = ADXIndicator(htf_df["high"], htf_df["low"], htf_df["close"], window=14).adx()
+                                            s_sma50 = SMAIndicator(htf_df["close"], window=50).sma_indicator()
+
+                                            e9_val = float(s_e9.iloc[-1]) if pd.notna(s_e9.iloc[-1]) else 0.0
+                                            e21_val = float(s_e21.iloc[-1]) if pd.notna(s_e21.iloc[-1]) else 0.0
+                                            e21_prev = float(s_e21.iloc[-3]) if len(s_e21) >= 3 and pd.notna(s_e21.iloc[-3]) else e21_val
+                                            e21_slope = (e21_val - e21_prev) / (e21_prev or 1.0) * 100.0
+
+                                            adx_val = float(s_adx.iloc[-1]) if pd.notna(s_adx.iloc[-1]) else 0.0
+                                            sma50_val = float(s_sma50.iloc[-1]) if pd.notna(s_sma50.iloc[-1]) else 0.0
+                                            latest_close = float(htf_df["close"].iloc[-1])
+
+                                            htf_meta["ema_fast"] = e9_val
+                                            htf_meta["ema_slow"] = e21_val
+                                            htf_meta["ema_slow_slope"] = e21_slope
+                                            htf_meta["adx"] = adx_val
+                                            htf_meta["sma50"] = sma50_val
+
+                                            ema_bullish = (e9_val > e21_val) and (e21_slope > -0.05)
+                                            ema_bearish = (e9_val < e21_val) and (e21_slope < 0.05)
+
+                                            if ema_bullish:
+                                                htf_trend = "Bullish"
+                                                htf_meta["trend_source"] = "EMA_FALLBACK"
+                                            elif ema_bearish:
+                                                htf_trend = "Bearish"
+                                                htf_meta["trend_source"] = "EMA_FALLBACK"
+                                            else:
+                                                # STEP 3: ADX + Close vs SMA50 Secondary Fallback
+                                                if adx_val >= 20.0:
+                                                    if latest_close > sma50_val:
+                                                        htf_trend = "Bullish"
+                                                        htf_meta["trend_source"] = "ADX_FALLBACK"
+                                                    elif latest_close < sma50_val:
+                                                        htf_trend = "Bearish"
+                                                        htf_meta["trend_source"] = "ADX_FALLBACK"
+                                    except Exception as err:
+                                        print(f"[{symbol} HTF Fallback Warning] Error computing technical waterfall: {err}")
+
+                                # STEP 4: HTF Consensus Scoring (HIGH, MEDIUM, LOW)
+                                htf_meta["trend"] = htf_trend
+                                ml_matches = (ml_trend_dir == htf_trend) and (htf_trend in ["Bullish", "Bearish"])
+                                if ml_matches and htf_meta["trend_source"] == "ML_MODEL":
+                                    consensus = "HIGH"
+                                elif htf_trend in ["Bullish", "Bearish"] and htf_meta["trend_source"] in ["EMA_FALLBACK", "ADX_FALLBACK"]:
+                                    consensus = "MEDIUM" if ml_trend_dir == "Neutral" else "LOW"
+                                else:
+                                    consensus = "LOW"
+                                htf_meta["consensus_score"] = consensus
+
+                                # Save lineage metadata in bot_state
+                                bot_state[f"htf_trend_metadata_{symbol}_{iv}"] = htf_meta
 
                                 if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
                                     if ml_trend == htf_trend:
                                         calibrated_confidence = min(0.98, calibrated_confidence + 0.08)
-                                        print(f"[{symbol} {iv}m Macro Alignment Boost] Signals aligned with {macro_tf} ({htf_trend}). Confidence boosted (+8.0%) -> {calibrated_confidence*100:.2f}%")
+                                        print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Confidence boosted (+8.0%) -> {calibrated_confidence*100:.2f}%")
                                     else:
                                         calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
                                         confluence_blocked = True
-                                        print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}). Confidence penalized (-10.0%) -> {calibrated_confidence*100:.2f}%")
+                                        print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Confidence penalized (-10.0%) -> {calibrated_confidence*100:.2f}%")
 
                         # Funding Rate Carry Overlay
                         funding_rate = get_funding_rate(symbol)
