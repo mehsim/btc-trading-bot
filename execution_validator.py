@@ -7,7 +7,7 @@ Ensures structural, sizing, and market safety invariants are maintained.
 from typing import Dict, Any, Tuple, Optional
 
 class ExecutionValidator:
-    def __init__(self, min_rr_ratio: float = 1.20, max_market_impact_pct: float = 0.02):
+    def __init__(self, min_rr_ratio: Optional[float] = None, max_market_impact_pct: Optional[float] = None):
         self.min_rr_ratio = min_rr_ratio
         self.max_market_impact_pct = max_market_impact_pct
 
@@ -22,11 +22,15 @@ class ExecutionValidator:
         live_price: float,
         top_book_depth_usd: float = 50000.0,
         portfolio_heat: float = 0.0,
-        max_portfolio_heat: float = 0.20
+        max_portfolio_heat: float = 0.20,
+        atr_norm: float = 0.01
     ) -> Tuple[bool, str]:
         """
         Validates order invariants. Returns (is_valid, reason).
+        Thresholds adapt dynamically to symbol ATR norm and live orderbook depth.
         """
+        dynamic_min_rr = self.min_rr_ratio if self.min_rr_ratio is not None else float(max(1.10, min(2.50, 1.0 + (atr_norm * 20.0))))
+        dynamic_max_impact = self.max_market_impact_pct if self.max_market_impact_pct is not None else float(max(0.005, min(0.05, 0.02 * (top_book_depth_usd / 50000.0))))
         if entry_price <= 0 or stop_loss_price <= 0 or take_profit_price <= 0:
             return False, f"Invalid prices: Entry={entry_price}, SL={stop_loss_price}, TP={take_profit_price}"
 
@@ -52,14 +56,14 @@ class ExecutionValidator:
         stop_dist = abs(entry_price - stop_loss_price)
         target_dist = abs(take_profit_price - entry_price)
         rr_ratio = target_dist / stop_dist if stop_dist > 0 else 0.0
-        if rr_ratio < self.min_rr_ratio - 1e-4:
-            return False, f"R:R Ratio ({rr_ratio:.2f}) below required minimum threshold ({self.min_rr_ratio:.2f})"
+        if rr_ratio < dynamic_min_rr - 1e-4:
+            return False, f"R:R Ratio ({rr_ratio:.2f}) below required minimum threshold ({dynamic_min_rr:.2f})"
 
         # 3. Market Impact Invariant Check
         if top_book_depth_usd > 0:
             estimated_impact = position_size_usd / top_book_depth_usd
-            if estimated_impact > self.max_market_impact_pct:
-                return False, f"Estimated Market Impact ({estimated_impact*100:.3f}%) exceeds safety limit ({self.max_market_impact_pct*100:.3f}%)"
+            if estimated_impact > dynamic_max_impact:
+                return False, f"Estimated Market Impact ({estimated_impact*100:.3f}%) exceeds safety limit ({dynamic_max_impact*100:.3f}%)"
 
         # 4. Immediate Trigger Invariant Check (Limit Order / Stop Order Safety)
         if live_price > 0:
