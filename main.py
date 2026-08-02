@@ -6591,6 +6591,16 @@ def sync_active_positions_from_bybit():
                     print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
                     continue
                 if symbol not in matched_symbols:
+                    # Guard: Do not recover positions for symbols that were recently closed in trade history (within 15 min)
+                    now_sec = time.time()
+                    recently_closed = any(
+                        t.get("symbol") == symbol and (now_sec - t.get("exit_time", 0.0) < 900)
+                        for t in bot_state.get("trade_history", [])
+                    )
+                    if recently_closed:
+                        print(f"[Crash Recovery Guard] Skipped recovery for {symbol} - position was recently closed within last 15 minutes.")
+                        continue
+
                     avg_price = float(pos.get("avgPrice", "0"))
                     liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
                     mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
