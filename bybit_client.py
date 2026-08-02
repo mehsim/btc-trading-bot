@@ -517,25 +517,22 @@ def get_instrument_specs(symbol: str) -> Dict[str, Any]:
     }
 
     try:
-        url = f"{BYBIT_BASE_URL}/v5/market/instruments-info"
-        res = bybit_public_get(url, params={"category": "linear", "symbol": symbol})
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("retCode") == 0:
-                list_data = data.get("result", {}).get("list", [])
-                if list_data:
-                    item = list_data[0]
-                    price_filter = item.get("priceFilter", {})
-                    lot_filter = item.get("lotSizeFilter", {})
-                    specs = {
-                        "tickSize": price_filter.get("tickSize", default_specs["tickSize"]),
-                        "lotSize": lot_filter.get("qtyStep", default_specs["lotSize"]),
-                        "minOrderQty": lot_filter.get("minOrderQty", default_specs["minOrderQty"]),
-                        "minNotionalValue": lot_filter.get("minNotionalValue", default_specs["minNotionalValue"])
-                    }
-                    with _instrument_specs_lock:
-                        _instrument_specs_cache[symbol] = specs
-                    return specs
+        res = bybit_get_request("/v5/market/instruments-info", {"category": "linear", "symbol": symbol})
+        if res and isinstance(res, dict) and res.get("retCode") == 0:
+            list_data = res.get("result", {}).get("list", [])
+            if list_data:
+                item = list_data[0]
+                price_filter = item.get("priceFilter", {})
+                lot_filter = item.get("lotSizeFilter", {})
+                specs = {
+                    "tickSize": price_filter.get("tickSize", default_specs["tickSize"]),
+                    "lotSize": lot_filter.get("qtyStep", default_specs["lotSize"]),
+                    "minOrderQty": lot_filter.get("minOrderQty", default_specs["minOrderQty"]),
+                    "minNotionalValue": lot_filter.get("minNotionalValue", default_specs["minNotionalValue"])
+                }
+                with _instrument_specs_lock:
+                    _instrument_specs_cache[symbol] = specs
+                return specs
     except Exception as e:
         print(f"[Instrument Specs Warning] Failed to fetch instrument info for {symbol}: {e}")
 

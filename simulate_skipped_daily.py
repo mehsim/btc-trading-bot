@@ -202,7 +202,7 @@ def main():
         pnl_pct = pnl * 100
         total_pnl += pnl_pct
         
-        dt_str = datetime.datetime.fromtimestamp(entry_time_sec, datetime.UTC).strftime('%H:%M')
+        dt_str = datetime.datetime.fromtimestamp(entry_time_ms / 1000.0, datetime.UTC).strftime('%H:%M')
         results.append({
             'time': dt_str,
             'symbol': symbol,

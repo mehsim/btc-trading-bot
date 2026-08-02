@@ -478,6 +478,7 @@ def choppiness_index(df, window=14):
     tr = np.maximum(df['high'] - df['low'], np.maximum(abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))))
     atr_sum = tr.rolling(window).sum()
     price_range = high_max - low_min
+    ci = 100.0 * np.log10(atr_sum / (price_range.replace(0, np.nan))) / np.log10(window)
     val = ci.iloc[-1]
     return float(val) if not np.isnan(val) and not np.isinf(val) else 50.0
 

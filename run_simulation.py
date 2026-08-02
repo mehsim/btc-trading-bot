@@ -142,9 +142,6 @@ def main():
     print("\n[Step 3] Generating Machine Learning Predictions...")
     latest_candle = df.iloc[-1]
     from ensemble import _slice_model_input
-    X_live_full = latest_candle[features].values.reshape(1, -1)
-    X_live = _slice_model_input(active_model_trend, X_live_full)
-
     # Dynamic Regime Routing based on ADX
     adx_regime = latest_candle["ADX"]
     if adx_regime >= 20.0:
@@ -156,6 +153,7 @@ def main():
         active_model_trend = models_ranging["trend"]
         regime_name = "Ranging (ADX < 20)"
 
+    X_live = _slice_model_input(active_model_trend, X_live_full)
     pred_pct = float(active_model_price.predict(X_live)[0])
     pred_change = pred_pct * latest_close
     predicted_price = latest_close + pred_change

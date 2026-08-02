@@ -3767,7 +3767,7 @@ def close_all_trades_internal(exit_reason):
     if TRADE_MODE != "simulation":
         try:
             print("[Panic Close All] Cancelling bot-managed pending orders on Bybit...")
-            tracked_symbols = SYMBOLS if isinstance(SYMBOLS, list) else [SYMBOL]
+            tracked_symbols = SUPPORTED_SYMBOLS if isinstance(SUPPORTED_SYMBOLS, list) else [SYMBOL]
             for s in tracked_symbols:
                 cancel_res = bybit_post_request("/v5/order/cancel-all", {
                     "category": "linear",
@@ -4408,7 +4408,7 @@ def run_funding_rate_arbitrage_monitor():
                     print(f"[Funding Arb] {sym} funding rate {rate*100:.4f}% > 0.1%. Opening arb short.")
                     if TRADE_MODE == "live":
                         qty_str = format_bybit_qty(sym, FUNDING_ARB_SIZE_USD / (bot_state.get(f"live_price_{sym}") or live_price))
-                        res = place_bybit_market_order(sym, "Sell", qty_str, reduce_only=False)
+                        res = execute_bybit_order_ws_or_rest(sym, "Sell", "Market", qty_str, reduce_only=False)
                         if res and res.get("retCode") == 0:
                             bot_state[arb_key] = {"qty": qty_str, "open_rate": rate}
                             send_telegram_alert(
@@ -4423,7 +4423,7 @@ def run_funding_rate_arbitrage_monitor():
                     print(f"[Funding Arb] {sym} funding rate normalized ({rate*100:.4f}%). Closing arb short.")
                     if TRADE_MODE == "live":
                         qty_str = existing["qty"]
-                        res = place_bybit_market_order(sym, "Buy", qty_str, reduce_only=True)
+                        res = execute_bybit_order_ws_or_rest(sym, "Buy", "Market", qty_str, reduce_only=True)
                         if res and res.get("retCode") == 0:
                             bot_state.pop(arb_key, None)
                             send_telegram_alert(
@@ -4492,6 +4492,7 @@ def run_pain_feedback_verifier():
         try:
             time.sleep(3600)  # Check hourly
             from data import get_history
+            import pain_feedback
             pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
         except Exception as e:
             print(f"[Pain Feedback Verifier Error] Exception in verification loop: {e}")
@@ -8034,8 +8035,9 @@ def main():
             
             # Rule 3: GARCH-scaled Dynamic Daily Circuit Breaker
             btc_returns = None
-            if "df_dict" in locals() and isinstance(df_dict, dict) and "BTCUSDT" in df_dict:
-                btc_df = df_dict["BTCUSDT"]
+            df_dict_val = locals().get("df_dict")
+            if isinstance(df_dict_val, dict) and "BTCUSDT" in df_dict_val:
+                btc_df = df_dict_val["BTCUSDT"]
                 if isinstance(btc_df, pd.DataFrame) and "close" in btc_df.columns:
                     btc_returns = btc_df["close"].pct_change()
 
@@ -9149,12 +9151,16 @@ def main():
                                                 just_opened_symbols.add(symbol)
                                                 with active_execution_lock:
                                                     active_execution_symbols.add(symbol)
-                                                threading.Thread(
-                                                    target=execute_bybit_trade_async,
-                                                    args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade),
-                                                    daemon=True
-                                                ).start()
-                                                bybit_success = False # Skip the simulation path for this trade
+                                                if bybit_success:
+                                                    actual_qty = raw_qty if 'raw_qty' in locals() and raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
+                                                    actual_notional_val = float(actual_qty * entry_price)
+                                                    actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
+                                                    threading.Thread(
+                                                        target=execute_bybit_trade_async,
+                                                        args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade),
+                                                        daemon=True
+                                                    ).start()
+                                                    bybit_success = False # Skip the simulation path for this trade
 
                                         if bybit_success:
                                             actual_notional_val = float(actual_qty * entry_price)
