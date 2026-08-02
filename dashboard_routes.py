@@ -528,9 +528,9 @@ def api_reality_gap():
     dyn_latency_ms = int(round(float(state_manager.get("last_api_latency_ms", 42))))
 
     # Persist computed execution metrics back to state_manager
-    state_manager.set("last_slippage_bp", dyn_slippage_bp)
-    state_manager.set("fill_quality_pct", dyn_fill_quality)
-    state_manager.set("last_fee_bp", dyn_fee_bp)
+    state_manager["last_slippage_bp"] = dyn_slippage_bp
+    state_manager["fill_quality_pct"] = dyn_fill_quality
+    state_manager["last_fee_bp"] = dyn_fee_bp
 
     reality_gap_data = {
         "status": "ok",

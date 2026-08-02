@@ -116,7 +116,7 @@ def _update_latency(start_time: float):
     try:
         lat_ms = max(5, int((time.time() - start_time) * 1000))
         from state_manager import state_manager
-        state_manager.set("last_api_latency_ms", lat_ms)
+        state_manager["last_api_latency_ms"] = lat_ms
     except Exception:
         pass
 
