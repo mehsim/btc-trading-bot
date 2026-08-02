@@ -39,6 +39,7 @@ from probabilistic_policy_selector import probabilistic_policy_selector
 from hierarchical_bayesian_engine import hierarchical_bayesian_engine
 from drift_attribution_engine import drift_attribution_engine
 from automatic_research_reporter import automatic_research_reporter
+from exit_policy_engine import exit_policy_engine
 from secret_manager import get_secure_env
 
 from bybit_client import (
