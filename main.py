@@ -6573,9 +6573,12 @@ def sync_active_positions_from_bybit():
                         updated_trades.append(t)
                         matched_symbols.add(symbol)
                     else:
-                        # Keep it so the exit checker can process its closure and fetch closed PnL
-                        t["bybit_closed"] = True
-                        updated_trades.append(t)
+                        # Position is closed on Bybit: keep ONLY if exit has not yet been processed
+                        if not t.get("exit_processed", False):
+                            t["bybit_closed"] = True
+                            updated_trades.append(t)
+                        else:
+                            print(f"[Sync Cleanup] Removed already processed closed trade for {symbol} ({tf_key}).")
                 
                 bot_state[f"active_trade_{tf_key}"] = updated_trades
     
@@ -8051,6 +8054,7 @@ def main():
                                 }
                                 bot_state.save_prediction(p)
                                 break
+                        active_trade["exit_processed"] = True
                         save_history()
                     else:
                         updated_trades.append(active_trade)
