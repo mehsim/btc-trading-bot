@@ -39,6 +39,10 @@ class PSIMultiDriftRetrainer:
         """
         mhi = 100.0
 
+        # Dynamic Penalties based on baseline win rate
+        dynamic_wr_drop_high = float(max(0.10, min(0.25, baseline_win_rate * 0.30)))
+        dynamic_wr_drop_mid = float(dynamic_wr_drop_high * 0.50)
+
         # 1. PSI Penalty
         if psi_score >= 0.25:
             mhi -= 40.0
@@ -51,11 +55,11 @@ class PSIMultiDriftRetrainer:
         elif ece_score >= 0.05:
             mhi -= 15.0
 
-        # 3. Performance Drop Penalty
+        # 3. Dynamic Performance Drop Penalty
         win_rate_drop = max(0.0, baseline_win_rate - recent_win_rate)
-        if win_rate_drop >= 0.15:
+        if win_rate_drop >= dynamic_wr_drop_high:
             mhi -= 30.0
-        elif win_rate_drop >= 0.08:
+        elif win_rate_drop >= dynamic_wr_drop_mid:
             mhi -= 15.0
 
         final_mhi = max(0.0, min(100.0, mhi))
