@@ -8596,14 +8596,28 @@ def main():
                                 macro_pred = bot_state.get(f"latest_prediction_{macro_tf}")
                                 if macro_pred and isinstance(macro_pred, dict):
                                     htf_trend = macro_pred.get("direction", "Neutral")
-                                    if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
-                                        if ml_trend == htf_trend:
-                                            calibrated_confidence = min(0.98, calibrated_confidence + 0.08)
-                                            print(f"[{symbol} {iv}m Macro Alignment Boost] Signals aligned with {macro_tf} ({htf_trend}). Confidence boosted (+8.0%) -> {calibrated_confidence*100:.2f}%")
-                                        else:
-                                            calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
-                                            confluence_blocked = True
-                                            print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}). Confidence penalized (-10.0%) -> {calibrated_confidence*100:.2f}%")
+
+                                if htf_trend not in ["Bullish", "Bearish"]:
+                                    # Fallback to Technical EMA9/EMA21 trend on higher timeframe if ML prediction is Neutral
+                                    try:
+                                        from ta.trend import EMAIndicator
+                                        htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=50)
+                                        if htf_df is not None and len(htf_df) >= 21:
+                                            s_e9 = EMAIndicator(htf_df["close"], window=9).ema_indicator()
+                                            s_e21 = EMAIndicator(htf_df["close"], window=21).ema_indicator()
+                                            if len(s_e9) > 0 and len(s_e21) > 0 and pd.notna(s_e9.iloc[-1]) and pd.notna(s_e21.iloc[-1]):
+                                                htf_trend = "Bullish" if float(s_e9.iloc[-1]) > float(s_e21.iloc[-1]) else "Bearish"
+                                    except Exception:
+                                        pass
+
+                                if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
+                                    if ml_trend == htf_trend:
+                                        calibrated_confidence = min(0.98, calibrated_confidence + 0.08)
+                                        print(f"[{symbol} {iv}m Macro Alignment Boost] Signals aligned with {macro_tf} ({htf_trend}). Confidence boosted (+8.0%) -> {calibrated_confidence*100:.2f}%")
+                                    else:
+                                        calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
+                                        confluence_blocked = True
+                                        print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}). Confidence penalized (-10.0%) -> {calibrated_confidence*100:.2f}%")
 
                         # Funding Rate Carry Overlay
                         funding_rate = get_funding_rate(symbol)
