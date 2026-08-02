@@ -7798,8 +7798,10 @@ def main():
                             else:
                                 exit_reason = "STOP LOSS HIT [FAIL]"
     
+                    is_exited = (exit_reason is not None) or bybit_closed
+                    if is_exited:
                         # Maker vs Taker execution logic
-                        is_stop_loss = "STOP LOSS" in str(exit_reason).upper()
+                        is_stop_loss = "STOP LOSS" in str(exit_reason).upper() if exit_reason else True
                         
                         if is_stop_loss:
                             # Maker limit execution for Stop Loss exit (Post-Only model)
