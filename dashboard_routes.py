@@ -7,6 +7,8 @@ Flask API endpoints, security middleware, killswitch handlers, trade history mig
 import os
 import time
 import json
+import gzip
+import io
 import threading
 from functools import wraps
 from flask import Blueprint, jsonify, request, render_template, make_response
@@ -17,6 +19,49 @@ from trade_calculators import calculate_replay_statistics
 
 dashboard_bp = Blueprint("dashboard", __name__)
 startup_time = time.time()
+
+_endpoint_cache = {}
+_endpoint_cache_lock = threading.Lock()
+
+def micro_cache(ttl_seconds=5.0):
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            cache_key = f.__name__
+            with _endpoint_cache_lock:
+                if cache_key in _endpoint_cache:
+                    cached_res, timestamp = _endpoint_cache[cache_key]
+                    if now - timestamp < ttl_seconds:
+                        return cached_res
+            res = f(*args, **kwargs)
+            with _endpoint_cache_lock:
+                _endpoint_cache[cache_key] = (res, now)
+            return res
+        return wrapper
+    return decorator
+
+@dashboard_bp.after_request
+def compress_response(response):
+    accept_encoding = request.headers.get('Accept-Encoding', '')
+    if 'gzip' not in accept_encoding.lower() or response.status_code != 200 or response.direct_passthrough:
+        return response
+    if response.content_type and 'json' not in response.content_type and 'text' not in response.content_type:
+        return response
+    data = response.get_data()
+    if len(data) < 500:
+        return response
+    
+    gzip_buffer = io.BytesIO()
+    with gzip.GzipFile(mode='wb', compresslevel=6, fileobj=gzip_buffer) as gzip_file:
+        gzip_file.write(data)
+    
+    compressed_data = gzip_buffer.getvalue()
+    response.set_data(compressed_data)
+    response.headers['Content-Encoding'] = 'gzip'
+    response.headers['Content-Length'] = len(compressed_data)
+    response.headers['Vary'] = 'Accept-Encoding'
+    return response
 
 bot_logs = []
 logs_lock = threading.Lock()
@@ -339,9 +384,8 @@ def api_status():
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
         real_bal = get_real_bybit_balance_cached()
         status_data["real_balance"] = real_bal
-        status_data["real_bybit_balance"] = real_bal
-        status_data["trade_history"] = state_manager.get("trade_history", [])
-        status_data["prediction_history"] = state_manager.get("prediction_history", [])
+        status_data["trade_history"] = state_manager.get("trade_history", [])[-50:]
+        status_data["prediction_history"] = state_manager.get("prediction_history", [])[-30:]
         status_data["uptime_seconds"] = int(time.time() - startup_time)
         
     return jsonify(status_data)
@@ -383,6 +427,7 @@ def prometheus_metrics():
 
 
 @dashboard_bp.route("/api/reality_gap")
+@micro_cache(ttl_seconds=5.0)
 def api_reality_gap():
     """
     Reality Gap Monitoring Endpoint (Enhancement 4).
@@ -471,6 +516,7 @@ def api_reality_gap():
 
 
 @dashboard_bp.route("/api/institutional_summary")
+@micro_cache(ttl_seconds=5.0)
 def api_institutional_summary():
     """
     Consolidated Institutional Summary Endpoint.
@@ -1059,6 +1105,7 @@ def _get_walk_forward_folds():
     return []
 
 @dashboard_bp.route("/api/exit_analytics")
+@micro_cache(ttl_seconds=5.0)
 def api_exit_analytics():
     """
     Dedicated Exit Analytics Endpoint.
@@ -1197,6 +1244,7 @@ def api_exit_analytics():
     })
 
 @dashboard_bp.route("/api/strategy_health")
+@micro_cache(ttl_seconds=5.0)
 def api_strategy_health():
     """
     Dedicated Strategy Health Endpoint (5 Institutional Operational Categories).

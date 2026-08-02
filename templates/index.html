@@ -2704,6 +2704,7 @@
         }
 
         function updateDashboard() {
+            if (document.hidden) return;
             fetch('/api/status')
                 .then(response => response.json())
                 .then(data => {
@@ -3115,11 +3116,12 @@
         document.addEventListener("visibilitychange", () => {
             clearInterval(updateInterval);
             if (document.hidden) {
-                // Tab is in background: poll once per minute to minimize bandwidth
-                updateInterval = setInterval(updateDashboard, 60000);
+                // Tab is in background: stop polling completely to save CPU/RAM
             } else {
-                // Tab is active: resume normal 10s polling
+                // Tab is active: resume normal polling immediately
                 updateDashboard();
+                updateRealityGap();
+                updateInstitutionalSummary();
                 updateInterval = setInterval(updateDashboard, 10000);
             }
         });
@@ -3577,6 +3579,7 @@
         }
 
         function updateRealityGap() {
+            if (document.hidden) return;
             fetch('/api/reality_gap')
                 .then(res => res.json())
                 .then(data => {
@@ -3608,6 +3611,7 @@
         updateRealityGap();
 
         function updateInstitutionalSummary() {
+            if (document.hidden) return;
             fetch('/api/institutional_summary')
                 .then(res => res.json())
                 .then(data => {
