@@ -21,7 +21,12 @@ class RegimeSpecificCalibrator:
 
     def calibrate_probability(self, raw_confidence: float, regime: str = "Default") -> float:
         reg_key = "Trending" if "Trending" in regime else ("Ranging" if "Ranging" in regime else ("Crisis" if "Crisis" in regime else "Default"))
-        T = self.temperatures.get(reg_key, 1.15)
+        records = self.history_by_regime.get(reg_key, [])
+        if len(records) >= 10:
+            errs = [abs(r["raw_p"] - r["outcome"]) for r in records]
+            T = max(0.8, min(2.5, 1.0 + (np.mean(errs) * 0.8)))
+        else:
+            T = self.temperatures.get(reg_key, 1.15)
         
         # Temperature scaling on logit space
         p_clipped = max(0.01, min(0.99, float(raw_confidence)))
