@@ -7367,7 +7367,7 @@ def main():
                         
                         # Break-Even Guard with Adaptive Floor
                         if not break_even_triggered and current_price >= entry_price + required_be_dist:
-                            target_sl = max(stop_loss, entry_price)
+                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
                                 if success:
@@ -7528,8 +7528,8 @@ def main():
                             position_size_usd = remaining_size
                             active_trade["position_size_usd"] = remaining_size
                             
-                            # Move stop loss to entry price (break-even)
-                            target_sl = entry_price
+                            # Move stop loss to fee-adjusted break-even
+                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
                                 if success:
@@ -7582,9 +7582,8 @@ def main():
                             position_size_usd = remaining_size
                             active_trade["position_size_usd"] = remaining_size
                             
-                            # Move stop loss to entry price + fee offset (fee-free break-even for short)
-                            fee_buffer = entry_price * 0.0005
-                            target_sl = (entry_price + fee_buffer) if direction == "Bullish" else (entry_price - fee_buffer)
+                            # Move stop loss to fee-adjusted break-even floor
+                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
                             
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)

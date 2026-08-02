@@ -876,4 +876,39 @@ class TransactionCostModel:
 transaction_cost_model = TransactionCostModel()
 
 
+def calculate_break_even_stop(
+    direction: str,
+    entry_price: float,
+    current_price: float = 0.0,
+    atr_dollars: float = 0.0,
+    taker_fee_pct: float = 0.00055,
+    spread_pct: float = 0.00015
+) -> float:
+    """
+    Calculates dynamic fee-, spread-, and slippage-adjusted break-even stop loss.
+    Uses direction-sign math (side_sign = +1 for Long, -1 for Short).
+    Enforces profit-side safety assertions and immediate trigger guards.
+    """
+    dir_str = str(direction).lower()
+    side_sign = 1 if dir_str in ["bullish", "long", "buy", "1"] else -1
+
+    # Total cost buffer = taker fee (exit) + spread/slippage buffer
+    cost_buffer = entry_price * (taker_fee_pct + spread_pct)
+
+    target_sl = entry_price + (side_sign * cost_buffer)
+
+    # Profit-side validation assertion check
+    if side_sign == 1:
+        assert target_sl > entry_price, f"Long break-even SL {target_sl} must be > entry {entry_price}"
+        if current_price > 0 and target_sl >= current_price:
+            target_sl = entry_price + (current_price - entry_price) * 0.5
+    else:
+        assert target_sl < entry_price, f"Short break-even SL {target_sl} must be < entry {entry_price}"
+        if current_price > 0 and target_sl <= current_price:
+            target_sl = entry_price - (entry_price - current_price) * 0.5
+
+    return round(target_sl, 4)
+
+
+
 
