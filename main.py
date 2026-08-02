@@ -7584,7 +7584,7 @@ def main():
                             
                             # Move stop loss to entry price + fee offset (fee-free break-even for short)
                             fee_buffer = entry_price * 0.0005
-                            target_sl = entry_price + fee_buffer
+                            target_sl = (entry_price + fee_buffer) if direction == "Bullish" else (entry_price - fee_buffer)
                             
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
