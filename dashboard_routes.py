@@ -451,17 +451,36 @@ def api_reality_gap():
     latest_20 = valid_trades[-20:] if len(valid_trades) >= 20 else valid_trades
 
     trades_comparison = []
+    slippage_bps = []
+    fill_pcts = []
+    fee_bps = []
+
     for idx, t in enumerate(latest_20):
         sym = str(t.get("symbol", "BTCUSDT")).replace("USDT", "")
         tf = str(t.get("interval", t.get("timeframe", "1h")))
         act_pnl = float(t.get("pnl_usd", 0.0))
 
         entry = float(t.get("entry_price", t.get("entry", 0.0)))
+        pred_entry = float(t.get("predicted_price", entry))
         sl = float(t.get("stop_loss", t.get("sl", 0.0)))
         tp = float(t.get("take_profit", t.get("tp", 0.0)))
         pos_size = float(t.get("position_size_usd", t.get("position_size", t.get("original_size", 10.0))))
         lev = float(t.get("leverage", 10.0))
         conf = float(t.get("confidence", 0.75))
+
+        # Dynamic slippage calculation (basis points difference between actual vs predicted entry)
+        if entry > 0 and pred_entry > 0:
+            slip = abs((entry - pred_entry) / pred_entry) * 10000.0
+            slippage_bps.append(slip)
+
+        # Dynamic fill quality percentage
+        fill_val = float(t.get("fill_pct", 100.0))
+        fill_pcts.append(min(100.0, max(0.0, fill_val)))
+
+        # Dynamic fee difference in basis points
+        is_maker = "Limit" in str(t.get("reason", "")) or t.get("post_only", False)
+        fee_bp = 2.0 if is_maker else 5.5
+        fee_bps.append(fee_bp)
 
         if entry > 0 and sl > 0:
             sl_pct = abs((entry - sl) / entry)
@@ -487,8 +506,6 @@ def api_reality_gap():
             "actual_pnl": round(act_pnl, 2)
         })
 
-
-
     # Dynamic Reality Gap Calculations across trade comparisons
     tot_exp = sum(float(t.get("expected_pnl", 0.0)) for t in trades_comparison)
     tot_act = sum(float(t.get("actual_pnl", 0.0)) for t in trades_comparison)
@@ -501,17 +518,28 @@ def api_reality_gap():
     act_losses = abs(sum(float(t.get("actual_pnl", 0.0)) for t in trades_comparison if float(t.get("actual_pnl", 0.0)) < 0))
     act_pf_val = round(act_wins / act_losses, 2) if act_losses > 0 else (1.0 if act_wins > 0 else 0.0)
 
-    gap_pct = round(abs(tot_exp - tot_act) / max(1.0, abs(tot_exp)) * 100.0, 1)
+    gap_pct = round(abs(tot_exp - tot_act) / max(1.0, abs(tot_exp)) * 100.0, 1) if tot_exp != 0 else 0.0
     status_tag = "REALITY_GAP_NORMAL" if gap_pct <= 15.0 else ("REALITY_GAP_ELEVATED" if gap_pct <= 30.0 else "REALITY_GAP_HIGH")
+
+    # Compute empirical execution metrics dynamically
+    dyn_slippage_bp = round(float(np.mean(slippage_bps)), 1) if slippage_bps else round(float(state_manager.get("last_slippage_bp", 1.2)), 1)
+    dyn_fill_quality = round(float(np.mean(fill_pcts)), 1) if fill_pcts else round(float(state_manager.get("fill_quality_pct", 100.0)), 1)
+    dyn_fee_bp = round(float(np.mean(fee_bps)), 1) if fee_bps else round(float(state_manager.get("last_fee_bp", 4.0)), 1)
+    dyn_latency_ms = int(round(float(state_manager.get("last_api_latency_ms", 42))))
+
+    # Persist computed execution metrics back to state_manager
+    state_manager.set("last_slippage_bp", dyn_slippage_bp)
+    state_manager.set("fill_quality_pct", dyn_fill_quality)
+    state_manager.set("last_fee_bp", dyn_fee_bp)
 
     reality_gap_data = {
         "status": "ok",
         "timestamp_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "reality_gap_pct": gap_pct,
-        "slippage_diff_bp": round(float(state_manager.get("last_slippage_bp", 3.5)), 1),
-        "fee_diff_bp": round(float(state_manager.get("last_fee_bp", 0.5)), 1),
-        "fill_quality_pct": round(float(state_manager.get("fill_quality_pct", 98.2)), 1),
-        "execution_latency_ms": int(round(float(state_manager.get("last_api_latency_ms", 18)))),
+        "slippage_diff_bp": dyn_slippage_bp,
+        "fee_diff_bp": dyn_fee_bp,
+        "fill_quality_pct": dyn_fill_quality,
+        "execution_latency_ms": dyn_latency_ms,
         "expected_pf": exp_pf_val,
         "actual_pf": act_pf_val,
         "status_tag": status_tag,

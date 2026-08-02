@@ -112,6 +112,15 @@ def get_bybit_time_offset() -> int:
     return 0
 
 
+def _update_latency(start_time: float):
+    try:
+        lat_ms = max(5, int((time.time() - start_time) * 1000))
+        from state_manager import state_manager
+        state_manager.set("last_api_latency_ms", lat_ms)
+    except Exception:
+        pass
+
+
 from secret_manager import get_secure_env
 
 
@@ -153,11 +162,13 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
             return status, data
 
     max_retries = 3
+    t_start = time.time()
     for attempt in range(max_retries):
         try:
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
             status, res = future.result(timeout=10)
+            _update_latency(t_start)
             if status == 200:
                 return res
             else:
@@ -210,11 +221,13 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
             return status, data
 
     max_retries = 3
+    t_start = time.time()
     for attempt in range(max_retries):
         try:
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
             status, res = future.result(timeout=10)
+            _update_latency(t_start)
             if status == 200:
                 return res
             else:
