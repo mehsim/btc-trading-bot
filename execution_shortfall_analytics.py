@@ -36,6 +36,14 @@ class ExecutionShortfallAnalytics:
         fill_ratio = round(filled_qty / requested_qty, 4) if requested_qty > 0 else 1.0
         market_impact_bps = round((requested_qty * fill_price / top_book_depth_usd) * 10000.0, 2) if top_book_depth_usd > 0 else 0.0
 
+        # Dynamic Execution Quality Thresholds based on rolling history
+        recent_bps = [log["implementation_shortfall_bps"] for log in self.execution_logs[-50:]] if self.execution_logs else []
+        avg_bps = float(np.mean(recent_bps)) if recent_bps else 5.0
+        excellent_thresh = max(3.0, min(10.0, avg_bps))
+        acceptable_thresh = max(10.0, min(25.0, avg_bps * 2.5))
+
+        execution_quality = "EXCELLENT" if shortfall_bps <= excellent_thresh else ("ACCEPTABLE" if shortfall_bps <= acceptable_thresh else "POOR")
+
         telemetry = {
             "symbol": symbol,
             "direction": direction,
@@ -47,7 +55,7 @@ class ExecutionShortfallAnalytics:
             "implementation_shortfall_bps": shortfall_bps,
             "fill_ratio": fill_ratio,
             "market_impact_bps": market_impact_bps,
-            "execution_quality": "EXCELLENT" if shortfall_bps <= 5.0 else ("ACCEPTABLE" if shortfall_bps <= 15.0 else "POOR")
+            "execution_quality": execution_quality
         }
 
         self.execution_logs.append(telemetry)
