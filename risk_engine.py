@@ -273,3 +273,142 @@ def get_volatility_regime_multiplier(atr_norm: float, interval: str) -> float:
         elif atr_norm < 0.003:        # Flat chop / dead market
             return 0.3                  # Heavy reduction
     return 1.0
+
+
+class JointRiskBudgetAllocator:
+    """
+    Institutional Joint Risk Budget Allocator.
+    Stop distance is strictly derived from market structure & volatility (NEVER squeezed by high confidence).
+    Capital sizing is governed by upstream portfolio heat reduction, MHI-tied fractional Kelly, and orderbook liquidity caps.
+    """
+
+    def __init__(self, max_capital_risk_pct: float = 0.02, base_min_rr: float = 1.20):
+        self.max_capital_risk_pct = max_capital_risk_pct
+        self.base_min_rr = base_min_rr
+
+    def get_mhi_max_kelly(self, mhi_score: float) -> float:
+        """
+        Governance-tied Kelly fraction based on Model Health Index (MHI):
+        - MHI >= 80 (HEALTHY): Max 0.25x Kelly
+        - 65 <= MHI < 80 (WATCH): Max 0.20x Kelly
+        - 50 <= MHI < 65 (DEGRADED): Max 0.10x Kelly
+        - MHI < 50 (CRITICAL): 0.00x Kelly (Trading Halted)
+        """
+        if mhi_score >= 80.0:
+            return 0.25
+        elif mhi_score >= 65.0:
+            return 0.20
+        elif mhi_score >= 50.0:
+            return 0.10
+        else:
+            return 0.00
+
+    def allocate_risk_budget(
+        self,
+        symbol: str,
+        entry_price: float,
+        atr_dollars: float,
+        atr_norm: float,
+        calibrated_confidence: float,
+        direction: str,
+        total_equity: float,
+        portfolio_heat: float = 0.0,
+        mhi_score: float = 90.0,
+        top_book_depth_usd: float = 50000.0,
+        df_completed: pd.DataFrame = None,
+        context_multipliers: Dict[str, float] = None,
+        database_module = None
+    ) -> Dict[str, Any]:
+        """
+        Jointly optimizes (stop_distance, target_distance, position_size, capital_at_risk, expected_utility).
+        Exposes a rich output dictionary for downstream governance & audit logging.
+        """
+        ctx_mults = context_multipliers or {}
+        target_exp = float(ctx_mults.get("target_expansion", 1.0))
+        stop_exp = float(ctx_mults.get("stop_expansion", 1.0))
+        size_boost = float(ctx_mults.get("size_multiplier", 1.0))
+
+        # 1. Upstream Portfolio Heat Reduction
+        # Available Risk Budget decreases linearly as Portfolio Heat increases
+        heat_ratio = min(1.0, max(0.0, portfolio_heat / 0.20)) if portfolio_heat > 0 else 0.0
+        avail_budget_factor = max(0.0, 1.0 - heat_ratio)
+        max_available_risk_usd = total_equity * self.max_capital_risk_pct * avail_budget_factor
+
+        # 2. Invariant Stop Loss Distance (Structure + Volatility Grounded, NOT confidence-squeezed)
+        base_stop_dist = calculate_final_stop_distance(
+            entry_price=entry_price,
+            atr_dollar=atr_dollars,
+            symbol=symbol,
+            df=df_completed,
+            gmm_multiplier=1.5 * stop_exp,
+            database_module=database_module
+        )
+        stop_distance = max(base_stop_dist, entry_price * 0.005) # Minimum 0.5% stop floor
+
+        # 3. Dynamic Target Distance
+        raw_target_dist = stop_distance * self.base_min_rr * target_exp
+        target_distance = max(raw_target_dist, entry_price * 0.008) # Minimum 0.8% target floor
+
+        # 4. MHI-Tied Fractional Kelly Sizing
+        max_kelly_frac = self.get_mhi_max_kelly(mhi_score)
+        if max_kelly_frac <= 0.0 or max_available_risk_usd <= 0.0:
+            return {
+                "symbol": symbol,
+                "stop_distance": stop_distance,
+                "target_distance": target_distance,
+                "risk_per_trade": 0.0,
+                "position_size": 0.0,
+                "expected_edge": 0.0,
+                "expected_utility": 0.0,
+                "capital_at_risk": 0.0,
+                "kelly_fraction": 0.0,
+                "portfolio_heat": portfolio_heat,
+                "liquidity_cap_applied": False,
+                "execution_permitted": False,
+                "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"
+            }
+
+        # Raw Kelly formula b = TP_dist / SL_dist, p = confidence
+        b_ratio = target_distance / stop_distance if stop_distance > 0 else 1.5
+        p_win = max(0.01, min(0.99, calibrated_confidence))
+        raw_kelly = (p_win * b_ratio - (1.0 - p_win)) / b_ratio if b_ratio > 0 else 0.05
+        raw_kelly = max(0.0, raw_kelly)
+
+        # Apply MHI Kelly Fraction Cap & Upstream Portfolio Heat Reduction Factor & Context Size Boost
+        effective_kelly = min(max_kelly_frac, raw_kelly * max_kelly_frac) * size_boost * avail_budget_factor
+        
+        # Calculate Unconstrained Risk-Budgeted Position Size (USD)
+        # Position Size = Capital * Effective Kelly (bounded by max available risk)
+        uncapped_size_usd = min(total_equity * effective_kelly, max_available_risk_usd / (stop_distance / entry_price))
+
+        # 5. Orderbook Executable Liquidity Constraint (<= 2% Top-of-Book Depth & Market Impact < 0.05%)
+        max_depth_cap = top_book_depth_usd * 0.02 if top_book_depth_usd > 0 else uncapped_size_usd
+        position_size_usd = min(uncapped_size_usd, max_depth_cap)
+        liquidity_cap_applied = position_size_usd < uncapped_size_usd - 1e-2
+
+        # Final Capital at Risk (USD)
+        capital_at_risk = position_size_usd * (stop_distance / entry_price)
+
+        # 6. Expected Edge & Expected Utility Calculation
+        roundtrip_fee_pct = 0.0010
+        expected_edge = p_win * (target_distance / entry_price) - (1.0 - p_win) * (stop_distance / entry_price) - roundtrip_fee_pct
+        expected_utility = position_size_usd * expected_edge
+
+        return {
+            "symbol": symbol,
+            "stop_distance": round(stop_distance, 6),
+            "target_distance": round(target_distance, 6),
+            "risk_per_trade": round(capital_at_risk, 2),
+            "position_size": round(position_size_usd, 2),
+            "expected_edge": round(expected_edge, 6),
+            "expected_utility": round(expected_utility, 4),
+            "capital_at_risk": round(capital_at_risk, 2),
+            "kelly_fraction": round(effective_kelly, 4),
+            "portfolio_heat": round(portfolio_heat, 4),
+            "liquidity_cap_applied": liquidity_cap_applied,
+            "execution_permitted": position_size_usd >= 1.0 and expected_edge > 0,
+            "reason": "APPROVED" if (position_size_usd >= 1.0 and expected_edge > 0) else "Insufficient Edge / Notional"
+        }
+
+joint_risk_budget_allocator = JointRiskBudgetAllocator()
+
