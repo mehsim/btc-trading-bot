@@ -91,7 +91,7 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
     start_idx = 0
     while start_idx + train_window_bars + test_window_bars <= n:
         test_df = df.iloc[start_idx + train_window_bars : start_idx + train_window_bars + test_window_bars]
-        test_returns = test_df["close"].pct_change().dropna() * 100.0
+        test_returns = test_df["close"].pct_change().fillna(0.0).dropna() * 100.0
         win_rate = float((test_returns > 0).mean() * 100.0) if len(test_returns) > 0 else 0.0
         
         cum_ret = float(((1.0 + test_returns / 100.0).prod() - 1.0) * 100.0) if len(test_returns) > 0 else 0.0

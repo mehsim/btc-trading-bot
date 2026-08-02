@@ -5095,7 +5095,7 @@ def on_error(ws, error):
 
 def start_ws():
     global ws_connected, ws_retry_delay, active_public_ws
-    url = BYBYIT_WS_URL if 'BYBYIT_WS_URL' in globals() else BYBIT_WS_URL
+    url = BYBIT_WS_URL
     print(f"[WebSocket Connecting] url={url}")
     # Parse proxy settings from BYBIT_PROXY env var
     proxy_host, proxy_port, proxy_auth, proxy_type_str = None, None, None, None
