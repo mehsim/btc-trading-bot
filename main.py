@@ -7785,7 +7785,7 @@ def main():
                             atr_ref = active_trade.get("atr_dollars") or (entry_price * 0.01)
                             be_hit = abs(actual_exit - entry_price) < (0.25 * atr_ref)
                             
-                            is_profit = (bybit_realized_pnl > 0) if (bybit_realized_pnl is not None) else ((actual_exit - entry_price > 0) if direction == "Bullish" else (actual_exit - entry_price < 0))
+                            is_profit = (bybit_realized_pnl > 0.001) if (bybit_realized_pnl is not None) else ((actual_exit > entry_price + 0.0005 * entry_price) if direction == "Bullish" else (actual_exit < entry_price - 0.0005 * entry_price))
                             
                             if tp_hit and is_profit:
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
@@ -9255,6 +9255,12 @@ def main():
                                             # Priority 1: Tighten stop distance proportionally to keep dollar risk constant
                                             scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
                                             new_stop_dist = original_stop_dist * scale_ratio
+                                            
+                                            # Enforce absolute floor: Never compress SL tighter than 0.60x ATR to prevent spread noise stop-outs
+                                            min_allowed_sl_dist = atr_dollars * 0.60
+                                            if new_stop_dist < min_allowed_sl_dist:
+                                                new_stop_dist = min_allowed_sl_dist
+                                                print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to 0.60x ATR (${min_allowed_sl_dist:.4f}) to protect against spread noise.")
                                             
                                             if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
                                                 new_sl_price = entry_price - new_stop_dist
