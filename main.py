@@ -46,6 +46,7 @@ from hierarchical_bayesian_engine import hierarchical_bayesian_engine
 from drift_attribution_engine import drift_attribution_engine
 from automatic_research_reporter import automatic_research_reporter
 from exit_policy_engine import exit_policy_engine, PortfolioUtilityOptimizer, generate_continuous_policy_vector, log_checksummed_exit_decision
+from order_state_machine import StopState, StopStateMachine
 from secret_manager import get_secure_env
 
 from bybit_client import (
@@ -7057,6 +7058,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "take_profit": float(take_profit_price),
             "initial_stop_loss": float(stop_loss_price),
             "initial_take_profit": float(take_profit_price),
+            "stop_state": "INITIAL",
+            "stop_state_meta": {
+                "stop_state": "INITIAL",
+                "stop_version": "v3.2",
+                "transition_reason": "InitialTradeOpened",
+                "locked_r": 0.0,
+                "expected_net_pnl": 0.0,
+                "updated_at": time.time()
+            },
             "sl_multiplier": float(sl_multiplier_adjusted),
             "tp_multiplier": float(tp_multiplier_adjusted),
             "sl_source": str(sl_source),
@@ -7899,6 +7909,8 @@ def main():
                             "confidence": active_trade.get("confidence") if active_trade.get("confidence") == "MT" else float(active_trade.get("confidence") or 0.0),
                             "take_profit": float(active_trade.get("take_profit", 0.0)),
                             "stop_loss": float(active_trade.get("stop_loss", 0.0)),
+                            "stop_state": active_trade.get("stop_state", "INITIAL"),
+                            "stop_state_meta": active_trade.get("stop_state_meta", {}),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
                             "fill_pct": float(active_trade.get("fill_pct", 100.0)),
                             "bybit_order_id": active_trade.get("bybit_order_id"),

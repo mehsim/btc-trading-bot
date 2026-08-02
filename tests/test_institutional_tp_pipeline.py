@@ -123,5 +123,35 @@ class TestInstitutionalTPPipeline(unittest.TestCase):
         if os.path.exists(test_file):
             os.remove(test_file)
 
+    def test_stop_state_machine(self):
+        from order_state_machine import StopState, StopStateMachine
+        
+        # Forward transition should be valid
+        self.assertTrue(StopStateMachine.can_transition(StopState.INITIAL, StopState.BREAK_EVEN))
+        self.assertTrue(StopStateMachine.can_transition(StopState.BREAK_EVEN, StopState.PROFIT_LOCK))
+        
+        # Backward transition should be invalid
+        self.assertFalse(StopStateMachine.can_transition(StopState.PROFIT_LOCK, StopState.TRAILING))
+
+        # Monotonic price update validation for Longs
+        valid_long, msg = StopStateMachine.validate_monotonic_stop_update(
+            direction="Bullish",
+            current_sl=100.0,
+            proposed_sl=101.5,
+            current_state_str="INITIAL",
+            target_state_str="BREAK_EVEN"
+        )
+        self.assertTrue(valid_long)
+
+        # Monotonic violation for Longs (regressing SL)
+        invalid_long, msg = StopStateMachine.validate_monotonic_stop_update(
+            direction="Bullish",
+            current_sl=100.0,
+            proposed_sl=99.5,
+            current_state_str="INITIAL",
+            target_state_str="BREAK_EVEN"
+        )
+        self.assertFalse(invalid_long)
+
 if __name__ == "__main__":
     unittest.main()

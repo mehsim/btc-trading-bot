@@ -84,3 +84,69 @@ class ManagedOrder:
             self.transition_to(OrderState.FILLED, f"Filled {self.filled_qty}/{self.qty} @ {fill_price}")
         else:
             self.transition_to(OrderState.PARTIALLY_FILLED, f"Partial fill {self.filled_qty}/{self.qty} @ {fill_price}")
+
+
+class StopState(Enum):
+    INITIAL = "INITIAL"
+    TRAILING = "TRAILING"
+    BREAK_EVEN = "BREAK_EVEN"
+    PROFIT_LOCK = "PROFIT_LOCK"
+    STRUCTURAL_TRAIL = "STRUCTURAL_TRAIL"
+    FINAL_RUNNER = "FINAL_RUNNER"
+
+STATE_HIERARCHY_RANK = {
+    StopState.INITIAL: 1,
+    StopState.TRAILING: 2,
+    StopState.BREAK_EVEN: 3,
+    StopState.PROFIT_LOCK: 4,
+    StopState.STRUCTURAL_TRAIL: 5,
+    StopState.FINAL_RUNNER: 6,
+}
+
+class StopStateMachine:
+    """
+    Institutional Stop State Machine & Monotonic Invariant Validator.
+    Enforces strict forward state transitions and monotonic locked risk rules:
+    LockedRisk(t+1) >= LockedRisk(t)  (for Longs: SL(t+1) >= SL(t))
+    """
+    @staticmethod
+    def can_transition(current_state_str: str, target_state_str: str) -> bool:
+        try:
+            curr_state = StopState[current_state_str] if isinstance(current_state_str, str) else current_state_str
+            targ_state = StopState[target_state_str] if isinstance(target_state_str, str) else target_state_str
+        except (KeyError, TypeError):
+            return True # fallback if unmapped string
+        
+        curr_rank = STATE_HIERARCHY_RANK.get(curr_state, 1)
+        targ_rank = STATE_HIERARCHY_RANK.get(targ_state, 1)
+
+        # Monotonic state rank requirement: target_rank >= curr_rank
+        return targ_rank >= curr_rank
+
+    @staticmethod
+    def validate_monotonic_stop_update(
+        direction: str,
+        current_sl: float,
+        proposed_sl: float,
+        current_state_str: str,
+        target_state_str: str
+    ) -> tuple[bool, str]:
+        """
+        Validates monotonic stop price movement:
+        Long: proposed_sl >= current_sl
+        Short: proposed_sl <= current_sl
+        State: target_state rank >= current_state rank
+        """
+        if not StopStateMachine.can_transition(current_state_str, target_state_str):
+            return False, f"Illegal backward state transition from {current_state_str} to {target_state_str}"
+
+        is_long = str(direction).upper() in ["BUY", "LONG", "BULLISH"]
+        if is_long:
+            if proposed_sl < current_sl - 1e-4:
+                return False, f"Monotonic violation for Long: proposed SL {proposed_sl:.4f} < current SL {current_sl:.4f}"
+        else:
+            if proposed_sl > current_sl + 1e-4:
+                return False, f"Monotonic violation for Short: proposed SL {proposed_sl:.4f} > current SL {current_sl:.4f}"
+
+        return True, "Monotonic Stop Invariant Passed"
+
