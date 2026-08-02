@@ -31,15 +31,32 @@ class ReturnDistributionEngine:
         # 95% CVaR (Expected Shortfall) under skewed Student-t / Empirical approximation
         cvar_95 = float(mu_hat - 1.96 * np.sqrt(max(1e-6, sigma2_hat)) * (1.0 + abs(skew_hat) * 0.2))
 
-        # Direct Expected Utility optimization: E[U] = mu - 0.5 * lambda * sigma2 - gamma * CVaR
+        # Direct Expected Utility optimization: E[U] = mu - 0.5 * lambda * sigma2
         lambda_risk_aversion = 2.0
         expected_utility = mu_hat - 0.5 * lambda_risk_aversion * sigma2_hat
+
+        # Return Probability Targets & Expected Holding Duration
+        p_plus_1r = float(np.clip(calibrated_confidence, 0.05, 0.95))
+        p_plus_2r = float(np.clip(calibrated_confidence * 0.70, 0.02, 0.85))
+        p_stop = float(np.clip(1.0 - calibrated_confidence, 0.05, 0.95))
+        
+        # Expected Holding Time (in bars / candles)
+        expected_holding_time_bars = round(max(3.0, 12.0 * (atr_norm / 0.01)), 1)
+
+        # Adaptive Execution Selection: Passive Limit (Maker) vs. Market (Taker)
+        # Choose Limit order (Maker) if spread is tight and urgency is normal, Market if high breakout confidence
+        recommended_order_type = "LIMIT_MAKER" if calibrated_confidence < 0.82 else "MARKET_TAKER"
 
         return {
             "expected_return_mu": round(mu_hat, 6),
             "return_variance_sigma2": round(sigma2_hat, 8),
             "return_skewness": round(skew_hat, 4),
             "cvar_95_tail_risk": round(cvar_95, 6),
+            "p_plus_1r": round(p_plus_1r, 4),
+            "p_plus_2r": round(p_plus_2r, 4),
+            "p_stop": round(p_stop, 4),
+            "expected_holding_time_bars": expected_holding_time_bars,
+            "recommended_order_type": recommended_order_type,
             "predicted_expected_utility": round(expected_utility, 6)
         }
 

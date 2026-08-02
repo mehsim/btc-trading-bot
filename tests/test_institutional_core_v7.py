@@ -33,8 +33,15 @@ def test_return_distribution_engine():
     assert "expected_return_mu" in res
     assert "return_variance_sigma2" in res
     assert "cvar_95_tail_risk" in res
+    assert "p_plus_1r" in res
+    assert "p_plus_2r" in res
+    assert "p_stop" in res
+    assert "expected_holding_time_bars" in res
+    assert "recommended_order_type" in res
     assert "predicted_expected_utility" in res
     assert res["expected_return_mu"] > 0
+    assert res["p_plus_1r"] == 0.75
+    assert res["recommended_order_type"] in ("LIMIT_MAKER", "MARKET_TAKER")
 
 
 def test_trade_lifecycle_health_scoring():
