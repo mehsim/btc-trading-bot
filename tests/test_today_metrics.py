@@ -9,6 +9,13 @@ if "redis" not in sys.modules:
     sys.modules["redis"] = mock_redis_mod
 
 class TestTodayMetrics(unittest.TestCase):
+    def setUp(self):
+        try:
+            from dashboard_routes import clear_endpoint_cache
+            clear_endpoint_cache()
+        except Exception:
+            pass
+
     def test_today_metrics_with_mixed_trades(self):
         """Verify quick_status today metrics with 1 win and 1 loss today."""
         now = time.time()

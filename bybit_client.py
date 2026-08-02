@@ -353,11 +353,15 @@ def get_bybit_position(symbol: str) -> Dict[str, Any]:
     return {}
 
 
-def get_all_bybit_positions() -> list:
-    res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
-    if res.get("retCode") == 0:
+def get_all_bybit_positions() -> Optional[list]:
+    """Retrieve all open linear positions on Bybit in a single call.
+    Returns list of position dicts on success, or None on API failure.
+    """
+    res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT", "limit": 200})
+    if isinstance(res, dict) and res.get("retCode") == 0:
         return res.get("result", {}).get("list", [])
-    return []
+    return None
+
 
 
 def get_bybit_closed_pnl(symbol: str, limit: int = 1) -> float:

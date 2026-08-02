@@ -2269,7 +2269,7 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
         if TRADE_MODE != "simulation":
             bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
             positions = get_all_bybit_positions()
-            for p in positions:
+            for p in (positions or []):
                 sym = p.get("symbol")
                 sz = float(p.get("size", "0"))
                 side = p.get("side")
@@ -6333,12 +6333,6 @@ def load_initial_prices():
     except Exception as e:
         print(f"[Initial Prices] Error loading prices at startup: {e}")
 
-def get_all_bybit_positions():
-    """Retrieve all open linear positions on Bybit in a single call."""
-    res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
-    if res.get("retCode") == 0:
-        return res.get("result", {}).get("list", [])
-    return None
 
 def get_bybit_entry_order_qty(symbol, side):
     """Query Bybit order history for the symbol to find the originally requested quantity of the entry order."""

@@ -23,6 +23,10 @@ startup_time = time.time()
 _endpoint_cache = {}
 _endpoint_cache_lock = threading.Lock()
 
+def clear_endpoint_cache():
+    with _endpoint_cache_lock:
+        _endpoint_cache.clear()
+
 def micro_cache(ttl_seconds=5.0):
     def decorator(f):
         @wraps(f)
@@ -141,7 +145,7 @@ def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: s
         if TRADE_MODE != "simulation":
             bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
             positions = get_all_bybit_positions()
-            for p in positions:
+            for p in (positions or []):
                 sym = p.get("symbol")
                 sz = float(p.get("size", "0"))
                 side = p.get("side")
