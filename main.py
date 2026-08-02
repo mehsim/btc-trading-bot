@@ -8,6 +8,12 @@ import json
 import re
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MALLOC_TRIM_THRESHOLD_"] = "65536"
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -4590,21 +4596,6 @@ def load_model_weights(iv):
         models_by_interval[iv] = models_by_interval[load_iv]
         return
 
-    # To maintain ultra-low RAM footprint on 1GB AWS servers, purge other idle timeframe models when loading a new timeframe
-    for existing_iv in list(models_by_interval.keys()):
-        if existing_iv != iv and existing_iv != load_iv:
-            models_by_interval[existing_iv] = {
-                "trending": {"trend": None, "price": None, "meta": None, "calibrator": None},
-                "ranging": {"trend": None, "price": None, "meta": None, "calibrator": None},
-                "selected_features": None
-            }
-    import gc, ctypes
-    gc.collect()
-    try:
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except Exception:
-        pass
-
     prefixes = {
         "trending_trend": f"ensemble_trending_trend_{load_iv}",
         "trending_price": f"ensemble_trending_price_{load_iv}",
@@ -4734,6 +4725,9 @@ def check_and_hot_reload_models():
         if changed:
             print(f"[Hot-Reload] Model update detected for {iv} on disk. Reloading in memory...")
             load_model_weights(iv)
+            for key, filename in filenames.items():
+                if os.path.exists(filename):
+                    model_files_mtime[f"{iv}_{key}"] = os.path.getmtime(filename)
             try:
                 p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
                 tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
@@ -9317,6 +9311,16 @@ def main():
                     f"• *High-Conf Win Rate*: {drift_res.get('high_conf_wr', 0)*100:.1f}%\n"
                     f"• *Alerts*:\n{alert_text}"
                 )
+
+        try:
+            import gc, ctypes
+            gc.collect()
+            try:
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         time.sleep(10)
 
