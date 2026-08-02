@@ -15,24 +15,29 @@ class TradeLifecycleHealthEngine:
         current_adx: float,
         regime_transition_prob: float = 0.05,
         orderbook_imbalance: float = 0.50,
-        oi_delta_pct: float = 0.0
+        oi_delta_pct: float = 0.0,
+        atr_norm: float = 0.01
     ) -> Tuple[float, bool, str]:
         """
         Returns (health_score_pct, should_exit_early, reason).
         Health score scale: 100.0 (Perfect) to 0.0 (Degraded/Exit).
+        Adverse move thresholds scale dynamically with symbol atr_norm.
         """
         health = 100.0
 
-        # 1. Price Momentum / Adverse Move Check
+        # 1. Price Momentum / Adverse Move Check (Dynamic ATR scaling)
         dir_upper = direction.upper()
         if dir_upper in ("BUY", "LONG", "BULLISH"):
             pnl_pct = (current_price - entry_price) / entry_price
         else:
             pnl_pct = (entry_price - current_price) / entry_price
 
-        if pnl_pct < -0.01:
+        dynamic_adverse_major = -1.0 * max(0.005, atr_norm * 1.0)
+        dynamic_adverse_minor = -1.0 * max(0.002, atr_norm * 0.5)
+
+        if pnl_pct < dynamic_adverse_major:
             health -= 25.0
-        elif pnl_pct < -0.005:
+        elif pnl_pct < dynamic_adverse_minor:
             health -= 15.0
 
         # 2. ADX Trend Decay Check
