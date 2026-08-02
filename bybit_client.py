@@ -561,7 +561,7 @@ def get_real_bybit_balance_cached(force: bool = False):
     api_key = get_secure_env("BYBIT_API_KEY", "").strip()
     api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
     if not api_key or not api_secret:
-        return None
+        return "API_KEYS_MISSING"
 
     res = bybit_get_request("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
     if res.get("retCode") == 0:

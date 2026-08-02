@@ -388,6 +388,7 @@ def api_status():
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
         real_bal = get_real_bybit_balance_cached()
         status_data["real_balance"] = real_bal
+        status_data["real_bybit_balance"] = real_bal
         status_data["trade_history"] = state_manager.get("trade_history", [])[-50:]
         status_data["prediction_history"] = state_manager.get("prediction_history", [])[-30:]
         status_data["uptime_seconds"] = int(time.time() - startup_time)
@@ -527,6 +528,7 @@ def api_institutional_summary():
     Powers all 10 specialized frontend sections and the sticky health banner.
     """
     from state_manager import state_manager
+    from bybit_client import get_real_bybit_balance_cached
     from portfolio_risk import portfolio_risk_engine
     import mlops_engine
     from statistical_validation import statistical_validation
@@ -841,7 +843,9 @@ def api_institutional_summary():
             "today_leveraged_volume_usd": float(round(today_leveraged_volume, 2)),
             "today_win_rate_pct": float(round(today_win_rate, 1)),
             "today_pf": today_pf,
-            "today_drawdown_pct": float(today_dd)
+            "today_drawdown_pct": float(today_dd),
+            "real_bybit_balance": get_real_bybit_balance_cached(),
+            "simulated_balance": state_manager.get("simulated_balance", 80.0)
         },
         "shs_breakdown": {
             "total_score": shs_val,

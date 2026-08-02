@@ -2732,7 +2732,7 @@
                     const realBalVal = document.getElementById("bybit-balance-value");
                     const realBalSub = document.getElementById("bybit-balance-subtitle");
                     if (realBalVal && realBalSub) {
-                        const bal = data.real_bybit_balance;
+                        const bal = (data.real_bybit_balance !== undefined && data.real_bybit_balance !== null) ? data.real_bybit_balance : ((data.real_balance !== undefined && data.real_balance !== null) ? data.real_balance : data.simulated_balance);
                         if (bal === "API_KEYS_MISSING") {
                             realBalVal.innerText = "Setup Keys";
                             realBalVal.style.fontSize = "26px";
