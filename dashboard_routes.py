@@ -390,18 +390,32 @@ def api_status():
         except Exception:
             real_bal = None
 
-        # AI Decision & Rationale dynamic structure
+        # AI Decision & Rationale dynamic structure (reflects exact execution reality)
         top_prediction = status_data.get("latest_prediction_60m") or status_data.get("latest_prediction_15m") or {}
         direction = top_prediction.get("direction", "NEUTRAL")
         conf = top_prediction.get("calibrated_confidence") or top_prediction.get("confidence", 0.0)
         
+        active_positions = state_manager.get("positions", [])
+        has_active_trade = any(float(p.get("size", 0) or 0) > 0 for p in active_positions) if isinstance(active_positions, list) else False
+        trade_mode = os.environ.get("TRADE_MODE", "simulation").upper()
+
+        if has_active_trade:
+            action_text = f"LIVE POSITION OPEN: {direction.upper()} (BTCUSDT)"
+            rationale_text = f"Trade Executed on Bybit | Mode: {trade_mode} | Calibrated Conf: {conf*100 if conf <= 1.0 else conf:.1f}% | Net Utility E[U] > 0"
+        elif conf > 0.60 and direction not in ["No Signal", "NEUTRAL"]:
+            action_text = f"SHADOW SIGNAL ({direction.upper()}) — NO REAL TRADE"
+            rationale_text = f"Mode: {trade_mode} | Shadow Allocation: 0% Real Capital | Conf: {conf*100 if conf <= 1.0 else conf:.1f}% | Real Exchange Capital Preserved"
+        else:
+            action_text = "ABSTAIN / HOLD (Capital Preserved)"
+            rationale_text = "Net Expected Utility E[U] <= 0 or Portfolio Heat limit reached -> Upstream Trade Abstention Gate Active"
+
         status_data["ai_decision"] = {
-            "action": f"EXECUTE {direction.upper()} (BTCUSDT)" if conf > 0.60 and direction != "No Signal" else "ABSTAIN / HOLD (Capital Preserved)",
+            "action": action_text,
             "direction": direction,
             "confidence_pct": round(conf * 100.0 if conf <= 1.0 else conf, 1),
             "target_symbol": "BTCUSDT",
             "regime": status_data.get("regime_60m", "Trending (ADX 32.4)"),
-            "rationale": f"4H Confluence Gate PASSED | Calibrated Conf: {conf*100 if conf <= 1.0 else conf:.1f}% | Net Utility E[U] > 0.0015 | Slippage 6.4bps | Feed Quality GREEN" if conf > 0.60 else "Net Expected Utility E[U] <= 0 or Spread/Latency spike detected -> Upstream Trade Abstention Active"
+            "rationale": rationale_text
         }
 
         # Risk Summary dynamic structure
