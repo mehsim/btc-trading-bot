@@ -46,9 +46,30 @@ class MarketDataQualityMonitor:
                     self.sequence_gap_count += (seq_num - self.last_seq - 1)
             self.last_seq = seq_num
 
-        is_stale = candle_age > dynamic_candle_age_limit
-        has_skew = clock_skew > dynamic_skew_limit
-        is_healthy = ws_connected and not is_stale and not has_skew
+        # 4-Tier Health State Machine: GREEN -> YELLOW -> ORANGE -> RED
+        health_tier = "GREEN"
+        decay_reasons = []
+        decay_factor = 1.00
+
+        if not ws_connected or candle_age > dynamic_candle_age_limit * 2.0:
+            health_tier = "RED"
+            decay_factor = 0.00
+            decay_reasons.append(f"RED: Feed disconnected or severe candle staleness ({candle_age:.1f}s > {dynamic_candle_age_limit*2.0:.1f}s limit) -> Trading Disabled")
+        elif candle_age > dynamic_candle_age_limit or clock_skew > dynamic_skew_limit or self.sequence_gap_count > 5:
+            health_tier = "ORANGE"
+            age_decay = max(0.50, 1.0 - 0.35 * (candle_age / max(1.0, dynamic_candle_age_limit * 2.0)))
+            skew_decay = max(0.50, 1.0 - 0.35 * (clock_skew / max(1.0, dynamic_skew_limit * 2.0)))
+            decay_factor = round(float(min(age_decay, skew_decay)), 4)
+            if candle_age > dynamic_candle_age_limit:
+                decay_reasons.append(f"ORANGE: Moderate candle age ({candle_age:.1f}s > {dynamic_candle_age_limit:.1f}s) -> Dynamic Factor {decay_factor:.2f}")
+            if clock_skew > dynamic_skew_limit:
+                decay_reasons.append(f"ORANGE: Clock skew ({clock_skew:.1f}ms > {dynamic_skew_limit:.1f}ms) -> Dynamic Factor {decay_factor:.2f}")
+            if self.sequence_gap_count > 5:
+                decay_reasons.append(f"ORANGE: Sequence gaps ({self.sequence_gap_count}) -> Dynamic Factor {decay_factor:.2f}")
+        elif clock_skew > dynamic_skew_limit * 0.5 or self.sequence_gap_count > 0:
+            health_tier = "YELLOW"
+            decay_factor = round(float(max(0.80, 1.0 - 0.05 * max(1, self.sequence_gap_count) - 0.05 * (clock_skew / max(1.0, dynamic_skew_limit)))), 4)
+            decay_reasons.append(f"YELLOW: Minor feed latency/sequence gap -> Dynamic Factor {decay_factor:.2f}")
 
         return {
             "timestamp": now,
@@ -57,9 +78,31 @@ class MarketDataQualityMonitor:
             "clock_skew_ms": round(clock_skew, 1),
             "sequence_gaps": self.sequence_gap_count,
             "duplicate_messages": self.duplicate_count,
-            "feed_status": "HEALTHY" if is_healthy else "DEGRADED",
-            "is_stale": is_stale,
-            "has_clock_skew": has_skew
+            "health_tier": health_tier, # GREEN, YELLOW, ORANGE, RED
+            "trading_allowed": health_tier != "RED",
+            "decay_factor": decay_factor,
+            "decay_reasons": decay_reasons,
+            "feed_status": "HEALTHY" if health_tier == "GREEN" else ("DEGRADED" if health_tier != "RED" else "CRITICAL")
+        }
+
+    def apply_explainable_confidence_decay(
+        self,
+        raw_confidence: float,
+        feed_health: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Applies feed-health confidence decay with an explainable audit trail.
+        """
+        decay_factor = float(feed_health.get("decay_factor", 1.00))
+        reasons = feed_health.get("decay_reasons", [])
+        decayed_confidence = float(raw_confidence * decay_factor)
+
+        return {
+            "raw_confidence": round(raw_confidence, 4),
+            "decayed_confidence": round(decayed_confidence, 4),
+            "decay_factor": round(decay_factor, 2),
+            "decay_reasons": reasons if reasons else ["GREEN: Market data feed optimal (No confidence decay)"],
+            "health_tier": feed_health.get("health_tier", "GREEN")
         }
 
 market_data_quality_monitor = MarketDataQualityMonitor()
