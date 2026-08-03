@@ -218,23 +218,25 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         if rsi_4h_pass:
             total_score += weight_4h
 
-    # CHECK 3: Orderbook Imbalance & L2 Depth
+    # CHECK 3: Orderbook Imbalance & L2 Depth (Tier 2 Optional: Confidence Decay on Missing Data)
     weight_ob = 1
     if get_orderbook_fn:
         try:
             ob_data = get_orderbook_fn(symbol=symbol)
-            ob_imbalance = ob_data.get("imbalance", 0.0)
+            ob_imbalance = ob_data.get("imbalance", 0.0) if isinstance(ob_data, dict) else 0.0
             ob_pass = (ml_trend == "Bullish" and ob_imbalance >= -0.2) or (ml_trend == "Bearish" and ob_imbalance <= 0.2)
             results["Orderbook_L2"] = {"pass": ob_pass, "detail": f"Imbalance: {ob_imbalance:+.2f}", "weight": weight_ob}
             max_score += weight_ob
             if ob_pass:
                 total_score += weight_ob
         except Exception as e:
-            results["Orderbook_L2"] = {"pass": True, "detail": f"Bypassed ({e})", "weight": 0}
+            results["Orderbook_L2"] = {"pass": False, "detail": f"Orderbook check failed ({e}) [FAIL CLOSED]", "weight": weight_ob}
+            max_score += weight_ob
     else:
-        results["Orderbook_L2"] = {"pass": True, "detail": "Orderbook check bypassed", "weight": 0}
+        results["Orderbook_L2"] = {"pass": False, "detail": "Orderbook unavailable [FAIL CLOSED]", "weight": weight_ob}
+        max_score += weight_ob
 
-    # CHECK 4: Choppiness Index Gate
+    # CHECK 4: Choppiness Index Gate (Tier 2 Optional: Fail Closed on error)
     weight_chop = 1
     if choppiness_fn and df_1h is not None and len(df_1h) >= 14:
         try:
@@ -245,9 +247,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             if chop_pass:
                 total_score += weight_chop
         except Exception as e:
-            results["Choppiness_Gate"] = {"pass": True, "detail": f"Bypassed ({e})", "weight": 0}
+            results["Choppiness_Gate"] = {"pass": False, "detail": f"Choppiness check failed ({e}) [FAIL CLOSED]", "weight": weight_chop}
+            max_score += weight_chop
     else:
-        results["Choppiness_Gate"] = {"pass": True, "detail": "Choppiness check bypassed", "weight": 0}
+        results["Choppiness_Gate"] = {"pass": False, "detail": "Choppiness check unavailable [FAIL CLOSED]", "weight": weight_chop}
+        max_score += weight_chop
 
     # CHECK 5: News Blackout & Sentiment Check
     weight_news = 1

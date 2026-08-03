@@ -564,7 +564,10 @@ def quantize_bybit_price(symbol: str, price: float) -> str:
     except Exception:
         return format_bybit_price(symbol, price)
 
-def get_real_bybit_balance_cached(force: bool = False):
+class AccountBalanceUnavailableException(Exception):
+    pass
+
+def get_real_bybit_balance_cached(force: bool = False) -> float:
     global _real_balance_cache, _last_real_balance_sync
     now = time.time()
     with _real_balance_lock:
@@ -574,18 +577,23 @@ def get_real_bybit_balance_cached(force: bool = False):
     api_key = get_secure_env("BYBIT_API_KEY", "").strip()
     api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
     if not api_key or not api_secret:
-        return "API_KEYS_MISSING"
+        raise AccountBalanceUnavailableException("BYBIT_API_KEY or BYBIT_API_SECRET missing in environment")
 
     res = bybit_get_request("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
     if res.get("retCode") == 0:
         list_data = res.get("result", {}).get("list", [])
         if list_data:
             total_equity = float(list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or 0.0)
-            with _real_balance_lock:
-                _real_balance_cache = total_equity
-                _last_real_balance_sync = now
-            return total_equity
-    return _real_balance_cache
+            if total_equity > 0:
+                with _real_balance_lock:
+                    _real_balance_cache = total_equity
+                    _last_real_balance_sync = now
+                return total_equity
+
+    if _real_balance_cache is not None and _real_balance_cache > 0:
+        return _real_balance_cache
+
+    raise AccountBalanceUnavailableException("Bybit wallet balance unavailable from API")
 
 
 def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
