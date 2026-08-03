@@ -1551,12 +1551,30 @@ def start_telegram_command_listener():
                                                     }
                                                     
                                                     with active_trades_lock:
-                                                        active_list = bot_state.get("active_trade_1h", [])
-                                                        exists = any(t.get("symbol") == sym for t in active_list)
-                                                        if not exists:
+                                                        # Guard: check ALL timeframes, not just 1h,
+                                                        # to prevent duplicate if a _recovered entry already exists.
+                                                        exists_any_tf = any(
+                                                            any(t.get("symbol") == sym for t in bot_state.get(f"active_trade_{k}", []))
+                                                            for k in ACTIVE_TRADE_TF_KEYS
+                                                        )
+                                                        if not exists_any_tf:
+                                                            active_list = bot_state.get("active_trade_1h", [])
                                                             active_list.append(new_trade)
                                                             bot_state["active_trade_1h"] = active_list
                                                             save_history()
+                                                        else:
+                                                            # Remove any stale _recovered entry for this symbol first, then insert cleanly
+                                                            for k in ACTIVE_TRADE_TF_KEYS:
+                                                                bot_state[f"active_trade_{k}"] = [
+                                                                    t for t in bot_state.get(f"active_trade_{k}", [])
+                                                                    if not (t.get("symbol") == sym and t.get("recovered", False))
+                                                                ]
+                                                            active_list = bot_state.get("active_trade_1h", [])
+                                                            active_list.append(new_trade)
+                                                            bot_state["active_trade_1h"] = active_list
+                                                            save_history()
+                                                            print(f"[Manual Trade] Replaced stale _recovered entry for {sym} with fresh manual trade in active_trade_1h.")
+
                                                         
                                                     execute_telegram_api_call("sendMessage", {
                                                         "chat_id": cid,
@@ -6584,10 +6602,21 @@ def sync_active_positions_from_bybit():
                 if in_active_execution:
                     print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
                     continue
+                # FIX: Re-check ALL active timeframes live in bot_state at this moment.
+                # matched_symbols is built at the START of the sync loop and may be stale
+                # if a manual trade was added to bot_state between the sync loop start and now.
+                currently_tracked = any(
+                    any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
+                    for k in ACTIVE_TRADE_TF_KEYS
+                )
+                if currently_tracked:
+                    print(f"[Crash Recovery] Skipped recovery for {symbol} - already tracked in current bot_state (live re-check).")
+                    continue
                 if symbol not in matched_symbols:
                     # Guard: Do not recover positions for symbols that were recently closed in trade history (within 15 min)
                     now_sec = time.time()
                     recently_closed = any(
+
                         t.get("symbol") == symbol and (now_sec - t.get("exit_time", 0.0) < 900)
                         for t in bot_state.get("trade_history", [])
                     )

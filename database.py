@@ -350,8 +350,17 @@ def save_completed_trade(trade):
             conn.close()
             
     reason_str = str(trade.get("reason", "")).upper()
+
     if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
         save_pending_pain_check(trade)
+
+    # Hook Phase 1 Continuous Learning Engine (non-blocking event dispatch)
+    try:
+        from learning_engine import continuous_learning_engine
+        continuous_learning_engine.on_trade_closed(trade)
+    except Exception as le:
+        print(f"[LearningEngine Hook] Non-critical dispatch error: {le}")
+
 
 
 def get_trade_history(limit=500):
