@@ -128,17 +128,23 @@ class ShadowTradingEngine:
             reasons.append("Statistical promotion gates not yet satisfied")
             return "SHADOW", 0.00, reasons
 
-        # Progressive Allocation Scale
-        if shadow_trades_count >= 500 and current_stage == "CANARY_50":
+        # Progressive Allocation Scale (Dynamic trade count thresholds scaling with volatility)
+        vol_scaler = max(0.5, min(2.0, 0.0040 / max(0.0010, atr_norm)))
+        thresh_champ = int(500 * vol_scaler)
+        thresh_50 = int(300 * vol_scaler)
+        thresh_20 = int(200 * vol_scaler)
+        thresh_5 = int(100 * vol_scaler)
+
+        if shadow_trades_count >= thresh_champ and current_stage == "CANARY_50":
             reasons.append("Promoted to full CHAMPION production status (100% allocation)")
             return "CHAMPION", 1.00, reasons
-        elif shadow_trades_count >= 300 and current_stage in ("CANARY_20", "CANARY_50"):
+        elif shadow_trades_count >= thresh_50 and current_stage in ("CANARY_20", "CANARY_50"):
             reasons.append("Advanced to CANARY_50 stage (50% allocation)")
             return "CANARY_50", 0.50, reasons
-        elif shadow_trades_count >= 200 and current_stage in ("CANARY_5", "CANARY_20"):
+        elif shadow_trades_count >= thresh_20 and current_stage in ("CANARY_5", "CANARY_20"):
             reasons.append("Advanced to CANARY_20 stage (20% allocation)")
             return "CANARY_20", 0.20, reasons
-        elif shadow_trades_count >= 100:
+        elif shadow_trades_count >= thresh_5:
             reasons.append("Advanced to CANARY_5 stage (5% allocation)")
             return "CANARY_5", 0.05, reasons
         else:
