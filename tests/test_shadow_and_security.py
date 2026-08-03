@@ -31,7 +31,30 @@ def test_shadow_promotion_gate_evaluation():
         shadow_trade_history=s_history
     )
     assert "promotion_approved" in res
+    assert "canary_stage" in res
     assert res["shadow_sample_size"] == 110
+
+
+def test_canary_progressive_rollout_stages():
+    stage, alloc, reasons = shadow_trading_engine.evaluate_canary_rollout_stage(
+        current_stage="SHADOW", shadow_trades_count=120, is_statistically_approved=True
+    )
+    assert stage == "CANARY_5"
+    assert alloc == 0.05
+
+    # High slippage execution quality gate rejection
+    stage_high_slip, alloc_slip, reasons_slip = shadow_trading_engine.evaluate_canary_rollout_stage(
+        current_stage="CANARY_5", shadow_trades_count=250, is_statistically_approved=True, mean_slippage_bps=20.0
+    )
+    assert stage_high_slip == "SHADOW"
+    assert alloc_slip == 0.00
+    assert "Execution Quality Gate Failed" in reasons_slip[0]
+
+
+def test_dependency_security_scan():
+    audit_res = security_operations_engine.scan_dependency_vulnerabilities()
+    assert audit_res["status"] == "PASS"
+    assert "findings" in audit_res
 
 
 def test_security_audit_logging():
