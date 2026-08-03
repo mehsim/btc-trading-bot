@@ -574,21 +574,31 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
         if not force and _real_balance_cache is not None and (now - _last_real_balance_sync) < 60:
             return _real_balance_cache
 
-    api_key = get_secure_env("BYBIT_API_KEY", "").strip()
-    api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
+    api_key = (os.environ.get("BYBIT_API_KEY") or get_secure_env("BYBIT_API_KEY", "")).strip()
+    api_secret = (os.environ.get("BYBIT_API_SECRET") or get_secure_env("BYBIT_API_SECRET", "")).strip()
     if not api_key or not api_secret:
         raise AccountBalanceUnavailableException("BYBIT_API_KEY or BYBIT_API_SECRET missing in environment")
 
-    res = bybit_get_request("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
-    if res.get("retCode") == 0:
-        list_data = res.get("result", {}).get("list", [])
-        if list_data:
-            total_equity = float(list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or 0.0)
-            if total_equity > 0:
-                with _real_balance_lock:
-                    _real_balance_cache = total_equity
-                    _last_real_balance_sync = now
-                return total_equity
+    # Support UNIFIED, CONTRACT, and SPOT account types for seamless synchronization
+    for acct_type in ["UNIFIED", "CONTRACT", "SPOT"]:
+        try:
+            res = bybit_get_request("/v5/account/wallet-balance", {"accountType": acct_type})
+            if isinstance(res, dict) and res.get("retCode") == 0:
+                list_data = res.get("result", {}).get("list", [])
+                if list_data:
+                    first_acct = list_data[0]
+                    total_equity = float(
+                        first_acct.get("totalEquity") or 
+                        first_acct.get("totalWalletBalance") or 
+                        first_acct.get("totalMarginBalance") or 0.0
+                    )
+                    if total_equity > 0:
+                        with _real_balance_lock:
+                            _real_balance_cache = total_equity
+                            _last_real_balance_sync = now
+                        return total_equity
+        except Exception:
+            continue
 
     if _real_balance_cache is not None and _real_balance_cache > 0:
         return _real_balance_cache
