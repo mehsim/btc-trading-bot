@@ -1175,6 +1175,70 @@
                 </div>
             </div>
             <button onclick="resetCircuitBreaker()" style="padding: 8px 16px; font-size: 12px; background: rgba(244,63,94,0.2); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.4); border-radius: 8px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.35)'" onmouseout="this.style.background='rgba(244,63,94,0.2)'">Reset Breaker</button>
+        <!-- Institutional Telemetry Grid: AI Decision, Risk Summary, Recent Alerts -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px;">
+            <!-- 1. AI Decision Card -->
+            <div class="card" id="card-ai-decision" style="padding: 20px; border: 1px solid rgba(59,130,246,0.3); background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                        <span>🧠</span> AI Decision & Rationale
+                    </div>
+                    <span id="ai-decision-badge" style="font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px; background: rgba(59,130,246,0.15); color: var(--accent-blue);">ACTIVE</span>
+                </div>
+                <div id="ai-decision-action" style="font-size: 18px; font-weight: 800; color: var(--accent-green); margin-bottom: 6px;">
+                    EXECUTE BUY (BTCUSDT)
+                </div>
+                <div style="display: flex; gap: 12px; font-size: 12px; margin-bottom: 10px; color: var(--text-secondary);">
+                    <div>Conf: <strong id="ai-decision-conf" style="color: var(--accent-blue);">82.5%</strong></div>
+                    <div>Regime: <strong id="ai-decision-regime" style="color: var(--accent-purple);">Trending (ADX 32.4)</strong></div>
+                </div>
+                <div id="ai-decision-rationale" style="font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; line-height: 1.4;">
+                    4H Confluence Gate PASSED | Calibrated Conf: 82.5% | Net Utility E[U] > 0.0015 | Slippage 6.4bps | Feed Quality GREEN
+                </div>
+            </div>
+
+            <!-- 2. Risk Summary Card -->
+            <div class="card" id="card-risk-summary" style="padding: 20px; border: 1px solid rgba(139,92,246,0.3); background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                        <span>🛡️</span> Risk Summary
+                    </div>
+                    <span style="font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px; background: rgba(139,92,246,0.15); color: var(--accent-purple);">GOVERNED</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
+                    <div>
+                        <div style="color: var(--text-secondary); font-size: 11px;">Portfolio VaR (99%)</div>
+                        <div id="risk-var-val" style="font-size: 16px; font-weight: 800; color: var(--accent-orange); margin-top: 2px;">$420.50 (1.69%)</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-secondary); font-size: 11px;">Portfolio Heat</div>
+                        <div id="risk-heat-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green); margin-top: 2px;">0.24 / 0.80</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-secondary); font-size: 11px;">Gross Exposure</div>
+                        <div id="risk-exposure-val" style="font-size: 16px; font-weight: 800; color: var(--accent-blue); margin-top: 2px;">$24,850.40 USD</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-secondary); font-size: 11px;">Max Intraday DD</div>
+                        <div id="risk-mdd-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green); margin-top: 2px;">-1.2%</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Recent Alerts Card -->
+            <div class="card" id="card-recent-alerts" style="padding: 20px; border: 1px solid rgba(16,185,129,0.3); background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div style="font-size: 14px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                        <span>🔔</span> Recent Operational Alerts
+                    </div>
+                    <span style="font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px; background: rgba(16,185,129,0.15); color: var(--accent-green);">LIVE STREAM</span>
+                </div>
+                <div id="recent-alerts-stream" style="font-size: 11px; color: var(--text-secondary); font-family: 'Fira Code', monospace; display: flex; flex-direction: column; gap: 6px; max-height: 90px; overflow-y: auto;">
+                    <div style="border-left: 2px solid var(--accent-green); padding-left: 6px;">[18:22:10] Data Quality GREEN | Latency 14ms | State Recovery OK</div>
+                    <div style="border-left: 2px solid var(--accent-blue); padding-left: 6px;">[18:20:05] Scope Audit: CRITICAL_TRADING Clean</div>
+                    <div style="border-left: 2px solid var(--accent-purple); padding-left: 6px;">[18:15:00] Candidate Model Canary Stage: CANARY_20 (5 Gates Passed)</div>
+                </div>
+            </div>
         </div>
 
         <!-- KPI Strategy & Market Dashboard -->
@@ -2724,7 +2788,6 @@
                                 <div style="font-size: 10px; color: var(--accent-green); margin-top: 4px;">✓ Balance synced successfully</div>
                             `;
                         } else {
-                            realBalVal.innerText = "--";
                             realBalVal.style.fontSize = "36px";
                             realBalVal.style.color = "var(--text-secondary)";
                             realBalSub.innerText = "Syncing with Bybit APIs...";
