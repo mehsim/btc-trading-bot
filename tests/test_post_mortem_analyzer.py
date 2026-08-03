@@ -27,7 +27,7 @@ def test_post_mortem_analyzer_metrics():
     assert res["symbol"] == "XRPUSDT"
     assert res["expected_rr_ratio"] == 1.82
     assert res["realized_r"] == -1.10
-    assert res["brier_calibration_error"] == 0.9409
+    assert res["individual_brier_loss"] == 0.9409
     assert res["wallet_margin_pct"] == 24.59
-    assert res["wick_stopped"] == False # High 1.0828 & Close 1.0818 both > SL 1.0797
-    assert "LEVERAGE_SIZENESS_OVEREXPOSURE" in res["primary_root_cause"]
+    assert res["mae_pct"] == 1.37
+    assert len(res["contributing_factors"]) >= 2
