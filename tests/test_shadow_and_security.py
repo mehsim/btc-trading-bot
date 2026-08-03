@@ -37,24 +37,35 @@ def test_shadow_promotion_gate_evaluation():
 
 def test_canary_progressive_rollout_stages():
     stage, alloc, reasons = shadow_trading_engine.evaluate_canary_rollout_stage(
-        current_stage="SHADOW", shadow_trades_count=120, is_statistically_approved=True
+        current_stage="SHADOW", shadow_trades_count=120, is_statistically_approved=True, regimes_encountered=["TRENDING", "RANGING"]
     )
     assert stage == "CANARY_5"
     assert alloc == 0.05
 
-    # High slippage execution quality gate rejection
-    stage_high_slip, alloc_slip, reasons_slip = shadow_trading_engine.evaluate_canary_rollout_stage(
-        current_stage="CANARY_5", shadow_trades_count=250, is_statistically_approved=True, mean_slippage_bps=20.0
+    # Adaptive Slippage Calculation test
+    ad_slip = shadow_trading_engine.calculate_adaptive_slippage_limit(atr_norm=0.0045, spread_pct=0.0004, ob_depth_usd=80000.0)
+    assert 8.0 <= ad_slip <= 35.0
+
+    # High CVaR tail risk rejection test
+    stage_cvar, alloc_cvar, reasons_cvar = shadow_trading_engine.evaluate_canary_rollout_stage(
+        current_stage="CANARY_5", shadow_trades_count=250, is_statistically_approved=True, candidate_cvar_99=0.15, champion_cvar_99=0.06
     )
-    assert stage_high_slip == "SHADOW"
-    assert alloc_slip == 0.00
-    assert "Execution Quality Gate Failed" in reasons_slip[0]
+    assert stage_cvar == "SHADOW"
+    assert alloc_cvar == 0.00
+    assert "CVaR Tail Risk Gate Failed" in reasons_cvar[0]
 
 
 def test_dependency_security_scan():
     audit_res = security_operations_engine.scan_dependency_vulnerabilities()
     assert audit_res["status"] == "PASS"
     assert "findings" in audit_res
+    assert "blocked_deployment" in audit_res
+
+
+def test_secret_rotation_and_versioning():
+    rot_res = security_operations_engine.rotate_secret_with_versioning("BYBIT_API_SECRET", "sz8921hd9ahsdj1298ahs1")
+    assert rot_res["rotation_status"] == "SUCCESS"
+    assert "version_id" in rot_res
 
 
 def test_security_audit_logging():

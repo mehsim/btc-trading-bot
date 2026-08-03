@@ -62,6 +62,21 @@ class ShadowTradingEngine:
         self._save()
         return shadow_record
 
+    def calculate_adaptive_slippage_limit(
+        self,
+        atr_norm: float = 0.0040,
+        spread_pct: float = 0.0003,
+        ob_depth_usd: float = 100000.0
+    ) -> float:
+        """
+        Adaptive Slippage Limit: f(ATR, Spread, Depth)
+        Max Allowed Slippage (bps) scales dynamically with market microstructure.
+        """
+        base_bps = (spread_pct * 10000.0) * 1.5
+        atr_mult = 1.0 + max(0.0, (atr_norm - 0.0030) * 100.0)
+        depth_mult = max(0.8, min(2.0, 100000.0 / max(1.0, ob_depth_usd)))
+        return float(max(8.0, min(35.0, base_bps * atr_mult * depth_mult)))
+
     def evaluate_canary_rollout_stage(
         self,
         current_stage: str,
@@ -69,25 +84,44 @@ class ShadowTradingEngine:
         is_statistically_approved: bool,
         mean_slippage_bps: float = 5.0,
         candidate_var_99: float = 0.05,
-        champion_var_99: float = 0.05
+        champion_var_99: float = 0.05,
+        candidate_cvar_99: float = 0.07,
+        champion_cvar_99: float = 0.07,
+        regimes_encountered: Optional[List[str]] = None,
+        atr_norm: float = 0.0040,
+        spread_pct: float = 0.0003,
+        ob_depth_usd: float = 100000.0
     ) -> Tuple[str, float, List[str]]:
         """
         Progressive Canary Rollout Pipeline:
         SHADOW (0%) -> CANARY_5 (5%) -> CANARY_20 (20%) -> CANARY_50 (50%) -> CHAMPION (100%)
+        Requires multi-regime exposure (TRENDING & RANGING) + Execution Quality + Tail Risk (VaR & CVaR).
         """
         reasons = []
         
-        # 1. Execution Quality Gate: Reject if live slippage is excessive relative to rolling baseline
-        dynamic_slippage_limit = float(max(10.0, min(18.0, max(12.0, mean_slippage_bps * 1.5))))
-        if mean_slippage_bps > dynamic_slippage_limit:
-            reasons.append(f"Execution Quality Gate Failed: Slippage ({mean_slippage_bps:.1f}bps > dynamic limit {dynamic_slippage_limit:.1f}bps)")
+        # 1. Adaptive Execution Quality Gate: f(ATR, Spread, Depth)
+        adaptive_slippage_limit = self.calculate_adaptive_slippage_limit(atr_norm, spread_pct, ob_depth_usd)
+        if mean_slippage_bps > adaptive_slippage_limit:
+            reasons.append(f"Execution Quality Gate Failed: Slippage ({mean_slippage_bps:.1f}bps > adaptive limit {adaptive_slippage_limit:.1f}bps)")
             return "SHADOW", 0.00, reasons
 
-        # 2. Risk Budget Gate: Reject if Portfolio VaR increases beyond dynamic tolerance
+        # 2. Tail Risk Budget Gate: Evaluate VaR (99%) and Expected Shortfall CVaR (99%)
         dynamic_var_tolerance = 1.05 + max(0.0, 0.02 * (1.0 - shadow_trades_count / 500.0))
         dynamic_var_limit = champion_var_99 * dynamic_var_tolerance
+        dynamic_cvar_limit = champion_cvar_99 * dynamic_var_tolerance
+
         if candidate_var_99 > dynamic_var_limit:
-            reasons.append(f"Risk Budget Gate Failed: Candidate VaR ({candidate_var_99*100:.2f}%) exceeds dynamic limit ({dynamic_var_limit*100:.2f}%)")
+            reasons.append(f"VaR Risk Gate Failed: Candidate VaR ({candidate_var_99*100:.2f}%) exceeds limit ({dynamic_var_limit*100:.2f}%)")
+            return "SHADOW", 0.00, reasons
+
+        if candidate_cvar_99 > dynamic_cvar_limit:
+            reasons.append(f"CVaR Tail Risk Gate Failed: Candidate CVaR ({candidate_cvar_99*100:.2f}%) exceeds limit ({dynamic_cvar_limit*100:.2f}%)")
+            return "SHADOW", 0.00, reasons
+
+        # 3. Multi-Regime Exposure Criterion
+        unique_regimes = set(regimes_encountered or ["TRENDING", "RANGING"])
+        if len(unique_regimes) < 2 and shadow_trades_count < 300:
+            reasons.append(f"Multi-Regime Exposure Gate Pending: Experienced regimes {list(unique_regimes)} (Requires both TRENDING & RANGING)")
             return "SHADOW", 0.00, reasons
 
         if not is_statistically_approved:
