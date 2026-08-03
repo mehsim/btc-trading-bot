@@ -38,27 +38,36 @@ class RuleBasedPatternMiner:
         
         return f"{regime}|{ltf_conf}|{conf_bucket}|{vol}"
 
-    def mine_patterns(self, limit: int = 500) -> List[Dict[str, Any]]:
+    def mine_patterns(self, limit: int = 500, decay_factor: float = 0.98) -> List[Dict[str, Any]]:
         trades = get_recent_experiences(limit=limit)
         clusters = {}
         
-        for t in trades:
+        # trades are ordered DESC (idx 0 is newest trade)
+        for idx, t in enumerate(trades):
+            weight = decay_factor ** idx
             key = self.generate_cluster_key(t)
             if key not in clusters:
-                clusters[key] = {"wins": 0, "total": 0, "sum_r": 0.0, "trades": []}
+                clusters[key] = {"wins": 0, "total": 0, "sum_r": 0.0, "weighted_wins": 0.0, "weighted_total": 0.0, "trades": []}
                 
             clusters[key]["total"] += 1
-            if t.get("trade_outcome") == "WIN" or t.get("pnl_usd", 0.0) > 0:
+            clusters[key]["weighted_total"] += weight
+            is_win = (t.get("trade_outcome") == "WIN" or t.get("pnl_usd", 0.0) > 0)
+            if is_win:
                 clusters[key]["wins"] += 1
-            clusters[key]["sum_r"] += t.get("realized_r", 0.0)
+                clusters[key]["weighted_wins"] += weight
+            clusters[key]["sum_r"] += t.get("realized_r", 0.0) * weight
             clusters[key]["trades"].append(t.get("trade_id"))
             
         results = []
         for key, data in clusters.items():
             n = data["total"]
             w = data["wins"]
-            win_rate = round(w / n, 4) if n > 0 else 0.0
-            avg_r = round(data["sum_r"] / n, 4) if n > 0 else 0.0
+            w_tot = data["weighted_total"]
+            w_win = data["weighted_wins"]
+            
+            # Recency-weighted win rate
+            win_rate = round(w_win / w_tot, 4) if w_tot > 0 else 0.0
+            avg_r = round(data["sum_r"] / w_tot, 4) if w_tot > 0 else 0.0
             ci_lower, ci_upper = wilson_score_interval(w, n)
             
             results.append({
@@ -69,10 +78,12 @@ class RuleBasedPatternMiner:
                 "avg_r": avg_r,
                 "ci_95_lower": ci_lower,
                 "ci_95_upper": ci_upper,
+                "trade_ids": data["trades"],
                 "is_significant": n >= self.min_sample_size
             })
             
         results.sort(key=lambda x: x["sample_size"], reverse=True)
         return results
+
 
 pattern_miner = RuleBasedPatternMiner()

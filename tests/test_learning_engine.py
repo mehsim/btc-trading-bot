@@ -117,5 +117,34 @@ class TestContinuousLearningEngine(unittest.TestCase):
         self.assertIn("win_rate", res)
         self.assertIn("avg_r", res)
 
+    def test_09_audit_logger_and_schema_validator(self):
+        from audit_logger import log_learning_action, get_recent_audit_logs
+        from schema_validator import schema_validator
+        
+        log_learning_action("TEST_ACTION", "test_component", trade_id="TEST_999", details={"key": "val"})
+        logs = get_recent_audit_logs(limit=5)
+        self.assertTrue(len(logs) > 0)
+        self.assertEqual(logs[0]["action_type"], "TEST_ACTION")
+        
+        is_valid, errors = schema_validator.validate_record({"trade_id": "T1", "symbol": "BTCUSDT", "confidence": 0.85})
+        self.assertTrue(is_valid)
+
+    def test_10_feature_availability_and_db_snapshot(self):
+        from feature_availability import record_feature_sample, get_feature_availability_report
+        from db_snapshot_manager import create_db_snapshot, list_db_snapshots
+        from regime_transition_analyzer import record_transition_trade, get_transition_analysis
+        
+        record_feature_sample("adx", is_available=True)
+        report = get_feature_availability_report()
+        self.assertTrue(len(report) > 0)
+        
+        snap_path = create_db_snapshot(snapshot_tag="unittest")
+        self.assertTrue(os.path.exists(snap_path))
+        
+        record_transition_trade("TRENDING", "HIGH_VOL", is_win=False, realized_r=-1.0)
+        transitions = get_transition_analysis()
+        self.assertTrue(len(transitions) > 0)
+
 if __name__ == "__main__":
     unittest.main()
+

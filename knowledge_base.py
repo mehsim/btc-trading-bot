@@ -37,10 +37,19 @@ def init_knowledge_db():
                     counter_evidence_count INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'VALIDATED',
                     recommendation TEXT,
+                    trade_ids_json TEXT,
                     created_at REAL NOT NULL,
                     last_updated REAL NOT NULL
                 );
             """)
+            
+            # Migration check for trade_ids_json
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(knowledge_rules);").fetchall()]
+            if "trade_ids_json" not in cols:
+                try:
+                    conn.execute("ALTER TABLE knowledge_rules ADD COLUMN trade_ids_json TEXT;")
+                except Exception:
+                    pass
             conn.commit()
         except Exception as e:
             print(f"[knowledge_base Error] Init failed: {e}")
@@ -52,19 +61,21 @@ def save_rule(rule_dict: Dict[str, Any]) -> bool:
         conn = get_db_connection()
         try:
             now = time.time()
+            trade_ids = rule_dict.get("trade_ids", [])
+            trade_ids_json = json.dumps(trade_ids) if isinstance(trade_ids, list) else str(trade_ids or "[]")
             conn.execute("""
                 INSERT OR REPLACE INTO knowledge_rules (
                     rule_id, cluster_key, sample_size, win_rate, avg_r,
                     ci_lower, ci_upper, evidence_score, counter_evidence_count,
-                    status, recommendation, created_at, last_updated
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    status, recommendation, trade_ids_json, created_at, last_updated
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 rule_dict.get("rule_id"), rule_dict.get("cluster_key"),
                 rule_dict.get("sample_size", 0), rule_dict.get("win_rate", 0.0),
                 rule_dict.get("avg_r", 0.0), rule_dict.get("ci_lower", 0.0),
                 rule_dict.get("ci_upper", 0.0), rule_dict.get("evidence_score", 50.0),
                 rule_dict.get("counter_evidence_count", 0), rule_dict.get("status", "VALIDATED"),
-                rule_dict.get("recommendation", ""), rule_dict.get("created_at", now), now
+                rule_dict.get("recommendation", ""), trade_ids_json, rule_dict.get("created_at", now), now
             ))
             conn.commit()
             return True

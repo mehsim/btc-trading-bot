@@ -33,6 +33,8 @@ def init_experience_db():
                     model_version TEXT,
                     ensemble_version TEXT,
                     normalizer_version TEXT,
+                    learning_engine_version TEXT DEFAULT 'v1.0.0',
+
                     
                     -- Decision Snapshot & Reason Codes
                     decision_snapshot_json TEXT,
