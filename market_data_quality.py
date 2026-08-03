@@ -123,6 +123,8 @@ class MarketDataQualityMonitor:
             "ws_connected": ws_connected,
             "candle_age_sec": round(candle_age, 1),
             "clock_skew_ms": round(clock_skew, 1),
+            "dynamic_candle_age_limit": round(dynamic_candle_age_limit, 1),
+            "dynamic_skew_limit": round(dynamic_skew_limit, 1),
             "sequence_gaps": self.sequence_gap_count,
             "duplicate_messages": self.duplicate_count,
             "health_tier": self.current_tier,
@@ -149,11 +151,13 @@ class MarketDataQualityMonitor:
         candle_age = float(feed_health.get("candle_age_sec", 0.0))
         clock_skew = float(feed_health.get("clock_skew_ms", 0.0))
         seq_gaps = int(feed_health.get("sequence_gaps", 0))
+        dynamic_candle_age_limit = float(feed_health.get("dynamic_candle_age_limit", 45.0))
+        dynamic_skew_limit = float(feed_health.get("dynamic_skew_limit", 150.0))
 
-        # Additive Confidence Attribution Breakdown
-        age_deduction_pct = round(max(0.0, min(20.0, (candle_age - 30.0) * 0.2)), 2)
-        skew_deduction_pct = round(max(0.0, min(20.0, (clock_skew - 100.0) * 0.05)), 2)
-        gap_deduction_pct = round(float(seq_gaps * 3.0), 2)
+        # 100% Dynamic Additive Confidence Attribution Breakdown
+        age_deduction_pct = round(max(0.0, min(25.0, (candle_age / max(1.0, dynamic_candle_age_limit)) * 10.0)), 2)
+        skew_deduction_pct = round(max(0.0, min(25.0, (clock_skew / max(1.0, dynamic_skew_limit)) * 10.0)), 2)
+        gap_deduction_pct = round(max(0.0, min(20.0, float(seq_gaps * 2.5))), 2)
         total_deduction_pct = age_deduction_pct + skew_deduction_pct + gap_deduction_pct
 
         final_confidence = max(0.0, raw_confidence * (1.0 - total_deduction_pct / 100.0) * decay_factor)
