@@ -383,6 +383,13 @@ def api_status():
         with logs_lock:
             status_data["logs"] = list(bot_logs)
 
+        # Fetch real Bybit balance first to avoid UnboundLocalError
+        real_bal = None
+        try:
+            real_bal = get_real_bybit_balance_cached()
+        except Exception:
+            real_bal = None
+
         # AI Decision & Rationale dynamic structure
         top_prediction = status_data.get("latest_prediction_60m") or status_data.get("latest_prediction_15m") or {}
         direction = top_prediction.get("direction", "NEUTRAL")
@@ -398,7 +405,7 @@ def api_status():
         }
 
         # Risk Summary dynamic structure
-        bal_val = float(real_bal.get("total_equity", 24850.40)) if isinstance(real_bal, dict) else 24850.40
+        bal_val = float(real_bal.get("total_equity", 24850.40)) if isinstance(real_bal, dict) else (float(real_bal) if isinstance(real_bal, (int, float)) and real_bal > 0 else 24850.40)
         status_data["risk_summary"] = {
             "portfolio_var_99_usd": round(bal_val * 0.0169, 2),
             "portfolio_var_99_pct": 1.69,
@@ -420,7 +427,6 @@ def api_status():
         status_data["status"] = "ok"
         status_data["bot_running"] = state_manager.get("bot_running", True)
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
-        real_bal = get_real_bybit_balance_cached()
         status_data["real_balance"] = real_bal
         status_data["real_bybit_balance"] = real_bal
         status_data["trade_history"] = state_manager.get("trade_history", [])[-50:]
