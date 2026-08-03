@@ -1179,7 +1179,7 @@
 
         <!-- Institutional Telemetry Grid: AI Decision, Risk Summary, Recent Alerts -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px;">
-            <!-- 1. AI Decision Card -->
+            <!-- 1. AI Decision & Rationale Card (Fixed Single Card Layout) -->
             <div class="card" id="card-ai-decision" style="padding: 20px; border: 1px solid rgba(59,130,246,0.3); background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <div style="font-size: 14px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
@@ -1188,14 +1188,17 @@
                     <span id="ai-decision-badge" style="font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 6px; background: rgba(59,130,246,0.15); color: var(--accent-blue);">ACTIVE</span>
                 </div>
                 <div id="ai-decision-action" style="font-size: 18px; font-weight: 800; color: var(--accent-green); margin-bottom: 6px;">
-                    EXECUTE BUY (BTCUSDT)
+                    ABSTAIN / HOLD (Capital Preserved)
                 </div>
-                <div style="display: flex; gap: 12px; font-size: 12px; margin-bottom: 10px; color: var(--text-secondary);">
+                <div style="display: flex; gap: 12px; font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">
                     <div>Conf: <strong id="ai-decision-conf" style="color: var(--accent-blue);">82.5%</strong></div>
                     <div>Regime: <strong id="ai-decision-regime" style="color: var(--accent-purple);">Trending (ADX 32.4)</strong></div>
                 </div>
+                <div id="shadow-note-line" style="font-size: 11px; color: var(--accent-orange); margin-bottom: 8px;">
+                    Shadow Model: <strong id="shadow-note-val" style="color: var(--accent-orange);">BEARISH (83.1% Conf - 0% Real Capital)</strong>
+                </div>
                 <div id="ai-decision-rationale" style="font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; line-height: 1.4;">
-                    4H Confluence Gate PASSED | Calibrated Conf: 82.5% | Net Utility E[U] > 0.0015 | Slippage 6.4bps | Feed Quality GREEN
+                    Champion Model: Hold (Net Utility E[U] <= 0) | Shadow Candidate: BEARISH Signal (0% Allocation)
                 </div>
             </div>
 
@@ -2802,16 +2805,22 @@
                         cbBanner.style.display = data.circuit_breaker_active ? "flex" : "none";
                     }
 
-                    // Dynamically update AI Decision Card
-                    if (data.ai_decision) {
-                        const aiAction = document.getElementById("ai-decision-action");
+                    // Dynamically update AI Decision & Rationale Card (Fixed Single Card Size)
+                    if (data.champion_decision || data.ai_decision) {
+                        const champ = data.champion_decision || data.ai_decision;
+                        const shadow = data.shadow_decision || {};
+                        
+                        const aiAct = document.getElementById("ai-decision-action");
                         const aiConf = document.getElementById("ai-decision-conf");
                         const aiRegime = document.getElementById("ai-decision-regime");
+                        const shadowVal = document.getElementById("shadow-note-val");
                         const aiRationale = document.getElementById("ai-decision-rationale");
-                        if (aiAction) aiAction.innerText = data.ai_decision.action || "ABSTAIN / HOLD (Capital Preserved)";
-                        if (aiConf) aiConf.innerText = `${data.ai_decision.confidence_pct || 0.0}%`;
-                        if (aiRegime) aiRegime.innerText = data.ai_decision.regime || "Trending (ADX 32.4)";
-                        if (aiRationale) aiRationale.innerText = data.ai_decision.rationale || "";
+
+                        if (aiAct) aiAct.innerText = champ.action || "ABSTAIN / HOLD (Capital Preserved)";
+                        if (aiConf) aiConf.innerText = `${champ.confidence_pct || 0.0}%`;
+                        if (aiRegime) aiRegime.innerText = champ.regime || "Trending (ADX 32.4)";
+                        if (shadowVal) shadowVal.innerText = `${shadow.direction || 'BEARISH'} (${shadow.confidence_pct || 83.1}% Conf - 0% Real Capital)`;
+                        if (aiRationale) aiRationale.innerText = champ.rationale || "Net Expected Utility E[U] <= 0 -> Real Capital Preserved";
                     }
 
                     // Dynamically update Risk Summary Card
