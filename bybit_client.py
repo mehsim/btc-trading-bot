@@ -567,11 +567,18 @@ def quantize_bybit_price(symbol: str, price: float) -> str:
 class AccountBalanceUnavailableException(Exception):
     pass
 
+def update_real_bybit_balance_cache(new_balance: float):
+    global _real_balance_cache, _last_real_balance_sync
+    if isinstance(new_balance, (int, float)) and new_balance > 0:
+        with _real_balance_lock:
+            _real_balance_cache = float(new_balance)
+            _last_real_balance_sync = time.time()
+
 def get_real_bybit_balance_cached(force: bool = False) -> float:
     global _real_balance_cache, _last_real_balance_sync
     now = time.time()
     with _real_balance_lock:
-        if not force and _real_balance_cache is not None and (now - _last_real_balance_sync) < 60:
+        if not force and _real_balance_cache is not None and (now - _last_real_balance_sync) < 5:
             return _real_balance_cache
 
     api_key = (os.environ.get("BYBIT_API_KEY") or get_secure_env("BYBIT_API_KEY", "")).strip()
@@ -608,9 +615,9 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
 
 def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
     """
-    Background worker thread running every 120s to sync wallet balance from Bybit API.
+    Background worker thread running every 5s to sync wallet balance in real-time from Bybit API.
     """
-    print("[Balance Sync] Bybit real wallet balance sync thread started.")
+    print("[Balance Sync] Bybit real-time wallet balance sync thread started (5s interval).")
     while True:
         try:
             bal = get_real_bybit_balance_cached(force=True)
@@ -623,5 +630,5 @@ def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
                     bot_state["wallet_balance"] = bal
                     bot_state["live_balance"] = bal
         except Exception as e:
-            print(f"[Balance Sync Error] Failed to update Bybit balance: {e}")
-        time.sleep(120)
+            pass
+        time.sleep(5)

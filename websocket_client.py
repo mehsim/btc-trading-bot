@@ -354,10 +354,16 @@ def on_private_message(ws, message, bot_state=None):
             wallet_data = data.get("data", [])
             if wallet_data:
                 total_equity = wallet_data[0].get("totalEquity") or wallet_data[0].get("totalWalletBalance")
-                if total_equity and bot_state:
+                if total_equity:
                     val = float(total_equity)
-                    if TRADE_MODE != "simulation":
-                        bot_state["simulated_balance"] = val
+                    if bot_state:
+                        if TRADE_MODE != "simulation":
+                            bot_state["simulated_balance"] = val
+                    try:
+                        from bybit_client import update_real_bybit_balance_cache
+                        update_real_bybit_balance_cache(val)
+                    except Exception:
+                        pass
                     print(f"[WebSocket Private] Balance updated dynamically from wallet stream: {val}")
         elif topic == "order":
             order_list = data.get("data", [])
