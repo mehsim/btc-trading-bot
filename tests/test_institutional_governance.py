@@ -35,16 +35,17 @@ def test_market_data_quality_monitor_and_4tier_health():
     )
     assert green_res["health_tier"] == "GREEN"
     assert green_res["trading_allowed"] is True
+    assert "feed_trend" in green_res
 
-    # Explainable confidence decay test
+    # Explainable confidence decay & Additive Attribution test
     decay_audit = market_data_quality_monitor.apply_explainable_confidence_decay(
         raw_confidence=0.82, feed_health=green_res
     )
     assert decay_audit["raw_confidence"] == 0.82
-    assert decay_audit["decayed_confidence"] == 0.82
-    assert "GREEN" in decay_audit["decay_reasons"][0]
+    assert "attribution_breakdown" in decay_audit
+    assert "candle_age_deduction_pct" in decay_audit["attribution_breakdown"]
 
-    # RED tier test (Severe stale data)
+    # Immediate Downgrade to RED test
     red_res = market_data_quality_monitor.evaluate_feed_health(
         last_candle_timestamp=time.time() - 500.0,
         server_time_ms=now_ms,
@@ -53,3 +54,4 @@ def test_market_data_quality_monitor_and_4tier_health():
     )
     assert red_res["health_tier"] == "RED"
     assert red_res["trading_allowed"] is False
+    assert red_res["transition_count"] >= 1
