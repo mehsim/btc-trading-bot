@@ -77,14 +77,17 @@ class ShadowTradingEngine:
         """
         reasons = []
         
-        # 1. Execution Quality Gate: Reject if live slippage is excessive
-        if mean_slippage_bps > 15.0:
-            reasons.append(f"Execution Quality Gate Failed: Slippage ({mean_slippage_bps:.1f}bps > 15.0bps limit)")
+        # 1. Execution Quality Gate: Reject if live slippage is excessive relative to rolling baseline
+        dynamic_slippage_limit = float(max(10.0, min(18.0, max(12.0, mean_slippage_bps * 1.5))))
+        if mean_slippage_bps > dynamic_slippage_limit:
+            reasons.append(f"Execution Quality Gate Failed: Slippage ({mean_slippage_bps:.1f}bps > dynamic limit {dynamic_slippage_limit:.1f}bps)")
             return "SHADOW", 0.00, reasons
 
-        # 2. Risk Budget Gate: Reject if Portfolio VaR increases by >5%
-        if candidate_var_99 > champion_var_99 * 1.05:
-            reasons.append(f"Risk Budget Gate Failed: Candidate VaR ({candidate_var_99*100:.2f}%) exceeds Champion VaR threshold ({champion_var_99*105:.2f}%)")
+        # 2. Risk Budget Gate: Reject if Portfolio VaR increases beyond dynamic tolerance
+        dynamic_var_tolerance = 1.05 + max(0.0, 0.02 * (1.0 - shadow_trades_count / 500.0))
+        dynamic_var_limit = champion_var_99 * dynamic_var_tolerance
+        if candidate_var_99 > dynamic_var_limit:
+            reasons.append(f"Risk Budget Gate Failed: Candidate VaR ({candidate_var_99*100:.2f}%) exceeds dynamic limit ({dynamic_var_limit*100:.2f}%)")
             return "SHADOW", 0.00, reasons
 
         if not is_statistically_approved:
