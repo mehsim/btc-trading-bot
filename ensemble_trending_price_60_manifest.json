@@ -1,0 +1,14 @@
+{
+  "prefix": "ensemble_trending_price_60",
+  "timestamp": "2026-08-04T20:28:22.582387+00:00",
+  "model_version": "v7.2.0",
+  "feature_version": "v3.1.0",
+  "ensemble_version": "v3.0_stacking",
+  "git_sha": "e692f73e",
+  "feature_count": 0,
+  "feature_names": [],
+  "feature_contract_hash": "e3b0c44298fc",
+  "training_data_hash": null,
+  "preprocessing_hash": null,
+  "metrics": {}
+}
