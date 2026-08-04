@@ -1,0 +1,14 @@
+{
+  "prefix": "ensemble_ranging_price_240",
+  "timestamp": "2026-08-04T20:14:50.216779+00:00",
+  "model_version": "v7.2.0",
+  "feature_version": "v3.1.0",
+  "ensemble_version": "v3.0_stacking",
+  "git_sha": "a6c65e39",
+  "feature_count": 0,
+  "feature_names": [],
+  "feature_contract_hash": "e3b0c44298fc",
+  "training_data_hash": null,
+  "preprocessing_hash": null,
+  "metrics": {}
+}
