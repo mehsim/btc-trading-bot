@@ -27,8 +27,8 @@ def get_model_feature_names(model):
                 return list(fn)
         except Exception:
             pass
-    # 2. Estimators with feature_names_ / feature_names / _feature_names
-    for attr in ["feature_names_", "feature_names", "_feature_names"]:
+    # 2. Estimators with feature_names_ / feature_names_in_ / feature_names / _feature_names
+    for attr in ["feature_names_", "feature_names_in_", "feature_names", "_feature_names"]:
         if hasattr(model, attr):
             fn = getattr(model, attr)
             if isinstance(fn, (list, tuple, np.ndarray)) and len(fn) > 0:
@@ -131,19 +131,11 @@ def _slice_model_input(model, X):
             if _are_positional:
                 n_exp = len(expected_names)
                 n_got = df.shape[1]
-                if n_got > n_exp:
-                    # Extra features — slice to first N
-                    return df.iloc[:, :n_exp]
-                elif n_got < n_exp:
-                    if os.environ.get("ALLOW_FEATURE_PADDING") == "1":
-                        print(f"[CRITICAL MODEL GOVERNANCE ALERT] Feature padding explicitly allowed via ALLOW_FEATURE_PADDING=1. Padding {n_exp - n_got} zero features.")
-                        pad = pd.DataFrame(np.zeros((len(df), n_exp - n_got)), index=df.index)
-                        return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
-                    else:
-                        raise RuntimeError(
-                            f"[Feature Shape Mismatch Error (F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_exp}). "
-                            f"Zero-padding features is prohibited because zero is not neutral for financial indicators (RSI=0, ATR_norm=0, ADX=0). Retrain models to match current feature contract."
-                        )
+                if n_got != n_exp:
+                    raise RuntimeError(
+                        f"[Feature Shape Mismatch Error (H-04/F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_exp}). "
+                        f"Silent truncation or zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
+                    )
                 return df
             missing = [c for c in expected_names if c not in df.columns]
             if missing:
@@ -155,18 +147,11 @@ def _slice_model_input(model, X):
         elif n_expected and df.shape[1] != n_expected:
             # No feature names — model trained on positional numpy array.
             n_got = df.shape[1]
-            if n_got > n_expected:
-                return df.iloc[:, :n_expected]
-            elif n_got < n_expected:
-                if os.environ.get("ALLOW_FEATURE_PADDING") == "1":
-                    print(f"[CRITICAL MODEL GOVERNANCE ALERT] Feature padding explicitly allowed via ALLOW_FEATURE_PADDING=1. Padding {n_expected - n_got} zero features.")
-                    pad = pd.DataFrame(np.zeros((len(df), n_expected - n_got)), index=df.index)
-                    return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
-                else:
-                    raise RuntimeError(
-                        f"[Feature Shape Mismatch Error (F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_expected}). "
-                        f"Zero-padding features is prohibited because zero is not neutral for financial indicators (RSI=0, ATR_norm=0, ADX=0). Retrain models to match current feature contract."
-                    )
+            raise RuntimeError(
+                f"[Feature Shape Mismatch Error (H-04/F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_expected}). "
+                f"Silent truncation or zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
+            )
+
         return df
     elif isinstance(X, dict):
         if expected_names:

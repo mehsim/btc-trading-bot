@@ -5,6 +5,7 @@ import threading
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List, Tuple
 
 # MLflow Integration with Fallback
 try:
@@ -135,10 +136,10 @@ class ModelRegistry:
             except Exception as ml_err:
                 print(f"[MLflow Registry Warning] Could not sync model to MLflow: {ml_err}")
 
-def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 10) -> float:
-    """Calculates Population Stability Index (PSI) between baseline and target distributions."""
+def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 10) -> Optional[float]:
+    """Calculates Population Stability Index (PSI) between baseline and target distributions. Returns None if sample size < 20."""
     if baseline is None or target is None:
-        return 0.0
+        return None
     
     b_arr = np.asarray(baseline, dtype=float)
     t_arr = np.asarray(target, dtype=float)
@@ -146,8 +147,9 @@ def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 1
     b_clean = b_arr[~np.isnan(b_arr)]
     t_clean = t_arr[~np.isnan(t_arr)]
     
-    if len(b_clean) == 0 or len(t_clean) == 0:
-        return 0.0
+    if len(b_clean) < 20 or len(t_clean) < 20:
+        return None
+
     
     quantiles = np.linspace(0, 100, num_buckets + 1)
     buckets = np.percentile(b_clean, quantiles)

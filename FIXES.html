@@ -20,6 +20,16 @@
     <h2>Applied Fixes</h2>
     <ol>
         <li>
+            <strong>Prohibit Positional Feature Truncation & Fail-Closed RuntimeError (H-04)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Refactored <code>_slice_model_input</code> in <code>ensemble.py</code> to raise a fail-closed <code>RuntimeError</code> on any positional feature shape mismatch (excess or deficit) instead of silently truncating extra features. Added support for <code>feature_names_in_</code> in <code>get_model_feature_names</code>.</div>
+        </li>
+        <li>
+            <strong>PSI Insufficient Data Sentinel & Telemetry Warning (H-03)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Updated <code>calculate_psi</code> across <code>drift_detector.py</code>, <code>mlops_engine.py</code>, and <code>psi_drift_retrainer.py</code> to return <code>None</code> (instead of <code>0.0</code> perfect stability) when sample size is sparse (&lt; 20 observations). Refactored <code>PSIDriftDetector.check_feature_drift</code> to surface explicit <code>INSUFFICIENT_DATA</code> status and telemetry warning logs. Added unit tests in <code>test_psi_insufficient_data.py</code>.</div>
+        </li>
+        <li>
             <strong>CUSUM Drift Detector Persistence Restoration & Idempotency (H-02)</strong> 
             <span class="tag completed">Completed</span>
             <div class="details">Fixed <code>_persist_state</code> in <code>drift_detector.py</code> to import and call <code>set_setting</code> (previously failed silently on non-existent <code>save_setting</code>). Extended persistence to store <code>processed_trade_ids</code> alongside <code>cusum_s_high</code> as JSON to preserve idempotency across restarts. Replaced silent error swallowing with diagnostic warning logs. Added unit test in <code>test_cusum_state_persistence.py</code>.</div>

@@ -1,6 +1,6 @@
 import numpy as np
 import threading
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 from collections import deque
 
@@ -79,14 +79,18 @@ class CUSUMDriftDetector:
             self.processed_trade_ids.clear()
             self._persist_state()
 
-def calculate_psi(baseline_data: np.ndarray, target_data: np.ndarray, num_bins: int = 10) -> float:
+def calculate_psi(baseline_data: np.ndarray, target_data: np.ndarray, num_bins: int = 10) -> Optional[float]:
     """
     Calculates Population Stability Index (PSI) between baseline training distribution
     and recent live distribution.
+    Returns None when sample size is sparse (< 20 observations) to avoid false stability signaling.
     PSI < 0.10: Stable, 0.10 <= PSI < 0.25: Moderate Drift, PSI >= 0.25: Severe Drift
     """
-    if len(baseline_data) < 20 or len(target_data) < 20:
-        return 0.0
+    if baseline_data is None or target_data is None or len(baseline_data) < 20 or len(target_data) < 20:
+        b_n = len(baseline_data) if baseline_data is not None else 0
+        t_n = len(target_data) if target_data is not None else 0
+        print(f"[PSI Telemetry Warning] Insufficient sample size for PSI calculation (baseline_n={b_n}, target_n={t_n}, min_required=20). Returning None (INSUFFICIENT_DATA).")
+        return None
         
     b_arr = np.asarray(baseline_data, dtype=float)
     t_arr = np.asarray(target_data, dtype=float)
@@ -114,18 +118,22 @@ def calculate_psi(baseline_data: np.ndarray, target_data: np.ndarray, num_bins: 
     psi_val = np.sum((t_pct - b_pct) * np.log(t_pct / b_pct))
     return float(psi_val)
 
+
 class PSIDriftDetector:
     def __init__(self, warning_psi: float = 0.10, severe_psi: float = 0.25):
         self.warning_psi = warning_psi
         self.severe_psi = severe_psi
 
-    def check_feature_drift(self, baseline_feature: np.ndarray, live_feature: np.ndarray) -> Tuple[bool, float, str]:
+    def check_feature_drift(self, baseline_feature: np.ndarray, live_feature: np.ndarray) -> Tuple[bool, Optional[float], str]:
         psi_score = calculate_psi(baseline_feature, live_feature)
+        if psi_score is None:
+            return False, None, "INSUFFICIENT_DATA"
         if psi_score >= self.severe_psi:
             return True, psi_score, "SEVERE_DRIFT"
         elif psi_score >= self.warning_psi:
             return False, psi_score, "MODERATE_DRIFT"
         return False, psi_score, "STABLE"
+
 
 
 def evaluate_drift_and_trigger_playbook(cusum_detector: CUSUMDriftDetector, psi_detector: PSIDriftDetector, recent_outcomes: list, live_features: np.ndarray = None, baseline_features: np.ndarray = None) -> dict:

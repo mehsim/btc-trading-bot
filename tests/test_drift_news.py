@@ -6,6 +6,7 @@ from news_monitor import EconomicNewsMonitor
 def test_cusum_drift_detector():
     """Verify CUSUM drift detection triggers when loss rate spikes."""
     detector = CUSUMDriftDetector(threshold_H=3.0, allowance_K=0.10, target_error_mu=0.35)
+    detector.reset()
     
     # 5 consecutive winning trades -> no drift
     for _ in range(5):
