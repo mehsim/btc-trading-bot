@@ -3742,6 +3742,173 @@ def force_close_trade():
     
     return jsonify({"status": "success", "message": f"Successfully force-closed {symbol} {tf.upper()} trade at ${actual_price:.2f}"})
 
+
+@app.route("/api/partial_exit_trade", methods=["POST"])
+@require_api_key
+def partial_exit_trade():
+    """Extract 50% of invested capital + 50% of current profit, keeping the remaining 50% open."""
+    data = request.json or {}
+    interval = str(data.get("interval", ""))
+    symbol = str(data.get("symbol", "")).upper()
+    trade_id = data.get("trade_id", "")
+
+    tf_map_local = {
+        "5": "5m", "5m": "5m",
+        "15": "15m", "15m": "15m",
+        "30": "30m", "30m": "30m",
+        "60": "1h",  "1h": "1h",
+        "120": "2h", "2h": "2h",
+        "240": "4h", "4h": "4h",
+        "360": "6h", "6h": "6h",
+    }
+    tf = tf_map_local.get(interval)
+    if not tf:
+        return jsonify({"status": "error", "message": "Invalid interval specified."}), 400
+
+    active_trade_key = f"active_trade_{tf}"
+    with active_trades_lock:
+        active_trades_list = bot_state.get(active_trade_key, [])
+        if not isinstance(active_trades_list, list):
+            active_trades_list = [] if active_trades_list is None else [active_trades_list]
+
+    # Locate trade
+    trade = None
+    if trade_id:
+        for t in active_trades_list:
+            if t.get("trade_id") == trade_id:
+                trade = t
+                break
+    if not trade:
+        for t in active_trades_list:
+            if t.get("symbol", "").upper() == symbol:
+                trade = t
+                break
+    if not trade:
+        return jsonify({"status": "error", "message": f"No active trade found for {tf}."}), 400
+
+    if trade.get("half_closed"):
+        return jsonify({"status": "error", "message": "This trade has already had a 50% partial exit."}), 400
+
+    entry_price = float(trade.get("entry_price", 0))
+    direction = trade.get("direction", "Bullish")
+    full_size = float(trade.get("original_size") or trade.get("position_size_usd", 100.0))
+    half_size = round(full_size / 2.0, 4)
+    leverage = float(trade.get("leverage", 1.0))
+
+    # Current price
+    live_price = get_fallback_price(symbol)
+    if live_price is None:
+        live_price = bot_state.get(f"live_price_{symbol}", entry_price)
+    live_price = float(live_price)
+
+    # --- Execute 50% close on Bybit (live / testnet) ---
+    bybit_exit_price = None
+    bybit_realized_pnl_half = None
+
+    if TRADE_MODE != "simulation":
+        pos = get_bybit_position(symbol)
+        if pos:
+            total_qty = float(pos.get("size", "0"))
+            half_qty = round(total_qty / 2.0, 6)
+            if half_qty > 0:
+                side = "Sell" if direction == "Bullish" else "Buy"
+                close_res = place_bybit_order(
+                    symbol=symbol,
+                    side=side,
+                    qty=str(half_qty),
+                    reduce_only=True
+                )
+                if close_res.get("retCode") == 0:
+                    time.sleep(0.5)
+                    exec_log = get_bybit_last_execution(symbol)
+                    if exec_log:
+                        exec_time_ms = int(exec_log.get("execTime", 0))
+                        if abs(int(time.time() * 1000) - exec_time_ms) <= 300000:
+                            bybit_exit_price = float(exec_log.get("execPrice", live_price))
+                    # Approximate realized PnL for the half
+                    closed_rec = get_bybit_closed_pnl(symbol)
+                    if closed_rec:
+                        rec_time_ms = int(closed_rec.get("updatedTime", 0))
+                        if abs(int(time.time() * 1000) - rec_time_ms) <= 300000:
+                            bybit_realized_pnl_half = float(closed_rec.get("closedPnl", 0.0))
+
+    exit_price = bybit_exit_price if bybit_exit_price is not None else live_price
+
+    # --- Calculate 50% PnL ---
+    raw_change_pct = (exit_price - entry_price) / entry_price * 100.0
+    raw_return_pct = raw_change_pct if direction == "Bullish" else -raw_change_pct
+    gross_pnl_half = half_size * (raw_return_pct * leverage / 100.0)
+    fee_half = half_size * leverage * 0.00055 * 2
+    realized_pnl_half = gross_pnl_half - fee_half
+
+    if TRADE_MODE != "simulation" and bybit_realized_pnl_half is not None:
+        realized_pnl_half = bybit_realized_pnl_half
+
+    # Amount returned to balance = 50% capital + 50% profit
+    returned_amount = half_size + realized_pnl_half
+
+    # Update simulated balance
+    if TRADE_MODE == "simulation":
+        old_bal = bot_state.get("simulated_balance", 80.0)
+        new_bal = round(old_bal + returned_amount, 2)
+        bot_state["simulated_balance"] = new_bal
+    else:
+        new_bal = bot_state.get("simulated_balance", 0.0)
+
+    # --- Mark trade as half-closed (remaining 50% stays open) ---
+    with active_trades_lock:
+        current_list = bot_state.get(active_trade_key, [])
+        if not isinstance(current_list, list):
+            current_list = []
+        for t in current_list:
+            if (trade_id and t.get("trade_id") == trade_id) or \
+               (not trade_id and t.get("symbol", "").upper() == symbol):
+                if not t.get("original_size"):
+                    t["original_size"] = full_size
+                if not t.get("original_qty"):
+                    t["original_qty"] = t.get("qty", 0)
+                t["half_closed"] = True
+                t["position_size_usd"] = round(half_size, 4)
+                if t.get("qty"):
+                    t["qty"] = round(float(t["qty"]) / 2.0, 6)
+                t["partial_exit_price"] = exit_price
+                t["partial_exit_pnl"] = round(realized_pnl_half, 4)
+                break
+        bot_state[active_trade_key] = current_list
+
+    database.save_active_trades(tf, current_list)
+    save_history()
+
+    net_pct = (realized_pnl_half / half_size * 100.0) if half_size > 0 else 0.0
+
+    print(f"\n[{symbol} {tf.upper()} PARTIAL EXIT] 50% withdrawn at ${exit_price:.2f}")
+    print(f"  Half-size: ${half_size:.2f} | PnL on half: ${realized_pnl_half:+.2f} ({net_pct:+.2f}%)")
+    print(f"  Returned to balance: ${returned_amount:.2f} | New Balance: ${new_bal:.2f}\n")
+
+    send_telegram_alert(
+        f"🟡 *PARTIAL EXIT (50%)* 🟡\n"
+        f"• *Asset*: {symbol}\n"
+        f"• *Interval*: {interval}m\n"
+        f"• *Direction*: {direction}\n"
+        f"• *Exit Price*: ${exit_price:.2f}\n"
+        f"• *Capital Returned*: ${half_size:.2f}\n"
+        f"• *Profit Extracted*: ${realized_pnl_half:+.2f} ({net_pct:+.2f}%)\n"
+        f"• *Remaining*: 50% position still open\n"
+        f"• *New Balance*: ${new_bal:.2f}"
+    )
+
+    sync_active_positions_from_bybit()
+
+    return jsonify({
+        "status": "success",
+        "message": (
+            f"Partial exit complete: withdrew ${half_size:.2f} capital + "
+            f"${realized_pnl_half:+.2f} profit at ${exit_price:.2f}. "
+            f"Remaining 50% still open."
+        )
+    })
+
+
 def close_all_trades_internal(exit_reason):
     closed_count = 0
     tf_map_local = {"60": "1h", "120": "2h", "240": "4h", "360": "6h"}

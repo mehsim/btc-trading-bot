@@ -2284,6 +2284,37 @@
             }
         }
 
+        function partialExitTrade(interval, symbol, tradeId) {
+            const tfMap = { '15': '15M', '30': '30M', '60': '1H', '120': '2H', '240': '4H', '360': '6H' };
+            const tfLabel = tfMap[interval] || interval;
+            const symLabel = symbol ? symbol.replace('USDT', '') : 'active';
+            if (confirm(`Extract 50% capital + 50% profit from ${tfLabel} ${symLabel} position? Remaining 50% stays open.`)) {
+                fetch('/api/partial_exit_trade', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        interval: String(interval),
+                        symbol: symbol || '',
+                        trade_id: tradeId || ''
+                    })
+                })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        alert(res.message);
+                        closeActiveTradesModal && closeActiveTradesModal();
+                        updateDashboard();
+                    } else {
+                        alert(res.message || 'Partial exit failed.');
+                    }
+                })
+                .catch(err => {
+                    console.error('Partial exit error:', err);
+                    alert('Error sending partial exit request.');
+                });
+            }
+        }
+
         function calculateMainnetPnL(t, currentPrice) {
             const entry = t.entry_price || 0;
             const lev = t.leverage || 1.0;
@@ -2688,7 +2719,8 @@
                         <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 700;">${countdownStr}</td>
                         <td><span class="${pnlClass}" style="font-weight: 800;">${formattedPnL}</span></td>
 
-                        <td>
+                        <td style="white-space: nowrap;">
+                            ${!isScaledOut ? `<button onclick="partialExitTrade('${trade.intervalVal}', '${symbol}', '${trade.trade_id || ''}')" style="padding: 4px 8px; font-size: 10px; background: rgba(245,158,11,0.15); color: var(--accent-orange); border: 1px solid rgba(245,158,11,0.3); border-radius: 4px; cursor: pointer; font-weight: 700; transition: background 0.2s; margin-right: 4px;" onmouseover="this.style.background='rgba(245,158,11,0.3)'" onmouseout="this.style.background='rgba(245,158,11,0.15)'">½ Exit</button>` : '<span style="font-size:9px;color:var(--accent-orange);font-weight:700;">50% Done</span> '}
                             <button onclick="forceCloseTrade('${trade.intervalVal}', '${symbol}', '${trade.trade_id || ''}')" style="padding: 4px 8px; font-size: 10px; background: rgba(244,63,94,0.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,0.3); border-radius: 4px; cursor: pointer; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='rgba(244,63,94,0.3)'" onmouseout="this.style.background='rgba(244,63,94,0.15)'">Force Close</button>
                         </td>
                     </tr>
