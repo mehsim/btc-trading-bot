@@ -174,22 +174,23 @@ class ContinuousLearningEngine:
     def on_trade_closed(self, trade_record: dict):
         """
         Public entry point called by save_completed_trade() hook.
-        Non-blocking: pushes event into learning_event_queue.
+        Pushes event into learning_event_queue with timeout & saturation tracking.
         """
         try:
-            learning_event_queue.put_nowait({"type": "TRADE_CLOSED", "trade": trade_record})
+            learning_event_queue.put({"type": "TRADE_CLOSED", "trade": trade_record}, block=True, timeout=2.0)
         except Exception as e:
-            print(f"[LearningEngine Queue Error] {e}")
+            t_id = trade_record.get('trade_id') if isinstance(trade_record, dict) else 'unknown'
+            print(f"[LearningEngine Queue Saturation Alert] Failed to enqueue learning event for trade {t_id}: {e}")
 
     def get_risk_multiplier(self, signal_context: dict) -> float:
         """
         Public risk multiplier query for position sizer.
-        Returns float in range [0.50, 1.00].
+        Returns float in range [0.50, 1.00]. Fails safe to 0.75 on exception.
         """
         try:
             return risk_multiplier_engine.get_risk_multiplier(signal_context)
         except Exception as e:
-            print(f"[LearningEngine RiskMult Error] {e}")
-            return 1.0
+            print(f"[LearningEngine RiskMult Fail-Safe] Exception evaluating risk multiplier: {e}. Falling back to 0.75.")
+            return 0.75
 
 continuous_learning_engine = ContinuousLearningEngine()
