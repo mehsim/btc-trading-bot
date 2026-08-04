@@ -18,19 +18,28 @@ class CUSUMDriftDetector:
 
     def _restore_state(self):
         try:
+            import json
             from database import get_setting
-            val = get_setting("cusum_s_high")
-            if val is not None:
-                self.S_high = float(val)
-        except Exception:
-            pass
+            val_s_high = get_setting("cusum_s_high")
+            if val_s_high is not None:
+                self.S_high = float(val_s_high)
+            val_ids = get_setting("cusum_processed_trade_ids")
+            if val_ids is not None:
+                parsed_ids = json.loads(val_ids)
+                if isinstance(parsed_ids, list):
+                    self.processed_trade_ids = set(parsed_ids)
+        except Exception as e:
+            print(f"[CUSUM Drift Detector Warning] Failed to restore CUSUM state from database: {e}")
 
     def _persist_state(self):
         try:
-            from database import save_setting
-            save_setting("cusum_s_high", str(self.S_high))
-        except Exception:
-            pass
+            import json
+            from database import set_setting
+            set_setting("cusum_s_high", str(self.S_high))
+            set_setting("cusum_processed_trade_ids", json.dumps(list(self.processed_trade_ids)))
+        except Exception as e:
+            print(f"[CUSUM Drift Detector Warning] Failed to persist CUSUM state to database: {e}")
+
 
     def update(self, actual_outcome: int, predicted_confidence: float = 0.70, trade_id: str = None) -> Tuple[bool, float, float]:
         """
