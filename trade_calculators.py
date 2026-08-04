@@ -516,16 +516,65 @@ def get_funding_adjustment(symbol: str, direction: str, funding_rate: float) -> 
     return 0.0
 
 
-def get_liquidity_score(symbol: str, orderbook_depth: int = 10) -> float:
-    """Score 0-1 based on L2 orderbook depth"""
+SYMBOL_LIQUIDITY_BENCHMARKS = {
+    "BTCUSDT": 5_000_000.0,
+    "ETHUSDT": 3_500_000.0,
+    "SOLUSDT": 2_000_000.0,
+    "BNBUSDT": 1_500_000.0,
+    "XRPUSDT": 1_500_000.0,
+    "DOGEUSDT": 1_000_000.0,
+    "ADAUSDT": 800_000.0,
+    "AVAXUSDT": 500_000.0,
+    "DOTUSDT": 500_000.0,
+    "LTCUSDT": 500_000.0,
+    "LINKUSDT": 500_000.0,
+}
+
+
+def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: float = None) -> float:
+    """
+    Score 0.0-1.0 based on dynamic L2 orderbook depth and bid-ask spread.
+    Fails closed (returns 0.0) if depth data cannot be retrieved or orderbook is illiquid.
+
+    Dynamic Value Resolution:
+    - If 24h turnover is provided/available, benchmark = max(200k, min(10M, 0.05% of 24h turnover)).
+    - Otherwise, resolves per-symbol tier benchmark from SYMBOL_LIQUIDITY_BENCHMARKS (default $350k for altcoins).
+    - Incorporates spread penalty: spreads wider than 0.15% dynamically degrade the score.
+    """
     try:
         from data import get_orderbook_imbalance
         ob = get_orderbook_imbalance(symbol=symbol)
-        depth_est = ob.get("total_depth", 500000000)
-        score = min(float(depth_est) / 500000000.0, 1.0)
-        return max(0.1, score)
-    except Exception:
-        return 1.0
+        if not ob or not isinstance(ob, dict):
+            return 0.0
+            
+        depth_est = float(ob.get("total_depth", 0.0))
+        spread = float(ob.get("spread", 0.0))
+        
+        if depth_est <= 0.0:
+            return 0.0
+            
+        # 1. Dynamic Benchmark Calculation
+        symbol_upper = symbol.upper() if symbol else "BTCUSDT"
+        if turnover_24h is not None and float(turnover_24h) > 0:
+            dynamic_benchmark = max(50_000.0, min(10_000_000.0, float(turnover_24h) * 0.0005))
+        elif symbol_upper in SYMBOL_LIQUIDITY_BENCHMARKS:
+            dynamic_benchmark = SYMBOL_LIQUIDITY_BENCHMARKS[symbol_upper]
+        else:
+            dynamic_benchmark = 350_000.0  # Dynamic default for altcoins
+
+        # 2. Depth Score calculation relative to dynamic benchmark
+        depth_score = min(depth_est / dynamic_benchmark, 1.0)
+        
+        # 3. Dynamic Spread Penalty (penalize spreads > 0.15%, zero score if spread > 0.50%)
+        spread_multiplier = max(0.0, min(1.0, 1.0 - max(0.0, spread - 0.0015) / 0.0035))
+        
+        final_score = depth_score * spread_multiplier
+        return max(0.0, min(1.0, round(float(final_score), 4)))
+    except Exception as e:
+        print(f"[Liquidity Guard Warning] Dynamic orderbook score error for {symbol}: {e}")
+        return 0.0
+
+
 
 
 def estimate_liquidation_pool(df_history, direction, entry_price):

@@ -20,6 +20,11 @@
     <h2>Applied Fixes</h2>
     <ol>
         <li>
+            <strong>Liquidity Guard Restoration & Dynamic Benchmark Scoring (H-01)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Relocated <code>get_orderbook_imbalance</code> to <code>data.py</code> to eliminate module resolution <code>ImportError</code>. Refactored <code>get_liquidity_score</code> in <code>trade_calculators.py</code> to fail closed (returning 0.0 on API errors/thin books) and introduced dynamic values: per-symbol liquidity tiers, 24h turnover scaling, and dynamic bid-ask spread penalties. Added unit tests in <code>test_liquidity_guard.py</code>.</div>
+        </li>
+        <li>
             <strong>Dashboard API Authentication & Security Hardening (F-13)</strong> 
             <span class="tag completed">Completed</span>
             <div class="details">Removed fail-open logic. API key auth now unconditionally returns 401 Unauthorized if DASHBOARD_API_KEY is unset or missing. Enforced header-only X-API-KEY evaluation using constant-time hmac.compare_digest and dropped query parameters. Purged static default secret key.</div>

@@ -6032,7 +6032,10 @@ def get_orderbook_imbalance(symbol=None):
                 mid_price = (best_bid + best_ask) / 2.0
                 spread = (best_ask - best_bid) / mid_price if mid_price > 0 else 0.0
                 
-                # Calculate weighted imbalance over top 10 levels
+                bid_depth_usd = sum(float(b[0]) * float(b[1]) for b in bids)
+                ask_depth_usd = sum(float(a[0]) * float(a[1]) for a in asks)
+                total_depth_usd = bid_depth_usd + ask_depth_usd
+
                 bid_vol = 0.0
                 ask_vol = 0.0
                 for i in range(min(10, len(bids), len(asks))):
@@ -6041,63 +6044,19 @@ def get_orderbook_imbalance(symbol=None):
                     ask_vol += float(asks[i][1]) * w
                     
                 imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-9)
-                return {"imbalance": imbalance, "spread": spread}
-            except Exception as cache_err:
+                return {
+                    "imbalance": float(imbalance),
+                    "spread": float(spread),
+                    "total_depth": float(total_depth_usd),
+                    "bid_depth": float(bid_depth_usd),
+                    "ask_depth": float(ask_depth_usd)
+                }
+            except Exception:
                 pass
 
-    try:
-        url = f"{BYBIT_BASE_URL}/v5/market/orderbook"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, params={"category": "linear", "symbol": symbol, "limit": 25}, headers=headers, proxies=get_bybit_proxies(), timeout=10)
-        res = None
-        if response.status_code == 200:
-            res = response.json()
-        else:
-            print(f"[Orderbook] Bybit returned HTTP {response.status_code}. Attempting Binance depth fallback...")
-            # Try Binance depth fallback
-            binance_url = "https://api.binance.com/api/v3/depth"
-            resp = requests.get(binance_url, params={"symbol": symbol.upper(), "limit": 25}, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                binance_data = resp.json()
-                res = {
-                    "result": {
-                        "b": binance_data.get("bids", []),
-                        "a": binance_data.get("asks", [])
-                    }
-                }
-            else:
-                print(f"[Orderbook] Binance depth fallback failed: HTTP {resp.status_code}")
-                return {"imbalance": 0.0, "spread": 0.0}
+    from data import get_orderbook_imbalance as data_get_ob
+    return data_get_ob(symbol=symbol)
 
-        if res and "result" in res and "b" in res["result"] and "a" in res["result"]:
-            bids = res["result"]["b"]  # list of [price, size]
-            asks = res["result"]["a"]
-            
-            if not bids or not asks:
-                return {"imbalance": 0.0, "spread": 0.0}
-                
-            best_bid = float(bids[0][0])
-            best_ask = float(asks[0][0])
-            mid_price = (best_bid + best_ask) / 2.0
-            
-            # Normalized bid-ask spread
-            spread = (best_ask - best_bid) / mid_price
-            
-            # Weighted sizes by proximity to mid price (1 / distance)
-            weighted_bid_size = sum(float(b[1]) / (abs(float(b[0]) - mid_price) + 1e-8) for b in bids)
-            weighted_ask_size = sum(float(a[1]) / (abs(float(a[0]) - mid_price) + 1e-8) for a in asks)
-            
-            weighted_imbalance = (weighted_bid_size - weighted_ask_size) / (weighted_bid_size + weighted_ask_size + 1e-8)
-            
-            return {
-                "imbalance": weighted_imbalance,
-                "spread": spread
-            }
-    except Exception as e:
-        print(f"[Orderbook] Error fetching/calculating orderbook metrics: {e}")
-    return {"imbalance": 0.0, "spread": 0.0}
 
 # ==========================================
 # CONFIDENCE CALIBRATION & HISTORICAL STATS

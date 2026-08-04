@@ -917,3 +917,66 @@ def classify_market_regime(df_history: pd.DataFrame, interval: str = None) -> st
         return "Low Vol, Ranging"
     else:
         return "High Vol, Ranging"
+
+
+def get_orderbook_imbalance(symbol: str = "BTCUSDT") -> dict:
+    """
+    Fetches real-time L2 orderbook snapshot from Bybit (with Binance depth fallback),
+    returning weighted order imbalance, normalized bid-ask spread, and total depth in USD.
+    """
+    if not symbol or not isinstance(symbol, str):
+        symbol = "BTCUSDT"
+
+    try:
+        url = f"{BYBIT_BASE_URL}/v5/market/orderbook"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, params={"category": "linear", "symbol": symbol.upper(), "limit": 25}, headers=headers, timeout=10)
+        res = None
+        if response.status_code == 200:
+            res = response.json()
+        else:
+            # Fallback to Binance depth
+            binance_url = "https://api.binance.com/api/v3/depth"
+            resp = requests.get(binance_url, params={"symbol": symbol.upper(), "limit": 25}, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                binance_data = resp.json()
+                res = {
+                    "result": {
+                        "b": binance_data.get("bids", []),
+                        "a": binance_data.get("asks", [])
+                    }
+                }
+
+        if res and "result" in res and "b" in res["result"] and "a" in res["result"]:
+            bids = res["result"]["b"]
+            asks = res["result"]["a"]
+            if not bids or not asks:
+                return {"imbalance": 0.0, "spread": 0.0, "total_depth": 0.0, "bid_depth": 0.0, "ask_depth": 0.0}
+
+            best_bid = float(bids[0][0])
+            best_ask = float(asks[0][0])
+            mid_price = (best_bid + best_ask) / 2.0
+            spread = (best_ask - best_bid) / mid_price if mid_price > 0 else 0.0
+
+            bid_depth_usd = sum(float(b[0]) * float(b[1]) for b in bids)
+            ask_depth_usd = sum(float(a[0]) * float(a[1]) for a in asks)
+            total_depth_usd = bid_depth_usd + ask_depth_usd
+
+            weighted_bid_size = sum(float(b[1]) / (abs(float(b[0]) - mid_price) + 1e-8) for b in bids)
+            weighted_ask_size = sum(float(a[1]) / (abs(float(a[0]) - mid_price) + 1e-8) for a in asks)
+            weighted_imbalance = (weighted_bid_size - weighted_ask_size) / (weighted_bid_size + weighted_ask_size + 1e-8)
+
+            return {
+                "imbalance": float(weighted_imbalance),
+                "spread": float(spread),
+                "total_depth": float(total_depth_usd),
+                "bid_depth": float(bid_depth_usd),
+                "ask_depth": float(ask_depth_usd)
+            }
+    except Exception as e:
+        print(f"[Orderbook] Error fetching depth metrics for {symbol}: {e}")
+
+    return {"imbalance": 0.0, "spread": 0.0, "total_depth": 0.0, "bid_depth": 0.0, "ask_depth": 0.0}
+
