@@ -56,5 +56,5 @@ class TransactionCostModel:
             "model": "Almgren-Chriss"
         }
 
-transaction_cost_model = TransactionCostModel(calibrated=True)
+transaction_cost_model = TransactionCostModel(gamma=0.42)
 
