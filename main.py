@@ -5603,17 +5603,10 @@ sentiment_pipeline = None
 
 def safe_parse_xml(xml_content):
     """
-    Safely parses XML content to eliminate XXE vulnerabilities (CWE-611).
+    Safely parses XML content using defusedxml to eliminate XXE vulnerabilities (CWE-611, B314).
     """
-    try:
-        import defusedxml.ElementTree as SafeET
-        return SafeET.fromstring(xml_content)
-    except Exception:
-        import xml.etree.ElementTree as ET
-        parser = ET.XMLParser()
-        if hasattr(parser, 'entity'):
-            parser.entity.clear()
-        return ET.fromstring(xml_content, parser=parser)
+    import defusedxml.ElementTree as SafeET
+    return SafeET.fromstring(xml_content)
 
 
 def get_reddit_posts():
