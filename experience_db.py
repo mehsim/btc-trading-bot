@@ -13,7 +13,7 @@ import time
 import threading
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
-db_lock = threading.Lock()
+from database import db_lock
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)

@@ -177,10 +177,13 @@ class ContinuousLearningEngine:
         Pushes event into learning_event_queue with timeout & saturation tracking.
         """
         try:
-            learning_event_queue.put({"type": "TRADE_CLOSED", "trade": trade_record}, block=True, timeout=2.0)
+            learning_event_queue.put_nowait({"type": "TRADE_CLOSED", "trade": trade_record})
+        except queue.Full:
+            t_id = trade_record.get('trade_id') if isinstance(trade_record, dict) else 'unknown'
+            print(f"[LearningEngine Queue Full] Learning event queue saturated; non-blockingly dropped event for trade {t_id}")
         except Exception as e:
             t_id = trade_record.get('trade_id') if isinstance(trade_record, dict) else 'unknown'
-            print(f"[LearningEngine Queue Saturation Alert] Failed to enqueue learning event for trade {t_id}: {e}")
+            print(f"[LearningEngine Queue Error] Failed to enqueue learning event for trade {t_id}: {e}")
 
     def get_risk_multiplier(self, signal_context: dict) -> float:
         """

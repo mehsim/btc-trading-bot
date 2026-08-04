@@ -1,5 +1,5 @@
 # Use lightweight official Python runtime as a parent image
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Install system dependencies needed for compiling packages or downloading models
 RUN apt-get update && apt-get install -y --no-install-recommends \
