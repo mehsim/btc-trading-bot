@@ -4755,18 +4755,37 @@ def load_model_weights(iv):
         n_features_ranging = len(feat_ranging)
         print(f"Loaded feature counts - Trending: {n_features_trending}, Ranging: {n_features_ranging} for interval {iv}")
         
-        if os.path.exists(f"{prefixes['trending_trend']}_xgb.json"):
+        from config import SUPPORTED_MANIFEST_SCHEMA_VERSION
+
+        def check_startup_manifest_health(prefix: str) -> bool:
+            manifest_path = f"{prefix}_manifest.json"
+            if not os.path.exists(manifest_path):
+                print(f"[CRITICAL ALERT] Model manifest missing for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                return False
+            try:
+                with open(manifest_path, "r") as f:
+                    m = json.load(f)
+                schema_v = m.get("manifest_schema_version", 1)
+                if schema_v != SUPPORTED_MANIFEST_SCHEMA_VERSION:
+                    print(f"[CRITICAL ALERT] Model manifest schema version mismatch ({schema_v} != {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                    return False
+                return True
+            except Exception as e:
+                print(f"[CRITICAL ALERT] Corrupted model manifest for {prefix}: {e}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                return False
+
+        if os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
             models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
-        if os.path.exists(f"{prefixes['trending_price']}_xgb.json"):
+        if os.path.exists(f"{prefixes['trending_price']}_xgb.json") and check_startup_manifest_health(prefixes['trending_price']):
             models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
         if os.path.exists(prefixes["trending_meta"]):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["trending_meta"])
             models_by_interval[iv]["trending"]["meta"] = meta_clf
-            
-        if os.path.exists(f"{prefixes['ranging_trend']}_xgb.json"):
+
+        if os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
             models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
-        if os.path.exists(f"{prefixes['ranging_price']}_xgb.json"):
+        if os.path.exists(f"{prefixes['ranging_price']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_price']):
             models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
         if os.path.exists(prefixes["ranging_meta"]):
             meta_clf = XGBClassifier()

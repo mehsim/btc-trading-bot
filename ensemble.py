@@ -681,30 +681,60 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
 
 import hashlib, subprocess, datetime
 
-def write_model_manifest(prefix: str, feature_names: list = None, metrics: dict = None, model_version: str = "v7.2.0", feature_version: str = "v3.1.0", ensemble_version: str = "v3.0_stacking"):
+def write_model_manifest(
+    prefix: str,
+    feature_names: list = None,
+    metrics: dict = None,
+    model_version: str = "v7.2.0",
+    feature_version: str = "v3.1.0",
+    ensemble_version: str = "v3.0_stacking",
+    parent_model_hash: str = None,
+    promotion_reason: str = None,
+    replaced_model_hash: str = None,
+    rollback_reference: str = None,
+    vif_values: dict = None,
+    surviving_features: list = None,
+    governance_policy: dict = None,
+    promotion_metrics: dict = None
+):
     try:
+        from config import MODEL_GOVERNANCE, SUPPORTED_MANIFEST_SCHEMA_VERSION
         git_sha = "b5c5c35a"
         try:
             git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()[:8]
         except Exception:
             pass
 
-        feat_str = ",".join(feature_names or [])
+        feats = list(feature_names or surviving_features or [])
+        feat_str = ",".join(feats)
         feat_hash = hashlib.sha256(feat_str.encode("utf-8")).hexdigest()[:12]
+        pipeline_hash = hashlib.sha256(f"{feature_version}:{feat_str}".encode("utf-8")).hexdigest()[:12]
 
         _metrics = dict(metrics or {})
+        _gov_policy = governance_policy or MODEL_GOVERNANCE
+
         manifest = {
+            "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,
             "prefix": prefix,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "model_version": model_version,
             "feature_version": feature_version,
             "ensemble_version": ensemble_version,
             "git_sha": git_sha,
-            "feature_count": len(feature_names or []),
-            "feature_names": list(feature_names or []),
+            "feature_count": len(feats),
+            "feature_names": feats,
+            "surviving_features": feats,
+            "vif_values": vif_values or {},
             "feature_contract_hash": feat_hash,
+            "feature_pipeline_hash": pipeline_hash,
             "training_data_hash": _metrics.pop("training_data_hash", None),
             "preprocessing_hash": _metrics.pop("preprocessing_hash", None),
+            "parent_model_hash": parent_model_hash,
+            "promotion_reason": promotion_reason or "Initial deployment / benchmark promotion",
+            "replaced_model_hash": replaced_model_hash,
+            "rollback_reference": rollback_reference or f"{prefix}_backup",
+            "governance_policy": _gov_policy,
+            "promotion_metrics": promotion_metrics or _metrics,
             "metrics": _metrics
         }
         with open(f"{prefix}_manifest.json", "w") as f:

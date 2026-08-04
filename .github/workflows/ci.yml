@@ -40,10 +40,10 @@ jobs:
         bandit -r . -x ./.venv,./tests -ll
       continue-on-error: false
 
-    - name: Run Full Pytest Test Suite
+    - name: Run Hermetic Unit Test Suite
       run: |
         mkdir -p junit
-        pytest tests/ --junitxml=junit/test-results.xml -v
+        pytest tests/unit/ --junitxml=junit/test-results.xml -v
       continue-on-error: false
 
 

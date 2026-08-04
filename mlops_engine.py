@@ -522,3 +522,103 @@ trade_outcome_analyzer = TradeOutcomeAnalyzer()
 global_interval_tracker = IntervalPerformanceTracker()
 
 
+def evaluate_champion_challenger_promotion(
+    champion_metrics: dict,
+    challenger_metrics: dict,
+    governance_policy: dict = None
+) -> Tuple[bool, str, dict]:
+    """
+    Items 1 & 2: Evaluates champion-challenger promotion gate on out-of-sample Sharpe ratio, ECE, and Brier score.
+    Requires:
+      - challenger ECE <= max_ece (default 0.08)
+      - challenger Brier <= max_brier (default 0.22)
+      - challenger Sharpe > champion Sharpe + min_sharpe_delta (default 0.10)
+    Returns (promoted, reason, structured_promotion_metrics).
+    """
+    from config import MODEL_GOVERNANCE
+    policy = governance_policy or MODEL_GOVERNANCE
+    max_ece = float(policy.get("max_ece", 0.08))
+    max_brier = float(policy.get("max_brier", 0.22))
+    min_sharpe_delta = float(policy.get("min_sharpe_delta", 0.10))
+
+    champ_sharpe = float(champion_metrics.get("sharpe", 0.0))
+    chal_sharpe = float(challenger_metrics.get("sharpe", 0.0))
+    chal_ece = float(challenger_metrics.get("ece", 1.0))
+    chal_brier = float(challenger_metrics.get("brier", 1.0))
+
+    promotion_metrics = {
+        "balanced_accuracy": float(challenger_metrics.get("balanced_accuracy", challenger_metrics.get("win_rate", 0.50))),
+        "ece": chal_ece,
+        "brier": chal_brier,
+        "sharpe": chal_sharpe,
+        "psr": float(challenger_metrics.get("psr", 0.50)),
+        "dsr": float(challenger_metrics.get("dsr", 0.50)),
+        "profit_factor": float(challenger_metrics.get("profit_factor", 1.0)),
+        "max_drawdown": float(challenger_metrics.get("max_drawdown", 0.0))
+    }
+
+    if chal_ece > max_ece:
+        return False, f"Challenger ECE ({chal_ece:.4f}) exceeds maximum threshold ({max_ece})", promotion_metrics
+
+    if chal_brier > max_brier:
+        return False, f"Challenger Brier score ({chal_brier:.4f}) exceeds maximum threshold ({max_brier})", promotion_metrics
+
+    sharpe_delta = chal_sharpe - champ_sharpe
+    if sharpe_delta < min_sharpe_delta:
+        return False, f"Challenger Sharpe delta ({sharpe_delta:+.3f}) below required delta ({min_sharpe_delta:+.3f})", promotion_metrics
+
+    return True, f"Challenger passed quality gate: Sharpe delta {sharpe_delta:+.3f}, ECE {chal_ece:.4f}, Brier {chal_brier:.4f}", promotion_metrics
+
+
+def calculate_psi_per_feature(
+    baseline_df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    feature_names: list = None
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Item 7: Calculates Population Stability Index (PSI) per feature with sample size telemetry.
+    Treats sparse windows (< 20 observations) as INSUFFICIENT_DATA (None).
+    """
+    if baseline_df is None or target_df is None:
+        return {}
+
+    cols = feature_names or list(set(baseline_df.columns).intersection(set(target_df.columns)))
+    results = {}
+
+    for feat in cols:
+        b_series = baseline_df[feat].dropna().values if feat in baseline_df.columns else None
+        t_series = target_df[feat].dropna().values if feat in target_df.columns else None
+
+        n_b = len(b_series) if b_series is not None else 0
+        n_t = len(t_series) if t_series is not None else 0
+
+        if n_b < 20 or n_t < 20:
+            results[feat] = {
+                "psi": None,
+                "n_baseline": n_b,
+                "n_target": n_t,
+                "status": "INSUFFICIENT_DATA"
+            }
+            continue
+
+        psi_val = calculate_psi(b_series, t_series)
+        if psi_val is None:
+            status = "INSUFFICIENT_DATA"
+        elif psi_val >= 0.25:
+            status = "SEVERE_DRIFT"
+        elif psi_val >= 0.10:
+            status = "MODERATE_DRIFT"
+        else:
+            status = "STABLE"
+
+        results[feat] = {
+            "psi": psi_val,
+            "n_baseline": n_b,
+            "n_target": n_t,
+            "status": status
+        }
+
+    return results
+
+
+

@@ -16,6 +16,16 @@ MAX_TRADE_HISTORY_MEMORY = 1000
 MAX_PREDICTION_HISTORY_MEMORY = 1000
 MAX_LOG_ENTRIES_MEMORY = 200
 
+# Institutional Model Governance & Promotion Policy
+SUPPORTED_MANIFEST_SCHEMA_VERSION = 3
+MODEL_GOVERNANCE = {
+    "version": "v2.4",
+    "max_ece": 0.08,
+    "max_brier": 0.22,
+    "min_sharpe_delta": 0.10,
+    "min_samples": 20
+}
+
 # Order Execution Bounds
 MIN_ORDER_VALUE_USDT = 5.1
 MAX_SCALED_RISK_CAP_RATIO = 1.10  # 110% hard cap on approved risk when order size is scaled up

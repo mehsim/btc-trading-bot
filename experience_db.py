@@ -87,7 +87,14 @@ def init_experience_db():
                     failure_attribution_json TEXT,
                     decision_replay_json TEXT,
                     learning_score REAL,
-                    research_priority INTEGER DEFAULT 0
+                    research_priority INTEGER DEFAULT 0,
+
+                    -- Item 10: Compact Monte Carlo Seed & Summary Risk Audit
+                    monte_carlo_seed INTEGER,
+                    monte_carlo_simulations INTEGER,
+                    monte_carlo_var_99 REAL,
+                    monte_carlo_cvar_99 REAL,
+                    monte_carlo_max_drawdown REAL
                 );
             """)
             

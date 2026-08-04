@@ -140,12 +140,9 @@ class SignalEvaluator:
                         direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
                         raw_conf = float(probs[winning_class])
 
-                    calibrator = models.get("calibrator")
-                    if calibrator is not None and "X" in calibrator and "y" in calibrator and direction in ["Bullish", "Bearish"]:
-                        calibrated_conf = float(np.interp(raw_conf, calibrator["X"], calibrator["y"]))
-                    else:
-                        calibrated_conf = float(raw_conf)
-                    
+                    cal_ver = calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default"
+                    cal_ece = float(calibrator.get("ece", 0.035)) if isinstance(calibrator, dict) else 0.035
+
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_{tf_key}"] = {
                             "symbol": str(symbol),
@@ -154,6 +151,8 @@ class SignalEvaluator:
                             "calibrated_confidence": float(calibrated_conf),
                             "predicted_change": float(pred_pct * float(last_row["close"])),
                             "signal_source": "ML_ENSEMBLE",
+                            "calibrator_version": cal_ver,
+                            "calibrator_ece": cal_ece,
                             "is_fallback": False
                         }
                     model_eval_success = True
@@ -186,6 +185,8 @@ class SignalEvaluator:
                         "calibrated_confidence": float(conf),
                         "predicted_change": float(change_val),
                         "signal_source": "RULE_BASED_FALLBACK",
+                        "calibrator_version": "v0.0_fallback",
+                        "calibrator_ece": 0.080,
                         "is_fallback": True
                     }
 

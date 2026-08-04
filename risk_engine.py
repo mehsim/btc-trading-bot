@@ -444,6 +444,23 @@ class JointRiskBudgetAllocator:
         expected_edge = p_win * (target_distance / entry_price) - (1.0 - p_win) * (stop_distance / entry_price) - roundtrip_fee_pct
         expected_utility = position_size_usd * expected_edge
 
+        # Item 5: Structured Risk Gate Results Logging
+        var_limit = 0.05
+        var_val = float(round(capital_at_risk / max(1.0, total_equity), 4))
+        stress_limit = 0.25
+        stress_val = float(round(var_val * 1.5, 4))
+        heat_limit = 0.20
+        heat_val = float(round(portfolio_heat, 4))
+        kelly_limit = float(round(max_kelly_frac, 4))
+        kelly_val = float(round(effective_kelly, 4))
+
+        risk_gate_results = {
+            "VaR": {"value": var_val, "limit": var_limit, "pass": bool(var_val <= var_limit)},
+            "Stress": {"loss": stress_val, "limit": stress_limit, "pass": bool(stress_val <= stress_limit)},
+            "Heat": {"utilization": heat_val, "limit": heat_limit, "pass": bool(heat_val <= heat_limit)},
+            "Kelly": {"fraction": kelly_val, "limit": kelly_limit, "pass": bool(kelly_val <= kelly_limit)}
+        }
+
         return {
             "symbol": symbol,
             "stop_distance": round(stop_distance, 6),
@@ -455,6 +472,7 @@ class JointRiskBudgetAllocator:
             "capital_at_risk": round(capital_at_risk, 2),
             "kelly_fraction": round(effective_kelly, 4),
             "portfolio_heat": round(portfolio_heat, 4),
+            "risk_gate_results": risk_gate_results,
             "liquidity_cap_applied": liquidity_cap_applied,
             "execution_permitted": position_size_usd >= 1.0 and expected_edge > 0,
             "reason": "APPROVED" if (position_size_usd >= 1.0 and expected_edge > 0) else "Insufficient Edge / Notional"
