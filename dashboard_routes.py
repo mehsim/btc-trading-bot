@@ -120,22 +120,13 @@ def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
-        if expected_key:
-            client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
-            if not client_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
-                return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
+        client_key = request.headers.get("X-API-KEY")
+        if not expected_key or not client_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+            return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
         return f(*args, **kwargs)
     return decorated_function
 
-def require_admin_key(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        expected_key = get_secure_env("DASHBOARD_API_KEY", "btc_bot_admin_secure_key_2026").strip()
-        client_key = request.headers.get("X-API-KEY")
-        if not client_key or not expected_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
-            return jsonify({"error": "Unauthorized", "message": "Admin authorization required via X-API-KEY header."}), 401
-        return f(*args, **kwargs)
-    return decorated_function
+require_admin_key = require_api_key
 
 
 def require_ip_whitelist(f):
@@ -185,7 +176,7 @@ def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: s
 
 
 @dashboard_bp.route("/killswitch", methods=["POST"])
-@require_api_key
+@require_admin_key
 def killswitch_endpoint():
     from state_manager import state_manager
     from telegram_bot import send_telegram_alert
@@ -356,7 +347,6 @@ def get_default_confluence_checks():
 
 
 @dashboard_bp.route("/api/status")
-@require_api_key
 def api_status():
     from state_manager import state_manager
     from bybit_client import get_real_bybit_balance_cached, bybit_get_request
