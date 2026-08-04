@@ -88,8 +88,20 @@ class SignalEvaluator:
                     _regime_key = "trending" if is_trending else "ranging"
                     _feat_key = f"selected_features_{_regime_key}"
                     _feat_list = self.models_by_interval[interval].get(_feat_key) or features
+
+                    # Guard: if selected_features has fewer cols than model expects, use all features
+                    # so _slice_model_input can correctly truncate to model's expected count.
+                    from ensemble import get_model_feature_names
+                    _model_fn = get_model_feature_names(models["trend"])
+                    _n_model = len(_model_fn) if _model_fn else None
+                    if _n_model and len(_feat_list) < _n_model:
+                        _feat_list = features  # fall back to full feature set
+
+                    # Only keep features present in df
+                    _feat_list = [f for f in _feat_list if f in df.columns]
                     row_X = df[_feat_list].iloc[[-1]]
                     row_X_sliced = _slice_model_input(models["trend"], row_X)
+
                     
                     probs = models["trend"].predict_proba(row_X_sliced)[0]
                     pred_pct = float(models["price"].predict(row_X_sliced)[0])

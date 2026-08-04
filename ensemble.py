@@ -130,8 +130,17 @@ def _slice_model_input(model, X):
             )
             if _are_positional:
                 n_exp = len(expected_names)
-                # Slice first N columns — extra features from pipeline growth are ignored
-                return df.iloc[:, :n_exp]
+                n_got = df.shape[1]
+                if n_got > n_exp:
+                    # Extra features — slice to first N
+                    return df.iloc[:, :n_exp]
+                elif n_got < n_exp:
+                    # Fewer features than model expects — zero-pad the remainder
+                    import warnings
+                    warnings.warn(f"[Ensemble] Padding {n_exp - n_got} zero features (model expects {n_exp}, got {n_got}). Retrain models to fix.")
+                    pad = pd.DataFrame(np.zeros((len(df), n_exp - n_got)), index=df.index)
+                    return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
+                return df
             missing = [c for c in expected_names if c not in df.columns]
             if missing:
                 raise RuntimeError(
@@ -140,12 +149,14 @@ def _slice_model_input(model, X):
                 )
             return df[expected_names]
         elif n_expected and df.shape[1] != n_expected:
-            # No feature names — model trained on positional numpy array. Slice first N.
+            # No feature names — model trained on positional numpy array.
             if df.shape[1] > n_expected:
                 return df.iloc[:, :n_expected]
-            raise RuntimeError(
-                f"[Feature Shape Coercion Error] Input DataFrame shape ({df.shape[1]}) does not match model expected features ({n_expected})."
-            )
+            elif df.shape[1] < n_expected:
+                import warnings
+                warnings.warn(f"[Ensemble] Padding {n_expected - df.shape[1]} zero features (model expects {n_expected}, got {df.shape[1]}). Retrain models to fix.")
+                pad = pd.DataFrame(np.zeros((len(df), n_expected - df.shape[1])), index=df.index)
+                return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
         return df
     elif isinstance(X, dict):
         if expected_names:
