@@ -17,6 +17,14 @@ import database
 import numpy as np
 from trade_calculators import calculate_replay_statistics
 
+def safe_float(val, default=0.0):
+    if val is None or val == "MT":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 dashboard_bp = Blueprint("dashboard", __name__)
 startup_time = time.time()
 
@@ -106,14 +114,26 @@ if not isinstance(sys.stdout, StdoutRedirector):
     sys.stdout = StdoutRedirector(sys.stdout)
 
 
+import hmac
+
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
         if expected_key:
             client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
-            if not client_key or client_key.strip() != expected_key:
-                return jsonify({"error": "Unauthorized", "message": "Missing or invalid X-API-KEY header."}), 401
+            if not client_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+                return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_admin_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        expected_key = get_secure_env("DASHBOARD_API_KEY", "btc_bot_admin_secure_key_2026").strip()
+        client_key = request.headers.get("X-API-KEY")
+        if not client_key or not expected_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+            return jsonify({"error": "Unauthorized", "message": "Admin authorization required via X-API-KEY header."}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -124,12 +144,12 @@ def require_ip_whitelist(f):
         allowed_ips = get_secure_env("ALLOWED_DASHBOARD_IPS", "").strip()
         if allowed_ips:
             ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-            forwarded = request.headers.get("X-Forwarded-For")
-            if forwarded:
-                client_ip = forwarded.split(",")[0].strip()
+            trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
+            if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
+                client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
             else:
-                client_ip = request.headers.get("X-Real-IP", request.remote_addr)
-            if client_ip not in ip_list and client_ip != "127.0.0.1":
+                client_ip = request.remote_addr
+            if client_ip not in ip_list and client_ip not in ["127.0.0.1", "::1"]:
                 return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -528,15 +548,15 @@ def api_reality_gap():
     for idx, t in enumerate(latest_20):
         sym = str(t.get("symbol", "BTCUSDT")).replace("USDT", "")
         tf = str(t.get("interval", t.get("timeframe", "1h")))
-        act_pnl = float(t.get("pnl_usd", 0.0))
+        act_pnl = safe_float(t.get("pnl_usd", 0.0))
 
-        entry = float(t.get("entry_price", t.get("entry", 0.0)))
-        pred_entry = float(t.get("predicted_price", entry))
-        sl = float(t.get("stop_loss", t.get("sl", 0.0)))
-        tp = float(t.get("take_profit", t.get("tp", 0.0)))
-        pos_size = float(t.get("position_size_usd", t.get("position_size", t.get("original_size", 10.0))))
-        lev = float(t.get("leverage", 10.0))
-        conf = float(t.get("confidence", 0.75))
+        entry = safe_float(t.get("entry_price", t.get("entry", 0.0)))
+        pred_entry = safe_float(t.get("predicted_price", entry), entry)
+        sl = safe_float(t.get("stop_loss", t.get("sl", 0.0)))
+        tp = safe_float(t.get("take_profit", t.get("tp", 0.0)))
+        pos_size = safe_float(t.get("position_size_usd", t.get("position_size", t.get("original_size", 10.0))), 10.0)
+        lev = safe_float(t.get("leverage", 10.0), 10.0)
+        conf = safe_float(t.get("confidence", 0.75), 0.75)
 
         # Dynamic slippage calculation (basis points difference between actual vs predicted entry)
         if entry > 0 and pred_entry > 0:
@@ -544,7 +564,7 @@ def api_reality_gap():
             slippage_bps.append(slip)
 
         # Dynamic fill quality percentage
-        fill_val = float(t.get("fill_pct", 100.0))
+        fill_val = safe_float(t.get("fill_pct", 100.0), 100.0)
         fill_pcts.append(min(100.0, max(0.0, fill_val)))
 
         # Dynamic fee difference in basis points
@@ -643,8 +663,8 @@ def api_institutional_summary():
 
     valid_trades = [t for t in history if isinstance(t, dict)]
     total_trades_count = len(valid_trades)
-    winning_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) > 0]
-    losing_trades = [t for t in valid_trades if float(t.get("pnl_usd", 0.0)) < 0]
+    winning_trades = [t for t in valid_trades if safe_float(t.get("pnl_usd", 0.0)) > 0]
+    losing_trades = [t for t in valid_trades if safe_float(t.get("pnl_usd", 0.0)) < 0]
     
     win_rate = (len(winning_trades) / max(1, total_trades_count)) * 100.0 if total_trades_count > 0 else 0.0
     import datetime
@@ -660,31 +680,31 @@ def api_institutional_summary():
 
     today_trades = [
         t for t in valid_trades 
-        if isinstance(t, dict) and float(t.get("exit_time", 0.0)) >= today_start_ts
+        if isinstance(t, dict) and safe_float(t.get("exit_time", 0.0)) >= today_start_ts
     ]
     if not today_trades:
         twenty_four_hours_ago = time.time() - 86400.0
         today_trades = [
             t for t in valid_trades
-            if isinstance(t, dict) and float(t.get("exit_time", 0.0)) >= twenty_four_hours_ago
+            if isinstance(t, dict) and safe_float(t.get("exit_time", 0.0)) >= twenty_four_hours_ago
         ]
 
-    today_pnl = sum(float(t.get("pnl_usd", 0.0)) for t in today_trades)
-    today_volume = sum(float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 15.0)))) for t in today_trades)
+    today_pnl = sum(safe_float(t.get("pnl_usd", 0.0)) for t in today_trades)
+    today_volume = sum(safe_float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 15.0))), 15.0) for t in today_trades)
     today_leveraged_volume = sum(
-        float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 15.0)))) * float(t.get("leverage", 10.0))
+        safe_float(t.get("position_size_usd", t.get("original_size", t.get("notional_usd", 15.0))), 15.0) * safe_float(t.get("leverage", 10.0), 10.0)
         for t in today_trades
     )
 
-    today_winning_trades = [t for t in today_trades if float(t.get("pnl_usd", 0.0)) > 0]
-    today_losing_trades = [t for t in today_trades if float(t.get("pnl_usd", 0.0)) < 0]
+    today_winning_trades = [t for t in today_trades if safe_float(t.get("pnl_usd", 0.0)) > 0]
+    today_losing_trades = [t for t in today_trades if safe_float(t.get("pnl_usd", 0.0)) < 0]
     today_win_rate = (len(today_winning_trades) / len(today_trades)) * 100.0 if today_trades else 0.0
 
-    today_gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in today_winning_trades)
-    today_gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in today_losing_trades))
+    today_gross_gains = sum(safe_float(t.get("pnl_usd", 0.0)) for t in today_winning_trades)
+    today_gross_losses = abs(sum(safe_float(t.get("pnl_usd", 0.0)) for t in today_losing_trades))
     today_pf = round(today_gross_gains / today_gross_losses, 2) if today_gross_losses > 0 else (1.00 if today_gross_gains > 0 else 0.00)
 
-    today_returns = [float(t.get("pnl_usd", 0.0)) for t in today_trades]
+    today_returns = [safe_float(t.get("pnl_usd", 0.0)) for t in today_trades]
     today_stats = calculate_replay_statistics(today_returns, initial_equity=100.0) if today_returns else {}
     today_dd = round(today_stats.get("max_drawdown_pct", 0.0), 1)
 
@@ -692,24 +712,24 @@ def api_institutional_summary():
     week_start_ts = now_ts - (7 * 86400.0)
     month_start_ts = now_ts - (30 * 86400.0)
     
-    trades_week_count = len([t for t in valid_trades if float(t.get("exit_time", 0.0)) >= week_start_ts])
-    trades_month_count = len([t for t in valid_trades if float(t.get("exit_time", 0.0)) >= month_start_ts])
+    trades_week_count = len([t for t in valid_trades if safe_float(t.get("exit_time", 0.0)) >= week_start_ts])
+    trades_month_count = len([t for t in valid_trades if safe_float(t.get("exit_time", 0.0)) >= month_start_ts])
 
-    hold_durations = [(float(t.get("exit_time", 0)) - float(t.get("entry_time", t.get("exit_time", 0)))) / 3600.0 for t in valid_trades if float(t.get("entry_time", 0)) > 0 and float(t.get("exit_time", 0)) > float(t.get("entry_time", 0))]
+    hold_durations = [(safe_float(t.get("exit_time", 0)) - safe_float(t.get("entry_time", t.get("exit_time", 0)))) / 3600.0 for t in valid_trades if safe_float(t.get("entry_time", 0)) > 0 and safe_float(t.get("exit_time", 0)) > safe_float(t.get("entry_time", 0))]
     avg_hold_hours = round(float(np.mean(hold_durations)), 1) if hold_durations else 2.4
 
-    planned_rr_vals = [abs(float(t.get("take_profit", 0)) - float(t.get("entry_price", 0))) / max(0.01, abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0)))) for t in valid_trades if float(t.get("entry_price", 0)) > 0 and float(t.get("take_profit", 0)) > 0 and float(t.get("stop_loss", 0)) > 0 and abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) > 0.001 * float(t.get("entry_price", 0))]
+    planned_rr_vals = [abs(safe_float(t.get("take_profit", 0)) - safe_float(t.get("entry_price", 0))) / max(0.01, abs(safe_float(t.get("entry_price", 0)) - safe_float(t.get("stop_loss", 0)))) for t in valid_trades if safe_float(t.get("entry_price", 0)) > 0 and safe_float(t.get("take_profit", 0)) > 0 and safe_float(t.get("stop_loss", 0)) > 0 and abs(safe_float(t.get("entry_price", 0)) - safe_float(t.get("stop_loss", 0))) > 0.001 * safe_float(t.get("entry_price", 0))]
     planned_rr_val = round(float(np.mean(planned_rr_vals)), 2) if planned_rr_vals else 2.50
 
-    gross_gains = sum(float(t.get("pnl_usd", 0.0)) for t in winning_trades)
-    gross_losses = abs(sum(float(t.get("pnl_usd", 0.0)) for t in losing_trades))
+    gross_gains = sum(safe_float(t.get("pnl_usd", 0.0)) for t in winning_trades)
+    gross_losses = abs(sum(safe_float(t.get("pnl_usd", 0.0)) for t in losing_trades))
     calculated_pf = round(gross_gains / gross_losses, 2) if gross_losses > 0 else (1.00 if gross_gains > 0 else 0.00)
     
     avg_win_val = (gross_gains / len(winning_trades)) if winning_trades else 0.00
     avg_loss_val = (gross_losses / len(losing_trades)) if losing_trades else 0.00
     rr_val = round(avg_win_val / avg_loss_val, 2) if avg_loss_val > 0 else 0.00
     
-    returns_list = [float(t.get("pnl_usd", 0.0)) for t in valid_trades]
+    returns_list = [safe_float(t.get("pnl_usd", 0.0)) for t in valid_trades]
     stats = calculate_replay_statistics(returns_list, initial_equity=100.0) if returns_list else {}
     
     dynamic_sharpe = round(stats.get("sharpe_ratio", 0.0), 2)
@@ -725,12 +745,12 @@ def api_institutional_summary():
     win_r_stats = []
     
     for t in valid_trades:
-        entry = float(t.get("entry_price", 0.0))
-        sl = float(t.get("stop_loss", 0.0))
-        tp = float(t.get("take_profit", 0.0))
-        atr = float(t.get("atr_dollars", 0.0))
-        pnl_usd = float(t.get("pnl_usd", 0.0))
-        pos_usd = float(t.get("position_size_usd", 15.0))
+        entry = safe_float(t.get("entry_price", 0.0))
+        sl = safe_float(t.get("stop_loss", 0.0))
+        tp = safe_float(t.get("take_profit", 0.0))
+        atr = safe_float(t.get("atr_dollars", 0.0))
+        pnl_usd = safe_float(t.get("pnl_usd", 0.0))
+        pos_usd = safe_float(t.get("position_size_usd", 15.0), 15.0)
 
         if entry > 0 and sl > 0 and abs(entry - sl) > 0:
             risk_dist = abs(entry - sl)
@@ -819,17 +839,17 @@ def api_institutional_summary():
         elif pos and isinstance(pos, dict):
             active_positions.append(pos)
             
-    active_position_size = sum(float(p.get("position_size_usd", p.get("notional_usd", 0.0))) for p in active_positions if isinstance(p, dict))
+    active_position_size = sum(safe_float(p.get("position_size_usd", p.get("notional_usd", 0.0))) for p in active_positions if isinstance(p, dict))
     portfolio_exposure_pct = round((active_position_size / max(1.0, sim_balance)) * 100.0, 1) if active_position_size > 0 else 0.0
     current_position_size_usd = round(active_position_size, 2) if active_position_size > 0 else 0.00
 
     # Dynamic Risk & Portfolio Metrics Calculation
-    open_risk_calc = (sum(abs(float(p.get("entry_price", 0)) - float(p.get("stop_loss", 0))) / max(1, float(p.get("entry_price", 1))) * float(p.get("position_size_usd", 0)) for p in active_positions if isinstance(p, dict)) / max(1.0, sim_balance) * 100.0) if active_positions else 0.0
+    open_risk_calc = (sum(abs(safe_float(p.get("entry_price", 0)) - safe_float(p.get("stop_loss", 0))) / max(1, safe_float(p.get("entry_price", 1), 1.0)) * safe_float(p.get("position_size_usd", 0)) for p in active_positions if isinstance(p, dict)) / max(1.0, sim_balance) * 100.0) if active_positions else 0.0
     open_risk_val = round(max(0.0, open_risk_calc), 2)
-    max_risk_val = float(state_manager.get("max_risk_pct", 5.0))
+    max_risk_val = safe_float(state_manager.get("max_risk_pct", 5.0), 5.0)
 
     if returns_list:
-        var_pct_val = round(max(0.0, float(abs(np.percentile(returns_list, 5.0))) / max(1.0, sim_balance) * 100.0), 2)
+        var_pct_val = round(max(0.0, safe_float(abs(np.percentile(returns_list, 5.0))) / max(1.0, sim_balance) * 100.0), 2)
         cvar_pct_val = round(var_pct_val * 1.45, 2)
     else:
         var_pct_val = round(max(0.0, dynamic_dd * 0.4), 2)
@@ -839,7 +859,7 @@ def api_institutional_summary():
     for p in active_positions:
         if isinstance(p, dict):
             sym = p.get("symbol", "BTCUSDT").replace("USDT", "")
-            pos_by_sym[sym] = pos_by_sym.get(sym, 0.0) + float(p.get("position_size_usd", p.get("notional_usd", 0.0)))
+            pos_by_sym[sym] = pos_by_sym.get(sym, 0.0) + safe_float(p.get("position_size_usd", p.get("notional_usd", 0.0)))
     
     if pos_by_sym:
         dynamic_exposures = [{"symbol": k, "pct": round((v / max(1.0, sim_balance)) * 100.0, 1)} for k, v in pos_by_sym.items()]

@@ -2,6 +2,7 @@ import math
 import sqlite3
 import os
 import json
+import uuid
 import threading
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -9,14 +10,17 @@ import time
 from typing import Dict, List, Tuple, Optional, Any, Union
 
 def round_monetary(val: Any, decimals: int = 4) -> float:
-    if val is None or (isinstance(val, float) and math.isnan(val)):
+    if val is None or val == "MT" or (isinstance(val, float) and math.isnan(val)):
         return 0.0
     try:
         d = Decimal(str(val))
         fmt = "0." + "0" * decimals if decimals > 0 else "0"
         return float(d.quantize(Decimal(fmt), rounding=ROUND_HALF_UP))
     except Exception:
-        return round(float(val), decimals)
+        try:
+            return round(float(val), decimals)
+        except Exception:
+            return 0.0
 
 DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
 db_lock = threading.Lock()
@@ -167,6 +171,12 @@ def init_db():
             # Enable Incremental Vacuum for storage optimization
             cursor.execute("PRAGMA auto_vacuum = INCREMENTAL;")
             
+            # High-Performance Query Indexes (Fix B9)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_symbol_ts ON predictions(symbol, timestamp);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_completed_trades_symbol_ts ON completed_trades(symbol, exit_time);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_trades_symbol ON active_trades(symbol);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_derivatives_symbol ON derivatives_cache(symbol);")
+            
             # 8. Create Pending Pain Checks Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pending_pain_checks (
@@ -238,7 +248,7 @@ def init_db():
 
 
 
-def save_prediction(pred):
+def save_prediction(pred) -> bool:
     p_id = pred.get("prediction_id") or f"{pred.get('symbol')}_{int(pred.get('timestamp', 0))}"
     with db_lock:
         conn = get_db_connection()
@@ -251,8 +261,14 @@ def save_prediction(pred):
                 pred.get("direction"), pred.get("confidence"), json.dumps(pred)
             ))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to save prediction: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to save prediction: {e} | Payload: {json.dumps(pred)}")
+            return False
         finally:
             conn.close()
 
@@ -277,7 +293,7 @@ def get_prediction_history(limit=500):
         finally:
             conn.close()
 
-def save_pending_pain_check(trade):
+def save_pending_pain_check(trade) -> bool:
     t_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(trade.get('exit_time', 0))}"
     with db_lock:
         conn = get_db_connection()
@@ -292,8 +308,14 @@ def save_pending_pain_check(trade):
                 trade.get("direction"), trade.get("reason")
             ))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to save pending pain check: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to save pending pain check: {e} | Payload: {json.dumps(trade)}")
+            return False
         finally:
             conn.close()
 
@@ -311,48 +333,185 @@ def get_pending_pain_checks():
         finally:
             conn.close()
 
-def delete_pending_pain_check(trade_id):
+def delete_pending_pain_check(trade_id) -> bool:
     with db_lock:
         conn = get_db_connection()
         try:
             conn.execute("DELETE FROM pending_pain_checks WHERE trade_id = ?;", (trade_id,))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to delete pending pain check {trade_id}: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to delete pending pain check {trade_id}: {e}")
+            return False
         finally:
             conn.close()
 
-def save_completed_trade(trade):
-    t_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(trade.get('exit_time', 0))}"
+def save_completed_trade(trade) -> bool:
+    trade_uuid = str(uuid.uuid4())
+    exit_ts = int(trade.get("exit_time", time.time()))
+    t_id = trade.get("trade_id")
+    if not t_id or not isinstance(t_id, str) or t_id.endswith(f"_{exit_ts}"):
+        t_id = f"tr_{trade.get('symbol')}_{exit_ts}_{trade_uuid}"
+        trade["trade_id"] = t_id
+
+    success = False
     with db_lock:
         conn = get_db_connection()
         try:
-            conn.execute("""
-                INSERT OR REPLACE INTO completed_trades (
-                    trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                    change_pct, success, reason, position_size_usd, original_size, pnl_usd,
-                    balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """, (
-                t_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
-                round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
-                round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
-                trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
-                round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
-                round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
-                round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
-                round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
-            ))
-            conn.commit()
+            try:
+                conn.execute("""
+                    INSERT INTO completed_trades (
+                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    t_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
+                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
+                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
+                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
+                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
+                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+                ))
+                conn.commit()
+                success = True
+            except sqlite3.IntegrityError as ie:
+                new_id = f"tr_{trade.get('symbol')}_{exit_ts}_{uuid.uuid4()}"
+                trade["trade_id"] = new_id
+                print(f"[Database Warning] Duplicate trade_id '{t_id}' detected. Retrying with fresh UUID '{new_id}': {ie}")
+                conn.execute("""
+                    INSERT INTO completed_trades (
+                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    new_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
+                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
+                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
+                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
+                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
+                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+                ))
+                conn.commit()
+                success = True
         except Exception as e:
-            print(f"[Database Error] Failed to save completed trade: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] CRITICAL: Failed to save completed trade: {e} | Payload: {json.dumps(trade)}")
+            success = False
         finally:
             conn.close()
-            
-    reason_str = str(trade.get("reason", "")).upper()
 
-    if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
-        save_pending_pain_check(trade)
+    if success:
+        reason_str = str(trade.get("reason", "")).upper()
+        if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
+            save_pending_pain_check(trade)
+
+        # Hook Phase 1 Continuous Learning Engine (non-blocking event dispatch)
+        try:
+            from learning_engine import continuous_learning_engine
+            continuous_learning_engine.on_trade_closed(trade)
+        except Exception as le:
+            print(f"[LearningEngine Hook] Non-critical dispatch error: {le}")
+
+    return success
+
+def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
+    """
+    Executes a 100% atomic transaction for trade closure:
+    1. Inserts record into completed_trades
+    2. Deletes trade from active_trades table for timeframe tf and symbol
+    3. Inserts into pending_pain_checks if STOP LOSS or BREAK-EVEN
+    If ANY step fails or if process crashes mid-way, SQLite AUTOMATICALLY ROLLS BACK EVERYTHING.
+    """
+    trade_uuid = str(uuid.uuid4())
+    exit_ts = int(trade.get("exit_time", time.time()))
+    t_id = trade.get("trade_id")
+    if not t_id or not isinstance(t_id, str) or t_id.endswith(f"_{exit_ts}"):
+        t_id = f"tr_{trade.get('symbol')}_{exit_ts}_{trade_uuid}"
+        trade["trade_id"] = t_id
+
+    symbol = trade.get("symbol")
+    reason_str = str(trade.get("reason", "")).upper()
+    
+    with db_lock:
+        conn = get_db_connection()
+        try:
+            conn.execute("BEGIN TRANSACTION;")
+            # Step 1: Insert into completed_trades (with IntegrityError fallback handling)
+            try:
+                conn.execute("""
+                    INSERT INTO completed_trades (
+                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
+                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
+                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
+                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
+                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
+                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+                ))
+            except sqlite3.IntegrityError:
+                t_id = f"tr_{symbol}_{exit_ts}_{uuid.uuid4()}"
+                trade["trade_id"] = t_id
+                conn.execute("""
+                    INSERT INTO completed_trades (
+                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
+                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
+                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
+                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
+                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
+                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+                ))
+            
+            # Step 2: Delete from active_trades
+            conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR (tf = ? AND symbol = ?);", (t_id, str(tf), symbol))
+            
+            # Step 3: Pending pain check if applicable
+            if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
+                conn.execute("""
+                    INSERT OR REPLACE INTO pending_pain_checks (
+                        trade_id, symbol, exit_time, exit_price, direction, reason, initial_floor, highest_post_exit_price, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    t_id, symbol, trade.get("exit_time"), round_monetary(trade.get("exit_price"), 4),
+                    trade.get("direction"), trade.get("reason"), 0.008, round_monetary(trade.get("exit_price"), 4), json.dumps(trade)
+                ))
+            
+            conn.commit()
+            print(f"[Database Atomic Success] Closed trade {t_id} for {symbol} ({tf}m) atomically.")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database Error] Transaction rolled back for trade {t_id}: {e}")
+            return False
+        finally:
+            conn.close()
 
     # Hook Phase 1 Continuous Learning Engine (non-blocking event dispatch)
     try:
@@ -360,6 +519,8 @@ def save_completed_trade(trade):
         continuous_learning_engine.on_trade_closed(trade)
     except Exception as le:
         print(f"[LearningEngine Hook] Non-critical dispatch error: {le}")
+
+    return True
 
 
 
@@ -398,7 +559,7 @@ def get_active_trades(tf):
         finally:
             conn.close()
 
-def save_active_trades(tf, trades):
+def save_active_trades(tf, trades) -> bool:
     with db_lock:
         conn = get_db_connection()
         try:
@@ -410,8 +571,14 @@ def save_active_trades(tf, trades):
                     VALUES (?, ?, ?, ?);
                 """, (t_id, tf, t.get("symbol"), json.dumps(t)))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to save active trades for {tf}: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to save active trades for {tf}: {e} | Payload: {json.dumps(trades)}")
+            return False
         finally:
             conn.close()
 
@@ -431,18 +598,24 @@ def get_setting(key, default=None):
         finally:
             conn.close()
 
-def set_setting(key, value):
+def set_setting(key, value) -> bool:
     with db_lock:
         conn = get_db_connection()
         try:
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", (key, str(value)))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to save setting {key}: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to save setting {key}: {e}")
+            return False
         finally:
             conn.close()
 
-def save_cached_derivatives(symbol, records):
+def save_cached_derivatives(symbol, records) -> bool:
     """
     records is a list of dicts: [{'timestamp': int_ms, 'open_interest': float, 'funding_rate': float}]
     """
@@ -455,8 +628,14 @@ def save_cached_derivatives(symbol, records):
                     VALUES (?, ?, ?, ?);
                 """, (r['timestamp'], symbol, r.get('open_interest'), r.get('funding_rate')))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to save cached derivatives for {symbol}: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to save cached derivatives for {symbol}: {e}")
+            return False
         finally:
             conn.close()
 
@@ -481,7 +660,7 @@ def get_cached_derivatives(symbol, since_ts):
         finally:
             conn.close()
 
-def save_cached_sentiment(records):
+def save_cached_sentiment(records) -> bool:
     """
     records is a list of dicts: [{'timestamp': int_ms, 'fear_and_greed_val': int}]
     """
@@ -494,8 +673,14 @@ def save_cached_sentiment(records):
                     VALUES (?, ?);
                 """, (r['timestamp'], r.get('fear_and_greed_val')))
             conn.commit()
+            return True
         except Exception as e:
-            print(f"[Database Error] Failed to save cached sentiment: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to save cached sentiment: {e}")
+            return False
         finally:
             conn.close()
 
@@ -536,7 +721,11 @@ def purge_old_order_flow_logs(retention_days: int = 60) -> int:
                 print(f"🧹 [Storage Cleanup] Purged {deleted_rows} order flow ticks older than {retention_days} days. Vacuum complete.")
             return deleted_rows
         except Exception as e:
-            print(f"[Database Error] Failed to purge old order flow logs: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to purge old order flow logs: {e}")
             return 0
         finally:
             conn.close()
@@ -568,17 +757,22 @@ def archive_legacy_recovery_trades() -> int:
                 print(f"📦 [Database Archive] Moved {archived_count} legacy offline recovery trades into completed_trades_archive.")
             return archived_count
         except Exception as e:
-            print(f"[Database Error] Failed to archive legacy trades: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed to archive legacy trades: {e}")
             return 0
         finally:
             conn.close()
 
 
-def clear_all_trade_history():
+def clear_all_trade_history() -> bool:
     """
     Completely clears completed_trades and predictions tables from SQLite,
     resetting all-time cumulative PnL to $0.00.
     """
+    success = False
     with db_lock:
         conn = get_db_connection()
         try:
@@ -588,8 +782,14 @@ def clear_all_trade_history():
             conn.commit()
             cursor.execute("PRAGMA incremental_vacuum;")
             print("🧹 [Database Clear] Successfully wiped all completed_trades and predictions records.")
+            success = True
         except Exception as e:
-            print(f"[Database Error] Failed clearing trade history: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[Database ERROR] Failed clearing trade history: {e}")
+            success = False
         finally:
             conn.close()
 
@@ -600,6 +800,7 @@ def clear_all_trade_history():
                     json.dump([], f) if fname != "pain_feedback_state.json" else json.dump({}, f)
             except Exception:
                 pass
+    return success
 
 
 def backup_database(dest_path=None) -> bool:

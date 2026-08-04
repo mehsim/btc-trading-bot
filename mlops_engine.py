@@ -28,6 +28,14 @@ def init_mlflow(experiment_name: str = "BTC_Trading_Bot"):
         print(f"[MLflow Warning] Failed to initialize MLflow: {e}")
         return False
 
+def safe_float(val, default=0.0):
+    if val is None or val == "MT":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 def calculate_brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     """
     F-10 Calibration Metric: Brier Score
@@ -357,18 +365,18 @@ def check_model_drift(interval: str, trade_history: list, window: int = 100) -> 
     if len(recent) < 20:
         return {"status": "INSUFFICIENT_DATA", "accuracy": 0.0, "alerts": []}
     
-    correct = sum(1 for t in recent if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+    correct = sum(1 for t in recent if t.get("success") is True or safe_float(t.get("pnl_usd"), 0.0) > 0)
     accuracy = round(correct / len(recent), 4)
 
     # Log latest outcome into CUSUM drift detector
     latest_trade = recent[-1]
-    latest_outcome = 1 if (latest_trade.get("success") is True or float(latest_trade.get("pnl_usd", 0.0)) > 0) else 0
-    latest_conf = float(latest_trade.get("confidence", 0.70))
+    latest_outcome = 1 if (latest_trade.get("success") is True or safe_float(latest_trade.get("pnl_usd"), 0.0) > 0) else 0
+    latest_conf = safe_float(latest_trade.get("confidence"), 0.70)
     is_cusum_drift, s_high, err_rate = cusum_drift_detector.update(latest_outcome, latest_conf)
     
-    high_conf = [t for t in recent if float(t.get("confidence", t.get("calibrated_confidence", 0.0))) >= 0.75]
+    high_conf = [t for t in recent if safe_float(t.get("confidence") or t.get("calibrated_confidence"), 0.0) >= 0.75]
     if high_conf:
-        high_conf_wins = sum(1 for t in high_conf if t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+        high_conf_wins = sum(1 for t in high_conf if t.get("success") is True or safe_float(t.get("pnl_usd"), 0.0) > 0)
         high_conf_wr = round(high_conf_wins / len(high_conf), 4)
     else:
         high_conf_wr = 0.0
@@ -408,8 +416,8 @@ def calculate_confidence_calibration_buckets(trade_history: list) -> list:
     for t in trade_history:
         if not isinstance(t, dict):
             continue
-        conf = float(t.get("confidence") or t.get("calibrated_confidence") or 0.60)
-        is_win = (t.get("success") is True or float(t.get("pnl_usd", 0.0)) > 0)
+        conf = safe_float(t.get("confidence") or t.get("calibrated_confidence"), 0.60)
+        is_win = (t.get("success") is True or safe_float(t.get("pnl_usd"), 0.0) > 0)
 
         for b in buckets:
             if b["min"] <= conf < b["max"]:

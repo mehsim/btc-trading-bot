@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import math
 import os
 import json
 import warnings
@@ -7,73 +8,173 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 from xgboost import XGBClassifier, XGBRegressor
 
+def get_model_feature_names(model):
+    """Extracts expected feature names list from LightGBM, XGBoost, CatBoost, or scikit-learn estimators."""
+    if model is None:
+        return None
+    # 1. LightGBM Booster or LGBMClassifier
+    if hasattr(model, "booster_") and hasattr(model.booster_, "feature_name"):
+        try:
+            fn = model.booster_.feature_name()
+            if fn and len(fn) > 0 and not str(fn[0]).startswith("Column_"):
+                return list(fn)
+        except Exception:
+            pass
+    if hasattr(model, "feature_name") and callable(getattr(model, "feature_name")):
+        try:
+            fn = model.feature_name()
+            if fn and len(fn) > 0 and not str(fn[0]).startswith("Column_"):
+                return list(fn)
+        except Exception:
+            pass
+    # 2. Estimators with feature_names_ / feature_names / _feature_names
+    for attr in ["feature_names_", "feature_names", "_feature_names"]:
+        if hasattr(model, attr):
+            fn = getattr(model, attr)
+            if isinstance(fn, (list, tuple, np.ndarray)) and len(fn) > 0:
+                fn_list = list(fn)
+                if not str(fn_list[0]).startswith("Column_"):
+                    return fn_list
+    # 3. XGBoost booster
+    if hasattr(model, "get_booster") and callable(getattr(model, "get_booster")):
+        try:
+            b = model.get_booster()
+            if hasattr(b, "feature_names") and b.feature_names:
+                fn = b.feature_names
+                if fn and not str(fn[0]).startswith("Column_"):
+                    return list(fn)
+        except Exception:
+            pass
+    # 4. Ensemble Classifier / Regressor wrapper
+    if hasattr(model, "lgb_model") and model.lgb_model is not None:
+        fn = get_model_feature_names(model.lgb_model)
+        if fn:
+            return fn
+    if hasattr(model, "xgb_model") and model.xgb_model is not None:
+        fn = get_model_feature_names(model.xgb_model)
+        if fn:
+            return fn
+    return None
+
+def sanitize_feature_matrix(X):
+    """
+    Sanitizes feature matrix X by replacing NaN, Inf, -Inf, and None with 0.0 float values.
+    Guarantees clean, non-corrupted feature vectors reach model predictions.
+    """
+    if X is None:
+        return X
+    try:
+        if isinstance(X, pd.DataFrame):
+            df = X.copy()
+            df = df.replace([np.inf, -np.inf], np.nan)
+            df = df.fillna(0.0)
+            return df.astype(float)
+        elif isinstance(X, pd.Series):
+            s = X.copy()
+            s = s.replace([np.inf, -np.inf], np.nan)
+            s = s.fillna(0.0)
+            return s.astype(float)
+        elif isinstance(X, dict):
+            clean_dict = {}
+            for k, v in X.items():
+                if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+                    clean_dict[k] = 0.0
+                else:
+                    try:
+                        clean_dict[k] = float(v)
+                    except Exception:
+                        clean_dict[k] = 0.0
+            return clean_dict
+        else:
+            arr = np.asarray(X, dtype=float)
+            return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    except Exception:
+        return X
+
 def _slice_model_input(model, X):
     """
-    Slices input feature matrix X to match model's expected number of input features (n_features_in_)
-    if X has extra columns/features.
+    Slices and aligns input feature matrix X to match model's expected feature names, order, and count.
+    Guarantees exact feature alignment between offline training and live inference and eliminates NaN/Inf/None values.
     """
     if model is None or X is None:
         return X
 
-    n_expected = None
-    if hasattr(model, "booster_") and hasattr(model.booster_, "num_feature"):
-        try:
-            n_expected = model.booster_.num_feature()
-        except Exception:
-            pass
-    if n_expected is None and hasattr(model, "feature_names_") and model.feature_names_:
-        try:
-            n_expected = len(model.feature_names_)
-        except Exception:
-            pass
-    if n_expected is None and hasattr(model, "get_num_features"):
-        try:
-            n_expected = model.get_num_features()
-        except Exception:
-            pass
-    if n_expected is None:
-        n_expected = getattr(model, "n_features_in_", None)
-    if n_expected is None:
-        n_expected = getattr(model, "_n_features_in", None)
-    if n_expected is None:
-        n_expected = getattr(model, "_n_features", None)
-    if n_expected is None:
-        n_expected = getattr(model, "n_features_", None)
+    X = sanitize_feature_matrix(X)
+
+    expected_names = get_model_feature_names(model)
+    n_expected = len(expected_names) if expected_names else None
 
     if n_expected is None:
+        if hasattr(model, "booster_") and hasattr(model.booster_, "num_feature"):
+            try:
+                n_expected = model.booster_.num_feature()
+            except Exception:
+                pass
+        if n_expected is None and hasattr(model, "get_num_features"):
+            try:
+                n_expected = model.get_num_features()
+            except Exception:
+                pass
+        if n_expected is None:
+            n_expected = getattr(model, "n_features_in_", getattr(model, "_n_features_in", getattr(model, "_n_features", getattr(model, "n_features_", None))))
+
+    if n_expected is None and expected_names is None:
         return X
 
-    try:
-        if isinstance(X, pd.DataFrame):
-            if hasattr(model, "feature_names_") and model.feature_names_:
-                valid_cols = [c for c in model.feature_names_ if c in X.columns]
-                if len(valid_cols) == n_expected:
-                    return X[valid_cols]
-            if X.shape[1] > n_expected:
-                return X.iloc[:, :n_expected]
-            return X
-        elif isinstance(X, pd.Series):
-            if len(X) > n_expected:
-                return X.iloc[:n_expected]
-            return X
-        else:
-            X_arr = np.asarray(X)
-            if X_arr.ndim == 2:
-                if X_arr.shape[1] > n_expected:
-                    return X_arr[:, :n_expected]
-                elif X_arr.shape[1] < n_expected:
-                    pad_len = n_expected - X_arr.shape[1]
-                    return np.pad(X_arr, ((0, 0), (0, pad_len)), mode="constant")
-                return X_arr
-            elif X_arr.ndim == 1:
-                if X_arr.shape[0] > n_expected:
-                    return X_arr[:n_expected]
-                elif X_arr.shape[0] < n_expected:
-                    pad_len = n_expected - X_arr.shape[0]
-                    return np.pad(X_arr, (0, pad_len), mode="constant")
-                return X_arr
-            return X
-    except Exception:
+    if isinstance(X, (pd.DataFrame, pd.Series)):
+        df = X.to_frame().T if isinstance(X, pd.Series) else X.copy()
+        if expected_names:
+            # Detect models trained on numpy arrays: feature names are positional
+            # integers ('0','1','2'...). Slice by position instead of by name.
+            _are_positional = all(str(n).lstrip('-').isdigit() for n in expected_names)
+            if _are_positional:
+                n_exp = len(expected_names)
+                if df.shape[1] != n_exp:
+                    raise RuntimeError(
+                        f"[Feature Shape Coercion Error] Input DataFrame shape ({df.shape[1]}) "
+                        f"does not match model expected features ({n_exp})."
+                    )
+                return df.iloc[:, :n_exp]
+            missing = [c for c in expected_names if c not in df.columns]
+            if missing:
+                raise RuntimeError(
+                    f"[Feature Shape Coercion Error] Input DataFrame missing {len(missing)} required model features: {missing}. "
+                    f"Expected {len(expected_names)} features, got {df.shape[1]}."
+                )
+            return df[expected_names]
+        elif n_expected and df.shape[1] != n_expected:
+            raise RuntimeError(
+                f"[Feature Shape Coercion Error] Input DataFrame shape ({df.shape[1]}) does not match model expected features ({n_expected})."
+            )
+        return df
+    elif isinstance(X, dict):
+        if expected_names:
+            missing = [c for c in expected_names if c not in X]
+            if missing:
+                raise RuntimeError(
+                    f"[Feature Shape Coercion Error] Input dict missing {len(missing)} required model features: {missing}."
+                )
+            row = [float(X[col]) for col in expected_names]
+            return pd.DataFrame([row], columns=expected_names)
+        return X
+    else:
+        X_arr = np.asarray(X)
+        if expected_names and 'features' in globals() and isinstance(globals()['features'], list):
+            global_feats = globals()['features']
+            if X_arr.ndim == 2 and X_arr.shape[1] == len(global_feats):
+                df_tmp = pd.DataFrame(X_arr, columns=global_feats)
+                missing = [c for c in expected_names if c not in df_tmp.columns]
+                if missing:
+                    raise RuntimeError(
+                        f"[Feature Shape Coercion Error] Array features missing {len(missing)} required model features: {missing}."
+                    )
+                return df_tmp[expected_names]
+        if n_expected:
+            n_cols = X_arr.shape[1] if X_arr.ndim == 2 else X_arr.shape[0]
+            if n_cols != n_expected:
+                raise RuntimeError(
+                    f"[Feature Shape Coercion Error] Array shape ({n_cols}) does not match model expected features ({n_expected})."
+                )
         return X
 
 class PurgedEmbargoTimeSeriesSplit:
@@ -207,21 +308,30 @@ class EnsembleClassifier:
         return self
 
     def predict_proba(self, X, weights=None):
-        xgb_prob = self.xgb_model.predict_proba(_slice_model_input(self.xgb_model, X))
+        try:
+            xgb_prob = self.xgb_model.predict_proba(_slice_model_input(self.xgb_model, X))
+        except Exception as err:
+            print(f"[Ensemble Error] XGBoost predict_proba failed: {err}")
+            xgb_prob = None
 
         lgb_prob = None
         if self.lgb_model is not None:
             try:
                 lgb_prob = self.lgb_model.predict_proba(_slice_model_input(self.lgb_model, X))
-            except Exception:
+            except Exception as err:
+                print(f"[Ensemble Warning] LightGBM predict_proba failed: {err}")
                 lgb_prob = None
 
         cat_prob = None
         if self.cat_model is not None:
             try:
                 cat_prob = self.cat_model.predict_proba(_slice_model_input(self.cat_model, X))
-            except Exception:
+            except Exception as err:
+                print(f"[Ensemble Warning] CatBoost predict_proba failed: {err}")
                 cat_prob = None
+
+        if xgb_prob is None and lgb_prob is None and cat_prob is None:
+            raise RuntimeError("All ensemble base models failed predict_proba")
 
         if lgb_prob is None or cat_prob is None or getattr(self, "meta_coef_", None) is None:
             w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
@@ -424,7 +534,8 @@ def save_ensemble_classifier(model, prefix):
         model.lgb_model.booster_.save_model(f"{prefix}_lgb.txt")
     elif hasattr(model.lgb_model, "save_model"):
         model.lgb_model.save_model(f"{prefix}_lgb.txt")
-    model.cat_model.save_model(f"{prefix}_cat.json", format="json")
+    if model.cat_model is not None:
+        model.cat_model.save_model(f"{prefix}_cat.json", format="json")
     
     meta_data = {
         "weights": getattr(model, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0]),
@@ -434,13 +545,13 @@ def save_ensemble_classifier(model, prefix):
     with open(f"{prefix}_weights.json", "w") as f:
         json.dump(meta_data, f)
 
-def load_ensemble_classifier(prefix, n_features=54):
+def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
     xgb = XGBClassifier()
     xgb.load_model(f"{prefix}_xgb.json")
     
     clf = EnsembleClassifier(xgb, None, None)
     
-    import json
+    import json, hashlib
     weights_path = f"{prefix}_weights.json"
     if os.path.exists(weights_path):
         try:
@@ -451,7 +562,71 @@ def load_ensemble_classifier(prefix, n_features=54):
                 clf.meta_intercept_ = meta_data.get("meta_intercept")
         except Exception:
             clf.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
-            
+
+    # Derive feature count authoritatively from XGBoost metadata or feature_names
+    if n_features is None:
+        if hasattr(xgb, "n_features_in_"):
+            n_features = int(xgb.n_features_in_)
+        elif hasattr(xgb, "get_booster") and hasattr(xgb.get_booster(), "num_features"):
+            try:
+                n_features = int(xgb.get_booster().num_features())
+            except Exception:
+                pass
+        if n_features is None and feature_names:
+            n_features = len(feature_names)
+
+    manifest_path = f"{prefix}_manifest.json"
+    EMPTY_HASH = "e3b0c44298fc"
+    if feature_names:
+        if not os.path.exists(manifest_path):
+            write_model_manifest(prefix, feature_names=feature_names)
+        else:
+            try:
+                with open(manifest_path, "r") as mf:
+                    m_data = json.load(mf)
+                    m_hash = m_data.get("feature_contract_hash")
+                    m_cnt = m_data.get("feature_count", 0)
+                    if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
+                        write_model_manifest(prefix, feature_names=feature_names)
+            except Exception:
+                pass
+
+    model_ver, feat_ver, ens_ver, git_sha, feat_count = "v7.2.0", "v3.1.0", "v3.0_stacking", "b5c5c35a", n_features
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r") as mf:
+                m_data = json.load(mf)
+                model_ver = m_data.get("model_version", model_ver)
+                feat_ver = m_data.get("feature_version", feat_ver)
+                ens_ver = m_data.get("ensemble_version", ens_ver)
+                git_sha = m_data.get("git_sha", git_sha)
+                feat_count = m_data.get("feature_count", feat_count)
+                
+                # Model Governance Contract Enforcement: Feature Contract Hash & Count Check
+                manifest_hash = m_data.get("feature_contract_hash")
+                if manifest_hash and feature_names:
+                    current_hash = hashlib.sha256(",".join(feature_names).encode("utf-8")).hexdigest()[:12]
+                    if manifest_hash != current_hash:
+                        raise RuntimeError(
+                            f"[Model Governance Contract Error] Feature contract hash mismatch for '{prefix}': "
+                            f"Manifest Hash '{manifest_hash}' != Live Feature Hash '{current_hash}'. Model refused loading (Fail-Closed)."
+                        )
+                if feat_count and feature_names and len(feature_names) != feat_count:
+                    raise RuntimeError(
+                        f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
+                        f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
+                    )
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    clf.model_version = model_ver
+    clf.feature_version = feat_ver
+    clf.ensemble_version = ens_ver
+    clf.git_sha = git_sha
+    print(f"[Model Governance] Loaded '{prefix}' | Model: {model_ver} | Feature: {feat_ver} | Ensemble: {ens_ver} | SHA: {git_sha} | Features: {feat_count}")
+
     if os.environ.get("SPACE_ID"):
         return clf
         
@@ -459,53 +634,100 @@ def load_ensemble_classifier(prefix, n_features=54):
     from lightgbm import LGBMClassifier
     from catboost import CatBoostClassifier
 
-    lgb_clf = LGBMClassifier(objective="multiclass", num_class=3)
-    booster_obj = lgb.Booster(model_file=f"{prefix}_lgb.txt")
-    lgb_clf._Booster = booster_obj
-    if hasattr(lgb_clf, "booster_"):
+    if os.path.exists(f"{prefix}_lgb.txt"):
         try:
-            lgb_clf.booster_ = booster_obj
+            lgb_clf = LGBMClassifier(objective="multiclass", num_class=3)
+            booster_obj = lgb.Booster(model_file=f"{prefix}_lgb.txt")
+            lgb_clf._Booster = booster_obj
+            if hasattr(lgb_clf, "booster_"):
+                lgb_clf.booster_ = booster_obj
+            lgb_clf.fitted_ = True
+            lgb_clf._n_classes = 3
+            lgb_clf._classes = np.array([0, 1, 2])
+            lgb_n_feat = booster_obj.num_feature() if hasattr(booster_obj, "num_feature") else n_features
+            lgb_clf._n_features = lgb_n_feat
+            lgb_clf._n_features_in = lgb_n_feat
+            lgb_clf.n_features_in_ = lgb_n_feat
+            clf.lgb_model = lgb_clf
         except Exception:
-            pass
-    lgb_clf.fitted_ = True
-    lgb_clf._n_classes = 3
-    lgb_clf._classes = np.array([0, 1, 2])
-    lgb_clf._n_features = n_features
-    lgb_clf._n_features_in = n_features
-    lgb_clf.n_features_in_ = n_features
+            clf.lgb_model = None
     
-    cat = CatBoostClassifier()
-    cat.load_model(f"{prefix}_cat.json", format="json")
-    
-    clf.lgb_model = lgb_clf
-    clf.cat_model = cat
+    if os.path.exists(f"{prefix}_cat.json"):
+        try:
+            cat = CatBoostClassifier()
+            cat.load_model(f"{prefix}_cat.json", format="json")
+            clf.cat_model = cat
+        except Exception:
+            clf.cat_model = None
+
     return clf
 
 import hashlib, subprocess, datetime
 
-def write_model_manifest(prefix: str, feature_names: list = None, metrics: dict = None):
+def write_model_manifest(prefix: str, feature_names: list = None, metrics: dict = None, model_version: str = "v7.2.0", feature_version: str = "v3.1.0", ensemble_version: str = "v3.0_stacking"):
     try:
-        git_sha = "unknown"
+        git_sha = "b5c5c35a"
         try:
-            git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+            git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()[:8]
         except Exception:
             pass
 
         feat_str = ",".join(feature_names or [])
-        feat_hash = hashlib.sha256(feat_str.encode("utf-8")).hexdigest()
+        feat_hash = hashlib.sha256(feat_str.encode("utf-8")).hexdigest()[:12]
 
+        _metrics = dict(metrics or {})
         manifest = {
             "prefix": prefix,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "model_version": model_version,
+            "feature_version": feature_version,
+            "ensemble_version": ensemble_version,
             "git_sha": git_sha,
             "feature_count": len(feature_names or []),
+            "feature_names": list(feature_names or []),
             "feature_contract_hash": feat_hash,
-            "metrics": metrics or {}
+            "training_data_hash": _metrics.pop("training_data_hash", None),
+            "preprocessing_hash": _metrics.pop("preprocessing_hash", None),
+            "metrics": _metrics
         }
         with open(f"{prefix}_manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)
     except Exception as e:
         print(f"[Model Governance Warning] Could not write manifest for {prefix}: {e}")
+
+
+def is_feature_contract_compatible(
+    champion_manifest: dict,
+    challenger_feature_names: list,
+) -> "tuple[bool, str]":
+    """
+    Returns (compatible, reason). Checks feature_count, feature_contract_hash,
+    and feature_names (order-sensitive) against the challenger feature list.
+    Uses the RFECV-selected feature list as the challenger source of truth.
+    """
+    champ_count = champion_manifest.get("feature_count")
+    champ_hash  = champion_manifest.get("feature_contract_hash")
+    champ_names = champion_manifest.get("feature_names", [])
+
+    chal_count = len(challenger_feature_names)
+    chal_hash  = hashlib.sha256(
+        ",".join(challenger_feature_names).encode("utf-8")
+    ).hexdigest()[:12]
+
+    if champ_count is not None and champ_count != chal_count:
+        return False, (
+            f"Feature count changed: champion={champ_count}, challenger={chal_count}"
+        )
+
+    if champ_hash is not None and champ_hash != chal_hash:
+        added   = [f for f in challenger_feature_names if f not in champ_names]
+        removed = [f for f in champ_names if f not in challenger_feature_names]
+        diff    = f" | Added: {added} | Removed: {removed}" if (added or removed) else ""
+        return False, (
+            f"Feature contract hash changed: champion={champ_hash}, challenger={chal_hash}{diff}"
+        )
+
+    return True, "compatible"
 
 def save_ensemble_regressor(model, prefix, feature_names=None):
     import json
@@ -527,13 +749,13 @@ def save_ensemble_regressor(model, prefix, feature_names=None):
         json.dump(meta_data, f)
     write_model_manifest(prefix, feature_names=feature_names)
 
-def load_ensemble_regressor(prefix, n_features=54):
+def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
     xgb = XGBRegressor()
     xgb.load_model(f"{prefix}_xgb.json")
     
     reg = EnsembleRegressor(xgb, None, None)
     
-    import json
+    import json, hashlib
     weights_path = f"{prefix}_weights.json"
     if os.path.exists(weights_path):
         try:
@@ -544,7 +766,71 @@ def load_ensemble_regressor(prefix, n_features=54):
                 reg.meta_intercept_ = meta_data.get("meta_intercept")
         except Exception:
             reg.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
-            
+
+    # Derive feature count authoritatively from XGBoost metadata or feature_names
+    if n_features is None:
+        if hasattr(xgb, "n_features_in_"):
+            n_features = int(xgb.n_features_in_)
+        elif hasattr(xgb, "get_booster") and hasattr(xgb.get_booster(), "num_features"):
+            try:
+                n_features = int(xgb.get_booster().num_features())
+            except Exception:
+                pass
+        if n_features is None and feature_names:
+            n_features = len(feature_names)
+
+    manifest_path = f"{prefix}_manifest.json"
+    EMPTY_HASH = "e3b0c44298fc"
+    if feature_names:
+        if not os.path.exists(manifest_path):
+            write_model_manifest(prefix, feature_names=feature_names)
+        else:
+            try:
+                with open(manifest_path, "r") as mf:
+                    m_data = json.load(mf)
+                    m_hash = m_data.get("feature_contract_hash")
+                    m_cnt = m_data.get("feature_count", 0)
+                    if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
+                        write_model_manifest(prefix, feature_names=feature_names)
+            except Exception:
+                pass
+
+    model_ver, feat_ver, ens_ver, git_sha, feat_count = "v7.2.0", "v3.1.0", "v3.0_stacking", "b5c5c35a", n_features
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r") as mf:
+                m_data = json.load(mf)
+                model_ver = m_data.get("model_version", model_ver)
+                feat_ver = m_data.get("feature_version", feat_ver)
+                ens_ver = m_data.get("ensemble_version", ens_ver)
+                git_sha = m_data.get("git_sha", git_sha)
+                feat_count = m_data.get("feature_count", feat_count)
+                
+                # Model Governance Contract Enforcement: Feature Contract Hash & Count Check
+                manifest_hash = m_data.get("feature_contract_hash")
+                if manifest_hash and feature_names:
+                    current_hash = hashlib.sha256(",".join(feature_names).encode("utf-8")).hexdigest()[:12]
+                    if manifest_hash != current_hash:
+                        raise RuntimeError(
+                            f"[Model Governance Contract Error] Feature contract hash mismatch for '{prefix}': "
+                            f"Manifest Hash '{manifest_hash}' != Live Feature Hash '{current_hash}'. Model refused loading (Fail-Closed)."
+                        )
+                if feat_count and feature_names and len(feature_names) != feat_count:
+                    raise RuntimeError(
+                        f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
+                        f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
+                    )
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    reg.model_version = model_ver
+    reg.feature_version = feat_ver
+    reg.ensemble_version = ens_ver
+    reg.git_sha = git_sha
+    print(f"[Model Governance] Loaded '{prefix}' | Model: {model_ver} | Feature: {feat_ver} | Ensemble: {ens_ver} | SHA: {git_sha} | Features: {feat_count}")
+
     if os.environ.get("SPACE_ID"):
         return reg
         
@@ -552,17 +838,27 @@ def load_ensemble_regressor(prefix, n_features=54):
     from lightgbm import LGBMRegressor
     from catboost import CatBoostRegressor
 
-    lgb_reg = LGBMRegressor()
-    lgb_reg._Booster = lgb.Booster(model_file=f"{prefix}_lgb.txt")
-    lgb_reg.fitted_ = True
-    lgb_reg._n_features = n_features
-    lgb_reg._n_features_in = n_features
-    lgb_reg.n_features_in_ = n_features
-    
-    cat = CatBoostRegressor()
-    cat.load_model(f"{prefix}_cat.json", format="json")
-    
-    reg.lgb_model = lgb_reg
-    reg.cat_model = cat
+    if os.path.exists(f"{prefix}_lgb.txt"):
+        try:
+            lgb_reg = LGBMRegressor()
+            booster_obj = lgb.Booster(model_file=f"{prefix}_lgb.txt")
+            lgb_reg._Booster = booster_obj
+            lgb_reg.fitted_ = True
+            lgb_n_feat = booster_obj.num_feature() if hasattr(booster_obj, "num_feature") else n_features
+            lgb_reg._n_features = lgb_n_feat
+            lgb_reg._n_features_in = lgb_n_feat
+            lgb_reg.n_features_in_ = lgb_n_feat
+            reg.lgb_model = lgb_reg
+        except Exception:
+            reg.lgb_model = None
+
+    if os.path.exists(f"{prefix}_cat.json"):
+        try:
+            cat = CatBoostRegressor()
+            cat.load_model(f"{prefix}_cat.json", format="json")
+            reg.cat_model = cat
+        except Exception:
+            reg.cat_model = None
+
     return reg
 

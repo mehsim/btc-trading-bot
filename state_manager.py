@@ -1,6 +1,9 @@
 import threading
 import json
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 import numpy as np
 import database
 

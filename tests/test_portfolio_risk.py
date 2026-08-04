@@ -55,3 +55,20 @@ def test_calculate_mcr():
     assert isinstance(mcr, float)
     assert isinstance(is_approved, bool)
 
+def test_parametric_var_fail_closed_and_prior():
+    """Verify F-05: Parametric VaR uses conservative prior and fails closed when returns_df is None or empty."""
+    positions = [{"symbol": "BTCUSDT", "position_size_usd": 1000.0}]
+    
+    # 1. Test missing returns_df -> applies conservative daily std prior (3%) instead of returning (0, 0, True)
+    var_usd, var_pct, is_ok = portfolio_risk_engine.calculate_parametric_var(positions, None, total_equity=1000.0)
+    assert var_usd > 0.0
+    assert var_pct > 0.0
+    assert is_ok is True  # 1.64485 * 0.03 * 1000 = ~49.35 USD (4.935% <= 5% cap)
+
+    # 2. Test large position exceeding 5% VaR equity cap under conservative prior -> Fail-Closed rejection
+    large_positions = [{"symbol": "BTCUSDT", "position_size_usd": 2000.0}]
+    var_usd_large, var_pct_large, is_ok_large = portfolio_risk_engine.calculate_parametric_var(large_positions, None, total_equity=1000.0)
+    assert var_pct_large > 0.05
+    assert is_ok_large is False  # Rejected because VaR > 5% equity cap
+
+

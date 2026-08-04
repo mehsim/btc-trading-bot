@@ -27,6 +27,18 @@ class DecisionOutcomeDatabase:
             except Exception as e:
                 print(f"[DecisionOutcomeDB Error] Failed to initialize {self.db_file}: {e}")
 
+    def load_records(self) -> List[Dict[str, Any]]:
+        self.ensure_db_exists()
+        try:
+            with open(self.db_file, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                return []
+        except Exception as e:
+            print(f"[DecisionOutcomeDB Error] Failed to load {self.db_file}: {e}")
+            return []
+
     def record_decision(
         self,
         symbol: str,

@@ -28,6 +28,14 @@ from shap_store import save_shap_record
 from learning_report import generate_trade_learning_report
 from audit_logger import log_learning_action
 from schema_validator import schema_validator
+
+def safe_float(val, default=0.0):
+    if val is None or val == "MT":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
 from feature_availability import record_feature_sample
 from regime_transition_analyzer import record_transition_trade
 
@@ -60,10 +68,10 @@ class ContinuousLearningEngine:
         Safe — wrapped in try/except so failures never affect main trade processing.
         """
         try:
-            trade_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(trade.get('exit_time', time.time()))}"
+            trade_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(safe_float(trade.get('exit_time'), time.time()))}"
             symbol = trade.get("symbol", "BTCUSDT")
-            pnl = float(trade.get("pnl_usd", 0.0))
-            conf = float(trade.get("confidence", 0.60))
+            pnl = safe_float(trade.get("pnl_usd", 0.0))
+            conf = safe_float(trade.get("confidence", 0.60), 0.60)
             is_win = (pnl >= 0)
             
             log_learning_action("TRADE_CLOSED_RECEIVED", "learning_engine", trade_id=trade_id, details={"symbol": symbol, "pnl": pnl})
@@ -113,7 +121,7 @@ class ContinuousLearningEngine:
             # 9. Regime Memory Tagging & Transition Analyzer
             regime_type = trade.get("market_regime", "TRENDING")
             from_regime = trade.get("prev_market_regime", regime_type)
-            realized_r = float(trade.get("realized_r", 0.0))
+            realized_r = safe_float(trade.get("realized_r", 0.0))
             regime_id = record_regime_trade(regime_type=regime_type, pnl_usd=pnl, realized_r=realized_r)
             if from_regime != regime_type:
                 record_transition_trade(from_regime, regime_type, is_win, realized_r)

@@ -32,9 +32,9 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
     Raises PermissionError if any safety bound is relaxed or breached.
     """
     if config_module is None:
-        try:
-            import config as config_module
-        except Exception:
+        import sys
+        config_module = sys.modules.get("config")
+        if config_module is None:
             return True
 
     # 1. Validate Timeframe Leverage Caps

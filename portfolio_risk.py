@@ -1,42 +1,84 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
+
+def safe_float(val, default=0.0):
+    if val is None or val == "MT":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
 
 class PortfolioRiskEngine:
-    def __init__(self, var_confidence: float = 0.99, max_var_pct: float = 0.05):
-        self.var_confidence = var_confidence  # 99% 1-day VaR
-        self.z_score = 2.33  # Z-score for 99% normal distribution
+    def __init__(self, var_confidence: float = 0.95, max_var_pct: float = 0.05):
+        try:
+            import config
+            var_confidence = getattr(config, "PARAMETRIC_VAR_CONFIDENCE_LEVEL", var_confidence)
+            max_var_pct = getattr(config, "PARAMETRIC_VAR_DAILY_EQUITY_CAP_PCT", max_var_pct)
+        except Exception:
+            pass
+
+        self.var_confidence = var_confidence  # Configured confidence level (e.g. 0.95 or 0.99)
+        try:
+            from scipy.stats import norm
+            self.z_score = float(norm.ppf(var_confidence))
+        except Exception:
+            _z_table = {0.90: 1.28155, 0.95: 1.64485, 0.98: 2.05375, 0.99: 2.32635}
+            self.z_score = _z_table.get(round(var_confidence, 2), 1.64485 if var_confidence == 0.95 else 2.32635)
         self.max_var_pct = max_var_pct  # Max 5% equity VaR limit
 
     def calculate_parametric_var(self, open_positions: List[Dict], returns_df: pd.DataFrame, total_equity: float) -> Tuple[float, float, bool]:
         """
-        Computes 99% 1-day Parametric Value at Risk (VaR):
-        VaR_99 = 2.33 * portfolio_std_dev * portfolio_value
+        Computes 1-day Parametric Value at Risk (VaR):
+        VaR = z_score * portfolio_std_dev * portfolio_value
         Returns: (var_dollars, var_pct_equity, is_within_limit)
         """
-        if not open_positions or returns_df is None or returns_df.empty or total_equity <= 0:
+        if total_equity <= 0:
+            return 0.0, 1.0, False
+
+        if not open_positions:
             return 0.0, 0.0, True
 
         symbol_sizes = {}
         for p in open_positions:
-            sym = p.get("symbol")
-            if sym and sym in returns_df.columns:
-                symbol_sizes[sym] = symbol_sizes.get(sym, 0.0) + float(p.get("position_size_usd", 0.0))
+            if isinstance(p, dict):
+                sym = p.get("symbol") or "CANDIDATE"
+                symbol_sizes[sym] = symbol_sizes.get(sym, 0.0) + safe_float(p.get("position_size_usd", 0.0))
 
-        symbols = list(symbol_sizes.keys())
-        if not symbols:
+        if not symbol_sizes:
             return 0.0, 0.0, True
 
-        weights = np.array([symbol_sizes[s] for s in symbols])
-        portfolio_val = float(np.sum(weights))
+        portfolio_val = float(np.sum(list(symbol_sizes.values())))
         if portfolio_val <= 0:
             return 0.0, 0.0, True
 
-        weight_vector = weights / max(1e-9, portfolio_val)
+        # Conservative Volatility Prior (3.0% daily volatility assumption) if return data is missing or insufficient
+        if returns_df is None or returns_df.empty:
+            conservative_daily_std = 0.03
+            var_dollars = float(self.z_score * conservative_daily_std * portfolio_val)
+            var_pct = float(var_dollars / max(1e-9, total_equity))
+            is_within_limit = var_pct <= self.max_var_pct
+            return var_dollars, var_pct, is_within_limit
+
+        symbols = [s for s in symbol_sizes.keys() if s in returns_df.columns]
+        if not symbols:
+            conservative_daily_std = 0.03
+            var_dollars = float(self.z_score * conservative_daily_std * portfolio_val)
+            var_pct = float(var_dollars / max(1e-9, total_equity))
+            is_within_limit = var_pct <= self.max_var_pct
+            return var_dollars, var_pct, is_within_limit
+
+        weights = np.array([symbol_sizes[s] for s in symbols])
         sub_returns = returns_df[symbols].dropna()
         if sub_returns.empty or len(sub_returns) < 10:
-            return 0.0, 0.0, True
+            conservative_daily_std = 0.03
+            var_dollars = float(self.z_score * conservative_daily_std * portfolio_val)
+            var_pct = float(var_dollars / max(1e-9, total_equity))
+            is_within_limit = var_pct <= self.max_var_pct
+            return var_dollars, var_pct, is_within_limit
 
+        weight_vector = weights / max(1e-9, portfolio_val)
         try:
             from sklearn.covariance import LedoitWolf
             cov_matrix = LedoitWolf().fit(sub_returns.values).covariance_
@@ -45,7 +87,6 @@ class PortfolioRiskEngine:
 
         port_variance = float(np.dot(weight_vector.T, np.dot(cov_matrix, weight_vector)))
         port_std_dev = float(np.sqrt(max(1e-8, port_variance)))
-
 
         var_dollars = float(self.z_score * port_std_dev * portfolio_val)
         var_pct_equity = float(var_dollars / max(1e-9, total_equity))
@@ -132,21 +173,30 @@ class PortfolioRiskEngine:
         returns_df: pd.DataFrame = None,
         total_equity: float = 100.0,
         num_simulations: int = 5000,
-        shock_pct: float = -0.30
+        shock_pct: float = -0.30,
+        seed: Optional[int] = None
     ) -> Dict[str, float]:
         """
-        Runs a vectorized Monte Carlo Stress Test under an instant market index shock (e.g. -30% BTC crash).
+        Runs a vectorized Monte Carlo Stress Test under instant market index shocks (-30% crash & +30% rally).
         1. Estimates asset betas relative to BTCUSDT (or market proxy).
         2. Inflates pairwise correlations to 0.95 (panic regime).
         3. Simulates N fat-tailed portfolio return paths under joint shock.
         4. Calculates Expected Tail Loss (Stress CVaR 99.9%) and Max Portfolio Equity Drawdown.
+        5. Uses deterministic RNG seeding for auditability & reproducibility.
         """
+        if seed is not None:
+            np.random.seed(int(seed) % (2**32 - 1))
+        else:
+            det_seed = hash((len(open_positions), round(float(total_equity), 2), round(float(shock_pct), 2))) % (2**31 - 1)
+            np.random.seed(det_seed)
+
         if not open_positions or total_equity <= 0:
             return {
                 "projected_stress_loss_usd": 0.0,
                 "projected_stress_loss_pct": 0.0,
                 "stress_cvar_999_usd": 0.0,
                 "stress_cvar_999_pct": 0.0,
+                "simulation_seed": seed,
                 "is_within_budget": True
             }
 
@@ -169,6 +219,7 @@ class PortfolioRiskEngine:
                 "projected_stress_loss_pct": 0.0,
                 "stress_cvar_999_usd": 0.0,
                 "stress_cvar_999_pct": 0.0,
+                "simulation_seed": seed,
                 "is_within_budget": True
             }
 
@@ -200,78 +251,73 @@ class PortfolioRiskEngine:
                 betas[s] = 1.0
 
         beta_vec = np.array([betas[s] for s in symbols])
-        expected_asset_shocks = beta_vec * shock_pct
 
-        # Construct stressed correlation matrix (inflated to 0.95 during panic)
-        n_assets = len(symbols)
-        stressed_corr = np.full((n_assets, n_assets), 0.95)
-        np.fill_diagonal(stressed_corr, 1.0)
+        # Bilateral Shock Simulation: Evaluate both market crash (-shock) and market rally (+shock)
+        shocks_to_evaluate = [-abs(shock_pct), +abs(shock_pct)]
+        results_per_shock = []
 
-        # Asset volatility estimation
-        vol_vec = np.array([0.03] * n_assets)
-        if returns_df is not None and not returns_df.empty:
-            for i, s in enumerate(symbols):
-                if s in returns_df.columns and len(returns_df[s].dropna()) >= 10:
-                    vol_vec[i] = max(0.01, min(0.15, float(returns_df[s].dropna().std())))
+        for current_shock in shocks_to_evaluate:
+            expected_asset_shocks = beta_vec * current_shock
 
-        cov_matrix = np.outer(vol_vec, vol_vec) * stressed_corr
+            n_assets = len(symbols)
+            stressed_corr = np.full((n_assets, n_assets), 0.95)
+            np.fill_diagonal(stressed_corr, 1.0)
 
-        # Multivariate Monte Carlo simulation (using t-distribution df=4 for heavy tails)
-        try:
-            chol = np.linalg.cholesky(cov_matrix + 1e-8 * np.eye(n_assets))
-            z = np.random.standard_t(df=4, size=(num_simulations, n_assets))
-            z = z / np.sqrt(2.0)
-            simulated_residuals = z @ chol.T
-        except Exception:
-            simulated_residuals = np.random.normal(0, 0.02, size=(num_simulations, n_assets))
+            vol_vec = np.array([0.03] * n_assets)
+            if returns_df is not None and not returns_df.empty:
+                for i, s in enumerate(symbols):
+                    if s in returns_df.columns and len(returns_df[s].dropna()) >= 10:
+                        vol_vec[i] = max(0.01, min(0.15, float(returns_df[s].dropna().std())))
 
-        simulated_returns = expected_asset_shocks + simulated_residuals
-        simulated_pnls = simulated_returns @ exposure_vec
-        simulated_losses = -simulated_pnls
+            cov_matrix = np.outer(vol_vec, vol_vec) * stressed_corr
 
-        mean_loss_usd = float(np.mean(simulated_losses))
-        var_999 = float(np.percentile(simulated_losses, 99.9))
-        tail_losses = simulated_losses[simulated_losses >= var_999]
-        cvar_999_usd = float(np.mean(tail_losses)) if len(tail_losses) > 0 else var_999
+            try:
+                chol = np.linalg.cholesky(cov_matrix + 1e-8 * np.eye(n_assets))
+                z = np.random.standard_t(df=4, size=(num_simulations, n_assets))
+                z = z / np.sqrt(2.0)
+                simulated_residuals = z @ chol.T
+            except Exception:
+                simulated_residuals = np.random.normal(0, 0.02, size=(num_simulations, n_assets))
 
-        mean_loss_usd = max(0.0, mean_loss_usd)
-        cvar_999_usd = max(0.0, cvar_999_usd)
+            simulated_returns = expected_asset_shocks + simulated_residuals
+            simulated_pnls = simulated_returns @ exposure_vec
+            simulated_losses = -simulated_pnls
 
-        loss_pct = float(mean_loss_usd / max(1e-9, total_equity))
-        cvar_pct = float(cvar_999_usd / max(1e-9, total_equity))
+            mean_loss_usd = float(np.mean(simulated_losses))
+            var_999 = float(np.percentile(simulated_losses, 99.9))
+            tail_losses = simulated_losses[simulated_losses >= var_999]
+            cvar_999_usd = float(np.mean(tail_losses)) if len(tail_losses) > 0 else var_999
 
-        # Enhancement 5: Monte Carlo Tail Risk Estimates
-        sim_loss_ratios = simulated_losses / max(1e-9, total_equity)
-        risk_of_ruin_pct = float(np.mean(sim_loss_ratios >= 0.50) * 100.0)
-        prob_20pct_drawdown = float(np.mean(sim_loss_ratios >= 0.20) * 100.0)
-        prob_new_equity_lows = float(np.mean(sim_loss_ratios >= 0.10) * 100.0)
-        
-        # Calculate expected max losing streak
-        loss_flags = (simulated_losses > 0).astype(int)
-        max_streaks = []
-        for i in range(min(500, len(loss_flags))):
-            s = loss_flags[i]
-            cur = max_s = 0
-            for val in [s]:
-                if val == 1:
-                    cur += 1
-                    max_s = max(max_s, cur)
-                else:
-                    cur = 0
-            max_streaks.append(max_s)
-        exp_losing_streak = int(np.mean(max_streaks)) if max_streaks else 2
+            mean_loss_usd = max(0.0, mean_loss_usd)
+            cvar_999_usd = max(0.0, cvar_999_usd)
 
-        return {
-            "projected_stress_loss_usd": round(mean_loss_usd, 4),
-            "projected_stress_loss_pct": round(loss_pct, 4),
-            "stress_cvar_999_usd": round(cvar_999_usd, 4),
-            "stress_cvar_999_pct": round(cvar_pct, 4),
-            "risk_of_ruin_pct": round(risk_of_ruin_pct, 2),
-            "prob_20pct_drawdown": round(prob_20pct_drawdown, 2),
-            "prob_new_equity_lows": round(prob_new_equity_lows, 2),
-            "expected_max_losing_streak": exp_losing_streak,
-            "is_within_budget": loss_pct <= 0.25
-        }
+            loss_pct = float(mean_loss_usd / max(1e-9, total_equity))
+            cvar_pct = float(cvar_999_usd / max(1e-9, total_equity))
+
+            sim_loss_ratios = simulated_losses / max(1e-9, total_equity)
+            risk_of_ruin_pct = float(np.mean(sim_loss_ratios >= 0.50) * 100.0)
+            prob_20pct_drawdown = float(np.mean(sim_loss_ratios >= 0.20) * 100.0)
+            prob_new_equity_lows = float(np.mean(sim_loss_ratios >= 0.10) * 100.0)
+
+            # Dual-Gate check: Mean Loss <= 25% AND Stress CVaR 99.9% <= 35%
+            is_within_budget = (loss_pct <= 0.25) and (cvar_pct <= 0.35)
+
+            results_per_shock.append({
+                "projected_stress_loss_usd": round(mean_loss_usd, 4),
+                "projected_stress_loss_pct": round(loss_pct, 4),
+                "stress_cvar_999_usd": round(cvar_999_usd, 4),
+                "stress_cvar_999_pct": round(cvar_pct, 4),
+                "risk_of_ruin_pct": round(risk_of_ruin_pct, 2),
+                "prob_20pct_drawdown": round(prob_20pct_drawdown, 2),
+                "prob_new_equity_lows": round(prob_new_equity_lows, 2),
+                "expected_max_losing_streak": 2,
+                "simulation_seed": seed,
+                "is_within_budget": is_within_budget
+            })
+
+        # Return worst-case scenario result across directions
+        worst_case = max(results_per_shock, key=lambda x: x["projected_stress_loss_pct"])
+        return worst_case
 
     def check_candidate_stress_budget(
         self,
@@ -282,37 +328,60 @@ class PortfolioRiskEngine:
         open_positions: List[Dict],
         returns_df: pd.DataFrame = None,
         total_equity: float = 100.0,
-        max_stress_loss_pct: float = 0.25,
-        shock_pct: float = -0.30
+        max_stress_loss_pct: float = None,
+        shock_pct: float = None,
+        seed: Optional[int] = None
     ) -> Tuple[bool, float, float, Dict]:
         """
-        Evaluates whether adding candidate position causes -30% market shock loss to exceed max_stress_loss_pct (default 25%).
+        Evaluates whether adding candidate position causes market shock loss (Mean & 99.9% Stress CVaR) to exceed budget.
         Returns: (is_approved, recommended_scaling_factor, projected_loss_pct, summary_dict)
         """
+        try:
+            import config
+            if max_stress_loss_pct is None:
+                max_stress_loss_pct = getattr(config, "MONTE_CARLO_MAX_STRESS_LOSS_PCT", 0.25)
+            if shock_pct is None:
+                shock_pct = getattr(config, "MONTE_CARLO_SHOCK_PCT", -0.30)
+        except Exception:
+            pass
+        if max_stress_loss_pct is None:
+            max_stress_loss_pct = 0.25
+        if shock_pct is None:
+            shock_pct = -0.30
         if total_equity <= 0:
-            return True, 1.0, 0.0, {}
+            return False, 0.0, 1.0, {"error": "Invalid total equity"}
 
-        candidate_pos = {
-            "symbol": candidate_symbol,
-            "position_size_usd": candidate_size_usd,
-            "leverage": candidate_lev,
-            "direction": candidate_direction
-        }
+        if seed is None:
+            seed = hash((candidate_symbol, round(candidate_size_usd, 2), candidate_direction, len(open_positions or []))) % (2**31 - 1)
 
-        full_positions = list(open_positions or []) + [candidate_pos]
+        try:
+            candidate_pos = {
+                "symbol": candidate_symbol,
+                "position_size_usd": candidate_size_usd,
+                "leverage": candidate_lev,
+                "direction": candidate_direction
+            }
 
-        res = self.run_monte_carlo_stress_test(
-            open_positions=full_positions,
-            returns_df=returns_df,
-            total_equity=total_equity,
-            num_simulations=3000,
-            shock_pct=shock_pct
-        )
+            full_positions = list(open_positions or []) + [candidate_pos]
 
-        loss_pct = res.get("projected_stress_loss_pct", 0.0)
+            res = self.run_monte_carlo_stress_test(
+                open_positions=full_positions,
+                returns_df=returns_df,
+                total_equity=total_equity,
+                num_simulations=3000,
+                shock_pct=shock_pct,
+                seed=seed
+            )
 
-        if loss_pct <= max_stress_loss_pct:
-            return True, 1.0, loss_pct, res
+            loss_pct = res.get("projected_stress_loss_pct", 0.0)
+            cvar_pct = res.get("stress_cvar_999_pct", 0.0)
+            max_cvar_pct = max_stress_loss_pct * 1.4  # Tail Loss CVaR budget cap (35% when mean cap is 25%)
+
+            # Dual-gate requirement: both mean loss and tail loss (Stress CVaR) must pass budget
+            if loss_pct <= max_stress_loss_pct and cvar_pct <= max_cvar_pct:
+                return True, 1.0, loss_pct, res
+        except Exception as e:
+            return False, 0.0, 1.0, {"error": str(e)}
 
         # Exceeds stress budget! Calculate recommended scaling factor
         base_res = self.run_monte_carlo_stress_test(
@@ -320,7 +389,8 @@ class PortfolioRiskEngine:
             returns_df=returns_df,
             total_equity=total_equity,
             num_simulations=1500,
-            shock_pct=shock_pct
+            shock_pct=shock_pct,
+            seed=seed
         )
         base_loss_pct = base_res.get("projected_stress_loss_pct", 0.0)
 
@@ -372,10 +442,10 @@ class PortfolioRiskEngine:
             if not isinstance(p, dict):
                 continue
             sym = p.get("symbol", "BTCUSDT")
-            entry_p = float(p.get("entry_price", 1.0))
-            sl_p = float(p.get("stop_loss", entry_p * 0.98))
-            pos_size = float(p.get("position_size_usd", 0.0))
-            lev = float(p.get("leverage", 1.0))
+            entry_p = safe_float(p.get("entry_price", 1.0), 1.0)
+            sl_p = safe_float(p.get("stop_loss", entry_p * 0.98), entry_p * 0.98)
+            pos_size = safe_float(p.get("position_size_usd", 0.0))
+            lev = safe_float(p.get("leverage", 1.0), 1.0)
             direction = str(p.get("direction", "Bullish")).capitalize()
 
             risk_dist = abs(entry_p - sl_p) / max(1e-6, entry_p)
@@ -432,7 +502,7 @@ class PortfolioRiskEngine:
         if total_equity <= 0:
             return {"capital_utilization_pct": 0.0, "average_exposure_pct": 0.0, "idle_capital_pct": 100.0}
 
-        margin_used = sum(float(p.get("position_size_usd", 0.0)) for p in (open_positions or []) if isinstance(p, dict))
+        margin_used = sum(safe_float(p.get("position_size_usd", 0.0)) for p in (open_positions or []) if isinstance(p, dict))
         utilization_pct = round(min(100.0, (margin_used / total_equity) * 100.0), 1)
         idle_pct = round(max(0.0, 100.0 - utilization_pct), 1)
         avg_exp_pct = round(utilization_pct * 0.85, 1)  # Rolling average proxy

@@ -4,6 +4,7 @@ Tracks decision arrival price, VWAP, execution latency, and implementation short
 """
 
 import time
+import numpy as np
 from typing import Dict, Any, List, Optional
 
 class ExecutionShortfallAnalytics:

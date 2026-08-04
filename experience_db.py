@@ -90,6 +90,12 @@ def init_experience_db():
                     research_priority INTEGER DEFAULT 0
                 );
             """)
+            
+            # Recommendation #11 Indexes for High-Frequency Queries
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_symbol_ts ON trade_experience(symbol, timestamp);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_regime ON trade_experience(market_regime);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_score ON trade_experience(learning_score);")
+            
             conn.commit()
         except Exception as e:
             print(f"[experience_db Error] Failed to initialize table: {e}")

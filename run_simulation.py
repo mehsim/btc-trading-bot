@@ -153,7 +153,7 @@ def main():
         active_model_trend = models_ranging["trend"]
         regime_name = "Ranging (ADX < 20)"
 
-    X_live_full = latest_candle[features].values.reshape(1, -1)
+    X_live_full = latest_candle[features].to_frame().T if isinstance(latest_candle[features], pd.Series) else latest_candle[features]
     X_live = _slice_model_input(active_model_trend, X_live_full)
     pred_pct = float(active_model_price.predict(X_live)[0])
     pred_change = pred_pct * latest_close

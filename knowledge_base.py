@@ -50,6 +50,11 @@ def init_knowledge_db():
                     conn.execute("ALTER TABLE knowledge_rules ADD COLUMN trade_ids_json TEXT;")
                 except Exception:
                     pass
+                    
+            # Recommendation #11 Indexes for High-Frequency Rules Queries
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_kr_status ON knowledge_rules(status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_kr_cluster ON knowledge_rules(cluster_key);")
+            
             conn.commit()
         except Exception as e:
             print(f"[knowledge_base Error] Init failed: {e}")
@@ -97,5 +102,21 @@ def get_active_rules() -> List[Dict[str, Any]]:
             return []
         finally:
             conn.close()
+
+def get_rule_lifecycle_status(sample_size: int) -> str:
+    """
+    Rule Lifecycle Stage:
+    - sample_size < 20: DRAFT
+    - 20 <= sample_size < 50: HYPOTHESIS
+    - 50 <= sample_size < 75: VALIDATED
+    - sample_size >= 75: ACTIVE
+    """
+    if sample_size >= 75:
+        return "ACTIVE"
+    elif sample_size >= 50:
+        return "VALIDATED"
+    elif sample_size >= 20:
+        return "HYPOTHESIS"
+    return "DRAFT"
 
 init_knowledge_db()

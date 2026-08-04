@@ -89,5 +89,36 @@ class TestMonteCarloStressEngine(unittest.TestCase):
         # Must recommend downscaling (scale_factor < 1.0)
         self.assertLess(scale_factor, 1.0)
 
+    def test_short_position_produces_non_zero_stress_loss(self):
+        """Verify F-06: Short positions produce non-zero stress loss under bilateral shock simulation."""
+        short_positions = [
+            {"symbol": "BTCUSDT", "position_size_usd": 100.0, "leverage": 10.0, "direction": "Bearish"}
+        ]
+        res = self.engine.run_monte_carlo_stress_test(
+            open_positions=short_positions,
+            returns_df=self.returns_df,
+            total_equity=self.total_equity,
+            num_simulations=2000,
+            shock_pct=-0.30
+        )
+        # Exposure = $1000 short. On a +30% rally shock, expected loss ~ $300 (30% of $1000 equity)
+        self.assertGreater(res["projected_stress_loss_usd"], 200.0)
+        self.assertGreater(res["projected_stress_loss_pct"], 0.20)
+
+    def test_deterministic_reproducibility_and_tail_loss_gating(self):
+        """Verify F-07: Monte Carlo stress simulation is 100% deterministic with seed and outputs Stress CVaR 99.9%."""
+        positions = [
+            {"symbol": "BTCUSDT", "position_size_usd": 150.0, "leverage": 2.0, "direction": "Bullish"}
+        ]
+        
+        # 1. Verify exact reproducibility when seed is specified
+        res1 = self.engine.run_monte_carlo_stress_test(positions, self.returns_df, self.total_equity, num_simulations=2000, seed=42)
+        res2 = self.engine.run_monte_carlo_stress_test(positions, self.returns_df, self.total_equity, num_simulations=2000, seed=42)
+        self.assertEqual(res1["projected_stress_loss_usd"], res2["projected_stress_loss_usd"])
+        self.assertEqual(res1["stress_cvar_999_usd"], res2["stress_cvar_999_usd"])
+
+        # 2. Verify Stress CVaR 99.9% tail loss is reported and strictly >= mean projected loss
+        self.assertGreaterEqual(res1["stress_cvar_999_pct"], res1["projected_stress_loss_pct"])
+
 if __name__ == "__main__":
     unittest.main()

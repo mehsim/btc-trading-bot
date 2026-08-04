@@ -12,6 +12,14 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional, Any, Union
 import database
 
+def safe_float(val, default=0.0):
+    if val is None or val == "MT":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 
 MAX_RR_RATIO = {
@@ -211,7 +219,8 @@ def calculate_uncertainty_tp_scaling(prediction_confidence: float, expected_move
     - Medium (70 - 79%): 75% of Expected Move
     - Low (< 70%): 65% of Expected Move
     """
-    conf = float(prediction_confidence) * 100.0 if float(prediction_confidence) <= 1.0 else float(prediction_confidence)
+    c_val = safe_float(prediction_confidence, 0.70)
+    conf = c_val * 100.0 if c_val <= 1.0 else c_val
     if conf >= 90.0:
         multiplier = 0.90
     elif conf >= 80.0:
@@ -695,15 +704,15 @@ def calculate_decomposed_trade_quality(trade: dict) -> dict:
             "overall_trade_quality": 83.0
         }
 
-    pnl_usd = float(trade.get("pnl_usd", 0.0))
-    entry_p = float(trade.get("entry_price", 1.0))
-    sl_p = float(trade.get("stop_loss", entry_p * 0.98))
-    exit_p = float(trade.get("exit_price", entry_p))
-    mfe_p = float(trade.get("mfe_price", exit_p))
-    atr_val = float(trade.get("atr_dollars", entry_p * 0.01))
+    pnl_usd = safe_float(trade.get("pnl_usd", 0.0))
+    entry_p = safe_float(trade.get("entry_price", 1.0), 1.0)
+    sl_p = safe_float(trade.get("stop_loss", entry_p * 0.98), entry_p * 0.98)
+    exit_p = safe_float(trade.get("exit_price", entry_p), entry_p)
+    mfe_p = safe_float(trade.get("mfe_price", exit_p), exit_p)
+    atr_val = safe_float(trade.get("atr_dollars", entry_p * 0.01), entry_p * 0.01)
 
     # Entry Edge: Distance of entry from optimal extreme
-    entry_dist_atr = abs(entry_p - float(trade.get("lowest_price", entry_p))) / max(1e-6, atr_val)
+    entry_dist_atr = abs(entry_p - safe_float(trade.get("lowest_price", entry_p), entry_p)) / max(1e-6, atr_val)
     entry_edge = round(max(30.0, min(100.0, (1.0 - min(1.0, entry_dist_atr / 2.0)) * 100.0)), 1)
 
     # Exit Edge: Captured vs MFE
@@ -712,7 +721,7 @@ def calculate_decomposed_trade_quality(trade: dict) -> dict:
     exit_edge = round(max(20.0, min(100.0, (captured_r / max(1e-6, max(0.1, mfe_r))) * 100.0)), 1) if pnl_usd > 0 else 45.0
 
     # Execution Edge: Slippage impact
-    slippage_bp = float(trade.get("slippage_bp", 3.5))
+    slippage_bp = safe_float(trade.get("slippage_bp", 3.5), 3.5)
     execution_edge = round(max(40.0, min(100.0, 100.0 - (slippage_bp * 2.0))), 1)
 
     # Market Tailwind

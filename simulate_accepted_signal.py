@@ -56,7 +56,7 @@ def main():
         candle_dt = datetime.fromtimestamp(timestamp / 1000)
         
         from ensemble import _slice_model_input
-        X_live_full = candle[features].values.reshape(1, -1)
+        X_live_full = candle[features].to_frame().T if isinstance(candle[features], pd.Series) else candle[features]
         
         # Dynamic Regime Routing based on ADX
         adx_regime = candle["ADX"]

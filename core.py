@@ -3,48 +3,10 @@ import json
 import numpy as np
 import pandas as pd
 import features as features_module
+from config import TIMEFRAME_CONFIG
 
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-
-TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe
-        "lookahead": 12,
-        "sl_mult": 0.75,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.3
-    },
-    "30": {   # 30M Timeframe
-        "lookahead": 12,
-        "sl_mult": 0.80,
-        "tp_mult_ranging": 1.3,
-        "tp_mult_trending": 1.5
-    },
-    "60": {
-        "lookahead": 10,
-        "sl_mult": 1.5,
-        "tp_mult_ranging": 1.5,
-        "tp_mult_trending": 2.5
-    },
-    "120": {
-        "lookahead": 12,
-        "sl_mult": 1.5,
-        "tp_mult_ranging": 1.4,
-        "tp_mult_trending": 2.2
-    },
-    "240": {
-        "lookahead": 12,
-        "sl_mult": 1.8,
-        "tp_mult_ranging": 1.3,
-        "tp_mult_trending": 2.0
-    },
-    "360": {
-        "lookahead": 16,
-        "sl_mult": 2.0,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.8
-    }
-}
 
 features = [
     "RSI", "MACD_diff", "MFI", "ATR_norm",
@@ -69,18 +31,12 @@ for lag in [1, 2]:
 def add_features(df, fetch_calendar_callback=None):
     return features_module.add_features(df, fetch_calendar_callback=fetch_calendar_callback)
 
-def calibrate_confidence(raw_conf, p95, max_conf):
-    if max_conf <= p95:
-        max_conf = p95 + 0.01
-    if p95 <= 0.33:
-        p95 = 0.34
-        
-    if raw_conf < p95:
-        calibrated = 50.0 + (raw_conf - 0.33) / (p95 - 0.33) * 30.0
-    else:
-        calibrated = 80.0 + (raw_conf - p95) / (max_conf - p95) * 20.0
-        
-    return min(100.0, max(50.0, calibrated)) / 100.0
+def calibrate_confidence(raw_conf, p95=0.55, max_conf=0.75):
+    """
+    Preserves true calibrated probability output from ensemble classifier
+    without ad-hoc piecewise linear stretching (Fix B12).
+    """
+    return float(np.clip(raw_conf, 0.0, 1.0))
 
 def calculate_historical_thresholds(model_trend, interval):
     if model_trend is None:
@@ -107,7 +63,7 @@ def calculate_historical_thresholds(model_trend, interval):
                         selected_features_list = json.load(f)
                             
                 from ensemble import _slice_model_input
-                X_hist = _slice_model_input(model_trend, df[features].values)
+                X_hist = _slice_model_input(model_trend, df[features])
                 probs = model_trend.predict_proba(X_hist)
                 confidences = np.max(probs, axis=1)
                 

@@ -5,25 +5,24 @@ from xgboost import XGBClassifier
 from ensemble import EnsembleClassifier, EnsembleRegressor, _slice_model_input
 
 def test_slice_model_input():
-    """Verify _slice_model_input correctly trims features based on n_features_in_."""
+    """Verify _slice_model_input raises RuntimeError on feature count mismatch (Fix B7)."""
     X_train = np.random.randn(100, 10)
     y_train = np.random.randint(0, 3, 100)
     
     xgb = XGBClassifier(n_estimators=5, random_state=42)
     xgb.fit(X_train, y_train)
     
-    # Pass input with extra features (15 columns instead of 10)
-    X_extra_np = np.random.randn(10, 15)
-    sliced_np = _slice_model_input(xgb, X_extra_np)
-    assert sliced_np.shape[1] == 10
+    # Matching features works
+    sliced_matching = _slice_model_input(xgb, X_train)
+    assert sliced_matching.shape[1] == 10
 
-    # Pass DataFrame with extra features
-    X_extra_df = pd.DataFrame(X_extra_np)
-    sliced_df = _slice_model_input(xgb, X_extra_df)
-    assert sliced_df.shape[1] == 10
+    # Mismatched features raises RuntimeError
+    X_extra_np = np.random.randn(10, 15)
+    with pytest.raises(RuntimeError):
+        _slice_model_input(xgb, X_extra_np)
 
 def test_ensemble_classifier_predict_proba():
-    """Verify EnsembleClassifier predict_proba works with _slice_model_input."""
+    """Verify EnsembleClassifier predict_proba works with matching features and rejects mismatched shapes."""
     X_train = np.random.randn(100, 10)
     y_train = np.random.randint(0, 3, 100)
     
@@ -36,10 +35,10 @@ def test_ensemble_classifier_predict_proba():
     probs = ensemble.predict_proba(X_train)
     assert probs.shape == (100, 3)
 
-    # Predict with extra features
+    # Predict with mismatched extra features raises RuntimeError (Fail-Closed)
     X_extra = np.random.randn(100, 15)
-    probs_extra = ensemble.predict_proba(X_extra)
-    assert probs_extra.shape == (100, 3)
+    with pytest.raises(RuntimeError):
+        ensemble.predict_proba(X_extra)
 
 def test_meta_classifier_slicing():
     """Verify meta-classifier prediction works when input array has extra or full feature counts."""
@@ -54,4 +53,32 @@ def test_meta_classifier_slicing():
     X_input = _slice_model_input(meta_clf, X_full)
     pred = meta_clf.predict(X_input)
     assert len(pred) == 1
+
+def test_feature_column_shuffle_alignment():
+    """
+    Claim A2 Proof:
+    Randomly shuffling every feature column in input DataFrame produces
+    100% identical sliced output and prediction, proving alignment is by name, not position.
+    """
+    class MockModel:
+        def __init__(self, feature_names):
+            self.feature_names_ = feature_names
+
+    feature_names = ["RSI", "ADX", "ATR_norm", "EMA_dist"]
+    model = MockModel(feature_names)
+
+    df_original = pd.DataFrame([{
+        "RSI": 65.4, "ADX": 28.5, "ATR_norm": 0.012, "EMA_dist": 0.005
+    }])
+
+    sliced_orig = _slice_model_input(model, df_original)
+
+    # Permute column order
+    df_shuffled = df_original[["ATR_norm", "ADX", "EMA_dist", "RSI"]]
+    sliced_shuffled = _slice_model_input(model, df_shuffled)
+
+    assert list(sliced_orig.columns) == feature_names
+    assert list(sliced_shuffled.columns) == feature_names
+    pd.testing.assert_frame_equal(sliced_orig, sliced_shuffled)
+
 

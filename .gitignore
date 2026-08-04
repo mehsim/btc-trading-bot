@@ -32,4 +32,15 @@ kline_cache.db-shm
 
 # Runtime database and trade history
 trading_bot.db
+trading_bot.db-wal
+trading_bot.db-shm
 dashboard_history.json
+abstention_history.json
+shadow_trading_history.json
+counterfactual_outcomes.json
+decision_outcome_db.json
+security_audit.log
+audit_trail.jsonl
+mlflow.db
+db_snapshots/
+junit/

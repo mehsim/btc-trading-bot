@@ -25,9 +25,37 @@ from data import get_history, merge_derivatives_sentiment_features
 import threading
 import requests
 import features as features_module
+
+def _emit_governance_event(event: dict):
+    """Appends a structured governance event to the audit trail."""
+    event["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        with open("governance_audit_trail.jsonl", "a") as _gf:
+            _gf.write(json.dumps(event) + "\n")
+    except Exception as _ge:
+        print(f"[Governance] Failed to write audit event: {_ge}")
+
+def _tg_alert(msg: str):
+    """Send a Telegram notification from train.py without importing main.py."""
+    try:
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_ids = os.environ.get("TELEGRAM_CHAT_ID", "")
+        if not token or not chat_ids:
+            return
+        for cid in chat_ids.split(","):
+            cid = cid.strip()
+            if cid:
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": cid, "text": msg, "parse_mode": "Markdown"},
+                    timeout=10
+                )
+    except Exception as e:
+        print(f"[Train Telegram] Alert failed: {e}")
 from datetime import datetime, timedelta, timezone
 from mlops_engine import model_registry, MLFLOW_AVAILABLE
 if MLFLOW_AVAILABLE:
+    # pyrefly: ignore [missing-import]
     import mlflow
 
 # Dynamic GPU training hardware auto-detection
@@ -89,33 +117,7 @@ def create_model(model_class, params):
 economic_calendar_cache = None
 economic_calendar_lock = threading.Lock()
 
-# Centralized timeframe parameters for training labels and live execution alignment
-TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe
-        "lookahead": 12,
-        "sl_mult": 0.75,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.3
-    },
-    "30": {   # 30M Timeframe
-        "lookahead": 12,
-        "sl_mult": 0.80,
-        "tp_mult_ranging": 1.3,
-        "tp_mult_trending": 1.5
-    },
-    "60": {   # 1H Timeframe
-        "lookahead": 10,
-        "sl_mult": 0.8,
-        "tp_mult_ranging": 1.5,
-        "tp_mult_trending": 2.5
-    },
-    "120": {  # 2H Timeframe
-        "lookahead": 12,
-        "sl_mult": 0.75,
-        "tp_mult_ranging": 1.4,
-        "tp_mult_trending": 2.2
-    }
-}
+from config import TIMEFRAME_CONFIG
 
 # =========================
 # CONFIGURATION
@@ -1109,48 +1111,111 @@ def train_models(interval=INTERVAL, pages=PAGES):
         )
         
         # Save models to disk using native text/JSON saving methods
-        from ensemble import load_ensemble_classifier, load_ensemble_regressor
-        
+        from ensemble import load_ensemble_classifier, load_ensemble_regressor, is_feature_contract_compatible
+
         c_prefix_t = f"ensemble_{name}_trend_{interval}"
         c_prefix_p = f"ensemble_{name}_price_{interval}"
-        
-        # Check if champion model exists
+
         champion_exists = os.path.exists(f"{c_prefix_t}_xgb.json")
-        
         should_save = True
+        champion_t = None
+        champion_p = None
+
+        # challenger_feature_names: use RFECV-selected list, NOT X_holdout.columns
+        # (DataFrame column order is not guaranteed to match training order)
+        challenger_feature_names = list(X_holdout.columns) if not hasattr(features_module, 'selected_features') else features
+
         if champion_exists:
+            manifest_path = f"{c_prefix_t}_manifest.json"
+            if os.path.exists(manifest_path):
+                with open(manifest_path) as _mf:
+                    champ_manifest = json.load(_mf)
+                compatible, reason = is_feature_contract_compatible(
+                    champ_manifest, challenger_feature_names
+                )
+            else:
+                champ_manifest = {}
+                compatible, reason = False, "No manifest — champion predates governance system"
+
+            if not compatible:
+                import hashlib as _hl
+                champ_count = champ_manifest.get("feature_count", "?")
+                champ_hash  = champ_manifest.get("feature_contract_hash", "?")
+                champ_names = champ_manifest.get("feature_names", [])
+                chal_count  = len(challenger_feature_names)
+                chal_hash   = _hl.sha256(",".join(challenger_feature_names).encode()).hexdigest()[:12]
+                print(
+                    f"  [Champion-Challenger] Champion model incompatible with challenger.\n"
+                    f"    Reason    : {reason}\n"
+                    f"    Champion  : {champ_count} features | hash={champ_hash}\n"
+                    f"              : {champ_names}\n"
+                    f"    Challenger: {chal_count} features | hash={chal_hash}\n"
+                    f"              : {challenger_feature_names}\n"
+                    f"    Champion comparison skipped. New model automatically promoted."
+                )
+                # Compute challenger's current git SHA for lineage
+                try:
+                    import subprocess as _sp
+                    _chal_git_sha = _sp.check_output(["git", "rev-parse", "HEAD"]).decode().strip()[:8]
+                except Exception:
+                    _chal_git_sha = "unknown"
+                _emit_governance_event({
+                    "event":                  "MODEL_CONTRACT_CHANGED",
+                    "interval":               interval,
+                    "regime":                 name,
+                    # Feature contract
+                    "old_feature_hash":       champ_hash,
+                    "new_feature_hash":       chal_hash,
+                    "old_feature_count":      champ_count,
+                    "new_feature_count":      chal_count,
+                    # Versioning
+                    "old_git_sha":            champ_manifest.get("git_sha", "unknown"),
+                    "new_git_sha":            _chal_git_sha,
+                    "old_model_version":      champ_manifest.get("model_version", "unknown"),
+                    "new_model_version":      "v7.2.0",
+                    "old_feature_version":    champ_manifest.get("feature_version", "unknown"),
+                    "new_feature_version":    "v3.1.0",
+                    "old_ensemble_version":   champ_manifest.get("ensemble_version", "unknown"),
+                    "new_ensemble_version":   "v3.0_stacking",
+                    # Data lineage
+                    "old_training_hash":      champ_manifest.get("training_data_hash"),
+                    "new_training_hash":      None,  # set by caller if available
+                    "old_preprocessing_hash": champ_manifest.get("preprocessing_hash"),
+                    "new_preprocessing_hash": None,  # set by caller if available
+                    # Decision
+                    "action":                 "ChampionSkipped",
+                    "reason":                 reason,
+                })
+                should_save = True
+            else:
+                try:
+                    n_champ = champ_manifest.get("feature_count", X_holdout.shape[1])
+                    champion_t = load_ensemble_classifier(c_prefix_t, n_features=n_champ)
+                    champion_p = load_ensemble_regressor(c_prefix_p, n_features=n_champ)
+                except Exception as _le:
+                    print(f"  [Champion-Challenger Warning] Failed to load champion: {_le}. Defaulting to save.")
+                    champion_t = None
+                    champion_p = None
+                    should_save = True
+        else:
+            print(f"  [Champion-Challenger] No existing champion for {name.upper()}. Saving challenger.")
+
+        if champion_t is not None:
             try:
-                # Check feature alignment before comparing
-                feat_file = f"selected_features_{interval}.json"
-                if os.path.exists(feat_file):
-                    with open(feat_file) as _ff:
-                        champ_feats = json.load(_ff)
-                    if len(champ_feats) != X_val.shape[1]:
-                        print(f"  [Champion-Challenger] Feature count mismatch "
-                              f"(on-disk={len(champ_feats)}, challenger={X_val.shape[1]}). Saving challenger.")
-                        should_save = True
-                        raise Exception("feature_count_mismatch")
-                # Load existing champion
-                champion_t = load_ensemble_classifier(c_prefix_t, n_features=X_holdout.shape[1])
-                champion_p = load_ensemble_regressor(c_prefix_p, n_features=X_holdout.shape[1])
-                
-                # Evaluate champion on frozen 15% out-of-sample hold-out dataset
                 champ_pred_t = champion_t.predict(X_holdout)
                 champ_pred_p = champion_p.predict(X_holdout)
                 champ_acc = balanced_accuracy_score(y_holdout_trend, champ_pred_t)
                 champ_mae = mean_absolute_error(y_holdout_price, champ_pred_p)
-                
-                # Evaluate challenger on frozen 15% out-of-sample hold-out dataset
+
                 chal_pred_t = final_ensemble_t.predict(X_holdout)
                 chal_pred_p = final_ensemble_p.predict(X_holdout)
                 chal_acc = balanced_accuracy_score(y_holdout_trend, chal_pred_t)
                 chal_mae = mean_absolute_error(y_holdout_price, chal_pred_p)
-                
+
                 print(f"  [Champion-Challenger] Frozen Hold-Out Comparison for {name.upper()}:")
                 print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
-                
-                # Update if balanced accuracy is strictly better, or equal balanced accuracy with lower MAE
+
                 if chal_acc > champ_acc:
                     should_save = True
                 elif chal_acc == champ_acc and chal_mae < champ_mae:
@@ -1158,12 +1223,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 else:
                     should_save = False
             except Exception as eval_err:
-                print(f"  [Champion-Challenger Warning] Error comparing models, defaulting to save: {eval_err}")
+                print(f"  [Champion-Challenger Warning] Error during hold-out comparison: {eval_err}. Defaulting to save.")
                 should_save = True
-        else:
-            print(f"  [Champion-Challenger] No existing champion model for {name.upper()}. Saving challenger.")
-            should_save = True
-            
+
         if should_save:
             print(f"  [Champion-Challenger] Challenger approved. Overwriting active model files...")
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
@@ -1171,14 +1233,27 @@ def train_models(interval=INTERVAL, pages=PAGES):
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
             print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
+            val_acc = float(chal_acc) if 'chal_acc' in locals() else 0.0
+            val_mae = float(chal_mae) if 'chal_mae' in locals() else 0.0
             model_registry.register_model(
                 run_id=f"train_{interval}m_{name}_{int(time.time())}",
                 model_name=f"ensemble_{name}_{interval}",
-                metrics={"val_accuracy": float(chal_acc) if 'chal_acc' in locals() else 0.0, "val_mae": float(chal_mae) if 'chal_mae' in locals() else 0.0},
+                metrics={"val_accuracy": val_acc, "val_mae": val_mae},
                 stage="Production"
+            )
+            _tg_alert(
+                f"✅ *Model Trained & Saved*\n"
+                f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
+                f"🎯 Val Accuracy: `{val_acc*100:.1f}%` | Val MAE: `{val_mae:.4f}`\n"
+                f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
             )
         else:
             print(f"  [Champion-Challenger] Champion model retained (Challenger did not show improvement).")
+            _tg_alert(
+                f"⏭️ *Champion Retained*\n"
+                f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
+                f"Challenger did not improve — existing model kept."
+            )
 
         if MLFLOW_AVAILABLE:
             try:
@@ -1422,21 +1497,50 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
     parser.add_argument("--interval", type=str, default="60", choices=["15", "30", "60", "120", "240", "360", "all"], help="Timeframe interval to train")
-    parser.add_argument("--pages", type=int, default=20, help="Number of data pages to fetch from Bybit")
+    parser.add_argument("--pages", type=int, default=8, help="Number of data pages (default 8 for AWS 1GB RAM)")
     parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
     parser.add_argument("--force-rfecv", action="store_true", help="Force running RFECV feature selection instead of reusing cached features")
     args = parser.parse_args()
     LIVE_FEEDBACK = args.live_feedback
     FORCE_RFECV = args.force_rfecv
 
-    if args.interval == "all":
-        for iv in ["15", "30", "60", "120"]:
-            print(f"\n==============================================")
-            print(f"TRAINING FOR INTERVAL: {iv}")
-            print(f"==============================================")
+    intervals_to_train = ["15", "30", "60", "120"] if args.interval == "all" else [args.interval]
+    _tg_alert(
+        f"🚀 *Retrain Started*\n"
+        f"📋 Intervals: `{', '.join(intervals_to_train)}`\n"
+        f"📄 Pages: `{args.pages}`\n"
+        f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+
+    t0 = time.time()
+    errors = []
+    for iv in intervals_to_train:
+        print(f"\n==============================================")
+        print(f"TRAINING FOR INTERVAL: {iv}")
+        print(f"==============================================")
+        try:
             train_models(interval=iv, pages=args.pages)
+        except Exception as train_err:
+            err_msg = str(train_err)[:200]
+            print(f"[Train Error] Interval {iv} failed: {train_err}")
+            errors.append(f"{iv}m: {err_msg}")
+            _tg_alert(f"❌ *Train Failed* — Interval `{iv}m`\n`{err_msg}`")
+
+    elapsed = int(time.time() - t0)
+    if errors:
+        _tg_alert(
+            f"⚠️ *Retrain Completed with Errors*\n"
+            f"✅ Done: {len(intervals_to_train) - len(errors)} | ❌ Failed: {len(errors)}\n"
+            f"⏱ Duration: `{elapsed}s`"
+        )
     else:
-        train_models(interval=args.interval, pages=args.pages)
+        _tg_alert(
+            f"🎉 *All Models Retrained Successfully*\n"
+            f"📋 Intervals: `{', '.join(intervals_to_train)}`\n"
+            f"⏱ Duration: `{elapsed}s`\n"
+            f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+        )
+
 
     # Post-Training Storage Optimization: Clean temporary CatBoost log artifacts
     import shutil

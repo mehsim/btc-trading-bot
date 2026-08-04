@@ -363,46 +363,7 @@ BALANCE_UPDATE_INTERVAL_SECS = int(os.environ.get("BALANCE_UPDATE_INTERVAL_SECS"
 POSITION_SYNC_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_INTERVAL_SECS", "30.0"))
 POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTERVAL_SECS", "120.0"))
 
-# Centralized timeframe parameters for training labels and live execution alignment
-TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe - Hardened Institutional Scalp
-        "lookahead": 12,
-        "sl_mult": 1.25,
-        "base_confidence_threshold": 0.68,
-        "tp_mult_ranging": 1.35,
-        "tp_mult_trending": 1.65
-    },
-    "30": {   # 30M Timeframe - Short Swing (Balanced R:R ~1.81x - 2.19x)
-        "lookahead": 12,
-        "sl_mult": 0.80,
-        "tp_mult_ranging": 1.45,
-        "tp_mult_trending": 1.75
-    },
-    "60": {   # 1H Timeframe - Swing (Balanced R:R ~1.80x - 2.25x)
-        "lookahead": 10,
-        "sl_mult": 1.2,
-        "tp_mult_ranging": 2.16,
-        "tp_mult_trending": 2.70
-    },
-    "120": {  # 2H Timeframe - Extended Swing (Balanced R:R ~1.80x - 2.25x)
-        "lookahead": 12,
-        "sl_mult": 1.2,
-        "tp_mult_ranging": 2.16,
-        "tp_mult_trending": 2.70
-    },
-    "240": {  # 4H Timeframe - Macro Swing (Balanced R:R ~1.80x - 2.20x)
-        "lookahead": 12,
-        "sl_mult": 1.5,
-        "tp_mult_ranging": 2.70,
-        "tp_mult_trending": 3.30
-    },
-    "360": {  # 6H Timeframe - Macro Trend (Balanced R:R ~1.80x - 2.20x)
-        "lookahead": 16,
-        "sl_mult": 1.5,
-        "tp_mult_ranging": 2.70,
-        "tp_mult_trending": 3.30
-    }
-}
+from config import TIMEFRAME_CONFIG
 
 
 print("[System Debug] Importing websocket...")
@@ -816,11 +777,10 @@ def run_manual_confluence_report(symbol, interval):
             ml_confidence = float(probs[1])
             
         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-            iso_val = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
-            calibrated_confidence = max(ml_confidence, iso_val) if str(iv) in ["15", "30"] else iso_val
+            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
         else:
             calibration = bot_state.get(f"calibration_{iv.replace('60','1h').replace('120','2h').replace('240','4h').replace('360','6h')}", {"p95": 0.8, "max_conf": 0.95})
-            calibrated_confidence = calibrate_confidence(ml_confidence, calibration["p95"], calibration["max_conf"])
+            calibrated_confidence = float(np.clip(ml_confidence, 0.0, 1.0))
             
         with news_sentiment_lock:
             news_sentiment = cached_news_sentiment
@@ -1179,6 +1139,32 @@ def start_telegram_command_listener():
                                     continue
                                     
                                 flow["direction"] = direction
+                                flow["step"] = "awaiting_timeframe"
+                                flow["timestamp"] = time.time()
+                                
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": sender_chat_id,
+                                    "text": f"Select which *Strategy Timeframe* to open this trade in:",
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {
+                                        "keyboard": [[{"text": "15m Strategy"}, {"text": "1h Strategy"}, {"text": "4h Strategy"}], [{"text": "/cancel"}]],
+                                        "resize_keyboard": True,
+                                        "one_time_keyboard": True
+                                    }
+                                })
+                                continue
+
+                            # 2b. Strategy Timeframe Step
+                            elif step == "awaiting_timeframe":
+                                val = text.lower()
+                                if "15m" in val or "15" in val:
+                                    tf_choice = "15"
+                                elif "4h" in val or "240" in val:
+                                    tf_choice = "240"
+                                else:
+                                    tf_choice = "60"
+                                    
+                                flow["strategy_tf"] = tf_choice
                                 flow["step"] = "awaiting_entry"
                                 flow["timestamp"] = time.time()
                                 
@@ -1456,7 +1442,7 @@ def start_telegram_command_listener():
                                         "reply_markup": {"remove_keyboard": True}
                                     })
                                     
-                                    def _execute_manual_trade_bg(cid, sym, d, m, l, t_p, s_l, atr, e_type, e_price):
+                                    def _execute_manual_trade_bg(cid, sym, d, m, l, t_p, s_l, atr, e_type, e_price, strat_tf="60"):
                                         try:
                                             set_bybit_leverage(sym, l)
                                             
@@ -1466,6 +1452,7 @@ def start_telegram_command_listener():
                                             actual_qty = float(qty_str)
                                             
                                             side = "Buy" if d == "Bullish" else "Sell"
+                                            target_tf_key = "15m" if strat_tf == "15" else ("4h" if strat_tf == "240" else "1h")
                                             
                                             if e_type == "limit":
                                                 # Place limit order directly with TP/SL attached
@@ -1476,7 +1463,8 @@ def start_telegram_command_listener():
                                                         "text": (
                                                             f"🎯 *MANUAL LIMIT ORDER PLACED* 🎯\n\n"
                                                             f"• *Asset*: {sym}\n"
-                                                            f"• *Side*: {side}\n"
+                                                            f"• *Direction*: {side}\n"
+                                                            f"• *Strategy*: {strat_tf}m ({target_tf_key})\n"
                                                             f"• *Limit Price*: ${e_price:.4f}\n"
                                                             f"• *Size*: ${m:.2f} ({l}x leverage)\n"
                                                             f"• *TP Price*: ${t_p:.4f}\n"
@@ -1489,43 +1477,30 @@ def start_telegram_command_listener():
                                                     err_msg = order_res.get("retMsg", "Unknown error")
                                                     execute_telegram_api_call("sendMessage", {
                                                         "chat_id": cid,
-                                                        "text": f"❌ *Failed to place Limit order on Bybit:* {err_msg}",
+                                                        "text": f"❌ *Failed to place limit order on Bybit:* {err_msg}",
                                                         "parse_mode": "Markdown"
                                                     })
                                             else:
-                                                # Market order execution
-                                                order_res = place_bybit_order(sym, side, qty_str, reduce_only=False)
+                                                # Place market order directly with TP/SL attached
+                                                order_res = place_bybit_order(sym, side, qty_str, sl=s_l, tp=t_p)
                                                 if order_res and order_res.get("retCode") == 0:
-                                                    res_data = order_res.get("result", {})
-                                                    order_id = res_data.get("orderId", "MANUAL")
-                                                    fill_price = e_price
-                                                    
-                                                    try:
-                                                        time.sleep(0.5)
-                                                        pos_info = get_bybit_position(sym)
-                                                        if pos_info:
-                                                            fill_price = float(pos_info.get("avgPrice", fill_price))
-                                                    except Exception:
-                                                        pass
+                                                    fill_price = float(order_res.get("result", {}).get("price", e_price))
+                                                    if fill_price <= 0:
+                                                        fill_price = e_price
                                                         
-                                                    temp_trade = {"qty": str(actual_qty), "direction": d}
-                                                    update_bybit_stop_loss(sym, s_l, temp_trade)
-                                                    update_bybit_take_profit(sym, t_p, temp_trade)
+                                                    bybit_order_id = order_res.get("result", {}).get("orderId", "MANUAL_LIVE")
                                                     
-                                                    limit_side = "Sell" if d == "Bullish" else "Buy"
-                                                    limit_price = fill_price + 1.0 * atr if d == "Bullish" else fill_price - 1.0 * atr
-                                                    limit_qty_str = format_bybit_qty(sym, actual_qty * 0.5)
-                                                    scale_out_order_id = None
-                                                    if (float(limit_qty_str) * limit_price) >= 5.0:
-                                                        limit_res = place_bybit_limit_order(sym, limit_side, limit_qty_str, limit_price, reduce_only=True)
-                                                        if limit_res.get("retCode") == 0:
-                                                            scale_out_order_id = limit_res.get("result", {}).get("orderId")
-                                                            
-                                                    import uuid
-                                                    trade_uuid = str(uuid.uuid4())[:8]
+                                                    # Place scale-out take-profit limit order
+                                                    scale_out_price = fill_price + (t_p - fill_price) * 0.5 if d == "Bullish" else fill_price - (fill_price - t_p) * 0.5
+                                                    scale_out_qty_str = format_bybit_qty(sym, actual_qty * 0.5)
+                                                    scale_out_side = "Sell" if d == "Bullish" else "Buy"
+                                                    scale_out_res = place_bybit_limit_order(sym, scale_out_side, scale_out_qty_str, scale_out_price, reduce_only=True)
+                                                    scale_out_order_id = scale_out_res.get("result", {}).get("orderId") if scale_out_res else None
+                                                    
                                                     new_trade = {
-                                                        "trade_id": f"{sym}_{trade_uuid}",
-                                                        "bybit_order_id": order_id,
+                                                        "trade_id": f"manual_{sym}_{int(time.time())}",
+                                                        "interval": strat_tf,
+                                                        "bybit_order_id": bybit_order_id,
                                                         "bybit_scale_out_order_id": scale_out_order_id,
                                                         "symbol": sym,
                                                         "entry_price": fill_price,
@@ -1551,37 +1526,25 @@ def start_telegram_command_listener():
                                                     }
                                                     
                                                     with active_trades_lock:
-                                                        # Guard: check ALL timeframes, not just 1h,
-                                                        # to prevent duplicate if a _recovered entry already exists.
-                                                        exists_any_tf = any(
-                                                            any(t.get("symbol") == sym for t in bot_state.get(f"active_trade_{k}", []))
-                                                            for k in ACTIVE_TRADE_TF_KEYS
-                                                        )
-                                                        if not exists_any_tf:
-                                                            active_list = bot_state.get("active_trade_1h", [])
-                                                            active_list.append(new_trade)
-                                                            bot_state["active_trade_1h"] = active_list
-                                                            save_history()
-                                                        else:
-                                                            # Remove any stale _recovered entry for this symbol first, then insert cleanly
-                                                            for k in ACTIVE_TRADE_TF_KEYS:
-                                                                bot_state[f"active_trade_{k}"] = [
-                                                                    t for t in bot_state.get(f"active_trade_{k}", [])
-                                                                    if not (t.get("symbol") == sym and t.get("recovered", False))
-                                                                ]
-                                                            active_list = bot_state.get("active_trade_1h", [])
-                                                            active_list.append(new_trade)
-                                                            bot_state["active_trade_1h"] = active_list
-                                                            save_history()
-                                                            print(f"[Manual Trade] Replaced stale _recovered entry for {sym} with fresh manual trade in active_trade_1h.")
+                                                        # Guard: check ALL timeframes, not just 1h
+                                                        for k in ACTIVE_TRADE_TF_KEYS:
+                                                            bot_state[f"active_trade_{k}"] = [
+                                                                t for t in bot_state.get(f"active_trade_{k}", [])
+                                                                if not (t.get("symbol") == sym and t.get("recovered", False))
+                                                            ]
+                                                        active_list = bot_state.get(f"active_trade_{target_tf_key}", [])
+                                                        active_list.append(new_trade)
+                                                        bot_state[f"active_trade_{target_tf_key}"] = active_list
+                                                        save_history()
+                                                        print(f"[Manual Trade] Created manual trade for {sym} in active_trade_{target_tf_key}.")
 
-                                                        
                                                     execute_telegram_api_call("sendMessage", {
                                                         "chat_id": cid,
                                                         "text": (
                                                             f"🚀 *MANUAL TRADE OPENED ON BYBIT* 🚀\n\n"
                                                             f"• *Asset*: {sym}\n"
                                                             f"• *Direction*: {d}\n"
+                                                            f"• *Strategy*: {strat_tf}m ({target_tf_key})\n"
                                                             f"• *Entry Price*: ${fill_price:.4f}\n"
                                                             f"• *Size*: ${m:.2f} ({l}x leverage)\n"
                                                             f"• *TP Price*: ${t_p:.4f}\n"
@@ -1604,7 +1567,8 @@ def start_telegram_command_listener():
                                                 "parse_mode": "Markdown"
                                             })
                                             
-                                    threading.Thread(target=_execute_manual_trade_bg, args=(sender_chat_id, symbol, direction, margin, leverage, tp, sl, atr_val, entry_type, entry_price), daemon=True).start()
+                                    strat_tf_choice = flow.get("strategy_tf", "60")
+                                    threading.Thread(target=_execute_manual_trade_bg, args=(sender_chat_id, symbol, direction, margin, leverage, tp, sl, atr_val, entry_type, entry_price, strat_tf_choice), daemon=True).start()
                                     continue
                                 else:
                                     pending_manual_trade.pop(sender_chat_id, None)
@@ -2306,7 +2270,7 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
         print(f"[Kill Switch Error] Failed executing emergency close: {err}")
 
 from functools import wraps
-
+import hmac
 
 def require_api_key(f):
     @wraps(f)
@@ -2314,8 +2278,8 @@ def require_api_key(f):
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
         if expected_key:
             client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
-            if not client_key or client_key.strip() != expected_key:
-                return jsonify({"error": "Unauthorized", "message": "Missing or invalid X-API-KEY header."}), 401
+            if not client_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+                return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -2325,12 +2289,12 @@ def require_ip_whitelist(f):
         allowed_ips = get_secure_env("ALLOWED_DASHBOARD_IPS", "").strip()
         if allowed_ips:
             ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-            forwarded = request.headers.get("X-Forwarded-For")
-            if forwarded:
-                client_ip = forwarded.split(",")[0].strip()
+            trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
+            if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
+                client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
             else:
-                client_ip = request.headers.get("X-Real-IP", request.remote_addr)
-            if client_ip not in ip_list and client_ip != "127.0.0.1":
+                client_ip = request.remote_addr
+            if client_ip not in ip_list and client_ip not in ["127.0.0.1", "::1"]:
                 return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -4681,31 +4645,32 @@ def load_model_weights(iv):
         print(f"Loaded feature counts - Trending: {n_features_trending}, Ranging: {n_features_ranging} for interval {iv}")
         
         if os.path.exists(f"{prefixes['trending_trend']}_xgb.json"):
-            models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending)
+            models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
         if os.path.exists(f"{prefixes['trending_price']}_xgb.json"):
-            models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending)
+            models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
         if os.path.exists(prefixes["trending_meta"]):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["trending_meta"])
             models_by_interval[iv]["trending"]["meta"] = meta_clf
             
         if os.path.exists(f"{prefixes['ranging_trend']}_xgb.json"):
-            models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging)
+            models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
         if os.path.exists(f"{prefixes['ranging_price']}_xgb.json"):
-            models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging)
+            models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
         if os.path.exists(prefixes["ranging_meta"]):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["ranging_meta"])
             models_by_interval[iv]["ranging"]["meta"] = meta_clf
             
-        # Load calibrators if they exist
+        # Load calibrators if they exist, or default to identity mapping
         trending_cal_file = f"calibrator_trending_{iv}.json"
         if os.path.exists(trending_cal_file):
             with open(trending_cal_file, "r") as f:
                 models_by_interval[iv]["trending"]["calibrator"] = json.load(f)
             print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
         else:
-            models_by_interval[iv]["trending"]["calibrator"] = None
+            models_by_interval[iv]["trending"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
+            print(f"Initialized identity calibrator for trending_{iv}")
 
         ranging_cal_file = f"calibrator_ranging_{iv}.json"
         if os.path.exists(ranging_cal_file):
@@ -4713,7 +4678,8 @@ def load_model_weights(iv):
                 models_by_interval[iv]["ranging"]["calibrator"] = json.load(f)
             print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
         else:
-            models_by_interval[iv]["ranging"]["calibrator"] = None
+            models_by_interval[iv]["ranging"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
+            print(f"Initialized identity calibrator for ranging_{iv}")
             
         print(f"Successfully loaded ensemble and meta models for interval {iv}")
     except Exception as e:
@@ -6076,20 +6042,12 @@ def calculate_historical_thresholds(model_trend, interval):
     
     return 0.55, 0.75
 
-def calibrate_confidence(raw_conf, p95, max_conf):
-    if max_conf <= p95:
-        max_conf = p95 + 0.01
-    if p95 <= 0.33:
-        p95 = 0.34
-        
-    if raw_conf < p95:
-        # Piecewise linear mapping [0.33, p95] -> [50%, 80%]
-        calibrated = 50.0 + (raw_conf - 0.33) / (p95 - 0.33) * 30.0
-    else:
-        # Piecewise linear mapping [p95, max_conf] -> [80%, 100%]
-        calibrated = 80.0 + (raw_conf - p95) / (max_conf - p95) * 20.0
-        
-    return min(100.0, max(50.0, calibrated)) / 100.0
+def calibrate_confidence(raw_conf, p95=0.55, max_conf=0.75):
+    """
+    Preserves true calibrated probability output from ensemble classifier
+    without ad-hoc piecewise linear stretching (Fix B12).
+    """
+    return float(np.clip(raw_conf, 0.0, 1.0))
 
 def get_funding_rate(symbol=SYMBOL):
     try:
@@ -6652,7 +6610,7 @@ def sync_active_positions_from_bybit():
                     scale_out_order_id = get_bybit_active_limit_order_id(symbol, limit_side)
                     
                     import uuid
-                    trade_uuid = str(uuid.uuid4())[:8]
+                    trade_uuid = str(uuid.uuid4())
                     
                     # Calculate proper ATR on recovery
                     calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
@@ -8436,7 +8394,8 @@ def main():
                                 except Exception:
                                     pass
 
-                        X_live_full = latest_candle_weighted[features].values.reshape(1, -1)
+                        _features_to_use = feat_list if feat_list is not None else features
+                        X_live_full = latest_candle_weighted[_features_to_use].to_frame().T if isinstance(latest_candle_weighted[_features_to_use], pd.Series) else latest_candle_weighted[_features_to_use]
                         X_live = _slice_model_input(active_model_trend, X_live_full)
 
                         # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
@@ -8461,17 +8420,10 @@ def main():
                                 conformal_unc_score = 0.0
                                 conformal_is_uncertain = False
                         except Exception as pred_err:
-                            close_val = float(latest_candle["close"])
-                            ema9_val = float(latest_candle.get("EMA_9", close_val))
-                            ema21_val = float(latest_candle.get("EMA_21", close_val))
-                            rsi_val = float(latest_candle.get("RSI", 50.0))
-                            is_bull = (ema9_val >= ema21_val)
-                            pred_pct = 0.003 if is_bull else -0.003
-                            pred_change = pred_pct * close_val
-                            predicted_price = close_val + pred_change
-                            probs = [0.1, 0.2, 0.7] if is_bull else [0.7, 0.2, 0.1]
-                            conformal_unc_score = 0.0
-                            conformal_is_uncertain = False
+                            print(f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] Model prediction exception: {pred_err}. Aborting trade entry (Fail-Closed).")
+                            status_msg = "Skipped (Prediction Error)"
+                            all_pass = False
+                            continue
                         
                         prob_bearish = float(probs[0])
                         prob_neutral = float(probs[1])
@@ -8513,37 +8465,29 @@ def main():
                         calibrated_confidence = ml_confidence
                         calibrator = models_tf["trending"]["calibrator"] if regime == "Trending" else models_tf["ranging"]["calibrator"]
                         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-                            iso_val = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
-                            calibrated_confidence = max(ml_confidence, iso_val) if str(iv) in ["15", "30"] else iso_val
-                            print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Calibrated: {calibrated_confidence*100:.2f}%")
+                            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+                            print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
                         else:
-                            # Fallback to piecewise linear calibration
-                            tf_cal_key = f"calibration_{iv}m" if f"calibration_{iv}m" in bot_state else f"calibration_{tf}"
-                            calibration = bot_state.get(tf_cal_key) or bot_state.get("calibration_15m") or {"p95": 0.55, "max_conf": 0.75}
-                            p95 = calibration.get("p95", 0.55)
-                            max_conf = calibration.get("max_conf", 0.75)
-                            calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
+                            calibrated_confidence = ml_confidence
                             
-                        # Item D: Exponential Time-Decayed Cross-Interval Penalty for 15M signals
+                        # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
+                        htf_decay_threshold_penalty = 0.0
                         if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
                             pred_30m_dict = bot_state.get("latest_prediction_30m") or {}
                             pred_60m_dict = bot_state.get("latest_prediction_1h") or {}
                             
                             now_time_sec = time.time()
-                            total_decay_penalty = 0.0
-                            
                             for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
                                 p_dir = pred_dict.get("direction")
                                 p_ts = pred_dict.get("timestamp", now_time_sec)
                                 if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
                                     age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
                                     decay = 0.5 ** (age_mins / 30.0)
-                                    total_decay_penalty += 0.03 * decay
+                                    htf_decay_threshold_penalty += 0.03 * decay
                                     
-                            if total_decay_penalty > 0:
-                                total_decay_penalty = min(0.04, total_decay_penalty)
-                                calibrated_confidence = max(0.0, calibrated_confidence - total_decay_penalty)
-                                print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction penalty (-{total_decay_penalty*100:.1f}%). Calibrated conf -> {calibrated_confidence*100:.2f}%")
+                            if htf_decay_threshold_penalty > 0:
+                                htf_decay_threshold_penalty = min(0.04, htf_decay_threshold_penalty)
+                                print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction gate penalty (+{htf_decay_threshold_penalty*100:.1f}% required threshold). Calibrated conf preserved -> {calibrated_confidence*100:.2f}%")
 
                         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
@@ -8555,7 +8499,9 @@ def main():
                             "predicted_price": predicted_price,
                             "direction": ml_trend,
                             "raw_confidence": ml_confidence,
-                            "calibrated_confidence": calibrated_confidence
+                            "calibrated_confidence": calibrated_confidence,
+                            "signal_source": "ML_ENSEMBLE",
+                            "is_fallback": False
                         }
 
                         print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
@@ -8577,6 +8523,9 @@ def main():
                                 dynamic_conf_threshold = min(0.62, dynamic_conf_threshold + 0.05)
                             else:
                                 dynamic_conf_threshold = 0.70
+                                
+                        if htf_decay_threshold_penalty > 0:
+                            dynamic_conf_threshold += htf_decay_threshold_penalty
                             
                         # Recent 50-Trade Performance Decay Filter
                         recent_trades = bot_state.get("trade_history", [])[-50:]
@@ -8646,21 +8595,20 @@ def main():
                             active_meta_model = models_tf["trending"]["meta"] if adx_regime >= 20.0 else models_tf["ranging"]["meta"]
                             if active_meta_model is not None:
                                 try:
-                                    X_meta_live = latest_candle_weighted[features].values.reshape(1, -1)
+                                    X_meta_live = latest_candle_weighted[features].to_frame().T if isinstance(latest_candle_weighted[features], pd.Series) else latest_candle_weighted[features]
                                     X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
                                     meta_pred = int(active_meta_model.predict(X_meta_input)[0])
                                     if meta_pred == 1:
-                                        meta_adjustment = +0.05
-                                        print(f"[{iv}m] Meta-Classifier: PASS (confidence boosted +5%)")
+                                        meta_adjustment = -0.05  # Lowers required gate threshold by 5%
+                                        print(f"[{iv}m] Meta-Classifier: PASS (required gate threshold lowered by -5%)")
                                     else:
-                                        meta_adjustment = -0.07  # Middle ground penalty
-                                        print(f"[{iv}m] Meta-Classifier: FAIL (confidence reduced -7%)")
-                                    calibrated_confidence = max(0.0, min(1.0, calibrated_confidence + meta_adjustment))
-                                    print(f"[{iv}m] Adjusted Calibrated Confidence: {calibrated_confidence*100:.2f}%")
+                                        meta_adjustment = +0.07  # Raises required gate threshold by 7%
+                                        print(f"[{iv}m] Meta-Classifier: FAIL (required gate threshold raised by +7%)")
+                                    dynamic_conf_threshold = min(0.85, max(0.50, dynamic_conf_threshold + meta_adjustment))
                                 except Exception as meta_err:
                                     print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
 
-                        # Candlestick Pattern Alignment Overlay Boost (+4% Confidence Boost)
+                        # Candlestick Pattern Alignment Overlay Boost (-4% Threshold Gate Lowering)
                         bull_patterns = ["cdl_hammer", "cdl_bullish_engulfing", "cdl_morning_star", "cdl_three_white_soldiers", "cdl_three_inside_up", "cdl_abandoned_baby_bull", "cdl_piercing_line", "cdl_tweezer_bottom", "cdl_marubozu_bull"]
                         bear_patterns = ["cdl_shooting_star", "cdl_bearish_engulfing", "cdl_evening_star", "cdl_three_black_crows", "cdl_three_inside_down", "cdl_dark_cloud_cover", "cdl_tweezer_top", "cdl_marubozu_bear"]
                         pattern_boost = False
@@ -8670,8 +8618,8 @@ def main():
                             pattern_boost = True
 
                         if pattern_boost:
-                            calibrated_confidence = min(0.98, calibrated_confidence + 0.04)
-                            print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (+4.0% confidence) -> {calibrated_confidence*100:.2f}%")
+                            dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.04)
+                            print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (required threshold lowered -4.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
                         # Determine tracking status
                         # Softened contradiction: only block if regressor predicts > 0.05% in OPPOSITE direction
@@ -8700,7 +8648,7 @@ def main():
                             "sma50": 0.0,
                             "consensus_score": "LOW",
                             "decision_timestamp": datetime.now(timezone.utc).isoformat(),
-                            "model_version": f"{macro_iv}_v1" if 'macro_iv' in locals() else "default"
+                            "model_version": f"{locals()['macro_iv']}_v1" if 'macro_iv' in locals() else "default"
                         }
 
                         htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
@@ -8795,12 +8743,12 @@ def main():
 
                                 if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
                                     if ml_trend == htf_trend:
-                                        calibrated_confidence = min(0.98, calibrated_confidence + 0.08)
-                                        print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Confidence boosted (+8.0%) -> {calibrated_confidence*100:.2f}%")
+                                        dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.08)
+                                        print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
                                     else:
-                                        calibrated_confidence = max(0.0, calibrated_confidence - 0.10)
+                                        dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.10)
                                         confluence_blocked = True
-                                        print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Confidence penalized (-10.0%) -> {calibrated_confidence*100:.2f}%")
+                                        print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
                         # Funding Rate Carry Overlay
                         funding_rate = get_funding_rate(symbol)
@@ -9249,7 +9197,7 @@ def main():
                                         lookahead = cfg.get("lookahead", 10)
                                         duration_seconds = int(iv) * 60.0 * lookahead
                                         import uuid
-                                        trade_uuid = str(uuid.uuid4())[:8]
+                                        trade_uuid = str(uuid.uuid4())
                                         # Calculate quantity (qty) in coins rounded according to symbol requirements
                                         leveraged_size = position_size_usd * leverage_val
                                         raw_qty = leveraged_size / entry_price
@@ -9320,6 +9268,11 @@ def main():
                                             bybit_success = False
 
                                         # Pre-Trade Risk Checklist Check
+                                        pred_info = bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
+                                        if pred_info.get("is_fallback", False) or pred_info.get("signal_source") == "RULE_BASED_FALLBACK":
+                                            position_size_usd *= 0.50
+                                            print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
+
                                         active_trades_list = [t for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])]
                                         df_dict = {symbol: df_completed}
                                         for t in active_trades_list:
@@ -9331,9 +9284,17 @@ def main():
                                                         df_dict[pos_sym] = df_pos
                                                 except Exception:
                                                     pass
-                                        passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
-                                            symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv)
-                                        )
+                                        try:
+                                            passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
+                                                symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend
+                                            )
+                                        except Exception as risk_err:
+                                            print(f"[{symbol} {iv}m CRITICAL RISK CHECKLIST EXCEPTION] {risk_err}. Aborting trade entry (Fail-Closed).")
+                                            passed_checklist = False
+                                            checklist_msg = f"REJECTED: Risk Checklist Exception ({risk_err})"
+                                            dd_mult = 0.0
+                                            capped_size = 0.0
+
                                         print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
                                         if not passed_checklist or wallet_exceeded:
                                             print(f"[{symbol} {iv}m Risk Checklist Block] Trade entry aborted.")

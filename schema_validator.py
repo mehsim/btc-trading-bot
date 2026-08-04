@@ -68,4 +68,47 @@ class SchemaValidator:
         is_valid = (len(errors) == 0)
         return is_valid, errors
 
+    def validate_features(self, features_data: Any) -> Tuple[bool, List[str]]:
+        """Validates feature matrices/dicts to ensure zero NaN/Inf/None values reach prediction engines."""
+        errors = []
+        if features_data is None:
+            return False, ["Feature data is None"]
+            
+        try:
+            if isinstance(features_data, dict):
+                for k, v in features_data.items():
+                    if v is None:
+                        errors.append(f"Feature '{k}' is None")
+                    elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                        errors.append(f"Feature '{k}' contains invalid NaN/Inf float: {v}")
+            else:
+                import numpy as np
+                import pandas as pd
+                if isinstance(features_data, (pd.DataFrame, pd.Series)):
+                    arr = features_data.values
+                else:
+                    arr = np.asarray(features_data)
+                
+                # Check for None elements
+                flat = arr.flatten()
+                for el in flat:
+                    if el is None:
+                        errors.append("Feature matrix contains None elements")
+                        break
+                    try:
+                        fel = float(el)
+                        if math.isnan(fel):
+                            errors.append("Feature matrix contains NaN elements")
+                            break
+                        if math.isinf(fel):
+                            errors.append("Feature matrix contains Inf elements")
+                            break
+                    except (ValueError, TypeError):
+                        errors.append(f"Feature matrix contains non-numeric element: {el}")
+                        break
+        except Exception as e:
+            errors.append(f"Feature validation error: {e}")
+
+        return len(errors) == 0, errors
+
 schema_validator = SchemaValidator()

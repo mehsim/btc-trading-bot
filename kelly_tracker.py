@@ -51,12 +51,14 @@ class KellyTracker:
             except Exception as e:
                 print(f"[KellyTracker Error] Failed to save trade history: {e}")
 
-    def compute_kelly_fraction(self, timeframe: str = None, min_trades: int = 10, max_kelly_cap: float = 0.25) -> float:
+    def compute_kelly_fraction(self, timeframe: str = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25) -> float:
         """
         Computes dynamic Quarter-Kelly fraction per timeframe:
         Kelly = (W * R - (1 - W)) / R
         Where W = Win Rate, R = Avg Win / Avg Loss ratio.
+        Requires at least min_trades (30) and min_losses (3) to prevent zero-loss distortion.
         Capped at max_kelly_cap (default 0.25 / Quarter-Kelly).
+        Returns 0.0 on zero or negative edge (proven losing strategy) or insufficient data.
         """
         with self.lock:
             if timeframe:
@@ -66,29 +68,35 @@ class KellyTracker:
                 filtered = self.history
 
             if len(filtered) < min_trades:
-                # Default safety fallback if not enough trade history accumulated
-                return 0.10
-
+                return 0.0
 
             returns = [t["return_pct"] for t in filtered[-100:]]
             wins = [r for r in returns if r > 0]
             losses = [abs(r) for r in returns if r < 0]
 
-            if not wins or not losses:
-                return 0.10
+            # Require minimum sample of both wins and losses to prevent distortion
+            if len(wins) < 1 or len(losses) < min_losses:
+                return 0.0
 
             w_rate = len(wins) / len(returns)
             avg_win = float(np.mean(wins))
-            avg_loss = float(np.mean(losses)) if np.mean(losses) > 0 else 1.0
+            # Loss floor safeguard: enforce min loss floor of 0.1% (0.001) to prevent infinite R-ratio
+            raw_avg_loss = float(np.mean(losses))
+            avg_loss = max(0.001, raw_avg_loss)
 
             r_ratio = avg_win / max(1e-9, avg_loss)
             if r_ratio <= 0:
-                return 0.05
+                return 0.0
 
             full_kelly = (w_rate * r_ratio - (1.0 - w_rate)) / max(1e-9, r_ratio)
+
+            # Negative or zero edge -> Zero position allocation
+            if full_kelly <= 0:
+                return 0.0
+
             quarter_kelly = full_kelly * 0.25
 
-            # Clamp between 2% minimum and max_kelly_cap (25%)
-            return float(np.clip(quarter_kelly, 0.02, max_kelly_cap))
+            # Clamp between 0.0 (no negative edge allocation) and max_kelly_cap (25%)
+            return float(np.clip(quarter_kelly, 0.0, max_kelly_cap))
 
 global_kelly_tracker = KellyTracker()

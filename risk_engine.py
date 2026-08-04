@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from typing import Dict, Any, List, Optional, Tuple, Union
 from kelly_tracker import global_kelly_tracker
 from portfolio_risk import portfolio_risk_engine
 from pain_feedback import pain_feedback
@@ -106,7 +107,7 @@ def check_symbol_total_exposure(symbol: str, active_trades: list, proposed_size:
 
 def calculate_per_interval_kelly(interval: str, trade_history: list = None) -> float:
     """Computes dynamic Quarter-Kelly fraction per timeframe."""
-    return global_kelly_tracker.compute_kelly_fraction(timeframe=str(interval), min_trades=10, max_kelly_cap=0.20)
+    return global_kelly_tracker.compute_kelly_fraction(timeframe=str(interval), min_trades=30, max_kelly_cap=0.20)
 
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:
     """Continuous Sigmoid & Exponential Drawdown Penalty: dd_penalty = exp(-5 * DD). Hard halt at 20% DD."""
@@ -119,17 +120,19 @@ def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> 
     return float(np.clip(penalty, 0.05, 1.0))
 
 def get_regime_sizing_multiplier(regime_name: str) -> float:
-    """Regime Position Sizing Multiplier: Trending (1.2x), Ranging (0.8x), Chop/Crisis (0.3x)."""
+    """Regime Position Sizing Multiplier bounded strictly to [0.5, 1.0]."""
     if not regime_name:
         return 1.0
     r = regime_name.lower()
     if "trending" in r:
-        return 1.2
+        raw_m = 1.0
     elif "ranging" in r:
-        return 0.8
+        raw_m = 0.8
     elif "chop" in r or "crisis" in r:
-        return 0.3
-    return 1.0
+        raw_m = 0.5
+    else:
+        raw_m = 1.0
+    return float(np.clip(raw_m, 0.5, 1.0))
 
 
 def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr: float, target_atr: float = 0.005, min_lev: float = 1.0, max_lev: float = 10.0) -> float:
@@ -167,9 +170,29 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
                     
     return max_corr
 
-def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: pd.DataFrame = None) -> tuple:
+def extract_or_build_returns_df(df_dict: dict) -> pd.DataFrame:
+    """Extracts or dynamically constructs a percentage returns DataFrame from candle data in df_dict."""
+    if not isinstance(df_dict, dict) or not df_dict:
+        return None
+    if "returns_df" in df_dict and isinstance(df_dict["returns_df"], pd.DataFrame) and not df_dict["returns_df"].empty:
+        return df_dict["returns_df"]
+    
+    close_series = {}
+    for sym, obj in df_dict.items():
+        if sym == "returns_df":
+            continue
+        if isinstance(obj, pd.DataFrame) and "close" in obj.columns and len(obj) >= 10:
+            close_series[sym] = obj["close"].pct_change()
+        elif isinstance(obj, pd.Series):
+            close_series[sym] = obj.pct_change()
 
-    """Rule 14: 99% 1-day Parametric VaR Heat Cap (Max 5% equity VaR)."""
+    if not close_series:
+        return None
+    returns_df = pd.DataFrame(close_series).dropna()
+    return returns_df if not returns_df.empty else None
+
+def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: pd.DataFrame = None) -> tuple:
+    """Rule 14: Parametric VaR Heat Cap & Portfolio Notional Heat Cap."""
     if total_equity <= 0:
         return False, 0.0
     
@@ -180,11 +203,11 @@ def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candid
     new_heat_usd = current_heat_usd + (candidate_size_usd * candidate_lev)
     heat_pct = (new_heat_usd / max(1e-9, total_equity)) * 100.0
 
-    # Parametric VaR calculation if returns history is available
-    if returns_df is not None and not returns_df.empty:
-        var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(open_positions, returns_df, total_equity)
-        if not var_ok:
-            return False, var_pct * 100.0
+    # Always execute Parametric VaR check for active positions + candidate
+    eval_positions = list(open_positions) + [{"symbol": "CANDIDATE", "position_size_usd": candidate_size_usd}]
+    var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, total_equity)
+    if not var_ok:
+        return False, var_pct * 100.0
     
     # Standard heat cap fallback at 300% leverage exposure
     is_safe = heat_pct <= 300.0
@@ -208,71 +231,88 @@ def check_margin_utilization(used_margin: float, total_equity: float, max_levera
     return "NORMAL"
 
 def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish") -> tuple:
-    if bot_state.get("circuit_breaker_active", False):
-        return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
+    try:
+        if not isinstance(bot_state, dict):
+            bot_state = {}
+        if not isinstance(active_trades, list):
+            active_trades = []
+        if not isinstance(df_dict, dict):
+            df_dict = {}
 
-    equity = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
-    if equity <= 0:
-        equity = float(bot_state.get("simulated_balance", 80.0))
-    peak_equity = float(bot_state.get("peak_balance", equity))
-    
-    # 0. Check interval position cap & total symbol exposure cap
-    capped_size = check_interval_position_limit(interval, position_size_usd, equity)
-    capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
-    leveraged_notional = capped_size * max(1.0, leverage_val)
-    if capped_size < 0.20 or leveraged_notional < 1.0: # Below minimum viable trade margin/notional
-        return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0, 0.0
+        if leverage_val > 25.0 or leverage_val < 1.0:
+            return False, f"REJECTED: Leverage ({leverage_val}x) exceeds maximum allowable limit (25x)", 0.0, 0.0
 
+        if bot_state.get("circuit_breaker_active", False):
+            return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
+
+        equity = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
+        if equity <= 0:
+            equity = float(bot_state.get("simulated_balance", 80.0))
+        if equity <= 0:
+            return False, "REJECTED: Account equity is zero or negative (Fail-Closed)", 0.0, 0.0
+
+        peak_equity = float(bot_state.get("peak_balance", equity))
         
-    # 1. Continuous Sigmoid Drawdown scaling check
-    dd_mult = calculate_drawdown_multiplier(equity, peak_equity)
-    if dd_mult == 0.0:
-        return False, "REJECTED: Circuit breaker active (>=20% Drawdown)", 0.0, 0.0
-    
-    # 2. Portfolio heat & Parametric VaR check
-    returns_df = df_dict.get("returns_df") if isinstance(df_dict, dict) else None
-    heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df)
-    if not heat_safe:
-        return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit", dd_mult, 0.0
+        # 0. Check interval position cap & total symbol exposure cap
+        capped_size = check_interval_position_limit(interval, position_size_usd, equity)
+        capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
+        leveraged_notional = capped_size * max(1.0, leverage_val)
+        if capped_size < 0.20 or leveraged_notional < 1.0: # Below minimum viable trade margin/notional
+            return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0, 0.0
 
-    # 2.5 Monte Carlo -30% Stress Test Check
-    mc_approved, mc_scale_factor, mc_loss_pct, _ = portfolio_risk_engine.check_candidate_stress_budget(
-        candidate_symbol=symbol,
-        candidate_size_usd=capped_size,
-        candidate_lev=leverage_val,
-        candidate_direction=direction,
-        open_positions=active_trades,
-        returns_df=returns_df,
-        total_equity=equity,
-        max_stress_loss_pct=0.25,
-        shock_pct=-0.30
-    )
-    if not mc_approved:
-        return False, f"REJECTED: Monte Carlo -30% Stress Test projected loss ({mc_loss_pct*100.0:.1f}%) exceeds max 25% equity budget", dd_mult, 0.0
-
-    if mc_scale_factor < 1.0:
-        capped_size = round(capped_size * mc_scale_factor, 2)
-    
-    # 3. Correlation check
-    corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict)
-    if corr_val > 0.7:
-        return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult, 0.0
+        # 1. Continuous Sigmoid Drawdown scaling check
+        dd_mult = calculate_drawdown_multiplier(equity, peak_equity)
+        if dd_mult == 0.0:
+            return False, "REJECTED: Circuit breaker active (>=20% Drawdown)", 0.0, 0.0
         
-    return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Sigmoid DD Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Stress Loss: {mc_loss_pct*100.0:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
+        # 2. Portfolio heat & Parametric VaR check
+        returns_df = extract_or_build_returns_df(df_dict)
+        heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df)
+        if not heat_safe:
+            return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit", dd_mult, 0.0
+
+        # 2.5 Monte Carlo -30% Stress Test Check
+        mc_approved, mc_scale_factor, mc_loss_pct, _ = portfolio_risk_engine.check_candidate_stress_budget(
+            candidate_symbol=symbol,
+            candidate_size_usd=capped_size,
+            candidate_lev=leverage_val,
+            candidate_direction=direction,
+            open_positions=active_trades,
+            returns_df=returns_df,
+            total_equity=equity,
+            max_stress_loss_pct=0.25,
+            shock_pct=-0.30
+        )
+        if not mc_approved:
+            return False, f"REJECTED: Monte Carlo -30% Stress Test projected loss ({mc_loss_pct*100.0:.1f}%) exceeds max 25% equity budget", dd_mult, 0.0
+
+        if mc_scale_factor < 1.0:
+            capped_size = round(capped_size * mc_scale_factor, 2)
+        
+        # 3. Correlation check
+        corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict)
+        if corr_val > 0.7:
+            return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult, 0.0
+            
+        return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Sigmoid DD Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Stress Loss: {mc_loss_pct*100.0:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
+    except Exception as e:
+        print(f"[risk_engine ERROR] Exception in evaluate_pre_trade_checklist for {symbol}: {e}")
+        return False, f"REJECTED: Risk engine exception (Fail-Closed): {e}", 0.0, 0.0
 
 
 def get_volatility_regime_multiplier(atr_norm: float, interval: str) -> float:
-    """Rule 16: Dynamic Inverse ATR Percentile Sizing."""
+    """Rule 16: Dynamic Inverse ATR Percentile Sizing bounded strictly to [0.5, 1.0]."""
+    raw_m = 1.0
     if str(interval) in ["15", "30"]:
         if atr_norm > 0.02:           # Extreme volatility (>2% per candle)
-            return 0.5                  # Cut size in half for safety
+            raw_m = 0.5               # Cut size in half for safety
         elif atr_norm > 0.015:        # High volatility
-            return 0.7
+            raw_m = 0.7
         elif 0.005 <= atr_norm <= 0.012: # Sweet spot for 15M/30M trend efficiency
-            return 1.2                  # Boost size by +20%
+            raw_m = 1.0               # Max 1.0x cap
         elif atr_norm < 0.003:        # Flat chop / dead market
-            return 0.3                  # Heavy reduction
-    return 1.0
+            raw_m = 0.5               # 0.5 floor
+    return float(np.clip(raw_m, 0.5, 1.0))
 
 
 class JointRiskBudgetAllocator:
@@ -375,7 +415,9 @@ class JointRiskBudgetAllocator:
         raw_kelly = max(0.0, raw_kelly)
 
         # Apply MHI Kelly Fraction Cap & Upstream Portfolio Heat Reduction Factor & Context Size Boost
-        effective_kelly = min(max_kelly_frac, raw_kelly * max_kelly_frac) * size_boost * avail_budget_factor
+        # Multipliers applied first, then final clamp against max_kelly_frac (MHI ceiling is binding)
+        boosted_kelly = raw_kelly * max_kelly_frac * size_boost * avail_budget_factor
+        effective_kelly = float(np.clip(boosted_kelly, 0.0, max_kelly_frac))
         
         # Calculate Unconstrained Risk-Budgeted Position Size (USD)
         # Position Size = Capital * Effective Kelly (bounded by max available risk)

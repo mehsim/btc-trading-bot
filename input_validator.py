@@ -18,11 +18,11 @@ def sanitize_symbol(symbol: Optional[str]) -> str:
         
     return clean_sym
 
-def validate_price(price: float, default_price: float = 0.0) -> float:
-    """Validates and ensures non-negative, finite price values."""
+def validate_price(price: float, default_price: float = 0.0, max_price: float = 500000.0) -> float:
+    """Validates and ensures non-negative, finite price values bounded within valid market range."""
     try:
         val = float(price)
-        if val <= 0.0 or np.isnan(val) or np.isinf(val):
+        if val <= 0.0 or val > max_price or np.isnan(val) or np.isinf(val):
             return float(default_price)
 
         return val
