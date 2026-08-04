@@ -36,7 +36,9 @@ class CUSUMDriftDetector:
             import json
             from database import set_setting
             set_setting("cusum_s_high", str(self.S_high))
-            set_setting("cusum_processed_trade_ids", json.dumps(list(self.processed_trade_ids)))
+            # Ring-buffer: keep only the most recent 1000 trade IDs to prevent unbounded growth
+            capped_ids = list(self.processed_trade_ids)[-1000:]
+            set_setting("cusum_processed_trade_ids", json.dumps(capped_ids))
         except Exception as e:
             print(f"[CUSUM Drift Detector Warning] Failed to persist CUSUM state to database: {e}")
 

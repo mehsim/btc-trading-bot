@@ -69,16 +69,10 @@ def is_news_blackout(now_utc, interval) -> bool:
 
 def safe_parse_xml(xml_content):
     """
-    Safely parses XML content to eliminate XXE vulnerabilities (CWE-611).
+    Safely parses XML content using defusedxml to eliminate XXE vulnerabilities (CWE-611, B314).
     """
-    try:
-        import defusedxml.ElementTree as SafeET
-        return SafeET.fromstring(xml_content)
-    except Exception:
-        parser = ET.XMLParser()
-        if hasattr(parser, 'entity'):
-            parser.entity.clear()
-        return ET.fromstring(xml_content, parser=parser)
+    import defusedxml.ElementTree as SafeET
+    return SafeET.fromstring(xml_content)
 
 
 def get_reddit_crypto_posts() -> List[str]:

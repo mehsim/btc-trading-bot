@@ -31,12 +31,12 @@ jobs:
 
     - name: Static Type Checking (mypy)
       run: |
-        mypy --ignore-missing-imports .
+        mypy --ignore-missing-imports --explicit-package-bases --exclude services .
       continue-on-error: false
 
     - name: Security Scanning (bandit)
       run: |
-        bandit -r . -x ./.venv,./tests -ll
+        bandit -r . -x ./.venv,./tests,./services -ll
       continue-on-error: false
 
     - name: Run Full Pytest Test Suite

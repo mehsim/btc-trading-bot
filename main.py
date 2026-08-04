@@ -1613,7 +1613,7 @@ def start_telegram_command_listener():
                                     raw_sym = text.upper()
                                     target_sym = raw_sym if raw_sym.endswith("USDT") else f"{raw_sym}USDT"
                                     if target_sym not in SUPPORTED_SYMBOLS:
-                                        reply_text = f"❌ *Symbol {target_sym} is not supported.*\n\nActive symbols: {', '.join(SUPPORTED_SYMBOLS)}\n\nPlease select one of the supported symbols from the keyboard or send /cancel to abort."
+                                        reply_text = f"❌ *Symbol {target_sym} is not supported.*\n\nActive symbols: {', '.join(SUPPORTED_SYMBOLS)}\n\nPlease select one of the supported symbols from the keyboard or send /cancel to abort."  # nosec B608 — Telegram reply string, not SQL
                                         
                                         syms_keyboard = []
                                         row = []
@@ -1662,7 +1662,7 @@ def start_telegram_command_listener():
                                     tf_str = text.lower()
                                     tf_mapping = {"1h": "60", "2h": "120", "4h": "240", "6h": "360"}
                                     if tf_str not in tf_mapping:
-                                        reply_text = f"❌ *Timeframe {tf_str} is not supported.*\n\nSupported: `1h`, `2h`, `4h`, `6h`\n\nPlease select a supported timeframe from the keyboard or send /cancel to abort."
+                                        reply_text = f"❌ *Timeframe {tf_str} is not supported.*\n\nSupported: `1h`, `2h`, `4h`, `6h`\n\nPlease select a supported timeframe from the keyboard or send /cancel to abort."  # nosec B608 — Telegram reply string, not SQL
                                         tf_keyboard = [
                                             [{"text": "1h"}, {"text": "2h"}],
                                             [{"text": "4h"}, {"text": "6h"}],
@@ -2508,11 +2508,12 @@ def load_history():
             from huggingface_hub import hf_hub_download
             dataset_id = f"{space_id}-history"
             print(f"[Sync] Attempting to download history from Dataset {dataset_id}...")
-            downloaded_path = hf_hub_download(
+            downloaded_path = hf_hub_download(  # nosec B615 — repo_id is derived from env-controlled space_id; no user input
                 repo_id=dataset_id,
                 filename="dashboard_history.json",
                 repo_type="dataset",
-                token=token
+                token=token,
+                revision="main"
             )
             import shutil
             shutil.copy(downloaded_path, HISTORY_FILE)
@@ -4644,7 +4645,7 @@ def run_flask():
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5001))
-    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")
+    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")  # nosec B104 — intentional, overridable via FLASK_HOST env var
     app.run(host=flask_host, port=port, debug=False, use_reloader=False)
 
 

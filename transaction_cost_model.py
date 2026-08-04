@@ -36,9 +36,9 @@ class TransactionCostModel:
 
         depth_usd = float(orderbook_depth_usd) if orderbook_depth_usd is not None and orderbook_depth_usd > 0 else max(10_000.0, float(volume_24h_usd) / 200.0)
         liquidity_ratio = max(1e-8, float(order_size_usd) / depth_usd)
-        # Almgren-Chriss: volatility-adjusted impact relative to orderbook depth
+        # Almgren-Chriss: volatility-adjusted impact relative to orderbook depth (fraction → bps requires ×10000)
         sigma = max(0.001, float(garch_sigma))
-        market_impact_bp = self.gamma * sigma * np.sqrt(liquidity_ratio) * 100.0
+        market_impact_bp = self.gamma * sigma * np.sqrt(liquidity_ratio) * 10000.0
 
         total_cost_bp = round(fee_bp + half_spread_bp + market_impact_bp, 2)
         total_cost_usd = round((total_cost_bp / 10000.0) * float(order_size_usd), 4)

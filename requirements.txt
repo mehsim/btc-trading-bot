@@ -17,3 +17,4 @@ redis>=5.0.0
 shap>=0.44.0
 mlflow>=2.10.0
 statsmodels>=0.14.0
+defusedxml>=0.7.1
