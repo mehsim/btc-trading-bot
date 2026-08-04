@@ -1504,7 +1504,7 @@ if __name__ == "__main__":
     LIVE_FEEDBACK = args.live_feedback
     FORCE_RFECV = args.force_rfecv
 
-    intervals_to_train = ["15", "30", "60", "120"] if args.interval == "all" else [args.interval]
+    intervals_to_train = ["15", "30", "60", "120", "240"] if args.interval == "all" else [args.interval]
     _tg_alert(
         f"🚀 *Retrain Started*\n"
         f"📋 Intervals: `{', '.join(intervals_to_train)}`\n"
