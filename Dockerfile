@@ -24,9 +24,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy the rest of the application files
 COPY --chown=user . $HOME/app
 
-# Hugging Face Spaces exposes port 7860 by default
-ENV PORT=7860
-EXPOSE 7860
+# Production web app port
+ENV PORT=5001
+EXPOSE 5001
 
 # Run the trading bot main entrypoint
 CMD ["python", "main.py"]

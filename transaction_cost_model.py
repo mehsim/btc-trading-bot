@@ -10,11 +10,11 @@ from typing import Dict, Any
 
 class TransactionCostModel:
     def __init__(self, default_taker_fee_bp: float = 6.0, default_maker_fee_bp: float = 1.0,
-                 gamma: float = 0.50, calibrated: bool = False):
+                 gamma: float = 0.42, max_acceptable_cost_bp: float = 25.0):
         self.taker_fee_bp = default_taker_fee_bp
         self.maker_fee_bp = default_maker_fee_bp
-        # gamma calibrated empirically from historical fills vs quoted prices
-        self.gamma = gamma if not calibrated else 0.42  # Backtest-calibrated value
+        self.gamma = gamma
+        self.max_acceptable_cost_bp = max_acceptable_cost_bp
 
     def estimate_transaction_cost(
         self,
@@ -23,7 +23,8 @@ class TransactionCostModel:
         volume_24h_usd: float = 50_000_000.0,
         bid_ask_spread_bp: float = 1.5,
         garch_sigma: float = 0.015,  # Almgren-Chriss: live realized vol from garch_monitor
-        is_maker: bool = False
+        is_maker: bool = False,
+        max_acceptable_cost_bp: float = None
     ) -> Dict[str, Any]:
         """
         Almgren-Chriss extended market impact:
@@ -39,7 +40,8 @@ class TransactionCostModel:
 
         total_cost_bp = round(fee_bp + half_spread_bp + market_impact_bp, 2)
         total_cost_usd = round((total_cost_bp / 10000.0) * float(order_size_usd), 4)
-        is_acceptable = total_cost_bp <= 25.0
+        cutoff = max_acceptable_cost_bp if max_acceptable_cost_bp is not None else self.max_acceptable_cost_bp
+        is_acceptable = total_cost_bp <= cutoff
 
         return {
             "symbol": symbol,

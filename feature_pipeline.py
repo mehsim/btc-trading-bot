@@ -124,10 +124,10 @@ def add_microstructure_features(df: pd.DataFrame) -> pd.DataFrame:
     close_s = df_feat["close"] if "close" in df_feat.columns else pd.Series(dtype=float)
     if not close_s.empty:
         log_ret = np.log(close_s / close_s.shift(1)).fillna(0.0)
-        df_feat["realized_vol_15m"] = log_ret.rolling(1, min_periods=1).std() * np.sqrt(96)
-        df_feat["realized_vol_1h"] = log_ret.rolling(4, min_periods=1).std() * np.sqrt(96)
-        df_feat["realized_vol_4h"] = log_ret.rolling(16, min_periods=1).std() * np.sqrt(96)
-        df_feat["vol_of_vol_24h"] = df_feat["realized_vol_1h"].rolling(24, min_periods=1).std()
+        df_feat["realized_vol_15m"] = log_ret.rolling(3, min_periods=2).std().fillna(0.0) * np.sqrt(96)
+        df_feat["realized_vol_1h"] = log_ret.rolling(4, min_periods=2).std().fillna(0.0) * np.sqrt(96)
+        df_feat["realized_vol_4h"] = log_ret.rolling(16, min_periods=2).std().fillna(0.0) * np.sqrt(96)
+        df_feat["vol_of_vol_24h"] = df_feat["realized_vol_1h"].rolling(24, min_periods=2).std().fillna(0.0)
 
     if "high" in df_feat.columns and "low" in df_feat.columns:
         range_s = df_feat["high"] - df_feat["low"]

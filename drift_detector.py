@@ -13,33 +13,62 @@ class CUSUMDriftDetector:
         self.S_high: float = 0.0
         self.S_low: float = 0.0
         self.error_stream = deque(maxlen=200)
+        self.processed_trade_ids = set()
+        self._restore_state()
 
-    def update(self, actual_outcome: int, predicted_confidence: float) -> Tuple[bool, float, float]:
+    def _restore_state(self):
+        try:
+            from database import get_setting
+            val = get_setting("cusum_s_high")
+            if val is not None:
+                self.S_high = float(val)
+        except Exception:
+            pass
+
+    def _persist_state(self):
+        try:
+            from database import save_setting
+            save_setting("cusum_s_high", str(self.S_high))
+        except Exception:
+            pass
+
+    def update(self, actual_outcome: int, predicted_confidence: float = 0.70, trade_id: str = None) -> Tuple[bool, float, float]:
         """
-        Rule 24: CUSUM Drift Detection:
+        Rule 24: CUSUM Drift Detection with Idempotency & Confidence Weighting:
         actual_outcome: 1 if profitable, 0 if loss
-        e_t = 1 - actual_outcome (error stream)
-        S_t = max(0, S_{t-1} + e_t - target_error_mu - K)
-        Returns: (is_drift_detected, S_high_val, error_rate)
+        trade_id: Unique identifier to ensure idempotency across evaluation loops
         """
         with self.lock:
+            if trade_id and trade_id in self.processed_trade_ids:
+                # Already ingested — return current state without re-accumulating
+                is_drift = self.S_high >= self.threshold_H
+                recent_error_rate = float(np.mean(self.error_stream)) if self.error_stream else self.target_error_mu
+                return is_drift, float(self.S_high), recent_error_rate
+
+            if trade_id:
+                self.processed_trade_ids.add(trade_id)
+
             # Error = 1.0 if loss, 0.0 if win
             error_val = 1.0 - float(actual_outcome)
             self.error_stream.append(error_val)
             recent_error_rate = float(np.mean(self.error_stream)) if self.error_stream else self.target_error_mu
 
+            # Target error expected: dynamic based on predicted model confidence if available
+            target_mu = (1.0 - float(predicted_confidence)) if (predicted_confidence and 0.0 < predicted_confidence < 1.0) else self.target_error_mu
             
             # Upper CUSUM accumulator for detecting degradation in accuracy against target baseline
-            self.S_high = max(0.0, self.S_high + (error_val - self.target_error_mu - self.allowance_K))
+            self.S_high = max(0.0, self.S_high + (error_val - target_mu - self.allowance_K))
+            self._persist_state()
             
             is_drift = self.S_high >= self.threshold_H
             return is_drift, float(self.S_high), recent_error_rate
-
 
     def reset(self):
         with self.lock:
             self.S_high = 0.0
             self.S_low = 0.0
+            self.processed_trade_ids.clear()
+            self._persist_state()
 
 def calculate_psi(baseline_data: np.ndarray, target_data: np.ndarray, num_bins: int = 10) -> float:
     """
@@ -112,7 +141,8 @@ def evaluate_drift_and_trigger_playbook(cusum_detector: CUSUMDriftDetector, psi_
     if recent_outcomes:
         for out in recent_outcomes:
             outcome_val = 1 if out.get("success") == 1 or (out.get("pnl_usd") or 0.0) > 0 else 0
-            is_drift, s_high, err_rate = cusum_detector.update(outcome_val, out.get("confidence", 0.70))
+            t_id = out.get("trade_id") or out.get("id")
+            is_drift, s_high, err_rate = cusum_detector.update(outcome_val, out.get("confidence", 0.70), trade_id=t_id)
             playbook_action["cusum_score"] = s_high
             if is_drift:
                 playbook_action["status"] = "SEVERE_DRIFT_CUSUM"

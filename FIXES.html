@@ -74,10 +74,35 @@
             <span class="tag completed">Completed</span>
             <div class="details">Unified calculate_adaptive_triple_barrier_labels in feature_pipeline.py with TIMEFRAME_CONFIG parameters, High/Low barrier evaluation, and 3-class {0: Bearish, 1: Neutral, 2: Bullish} labels.</div>
         </li>
+        <li>
+            <strong>CUSUM Drift State Persistence & Idempotent Ingestion (F-25)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Added processed_trade_ids idempotency set in drift_detector.py to prevent duplicate outcome ingestion and persisted S_high accumulator to SQLite settings across restarts.</div>
+        </li>
+        <li>
+            <strong>Realized Volatility 15m Calculation NaN Fix (F-26)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Fixed realized_vol_15m in feature_pipeline.py by setting rolling window to 3 with min_periods=2, eliminating NaN outputs caused by single-sample ddof=1 std calculations.</div>
+        </li>
+        <li>
+            <strong>Shared State Lock Synchronization (F-27)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Added state_lock in signal_evaluator.py to protect shared bot_state dictionary mutations against race conditions with dashboard web server threads.</div>
+        </li>
+        <li>
+            <strong>Container Deployment Port Standardization (F-30)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Updated Dockerfile to expose production web dashboard port 5001 (ENV PORT=5001 & EXPOSE 5001), aligning container builds with live EC2 deployment topology.</div>
+        </li>
+        <li>
+            <strong>Transaction Cost Model Configurable Impact Threshold (F-31)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Updated transaction_cost_model.py to support custom gamma calibration parameters and configurable max_acceptable_cost_bp thresholds.</div>
+        </li>
     </ol>
 
     <h2>Upcoming / Next Fixes</h2>
-    <ol start="12">
+    <ol start="17">
         <li>
             <strong>Dynamic L2 Orderbook Slippage Model</strong> 
             <span class="tag planned">Planned (Next)</span>

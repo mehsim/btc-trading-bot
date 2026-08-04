@@ -22,6 +22,7 @@ TF_MAP = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
 class SignalEvaluator:
     def __init__(self, bot_state):
         self.bot_state = bot_state
+        self.state_lock = threading.Lock()
         self.models_by_interval = {}
         self.load_models()
 
@@ -87,8 +88,9 @@ class SignalEvaluator:
 
             regime_str = f"Trending (ADX {adx_val:.1f})" if is_trending else f"Ranging (ADX {adx_val:.1f})"
             
-            self.bot_state[f"regime_{tf_key}"] = regime_str
-            self.bot_state[f"adx_{tf_key}"] = adx_val
+            with self.state_lock:
+                self.bot_state[f"regime_{tf_key}"] = regime_str
+                self.bot_state[f"adx_{tf_key}"] = adx_val
 
             # Model evaluation if models loaded
             model_eval_success = False
