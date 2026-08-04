@@ -24,19 +24,21 @@ class TransactionCostModel:
         bid_ask_spread_bp: float = 1.5,
         garch_sigma: float = 0.015,  # Almgren-Chriss: live realized vol from garch_monitor
         is_maker: bool = False,
-        max_acceptable_cost_bp: float = None
+        max_acceptable_cost_bp: float = None,
+        orderbook_depth_usd: float = None
     ) -> Dict[str, Any]:
         """
-        Almgren-Chriss extended market impact:
-        Slippage_bps = Half_Spread + gamma * sigma * sqrt(Order_Size / Volume_24h) * 10000
+        Almgren-Chriss extended market impact against instantaneous orderbook depth:
+        Slippage_bps = Half_Spread + gamma * sigma * sqrt(Order_Size / Orderbook_Depth) * 100
         """
         fee_bp = self.maker_fee_bp if is_maker else self.taker_fee_bp
         half_spread_bp = float(bid_ask_spread_bp) / 2.0
 
-        liquidity_ratio = max(1e-8, float(order_size_usd) / max(1.0, float(volume_24h_usd)))
-        # Almgren-Chriss: volatility-adjusted impact
+        depth_usd = float(orderbook_depth_usd) if orderbook_depth_usd is not None and orderbook_depth_usd > 0 else max(10_000.0, float(volume_24h_usd) / 200.0)
+        liquidity_ratio = max(1e-8, float(order_size_usd) / depth_usd)
+        # Almgren-Chriss: volatility-adjusted impact relative to orderbook depth
         sigma = max(0.001, float(garch_sigma))
-        market_impact_bp = self.gamma * sigma * np.sqrt(liquidity_ratio) * 10000.0
+        market_impact_bp = self.gamma * sigma * np.sqrt(liquidity_ratio) * 100.0
 
         total_cost_bp = round(fee_bp + half_spread_bp + market_impact_bp, 2)
         total_cost_usd = round((total_cost_bp / 10000.0) * float(order_size_usd), 4)

@@ -18,7 +18,7 @@ class JSONFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-            "correlation_id": getattr(record, "correlation_id", str(uuid.uuid4())[:8]),
+            "correlation_id": getattr(record, "correlation_id", str(uuid.uuid4())),
             "module": record.module,
             "line_no": record.lineno
         }
@@ -40,7 +40,7 @@ bot_logger = setup_logger("trading_bot")
 
 def log_event(level: str, msg: str, correlation_id: str = None, extra: dict = None):
     lvl = getattr(logging, level.upper(), logging.INFO)
-    extra_dict = {"correlation_id": correlation_id or str(uuid.uuid4())[:8]}
+    extra_dict = {"correlation_id": correlation_id or str(uuid.uuid4())}
     if extra:
         extra_dict.update(extra)
     bot_logger.log(lvl, msg, extra=extra_dict)

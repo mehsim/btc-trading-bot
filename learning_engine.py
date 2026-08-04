@@ -46,8 +46,15 @@ learning_event_queue = queue.Queue(maxsize=1000)
 
 class ContinuousLearningEngine:
     def __init__(self):
-        self._worker_thread = threading.Thread(target=self._event_loop_worker, daemon=True)
-        self._worker_thread.start()
+        self._worker_thread = None
+        self._lock = threading.Lock()
+
+    def _ensure_worker_started(self):
+        if self._worker_thread is None or not self._worker_thread.is_alive():
+            with self._lock:
+                if self._worker_thread is None or not self._worker_thread.is_alive():
+                    self._worker_thread = threading.Thread(target=self._event_loop_worker, daemon=True)
+                    self._worker_thread.start()
 
     def _event_loop_worker(self):
         while True:
@@ -177,6 +184,7 @@ class ContinuousLearningEngine:
         Pushes event into learning_event_queue with timeout & saturation tracking.
         """
         try:
+            self._ensure_worker_started()
             learning_event_queue.put_nowait({"type": "TRADE_CLOSED", "trade": trade_record})
         except queue.Full:
             t_id = trade_record.get('trade_id') if isinstance(trade_record, dict) else 'unknown'

@@ -557,7 +557,11 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             from core import features as core_features
             n_features = len(core_features)
         except Exception:
-            n_features = 46
+            try:
+                import features as features_module
+                n_features = len(features_module.features)
+            except Exception:
+                n_features = 26
 
     xgb = XGBClassifier()
     xgb.load_model(f"{prefix}_xgb.json")
@@ -768,7 +772,11 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
             from core import features as core_features
             n_features = len(core_features)
         except Exception:
-            n_features = 46
+            try:
+                import features as features_module
+                n_features = len(features_module.features)
+            except Exception:
+                n_features = 26
 
     xgb = XGBRegressor()
     xgb.load_model(f"{prefix}_xgb.json")
