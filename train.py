@@ -124,7 +124,7 @@ from config import TIMEFRAME_CONFIG
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-PAGES = 15  # 15 pages ~15,000 candles — optimized for fast AWS 1GB retraining (<5 min per interval)
+PAGES = 5  # 5 pages ~5,000 candles — low-RAM retraining mode
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
 # Feature list matches train.py and main.py
@@ -415,7 +415,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             return 0.0
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=5)
     best = study.best_params
     best["lookahead"] = 10
     print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
@@ -434,7 +434,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'n_estimators': trial.suggest_int('n_estimators', 30, 80),
             'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
@@ -454,7 +454,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=3)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -470,7 +470,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'n_estimators': trial.suggest_int('n_estimators', 30, 80),
             'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
@@ -489,7 +489,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=3)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -505,7 +505,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             depth_min, depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
         params = {
-            'iterations': trial.suggest_int('iterations', 50, 150),
+            'iterations': trial.suggest_int('iterations', 30, 80),
             'depth': trial.suggest_int('depth', depth_min, depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True),
@@ -518,7 +518,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=3)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -531,7 +531,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'n_estimators': trial.suggest_int('n_estimators', 30, 80),
             'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
@@ -548,7 +548,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=3)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -561,7 +561,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'n_estimators': trial.suggest_int('n_estimators', 30, 80),
             'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
@@ -578,7 +578,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=3)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -591,7 +591,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
             depth_min, depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
         params = {
-            'iterations': trial.suggest_int('iterations', 50, 150),
+            'iterations': trial.suggest_int('iterations', 30, 80),
             'depth': trial.suggest_int('depth', depth_min, depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True),
@@ -603,7 +603,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=3)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
