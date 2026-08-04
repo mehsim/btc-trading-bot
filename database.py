@@ -171,9 +171,11 @@ def init_db():
             # Enable Incremental Vacuum for storage optimization
             cursor.execute("PRAGMA auto_vacuum = INCREMENTAL;")
             
-            # High-Performance Query Indexes (Fix B9)
+            # High-Performance Query Indexes (Fix B9 & F-18)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_symbol_ts ON predictions(symbol, timestamp);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON predictions(timestamp DESC);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_completed_trades_symbol_ts ON completed_trades(symbol, exit_time);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_completed_trades_exit_time ON completed_trades(exit_time DESC);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_trades_symbol ON active_trades(symbol);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_derivatives_symbol ON derivatives_cache(symbol);")
             

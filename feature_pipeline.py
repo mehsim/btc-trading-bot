@@ -70,15 +70,38 @@ def intelligent_data_imputation(df: pd.DataFrame) -> pd.DataFrame:
     return df_imp.bfill().fillna(0.0)
 
 def filter_multicollinear_features(df: pd.DataFrame, feature_list: list, vif_threshold: float = 10.0) -> list:
-    """Rule 21: Variance Inflation Factor (VIF) feature selection (VIF > 10.0 dropped)."""
-    if len(feature_list) <= 1:
-        return feature_list
-    
-    corr_matrix = df[feature_list].corr().abs()
+    """Rule 21: Iterative Variance Inflation Factor (VIF > 10.0 dropped) & correlation filtering."""
+    valid_feats = [f for f in feature_list if f in df.columns]
+    if len(valid_feats) <= 1:
+        return valid_feats
+
+    # Step 1: Pairwise absolute correlation filtering (>0.85)
+    df_sub = df[valid_feats].dropna().astype(float)
+    if len(df_sub) < 10:
+        return valid_feats
+
+    corr_matrix = df_sub.corr().abs()
     upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-    to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > 0.85)]
-    filtered = [f for f in feature_list if f not in to_drop]
-    return filtered
+    to_drop = set(column for column in upper_tri.columns if any(upper_tri[column] > 0.85))
+    remaining = [f for f in valid_feats if f not in to_drop]
+
+    # Step 2: Iterative VIF feature removal (VIF > vif_threshold)
+    try:
+        from statsmodels.stats.outliers_influence import variance_inflation_factor
+        X_mat = df_sub[remaining].values
+        keep = list(remaining)
+        while len(keep) > 1:
+            vifs = [variance_inflation_factor(X_mat, i) for i in range(len(keep))]
+            max_vif = max(vifs)
+            if max_vif > vif_threshold and not np.isnan(max_vif) and not np.isinf(max_vif):
+                max_idx = vifs.index(max_vif)
+                keep.pop(max_idx)
+                X_mat = np.delete(X_mat, max_idx, axis=1)
+            else:
+                break
+        return keep
+    except Exception:
+        return remaining
 
 def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
     df_int = df.copy()
@@ -128,44 +151,57 @@ def calculate_adaptive_triple_barrier_labels(
 ) -> pd.Series:
     """
     Pillar 2: Adaptive Triple Barrier Labeling.
-    Learns dynamic TP/SL multipliers from historical performance by (Symbol x Timeframe x Regime).
+    Evaluates High/Low price barriers with dynamic timeframe parameters, emitting {0: Bearish, 1: Neutral, 2: Bullish} labels.
     """
+    from config import TIMEFRAME_CONFIG
+    cfg = TIMEFRAME_CONFIG.get(str(interval), {
+        "lookahead": 12,
+        "sl_mult": 0.8,
+        "tp_mult_ranging": 1.35,
+        "tp_mult_trending": 1.85
+    })
+
+    lookahead = cfg.get("lookahead", 10)
+    sl_mult = cfg.get("sl_mult", 0.8)
     regime_upper = str(regime).upper()
     if "TRENDING" in regime_upper:
-        tp_mult, sl_mult = 1.85, 1.10
-    elif "RANGING" in regime_upper:
-        tp_mult, sl_mult = 1.35, 1.00
+        tp_mult = cfg.get("tp_mult_trending", 1.85)
     else:
-        tp_mult, sl_mult = 1.50, 1.20
+        tp_mult = cfg.get("tp_mult_ranging", 1.35)
 
-    if symbol == "BTCUSDT":
-        tp_mult *= 1.05
-    elif symbol == "ADAUSDT":
-        sl_mult *= 1.20
+    closes = df["close"].values
+    highs = df["high"].values if "high" in df.columns else closes
+    lows = df["low"].values if "low" in df.columns else closes
+    atr_vals = df["ATR"].values if "ATR" in df.columns else (closes * 0.01)
+    
+    n_samples = len(df)
+    labels = np.ones(n_samples, dtype=int) * 1  # Default 1: Neutral
 
-    close = df["close"]
-    atr = df["ATR"] if "ATR" in df.columns else (close * 0.01)
-    labels = pd.Series(0, index=df.index)
+    for i in range(n_samples):
+        p_t = closes[i]
+        atr_t = atr_vals[i] if atr_vals[i] > 0 else p_t * 0.001
+        
+        upper_b = p_t + tp_mult * atr_t
+        lower_b = p_t - tp_mult * atr_t
+        upper_s = p_t + sl_mult * atr_t
+        lower_s = p_t - sl_mult * atr_t
+        
+        for step in range(1, lookahead + 1):
+            if i + step >= n_samples:
+                break
+            h, l = highs[i + step], lows[i + step]
+            hit_bullish = h >= upper_b and l > lower_s
+            hit_bearish = l <= lower_b and h < upper_s
+            
+            if hit_bullish and not hit_bearish:
+                labels[i] = 2  # Bullish
+                break
+            elif hit_bearish and not hit_bullish:
+                labels[i] = 0  # Bearish
+                break
+            elif l <= lower_s or h >= upper_s:
+                labels[i] = 1  # Neutral (hit SL before TP)
+                break
 
-    for i in range(len(df) - 10):
-        c_price = close.iloc[i]
-        c_atr = atr.iloc[i]
-        upper = c_price + (tp_mult * c_atr)
-        lower = c_price - (sl_mult * c_atr)
-
-        sub_seq = close.iloc[i+1:i+11]
-        hit_tp = (sub_seq >= upper).any()
-        hit_sl = (sub_seq <= lower).any()
-
-        if hit_tp and not hit_sl:
-            labels.iloc[i] = 1
-        elif hit_sl and not hit_tp:
-            labels.iloc[i] = -1
-        elif hit_tp and hit_sl:
-            tp_first = (sub_seq >= upper).idxmax() < (sub_seq <= lower).idxmax()
-            labels.iloc[i] = 1 if tp_first else -1
-        else:
-            labels.iloc[i] = 0
-
-    return labels
+    return pd.Series(labels, index=df.index)
 

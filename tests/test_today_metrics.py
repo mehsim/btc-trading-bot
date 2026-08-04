@@ -21,8 +21,8 @@ class TestTodayMetrics(unittest.TestCase):
         now = time.time()
         
         # Today trades: 2 trades (1 win: +10 USD, 1 loss: -5 USD) => today_win_rate = 50%, today_pf = 2.0
-        today_trade_1 = {"exit_time": now - 3600, "pnl_usd": 10.0, "position_size_usd": 50.0, "leverage": 10.0}
-        today_trade_2 = {"exit_time": now - 1800, "pnl_usd": -5.0, "position_size_usd": 50.0, "leverage": 10.0}
+        today_trade_1 = {"exit_time": now - 300, "pnl_usd": 10.0, "position_size_usd": 50.0, "leverage": 10.0}
+        today_trade_2 = {"exit_time": now - 150, "pnl_usd": -5.0, "position_size_usd": 50.0, "leverage": 10.0}
         
         # Older historical trades (10 losses: -10 USD each)
         old_trades = [
@@ -56,8 +56,8 @@ class TestTodayMetrics(unittest.TestCase):
         """Verify user screenshot scenario: 2 trades today, 1 win (+0.50) and 1 loss (-0.84)."""
         now = time.time()
         
-        today_trade_1 = {"exit_time": now - 3600, "pnl_usd": 0.50, "position_size_usd": 30.0, "leverage": 2.0}
-        today_trade_2 = {"exit_time": now - 1800, "pnl_usd": -0.84, "position_size_usd": 31.85, "leverage": 2.0}
+        today_trade_1 = {"exit_time": now - 300, "pnl_usd": 0.50, "position_size_usd": 30.0, "leverage": 2.0}
+        today_trade_2 = {"exit_time": now - 150, "pnl_usd": -0.84, "position_size_usd": 31.85, "leverage": 2.0}
         
         old_trades = [
             {"exit_time": now - (86400 * 3 + i * 3600), "pnl_usd": 1.0, "position_size_usd": 20.0, "leverage": 1.0}

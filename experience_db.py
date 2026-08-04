@@ -91,8 +91,9 @@ def init_experience_db():
                 );
             """)
             
-            # Recommendation #11 Indexes for High-Frequency Queries
+            # Recommendation #11 & F-18 Indexes for High-Frequency Queries
             conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_symbol_ts ON trade_experience(symbol, timestamp);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_ts_desc ON trade_experience(timestamp DESC);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_regime ON trade_experience(market_regime);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_exp_score ON trade_experience(learning_score);")
             

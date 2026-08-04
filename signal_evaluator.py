@@ -15,6 +15,7 @@ from typing import Dict, Any
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features, calibrate_confidence, features
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
+from config import ENABLE_REGIME_HYSTERESIS, STRONG_TREND_ADX_ENTER, STRONG_TREND_ADX_EXIT
 
 TF_MAP = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
 
@@ -74,7 +75,16 @@ class SignalEvaluator:
             last_row = df.iloc[-1]
             adx_val = float(last_row.get("ADX", 20.0)) if "ADX" in last_row and not np.isnan(last_row["ADX"]) else 20.0
             
-            is_trending = adx_val >= 20.0
+            prev_regime = self.bot_state.get(f"regime_{tf_key}", "")
+            was_trending = "Trending" in prev_regime
+            if ENABLE_REGIME_HYSTERESIS:
+                if was_trending:
+                    is_trending = adx_val >= STRONG_TREND_ADX_EXIT
+                else:
+                    is_trending = adx_val >= STRONG_TREND_ADX_ENTER
+            else:
+                is_trending = adx_val >= 20.0
+
             regime_str = f"Trending (ADX {adx_val:.1f})" if is_trending else f"Ranging (ADX {adx_val:.1f})"
             
             self.bot_state[f"regime_{tf_key}"] = regime_str

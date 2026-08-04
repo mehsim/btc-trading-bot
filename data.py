@@ -109,6 +109,12 @@ def init_db():
                 UNIQUE(symbol, timestamp) ON CONFLICT REPLACE
             )
         """)
+        # High-Performance Indexes for Time-Series Queries (F-18 Fix)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_kline_sym_iv_ts ON kline_data(symbol, interval, timestamp DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_oi_sym_iv_ts ON oi_data(symbol, interval, timestamp DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_funding_sym_ts ON funding_data(symbol, timestamp DESC);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_hof_sym_ts ON historical_order_flow(symbol, timestamp DESC);")
+        
         # Migration for existing databases (C11: SQL injection pattern prevention)
         import re
         for col in ["ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"]:

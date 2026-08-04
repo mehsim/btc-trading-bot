@@ -557,6 +557,13 @@ def save_ensemble_classifier(model, prefix):
         json.dump(meta_data, f)
 
 def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
+    if n_features is None:
+        try:
+            from core import features as core_features
+            n_features = len(core_features)
+        except Exception:
+            n_features = 46
+
     xgb = XGBClassifier()
     xgb.load_model(f"{prefix}_xgb.json")
     
@@ -761,6 +768,13 @@ def save_ensemble_regressor(model, prefix, feature_names=None):
     write_model_manifest(prefix, feature_names=feature_names)
 
 def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
+    if n_features is None:
+        try:
+            from core import features as core_features
+            n_features = len(core_features)
+        except Exception:
+            n_features = 46
+
     xgb = XGBRegressor()
     xgb.load_model(f"{prefix}_xgb.json")
     

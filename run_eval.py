@@ -10,6 +10,7 @@ sys.path.append(workspace)
 
 from data import get_history, merge_derivatives_sentiment_features
 import features as features_module
+from core import features
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, PurgedEmbargoTimeSeriesSplit
 from train import add_triple_barrier_labels
 
@@ -71,7 +72,7 @@ for interval in timeframes:
         if len(df_regime) < 10:
             continue
         from ensemble import _slice_model_input
-        X = df_regime[features_module.features].values
+        X = df_regime[features].values
         y_trend = df_regime["target_trend"].values
         y_price = df_regime["target_price_change"].values
         
@@ -87,8 +88,8 @@ for interval in timeframes:
             clf_prefix = f"{workspace}/ensemble_{name}_trend_{interval}"
             reg_prefix = f"{workspace}/ensemble_{name}_price_{interval}"
             
-            clf = load_ensemble_classifier(clf_prefix, n_features=len(features_module.features))
-            reg = load_ensemble_regressor(reg_prefix, n_features=len(features_module.features))
+            clf = load_ensemble_classifier(clf_prefix, n_features=len(features))
+            reg = load_ensemble_regressor(reg_prefix, n_features=len(features))
             
             X_val_clf = _slice_model_input(clf, X_val)
             X_val_reg = _slice_model_input(reg, X_val)
