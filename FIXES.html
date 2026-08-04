@@ -30,9 +30,9 @@
             <div class="details">Added "½ Exit" button in active open trades table to extract 50% capital + 50% profit while keeping remaining 50% position open with updated margin tracking.</div>
         </li>
         <li>
-            <strong>Feature Matrix Alignment & Shape Coercion Fix</strong> 
+            <strong>Feature Contract Protection & Fail-Closed RuntimeError (F-12)</strong> 
             <span class="tag completed">Completed</span>
-            <div class="details">Fixed positional Column_N feature shape coercion mismatch by automatically truncating extra features or zero-padding missing features for legacy models.</div>
+            <div class="details">Restored strict fail-closed RuntimeError on positional feature shape deficits in ensemble.py (_slice_model_input). Prohibited zero-padding financial indicators (RSI=0, ATR_norm=0, ADX=0). Optional ALLOW_FEATURE_PADDING=1 environment variable gate added for emergency overrides with error logging. Added test_positional_feature_mismatch_raises_runtime_error.</div>
         </li>
         <li>
             <strong>4H Timeframe (240m) Integration into Retrain Pipeline</strong> 
@@ -65,9 +65,9 @@
             <div class="details">Connected ENABLE_REGIME_HYSTERESIS, STRONG_TREND_ADX_ENTER (32.0), and STRONG_TREND_ADX_EXIT (28.0) in signal_evaluator.py to mitigate regime flapping.</div>
         </li>
         <li>
-            <strong>Iterative VIF Multicollinearity Removal (F-22)</strong> 
+            <strong>Iterative VIF Multicollinearity Removal & Statsmodels Dependency (F-22)</strong> 
             <span class="tag completed">Completed</span>
-            <div class="details">Implemented Variance Inflation Factor (VIF > 10.0) feature selection in feature_pipeline.py alongside pairwise correlation filtering.</div>
+            <div class="details">Implemented Variance Inflation Factor (VIF > 10.0) feature selection in feature_pipeline.py and added statsmodels==0.14.4 to requirements.txt to activate execution in production and CI.</div>
         </li>
         <li>
             <strong>Adaptive Triple-Barrier Multipliers & High/Low Labeling Alignment (F-23 & F-24)</strong> 
@@ -87,7 +87,12 @@
         <li>
             <strong>Shared State Lock Synchronization (F-27)</strong> 
             <span class="tag completed">Completed</span>
-            <div class="details">Added state_lock in signal_evaluator.py to protect shared bot_state dictionary mutations against race conditions with dashboard web server threads.</div>
+            <div class="details">Added state_lock across ALL 5 bot_state dictionary writes (regime_*, adx_*, latest_prediction_*, confluence_results_*) in signal_evaluator.py to protect shared memory against race conditions.</div>
+        </li>
+        <li>
+            <strong>Dead Duplicate Routes Removal (F-34)</strong> 
+            <span class="tag completed">Completed</span>
+            <div class="details">Purged dead duplicate route definitions (/api/health, /api/status, /) from main.py, leaving dashboard_routes.py as the sole blueprint routing authority.</div>
         </li>
         <li>
             <strong>Container Deployment Port Standardization (F-30)</strong> 
@@ -103,11 +108,6 @@
             <strong>Learning Engine Event Saturation & Fail-Safe Risk Multiplier (F-32)</strong> 
             <span class="tag completed">Completed</span>
             <div class="details">Updated learning_engine.py with event queue saturation logging & timeout blocking. Updated get_risk_multiplier to fail-safe to conservative 0.75 de-risking multiplier on exception.</div>
-        </li>
-        <li>
-            <strong>Shadowed Duplicate Routes Clean-up (F-34)</strong> 
-            <span class="tag completed">Completed</span>
-            <div class="details">Cleaned up dead shadowed route definitions in main.py to enforce single authoritative route handlers in dashboard_routes.py.</div>
         </li>
         <li>
             <strong>Empirical Post-Mortem Contract Assertion Verification (F-35)</strong> 

@@ -3421,57 +3421,7 @@ def run_bybit_balance_updater():
         except Exception as e:
             print(f"[Bybit Balance] Error in background balance update: {e}")
 
-@app.route("/api/health")
-def get_health():
-    ws_status = "live" if ws_connected else "disconnected"
-    private_ws_status = "live" if private_ws_connected else "disconnected"
-    
-    max_age_hours = 0.0
-    if model_files_mtime:
-        newest_mtime = max(model_files_mtime.values())
-        max_age_hours = (time.time() - newest_mtime) / 3600.0
-        
-    active_count = 0
-    with bot_state_lock:
-        for tf in ACTIVE_TRADE_TF_KEYS:
-            active_count += len(bot_state.get(f"active_trade_{tf}", []))
-            
-    return jsonify({
-        "status": "ok",
-        "uptime_seconds": int(time.time() - startup_time),
-        "bybit_api": "connected" if get_real_bybit_balance_cached() != "API_KEYS_MISSING" else "API_KEYS_MISSING",
-        "websocket": ws_status,
-        "private_websocket": private_ws_status,
-        "model_weights_age_hours": round(max_age_hours, 2),
-        "active_trades": active_count,
-        "last_candle_close": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(last_ws_update_time)) if last_ws_update_time > 0 else "N/A"
-    })
 
-
-@app.route("/api/status")
-def get_status():
-    # Thread-safe dictionary copy using the global bot_state_lock
-    with bot_state_lock:
-        state_copy = bot_state.copy()
-        for tf in ACTIVE_TRADE_TF_KEYS:
-            tf_key = f"active_trade_{tf}"
-            if tf_key in state_copy and isinstance(state_copy[tf_key], list):
-                state_copy[tf_key] = list(state_copy[tf_key])
-
-    # Filter out simulated skipped trades from the frontend view
-    if "trade_history" in state_copy:
-        state_copy["trade_history"] = [
-            t for t in state_copy["trade_history"]
-            if "SIMULATED" not in str(t.get("reason", "")).upper()
-        ]
-
-    with logs_lock:
-        state_copy["logs"] = list(bot_logs)
-    
-    # Inject cached real Bybit balance
-    state_copy["real_bybit_balance"] = get_real_bybit_balance_cached()
-    
-    return jsonify(state_copy)
 
 @app.route("/api/research_report")
 def get_research_report():
@@ -4402,13 +4352,7 @@ def api_backtest():
         ]
     })
 
-@app.route("/")
-def index():
-    resp = make_response(render_template("index.html"))
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
+
 
 def retrain_models_thread(is_manual=False):
     """

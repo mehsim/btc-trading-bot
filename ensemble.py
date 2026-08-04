@@ -135,11 +135,15 @@ def _slice_model_input(model, X):
                     # Extra features — slice to first N
                     return df.iloc[:, :n_exp]
                 elif n_got < n_exp:
-                    # Fewer features than model expects — zero-pad the remainder
-                    import warnings
-                    warnings.warn(f"[Ensemble] Padding {n_exp - n_got} zero features (model expects {n_exp}, got {n_got}). Retrain models to fix.")
-                    pad = pd.DataFrame(np.zeros((len(df), n_exp - n_got)), index=df.index)
-                    return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
+                    if os.environ.get("ALLOW_FEATURE_PADDING") == "1":
+                        print(f"[CRITICAL MODEL GOVERNANCE ALERT] Feature padding explicitly allowed via ALLOW_FEATURE_PADDING=1. Padding {n_exp - n_got} zero features.")
+                        pad = pd.DataFrame(np.zeros((len(df), n_exp - n_got)), index=df.index)
+                        return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
+                    else:
+                        raise RuntimeError(
+                            f"[Feature Shape Mismatch Error (F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_exp}). "
+                            f"Zero-padding features is prohibited because zero is not neutral for financial indicators (RSI=0, ATR_norm=0, ADX=0). Retrain models to match current feature contract."
+                        )
                 return df
             missing = [c for c in expected_names if c not in df.columns]
             if missing:
@@ -150,13 +154,19 @@ def _slice_model_input(model, X):
             return df[expected_names]
         elif n_expected and df.shape[1] != n_expected:
             # No feature names — model trained on positional numpy array.
-            if df.shape[1] > n_expected:
+            n_got = df.shape[1]
+            if n_got > n_expected:
                 return df.iloc[:, :n_expected]
-            elif df.shape[1] < n_expected:
-                import warnings
-                warnings.warn(f"[Ensemble] Padding {n_expected - df.shape[1]} zero features (model expects {n_expected}, got {df.shape[1]}). Retrain models to fix.")
-                pad = pd.DataFrame(np.zeros((len(df), n_expected - df.shape[1])), index=df.index)
-                return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
+            elif n_got < n_expected:
+                if os.environ.get("ALLOW_FEATURE_PADDING") == "1":
+                    print(f"[CRITICAL MODEL GOVERNANCE ALERT] Feature padding explicitly allowed via ALLOW_FEATURE_PADDING=1. Padding {n_expected - n_got} zero features.")
+                    pad = pd.DataFrame(np.zeros((len(df), n_expected - n_got)), index=df.index)
+                    return pd.concat([df.reset_index(drop=True), pad.reset_index(drop=True)], axis=1)
+                else:
+                    raise RuntimeError(
+                        f"[Feature Shape Mismatch Error (F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_expected}). "
+                        f"Zero-padding features is prohibited because zero is not neutral for financial indicators (RSI=0, ATR_norm=0, ADX=0). Retrain models to match current feature contract."
+                    )
         return df
     elif isinstance(X, dict):
         if expected_names:

@@ -146,15 +146,16 @@ class SignalEvaluator:
                     else:
                         calibrated_conf = float(raw_conf)
                     
-                    self.bot_state[f"latest_prediction_{tf_key}"] = {
-                        "symbol": str(symbol),
-                        "direction": str(direction),
-                        "confidence": float(raw_conf),
-                        "calibrated_confidence": float(calibrated_conf),
-                        "predicted_change": float(pred_pct * float(last_row["close"])),
-                        "signal_source": "ML_ENSEMBLE",
-                        "is_fallback": False
-                    }
+                    with self.state_lock:
+                        self.bot_state[f"latest_prediction_{tf_key}"] = {
+                            "symbol": str(symbol),
+                            "direction": str(direction),
+                            "confidence": float(raw_conf),
+                            "calibrated_confidence": float(calibrated_conf),
+                            "predicted_change": float(pred_pct * float(last_row["close"])),
+                            "signal_source": "ML_ENSEMBLE",
+                            "is_fallback": False
+                        }
                     model_eval_success = True
                 except Exception as ex_m:
                     import traceback
@@ -177,19 +178,21 @@ class SignalEvaluator:
                     conf = min(0.55, 0.50 + max(0.0, (55.0 - rsi) / 200.0))
                     change_val = -close_p * 0.003
 
-                self.bot_state[f"latest_prediction_{tf_key}"] = {
-                    "symbol": str(symbol),
-                    "direction": str(direction),
-                    "confidence": float(conf),
-                    "calibrated_confidence": float(conf),
-                    "predicted_change": float(change_val),
-                    "signal_source": "RULE_BASED_FALLBACK",
-                    "is_fallback": True
-                }
+                with self.state_lock:
+                    self.bot_state[f"latest_prediction_{tf_key}"] = {
+                        "symbol": str(symbol),
+                        "direction": str(direction),
+                        "confidence": float(conf),
+                        "calibrated_confidence": float(conf),
+                        "predicted_change": float(change_val),
+                        "signal_source": "RULE_BASED_FALLBACK",
+                        "is_fallback": True
+                    }
 
             # Update Confluence Results for UI
             self.update_confluence_results(tf_key, df, symbol)
-            sig_src = self.bot_state.get(f"latest_prediction_{tf_key}", {}).get("signal_source", "UNKNOWN")
+            with self.state_lock:
+                sig_src = self.bot_state.get(f"latest_prediction_{tf_key}", {}).get("signal_source", "UNKNOWN")
             print(f"[SignalEvaluator] Evaluated {interval}m: Regime={regime_str}, Direction={direction}, Source={sig_src}, ADX={adx_val:.1f}")
 
         except Exception as e:
@@ -215,7 +218,13 @@ class SignalEvaluator:
         adx_val = float(last_row.get("ADX", 20.0))
         
         # Pred info & external data lookup
-        pred_info = self.bot_state.get(f"latest_prediction_{tf_key}", {})
+        with self.state_lock:
+            pred_info = dict(self.bot_state.get(f"latest_prediction_{tf_key}", {}))
+            ofi = self.bot_state.get("latest_ofi")
+            sentiment = self.bot_state.get("latest_sentiment_score") or (last_row["fear_greed"] if "fear_greed" in last_row and not np.isnan(last_row["fear_greed"]) else None)
+            pred_15 = self.bot_state.get("latest_prediction_15m", {}).get("direction")
+            pred_1h = self.bot_state.get("latest_prediction_1h", {}).get("direction")
+
         pred_change = abs(float(pred_info.get("predicted_change", 0.0)))
         fee_hurdle = close * 0.0012
 
@@ -248,7 +257,6 @@ class SignalEvaluator:
             detail_fee = "Not Evaluated (No Model Target)"
 
         # Orderbook Imbalance (L2 Stream)
-        ofi = self.bot_state.get("latest_ofi")
         if ofi is not None:
             pass_ofi = bool(ofi >= 0.0)
             detail_ofi = f"L2 Orderbook OFI {ofi:+.3f}"
@@ -257,7 +265,6 @@ class SignalEvaluator:
             detail_ofi = "Not Evaluated (No L2 Data Stream)"
 
         # News Sentiment
-        sentiment = self.bot_state.get("latest_sentiment_score") or (last_row["fear_greed"] if "fear_greed" in last_row and not np.isnan(last_row["fear_greed"]) else None)
         if sentiment is not None:
             pass_sent = bool(float(sentiment) >= 30.0)
             detail_sent = f"Sentiment Index {float(sentiment):.1f} (min 30.0)"
@@ -275,8 +282,6 @@ class SignalEvaluator:
             detail_exp = "Not Evaluated (No Model Target)"
 
         # Timeframe Alignment
-        pred_15 = self.bot_state.get("latest_prediction_15m", {}).get("direction")
-        pred_1h = self.bot_state.get("latest_prediction_1h", {}).get("direction")
         if pred_15 and pred_1h:
             pass_align = bool(pred_15 == pred_1h)
             detail_align = f"15m ({pred_15}) aligned with 1h ({pred_1h})"
@@ -293,25 +298,26 @@ class SignalEvaluator:
             pass_oi = None
             detail_oi = "Not Evaluated (No Live OI Feed)"
 
-        self.bot_state[f"confluence_results_{tf_key}"] = {
-            "checks": {
-                "1d_Trend": {"pass": pass_1d, "detail": detail_1d},
-                "4h_Trend": {"pass": bool(ema9 >= ema21), "detail": f"EMA9 ({ema9:.2f}) vs EMA21 ({ema21:.2f})"},
-                "4h_RSI": {"pass": bool(rsi >= 30.0 and rsi <= 70.0), "detail": f"4h RSI {rsi:.1f} in safe neutral band [30, 70]"},
-                "1h_RSI": {"pass": bool(rsi >= 25.0 and rsi <= 75.0), "detail": f"1h RSI {rsi:.1f} in safe neutral band [25, 75]"},
-                "Volume_Participation": {"pass": bool(vol_ratio >= 0.8), "detail": f"Volume ratio {vol_ratio:.2f}x vs 20-avg (min 0.8x)"},
-                "BB_Edge_Guard": {"pass": pass_bb, "detail": detail_bb},
-                "Counter_Momentum": {"pass": pass_cm, "detail": detail_cm},
-                "Volatility_Guard": {"pass": pass_vol_g, "detail": detail_vol_g},
-                "ADX_Regime": {"pass": pass_adx, "detail": detail_adx},
-                "Fee_Coverage": {"pass": pass_fee, "detail": detail_fee},
-                "Orderbook_Imbalance": {"pass": pass_ofi, "detail": detail_ofi},
-                "News_Sentiment": {"pass": pass_sent, "detail": detail_sent},
-                "Expected_Change": {"pass": pass_exp, "detail": detail_exp},
-                "Timeframe_Alignment": {"pass": pass_align, "detail": detail_align},
-                "Open_Interest_Delta": {"pass": pass_oi, "detail": detail_oi}
+        with self.state_lock:
+            self.bot_state[f"confluence_results_{tf_key}"] = {
+                "checks": {
+                    "1d_Trend": {"pass": pass_1d, "detail": detail_1d},
+                    "4h_Trend": {"pass": bool(ema9 >= ema21), "detail": f"EMA9 ({ema9:.2f}) vs EMA21 ({ema21:.2f})"},
+                    "4h_RSI": {"pass": bool(rsi >= 30.0 and rsi <= 70.0), "detail": f"4h RSI {rsi:.1f} in safe neutral band [30, 70]"},
+                    "1h_RSI": {"pass": bool(rsi >= 25.0 and rsi <= 75.0), "detail": f"1h RSI {rsi:.1f} in safe neutral band [25, 75]"},
+                    "Volume_Participation": {"pass": bool(vol_ratio >= 0.8), "detail": f"Volume ratio {vol_ratio:.2f}x vs 20-avg (min 0.8x)"},
+                    "BB_Edge_Guard": {"pass": pass_bb, "detail": detail_bb},
+                    "Counter_Momentum": {"pass": pass_cm, "detail": detail_cm},
+                    "Volatility_Guard": {"pass": pass_vol_g, "detail": detail_vol_g},
+                    "ADX_Regime": {"pass": pass_adx, "detail": detail_adx},
+                    "Fee_Coverage": {"pass": pass_fee, "detail": detail_fee},
+                    "Orderbook_Imbalance": {"pass": pass_ofi, "detail": detail_ofi},
+                    "News_Sentiment": {"pass": pass_sent, "detail": detail_sent},
+                    "Expected_Change": {"pass": pass_exp, "detail": detail_exp},
+                    "Timeframe_Alignment": {"pass": pass_align, "detail": detail_align},
+                    "Open_Interest_Delta": {"pass": pass_oi, "detail": detail_oi}
+                }
             }
-        }
 
 
 def run_signal_evaluator_loop(bot_state):

@@ -38,5 +38,18 @@ class TestFeatureSlicingContract(unittest.TestCase):
             _slice_model_input(model, df)
         self.assertIn("missing 1 required model features", str(cm.exception))
 
+    def test_positional_feature_mismatch_raises_runtime_error(self):
+        """Verify F-12: Positional model feature count deficit raises RuntimeError (Fail-Closed)."""
+        class MockPositionalModel:
+            feature_names_ = [f"Column_{i}" for i in range(46)]
+
+        model = MockPositionalModel()
+        # Input DataFrame with only 35 features
+        df = pd.DataFrame(np.ones((1, 35)))
+
+        with self.assertRaises(RuntimeError) as cm:
+            _slice_model_input(model, df)
+        self.assertIn("Input vector feature count (35) does not match model expected features (46)", str(cm.exception))
+
 if __name__ == "__main__":
     unittest.main()
