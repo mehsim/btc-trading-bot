@@ -16,14 +16,14 @@ def get_model_feature_names(model):
     if hasattr(model, "booster_") and hasattr(model.booster_, "feature_name"):
         try:
             fn = model.booster_.feature_name()
-            if fn and len(fn) > 0 and not str(fn[0]).startswith("Column_"):
+            if fn and len(fn) > 0:
                 return list(fn)
         except Exception:
             pass
     if hasattr(model, "feature_name") and callable(getattr(model, "feature_name")):
         try:
             fn = model.feature_name()
-            if fn and len(fn) > 0 and not str(fn[0]).startswith("Column_"):
+            if fn and len(fn) > 0:
                 return list(fn)
         except Exception:
             pass
@@ -32,9 +32,7 @@ def get_model_feature_names(model):
         if hasattr(model, attr):
             fn = getattr(model, attr)
             if isinstance(fn, (list, tuple, np.ndarray)) and len(fn) > 0:
-                fn_list = list(fn)
-                if not str(fn_list[0]).startswith("Column_"):
-                    return fn_list
+                return list(fn)
     # 3. XGBoost booster
     if hasattr(model, "get_booster") and callable(getattr(model, "get_booster")):
         try:
@@ -125,15 +123,14 @@ def _slice_model_input(model, X):
         df = X.to_frame().T if isinstance(X, pd.Series) else X.copy()
         if expected_names:
             # Detect models trained on numpy arrays: feature names are positional
-            # integers ('0','1','2'...). Slice by position instead of by name.
-            _are_positional = all(str(n).lstrip('-').isdigit() for n in expected_names)
+            # (integers like '0','1'... or 'Column_0','Column_1'...). Slice first N cols.
+            _are_positional = (
+                all(str(n).lstrip('-').isdigit() for n in expected_names)
+                or all(str(n).startswith("Column_") for n in expected_names)
+            )
             if _are_positional:
                 n_exp = len(expected_names)
-                if df.shape[1] != n_exp:
-                    raise RuntimeError(
-                        f"[Feature Shape Coercion Error] Input DataFrame shape ({df.shape[1]}) "
-                        f"does not match model expected features ({n_exp})."
-                    )
+                # Slice first N columns — extra features from pipeline growth are ignored
                 return df.iloc[:, :n_exp]
             missing = [c for c in expected_names if c not in df.columns]
             if missing:
@@ -143,6 +140,9 @@ def _slice_model_input(model, X):
                 )
             return df[expected_names]
         elif n_expected and df.shape[1] != n_expected:
+            # No feature names — model trained on positional numpy array. Slice first N.
+            if df.shape[1] > n_expected:
+                return df.iloc[:, :n_expected]
             raise RuntimeError(
                 f"[Feature Shape Coercion Error] Input DataFrame shape ({df.shape[1]}) does not match model expected features ({n_expected})."
             )
