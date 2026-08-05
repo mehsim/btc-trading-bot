@@ -1,0 +1,1 @@
+["RSI", "close_to_EMA50", "close_to_EMA200", "BB_pct", "volume_ratio", "MACD_diff_diff", "ADX", "ADX_pos", "ADX_neg", "close_to_VWAP", "btc_return_5m_lag1", "btc_return_5m_lag2", "volatility_24h", "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos", "RSI_z", "return_5m_lag2", "return_5m_lag4", "volume_ratio_lag1", "volume_ratio_lag2"]
