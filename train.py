@@ -1225,9 +1225,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_raw))
                     chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_raw))
                 except Exception as ex_brier:
-                    log_event("WARNING", f"Holdout calibration metric calculation notice: {ex_brier}")
-                    chal_brier = 0.18
-                    chal_ece = 0.035
+                    log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
+                    chal_brier = 0.99
+                    chal_ece = 0.99
+                    should_save = False
 
                 print(f"  [Champion-Challenger] Frozen Hold-Out Comparison for {name.upper()}:")
                 print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
@@ -1241,12 +1242,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 else:
                     should_save = False
             except Exception as eval_err:
-                print(f"  [Champion-Challenger Warning] Error during hold-out comparison: {eval_err}. Defaulting to save.")
-                should_save = True
-                chal_acc = 0.50
-                chal_mae = 0.01
-                chal_brier = 0.18
-                chal_ece = 0.035
+                print(f"  [Champion-Challenger Warning] Error during hold-out comparison: {eval_err}. Failing closed.")
+                should_save = False
+                chal_acc = 0.0
+                chal_mae = 999.0
+                chal_brier = 0.99
+                chal_ece = 0.99
         else:
             chal_acc = 0.55
             chal_mae = 0.01
@@ -1256,9 +1257,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_raw))
                 chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_raw))
             except Exception as ex_brier:
-                log_event("WARNING", f"Holdout calibration metric calculation notice: {ex_brier}")
-                chal_brier = 0.18
-                chal_ece = 0.035
+                log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
+                chal_brier = 0.99
+                chal_ece = 0.99
+                should_save = False
 
         if should_save:
             from mlops_engine import log_mlflow_training_run, promote_if_better
