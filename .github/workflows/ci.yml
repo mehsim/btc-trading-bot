@@ -70,11 +70,15 @@ jobs:
     - name: Deploy & Smoke Test with Automatic Rollback (AWS Singapore)
       env:
         SSH_KEY: ${{ secrets.AWS_SINGAPORE_KEY }}
-        AWS_HOST: ${{ secrets.AWS_HOST || '127.0.0.1' }}
+        AWS_HOST: ${{ secrets.AWS_HOST }}
       run: |
         if [ -z "$SSH_KEY" ]; then
           echo "AWS_SINGAPORE_KEY secret not configured — skipping deploy."
           exit 0
+        fi
+        if [ -z "$AWS_HOST" ]; then
+          echo "AWS_HOST secret not configured — deployment aborted."
+          exit 1
         fi
         echo "$SSH_KEY" > /tmp/deploy_key.pem
         chmod 600 /tmp/deploy_key.pem
