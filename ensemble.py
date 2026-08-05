@@ -604,6 +604,17 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
 
     manifest_path = f"{prefix}_manifest.json"
     EMPTY_HASH = "e3b0c44298fc"
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r") as mf:
+                m_data = json.load(mf)
+                if not feature_names:
+                    feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
+                if n_features is None and feature_names:
+                    n_features = len(feature_names)
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
+
     if feature_names:
         if not os.path.exists(manifest_path):
             write_model_manifest(prefix, feature_names=feature_names)
@@ -859,6 +870,17 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
 
     manifest_path = f"{prefix}_manifest.json"
     EMPTY_HASH = "e3b0c44298fc"
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r") as mf:
+                m_data = json.load(mf)
+                if not feature_names:
+                    feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
+                if n_features is None and feature_names:
+                    n_features = len(feature_names)
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
+
     if feature_names:
         if not os.path.exists(manifest_path):
             write_model_manifest(prefix, feature_names=feature_names)

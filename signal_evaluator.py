@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any
 
+from logger import log_event
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features, calibrate_confidence, features
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
@@ -30,25 +31,67 @@ class SignalEvaluator:
         cache_key = f"{interval}_{regime_key}"
         if cache_key in self.models_by_interval:
             return self.models_by_interval[cache_key]
+        if interval in self.models_by_interval and isinstance(self.models_by_interval[interval], dict) and regime_key in self.models_by_interval[interval]:
+            return self.models_by_interval[interval][regime_key]
 
         import json, os, gc
-        def _load_feats(primary, fallback=None):
-            for fname in filter(None, [primary, fallback, f"selected_features_{interval}.json", "selected_features_30.json"]):
+
+        manifest_path = f"ensemble_{regime_key}_trend_{interval}_manifest.json"
+        feat_list = None
+        model_ver_str = None
+        git_sha_str = None
+
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r") as mf:
+                    m_data = json.load(mf)
+                    feat_list = m_data.get("feature_names") or m_data.get("surviving_features")
+                    m_ver = m_data.get("model_version", "v7.2.0")
+                    git_sha_str = m_data.get("git_sha", "unknown")
+                    model_ver_str = f"btc_{interval}m_{regime_key}_clf:{m_ver}"
+            except Exception as ex_m:
+                log_event("WARNING", f"[SignalEvaluator Warning] Failed reading manifest {manifest_path}: {ex_m}")
+
+        if not feat_list:
+            for fname in [f"selected_features_{interval}_{regime_key}.json", f"selected_features_{interval}.json"]:
                 if os.path.exists(fname):
                     try:
                         with open(fname) as f:
-                            feat = json.load(f)
-                            if feat:
-                                return feat
-                    except (ValueError, TypeError, KeyError, OSError):
-                        pass
-            return features
+                            feat_list = json.load(f)
+                            if feat_list:
+                                break
+                    except (ValueError, TypeError, KeyError, OSError) as ex_f:
+                        log_event("WARNING", f"[SignalEvaluator Info] Feature file notice: {ex_f}")
 
-        feat_list = _load_feats(f"selected_features_{interval}_{regime_key}.json", f"selected_features_{interval}.json")
+        if not feat_list:
+            log_event("ERROR", f"[SignalEvaluator ERROR] No feature contract list found for {interval}m ({regime_key}). Failing closed.")
+            return None
+
+        if not model_ver_str:
+            model_ver_str = f"btc_{interval}m_{regime_key}_clf:v7.2.0"
+
+        # Load Calibrator Artefact (C-04)
+        calibrator_data = None
+        cal_ver_str = "v1.0_default"
+        cal_ece_val = 0.035
+        cal_path = f"calibrator_{regime_key}_{interval}.json"
+        if os.path.exists(cal_path):
+            try:
+                with open(cal_path, "r") as cf:
+                    calibrator_data = json.load(cf)
+                    cal_ver_str = calibrator_data.get("version", f"v1.0_isotonic_{interval}m")
+                    cal_ece_val = float(calibrator_data.get("ece", 0.035))
+            except Exception as ex_cal:
+                log_event("WARNING", f"[SignalEvaluator Warning] Failed reading calibrator {cal_path}: {ex_cal}")
+
+        if calibrator_data is None:
+            calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0], "version": cal_ver_str, "ece": cal_ece_val}
+
         try:
-            m_trend = load_ensemble_classifier(f"ensemble_{regime_key}_trend_{interval}", len(feat_list))
-            m_price = load_ensemble_regressor(f"ensemble_{regime_key}_price_{interval}", len(feat_list))
+            m_trend = load_ensemble_classifier(f"ensemble_{regime_key}_trend_{interval}", n_features=len(feat_list), feature_names=feat_list)
+            m_price = load_ensemble_regressor(f"ensemble_{regime_key}_price_{interval}", n_features=len(feat_list), feature_names=feat_list)
             if m_trend is None or m_price is None:
+                log_event("ERROR", f"[SignalEvaluator ERROR] Ensemble loading returned None for {interval}m ({regime_key})")
                 return None
                 
             # Keep at most 2 active regime models in memory
@@ -60,12 +103,17 @@ class SignalEvaluator:
             res = {
                 "trend": m_trend,
                 "price": m_price,
-                "selected_features": feat_list
+                "selected_features": feat_list,
+                "model_version": model_ver_str,
+                "git_sha": git_sha_str,
+                "calibrator": calibrator_data,
+                "calibrator_version": cal_ver_str,
+                "calibrator_ece": cal_ece_val
             }
             self.models_by_interval[cache_key] = res
             return res
         except Exception as e:
-            print(f"[SignalEvaluator Info] Lazy model loading for {interval}m ({regime_key}): {e}")
+            log_event("ERROR", f"[SignalEvaluator ERROR] Lazy model loading for {interval}m ({regime_key}): {e}")
             return None
 
     def evaluate_interval(self, symbol="BTCUSDT", interval="15"):
@@ -105,20 +153,14 @@ class SignalEvaluator:
                     _regime_key = "trending" if is_trending else "ranging"
                     _feat_list = models.get("selected_features") or features
 
-                    # Guard: if selected_features has fewer cols than model expects, use all features
-                    # so _slice_model_input can correctly truncate to model's expected count.
-                    from ensemble import get_model_feature_names
-                    _model_fn = get_model_feature_names(models["trend"])
-                    _n_model = len(_model_fn) if _model_fn else None
-                    if _n_model and len(_feat_list) < _n_model:
-                        _feat_list = features  # fall back to full feature set
+                    # Ensure all required features are present in df
+                    for f_col in _feat_list:
+                        if f_col not in df.columns:
+                            df[f_col] = 0.0
 
-                    # Only keep features present in df
-                    _feat_list = [f for f in _feat_list if f in df.columns]
                     row_X = df[_feat_list].iloc[[-1]]
                     row_X_sliced = _slice_model_input(models["trend"], row_X)
 
-                    
                     probs = models["trend"].predict_proba(row_X_sliced)[0]
                     pred_pct = float(models["price"].predict(row_X_sliced)[0])
                     
@@ -165,9 +207,8 @@ class SignalEvaluator:
                     else:
                         calibrated_conf = float(raw_conf)
 
-                    cal_ver = calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default"
-                    cal_ece = float(calibrator.get("ece", 0.035)) if isinstance(calibrator, dict) else 0.035
-
+                    cal_ver = models.get("calibrator_version") or (calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default")
+                    cal_ece = float(models.get("calibrator_ece") or (calibrator.get("ece", 0.035) if isinstance(calibrator, dict) else 0.035))
                     served_version = models.get("model_version") or f"btc_{interval}m_{_regime_key}_clf:v1.0"
 
                     pred_entry = {
