@@ -787,14 +787,21 @@ def write_model_manifest(
             "metrics": _metrics
         }
 
+        def _json_safe(o):
+            if isinstance(o, (np.integer,)): return int(o)
+            if isinstance(o, (np.floating,)): return float(o)
+            if isinstance(o, np.ndarray): return o.tolist()
+            raise TypeError(f"Unserialisable: {type(o)}")
+
         hmac_key = get_manifest_hmac_secret()
-        canonical_json = json.dumps(manifest, sort_keys=True).encode("utf-8")
+        canonical_json = json.dumps(manifest, sort_keys=True, default=_json_safe).encode("utf-8")
         manifest["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
         with open(f"{prefix}_manifest.json", "w") as f:
-            json.dump(manifest, f, indent=2)
+            json.dump(manifest, f, indent=2, default=_json_safe)
     except Exception as e:
-        print(f"[Model Governance Warning] Could not write manifest for {prefix}: {e}")
+        log_event("ERROR", f"[Manifest] Write failed for {prefix}: {e}")
+        raise
 
 
 def get_manifest_hmac_secret() -> bytes:
