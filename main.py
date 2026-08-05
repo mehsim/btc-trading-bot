@@ -4771,8 +4771,8 @@ def load_model_weights(iv):
                 with open(manifest_path, "r") as f:
                     m = json.load(f)
                 schema_v = m.get("manifest_schema_version", 1)
-                if schema_v != SUPPORTED_MANIFEST_SCHEMA_VERSION:
-                    print(f"[CRITICAL ALERT] Model manifest schema version mismatch ({schema_v} != {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                if schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION or schema_v < 1:
+                    print(f"[CRITICAL ALERT] Model manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
                     return False
                 return True
             except Exception as e:
