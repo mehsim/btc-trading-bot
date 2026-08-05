@@ -63,8 +63,8 @@ class StatisticalValidation:
         pf_gain = pf_candidate - pf_baseline
         practical_pass = pf_gain >= self.min_pf_gain
         
-        # Dynamic family size multiple-testing correction (Optuna trial count or default m=12)
-        m_trials = max(1, num_trials) if 'num_trials' in locals() and num_trials is not None else 12
+        # Dynamic family size multiple-testing correction (Optuna trial count)
+        m_trials = max(1, num_trials)
         fdr_q_val = min(1.0, float(p_value * m_trials))
         statistical_pass = fdr_q_val < self.fdr_alpha
 
