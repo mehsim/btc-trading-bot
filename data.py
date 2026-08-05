@@ -1,3 +1,5 @@
+from typing import Optional
+from logger import log_event
 import os
 import time
 import requests
@@ -36,15 +38,15 @@ def safe_get_sqlite_conn(db_path=DB_PATH, timeout=60.0):
             try:
                 if 'conn' in locals() and conn:
                     conn.close()
-            except Exception:
-                pass
+            except Exception as ex_data:
+                log_event("WARNING", f"data notice: {ex_data}")
             for ext in ["", "-wal", "-shm"]:
                 target = f"{db_path}{ext}"
                 if os.path.exists(target):
                     try:
                         os.remove(target)
-                    except Exception:
-                        pass
+                    except Exception as ex_data:
+                        log_event("WARNING", f"data notice: {ex_data}")
             time.sleep(0.5)
     conn = sqlite3.connect(db_path, timeout=timeout)
     conn.execute("PRAGMA busy_timeout = 60000;")
@@ -121,8 +123,8 @@ def init_db():
             if re.match(r'^[a-zA-Z0-9_]+$', col):
                 try:
                     conn.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
-                except Exception:
-                    pass
+                except Exception as ex_data:
+                    log_event("WARNING", f"data notice: {ex_data}")
         conn.commit()
         conn.close()
         _db_initialized = True
@@ -812,17 +814,20 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     # Hermetic Fetch with Fallback
     try:
         df_oi = get_bybit_oi_history(symbol=symbol, interval=interval, start_ts_ms=min_ts, end_ts_ms=max_ts)
-    except Exception:
+    except Exception as ex_data:
+        log_event("WARNING", f"data notice: {ex_data}")
         df_oi = pd.DataFrame(columns=["timestamp", "open_interest"])
 
     try:
         df_funding = get_bybit_funding_history(symbol=symbol, start_ts_ms=min_ts, end_ts_ms=max_ts)
-    except Exception:
+    except Exception as ex_data:
+        log_event("WARNING", f"data notice: {ex_data}")
         df_funding = pd.DataFrame(columns=["timestamp", "funding_rate"])
 
     try:
         df_fng = get_fear_and_greed_history()
-    except Exception:
+    except Exception as ex_data:
+        log_event("WARNING", f"data notice: {ex_data}")
         df_fng = pd.DataFrame(columns=["timestamp", "fear_greed"])
 
     # Merge open interest
@@ -898,7 +903,7 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     
     return df
 
-def classify_market_regime(df_history: pd.DataFrame, interval: str = None) -> str:
+def classify_market_regime(df_history: pd.DataFrame, interval: Optional[str] = None) -> str:
     """
     4-Regime Classification:
     1. High Vol, Trending (Breakout)

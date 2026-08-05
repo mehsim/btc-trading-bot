@@ -1,3 +1,4 @@
+from logger import log_event
 import os
 import time
 import json
@@ -107,7 +108,8 @@ def get_bybit_time_offset() -> int:
                         _cached_time_offset = offset
                         _last_time_sync = time.time()
                     return offset
-        except Exception:
+        except Exception as ex_bybit_client:
+            log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
             time.sleep(1)
     return 0
 
@@ -117,8 +119,8 @@ def _update_latency(start_time: float):
         lat_ms = max(5, int((time.time() - start_time) * 1000))
         from state_manager import state_manager
         state_manager["last_api_latency_ms"] = lat_ms
-    except Exception:
-        pass
+    except Exception as ex_bybit_client:
+        log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
 
 
 from secret_manager import get_secure_env
@@ -156,7 +158,8 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
             status = resp.status
             try:
                 data = await resp.json()
-            except Exception:
+            except Exception as ex_bybit_client:
+                log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
                 text = await resp.text()
                 data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
             return status, data
@@ -176,11 +179,12 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
                     time.sleep(1 + attempt * 1.5)
                     continue
                 return res if isinstance(res, dict) else {"retCode": status, "retMsg": str(res)}
-        except Exception as e:
+        except Exception as ex_bybit_client:
+            log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
             if attempt < max_retries - 1:
                 time.sleep(1 + attempt * 1.5)
                 continue
-            return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+            return {"retCode": -1, "retMsg": f"Connection Error: {ex_bybit_client}"}
 
 
 def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -215,7 +219,8 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
             status = resp.status
             try:
                 data = await resp.json()
-            except Exception:
+            except Exception as ex_bybit_client:
+                log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
                 text = await resp.text()
                 data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
             return status, data
@@ -235,11 +240,12 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
                     time.sleep(1 + attempt * 1.5)
                     continue
                 return res if isinstance(res, dict) else {"retCode": status, "retMsg": str(res)}
-        except Exception as e:
+        except Exception as ex_bybit_client:
+            log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
             if attempt < max_retries - 1:
                 time.sleep(1 + attempt * 1.5)
                 continue
-            return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+            return {"retCode": -1, "retMsg": f"Connection Error: {ex_bybit_client}"}
 
 
 def execute_bybit_order_ws_or_rest(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -269,7 +275,8 @@ def format_bybit_price(symbol: str, price: float) -> str:
         tick_str = specs.get("tickSize", "0.01")
         p = len(tick_str.split(".")[1]) if "." in tick_str else 0
         return f"{p_val:.{p}f}"
-    except Exception:
+    except Exception as ex_bybit_client:
+        log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         price_precisions = {
             "BTCUSDT": 2, "ETHUSDT": 2, "SOLUSDT": 3, "BNBUSDT": 2,
             "AVAXUSDT": 3, "NEARUSDT": 3, "LINKUSDT": 3, "LTCUSDT": 2,
@@ -289,7 +296,8 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
         if p == 0:
             return f"{int(q_val)}"
         return f"{q_val:.{p}f}"
-    except Exception:
+    except Exception as ex_bybit_client:
+        log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         precisions = {
             "BTCUSDT": 3, "ETHUSDT": 2, "SOLUSDT": 1, "BNBUSDT": 1,
             "AVAXUSDT": 1, "NEARUSDT": 1, "LINKUSDT": 1, "LTCUSDT": 1,
@@ -308,7 +316,8 @@ def get_bybit_min_qty_step(symbol: str) -> tuple:
         min_q = float(specs.get("minOrderQty", 0.001))
         step_q = float(specs.get("lotSize", 0.001))
         return min_q, step_q
-    except Exception:
+    except Exception as ex_bybit_client:
+        log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         mins = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
         steps = {"BTCUSDT": 0.001, "ETHUSDT": 0.01, "SOLUSDT": 0.1, "BNBUSDT": 0.01, "ADAUSDT": 1.0, "XRPUSDT": 1.0}
         return mins.get(symbol, 0.001), steps.get(symbol, 0.001)
@@ -567,7 +576,8 @@ def quantize_bybit_price(symbol: str, price: float) -> str:
     try:
         decimals = len(tick_str.split(".")[1]) if "." in tick_str else 0
         return f"{price:.{decimals}f}"
-    except Exception:
+    except Exception as ex_bybit_client:
+        log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         return format_bybit_price(symbol, price)
 
 class AccountBalanceUnavailableException(Exception):
@@ -612,7 +622,8 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
                             _real_balance_cache = total_equity
                             _last_real_balance_sync = now
                         return total_equity
-        except Exception:
+        except Exception as ex_bybit_client:
+            log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
             continue
 
     if _real_balance_cache is not None and _real_balance_cache > 0:
@@ -640,6 +651,6 @@ def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
                 else:
                     bot_state["wallet_balance"] = bal
                     bot_state["live_balance"] = bal
-        except Exception as e:
-            pass
+        except Exception as ex_bybit_client:
+            log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         time.sleep(5)

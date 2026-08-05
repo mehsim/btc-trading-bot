@@ -2,7 +2,7 @@
 tools/mypy_ratchet.py
 ---------------------
 Fix 4 Type Coverage Ratchet:
-Parses mypy output, counts type errors, and asserts count <= BASELINE (133).
+Parses mypy output, counts type errors, and asserts count <= BASELINE (111).
 Baseline ratchets down only as type annotations improve across the codebase.
 """
 
@@ -10,7 +10,7 @@ import argparse
 import re
 import sys
 
-BASELINE = 165
+BASELINE = 111
 
 
 def count_mypy_errors(mypy_output_path: str) -> int:

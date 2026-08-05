@@ -32,7 +32,7 @@ jobs:
     - name: Static Type Checking (mypy - Informational Track, Ratcheted)
       run: |
         mypy --ignore-missing-imports --explicit-package-bases . > mypy.txt 2>&1 || true
-        python tools/mypy_ratchet.py mypy.txt --baseline 165
+        python tools/mypy_ratchet.py mypy.txt --baseline 111
       continue-on-error: false
 
     - name: Silent Handler Ratchet Check

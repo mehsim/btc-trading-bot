@@ -1,3 +1,4 @@
+from logger import log_event
 """
 websocket_client.py
 -------------------
@@ -66,7 +67,8 @@ def parse_proxy_url(proxy_url):
         auth = (parsed.username, parsed.password) if parsed.username else None
         scheme = (parsed.scheme or "http").lower()
         return host, port, auth, scheme
-    except Exception:
+    except Exception as ex_websocket_client:
+        log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
         return None, None, None, None
 
 
@@ -230,7 +232,8 @@ def on_open(ws):
         while ws_connected:
             try:
                 ws.send(json.dumps({"op": "ping"}))
-            except Exception:
+            except Exception as ex_websocket_client:
+                log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
                 break
             time.sleep(20)
     threading.Thread(target=send_heartbeat, daemon=True).start()
@@ -270,8 +273,8 @@ def start_ws(bot_state=None):
             try:
                 import certifi
                 ssl_opts["ca_certs"] = certifi.where()
-            except Exception:
-                pass
+            except Exception as ex_websocket_client:
+                log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
                 http_proxy_host=proxy_host,
@@ -320,7 +323,8 @@ def on_private_open(ws):
         while private_ws_connected:
             try:
                 ws.send(json.dumps({"op": "ping"}))
-            except Exception:
+            except Exception as ex_websocket_client:
+                log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
                 break
             time.sleep(20)
     threading.Thread(target=send_private_heartbeat, daemon=True).start()
@@ -362,8 +366,8 @@ def on_private_message(ws, message, bot_state=None):
                     try:
                         from bybit_client import update_real_bybit_balance_cache
                         update_real_bybit_balance_cache(val)
-                    except Exception:
-                        pass
+                    except Exception as ex_websocket_client:
+                        log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
                     print(f"[WebSocket Private] Balance updated dynamically from wallet stream: {val}")
         elif topic == "order":
             order_list = data.get("data", [])
@@ -415,8 +419,8 @@ def start_private_ws(bot_state=None):
             try:
                 import certifi
                 ssl_opts_priv["ca_certs"] = certifi.where()
-            except Exception:
-                pass
+            except Exception as ex_websocket_client:
+                log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
             ws.run_forever(
                 ping_interval=20, ping_timeout=10,
                 http_proxy_host=proxy_host,

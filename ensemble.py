@@ -1,3 +1,5 @@
+from typing import Optional
+from logger import log_event
 import numpy as np
 import pandas as pd
 import math
@@ -18,15 +20,15 @@ def get_model_feature_names(model):
             fn = model.booster_.feature_name()
             if fn and len(fn) > 0:
                 return list(fn)
-        except Exception:
-            pass
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
     if hasattr(model, "feature_name") and callable(getattr(model, "feature_name")):
         try:
             fn = model.feature_name()
             if fn and len(fn) > 0:
                 return list(fn)
-        except Exception:
-            pass
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
     # 2. Estimators with feature_names_ / feature_names_in_ / feature_names / _feature_names
     for attr in ["feature_names_", "feature_names_in_", "feature_names", "_feature_names"]:
         if hasattr(model, attr):
@@ -41,8 +43,8 @@ def get_model_feature_names(model):
                 fn = b.feature_names
                 if fn and not str(fn[0]).startswith("Column_"):
                     return list(fn)
-        except Exception:
-            pass
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
     # 4. Ensemble Classifier / Regressor wrapper
     if hasattr(model, "lgb_model") and model.lgb_model is not None:
         fn = get_model_feature_names(model.lgb_model)
@@ -80,13 +82,15 @@ def sanitize_feature_matrix(X):
                 else:
                     try:
                         clean_dict[k] = float(v)
-                    except Exception:
+                    except Exception as ex_ens:
+                        log_event("WARNING", f"Ensemble notice: {ex_ens}")
                         clean_dict[k] = 0.0
             return clean_dict
         else:
             arr = np.asarray(X, dtype=float)
             return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-    except Exception:
+    except Exception as ex_ens:
+        log_event("WARNING", f"Ensemble notice: {ex_ens}")
         return X
 
 def _slice_model_input(model, X):
@@ -106,13 +110,13 @@ def _slice_model_input(model, X):
         if hasattr(model, "booster_") and hasattr(model.booster_, "num_feature"):
             try:
                 n_expected = model.booster_.num_feature()
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if n_expected is None and hasattr(model, "get_num_features"):
             try:
                 n_expected = model.get_num_features()
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if n_expected is None:
             n_expected = getattr(model, "n_features_in_", getattr(model, "_n_features_in", getattr(model, "_n_features", getattr(model, "n_features_", None))))
 
@@ -304,13 +308,13 @@ class EnsembleClassifier:
         if self.lgb_model is not None:
             try:
                 self.lgb_model.fit(_slice_model_input(self.lgb_model, X_arr), y, sample_weight=sample_weight)
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if self.cat_model is not None:
             try:
                 self.cat_model.fit(_slice_model_input(self.cat_model, X_arr), y, sample_weight=sample_weight)
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
         return self
 
     def predict_proba(self, X, weights=None):
@@ -357,8 +361,8 @@ class EnsembleClassifier:
         if getattr(self, "meta_clf", None) is not None:
             try:
                 return self.meta_clf.predict_proba(X_meta)
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
         from sklearn.linear_model import LogisticRegression
         meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
@@ -380,7 +384,8 @@ class EnsembleClassifier:
                 three_probs = three_probs / np.maximum(1e-9, row_sums)
                 return three_probs
 
-            except Exception:
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
                 w = np.array(self.weights, dtype=float)
                 w = w / max(1e-9, float(np.sum(w)))
                 return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
@@ -499,14 +504,16 @@ class EnsembleRegressor:
         if self.lgb_model is not None:
             try:
                 lgb_pred = self.lgb_model.predict(_slice_model_input(self.lgb_model, X))
-            except Exception:
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
                 lgb_pred = None
 
         cat_pred = None
         if self.cat_model is not None:
             try:
                 cat_pred = self.cat_model.predict(_slice_model_input(self.cat_model, X))
-            except Exception:
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
                 cat_pred = None
 
         if lgb_pred is None or cat_pred is None or getattr(self, "meta_coef_", None) is None:
@@ -556,11 +563,13 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         try:
             from core import features as core_features
             n_features = len(core_features)
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             try:
                 import features as features_module
                 n_features = len(features_module.features)
-            except Exception:
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
                 n_features = 26
 
     xgb = XGBClassifier()
@@ -577,7 +586,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
                 clf.weights = meta_data.get("weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
                 clf.meta_coef_ = meta_data.get("meta_coef")
                 clf.meta_intercept_ = meta_data.get("meta_intercept")
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             clf.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
 
     # Derive feature count authoritatively from XGBoost metadata or feature_names
@@ -587,8 +597,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         elif hasattr(xgb, "get_booster") and hasattr(xgb.get_booster(), "num_features"):
             try:
                 n_features = int(xgb.get_booster().num_features())
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if n_features is None and feature_names:
             n_features = len(feature_names)
 
@@ -605,8 +615,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
                     m_cnt = m_data.get("feature_count", 0)
                     if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
                         write_model_manifest(prefix, feature_names=feature_names)
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
     model_ver, feat_ver, ens_ver, git_sha, feat_count = "v7.2.0", "v3.1.0", "v3.0_stacking", "b5c5c35a", n_features
     if os.path.exists(manifest_path):
@@ -635,8 +645,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
                     )
         except RuntimeError:
             raise
-        except Exception:
-            pass
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
     clf.model_version = model_ver
     clf.feature_version = feat_ver
@@ -666,7 +676,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             lgb_clf._n_features_in = lgb_n_feat
             lgb_clf.n_features_in_ = lgb_n_feat
             clf.lgb_model = lgb_clf
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             clf.lgb_model = None
     
     if os.path.exists(f"{prefix}_cat.json"):
@@ -674,7 +685,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             cat = CatBoostClassifier()
             cat.load_model(f"{prefix}_cat.json", format="json")
             clf.cat_model = cat
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             clf.cat_model = None
 
     return clf
@@ -683,27 +695,27 @@ import hashlib, subprocess, datetime
 
 def write_model_manifest(
     prefix: str,
-    feature_names: list = None,
-    metrics: dict = None,
+    feature_names: Optional[list] = None,
+    metrics: Optional[dict] = None,
     model_version: str = "v7.2.0",
     feature_version: str = "v3.1.0",
     ensemble_version: str = "v3.0_stacking",
-    parent_model_hash: str = None,
-    promotion_reason: str = None,
-    replaced_model_hash: str = None,
-    rollback_reference: str = None,
-    vif_values: dict = None,
-    surviving_features: list = None,
-    governance_policy: dict = None,
-    promotion_metrics: dict = None
+    parent_model_hash: Optional[str] = None,
+    promotion_reason: Optional[str] = None,
+    replaced_model_hash: Optional[str] = None,
+    rollback_reference: Optional[str] = None,
+    vif_values: Optional[dict] = None,
+    surviving_features: Optional[list] = None,
+    governance_policy: Optional[dict] = None,
+    promotion_metrics: Optional[dict] = None
 ):
     try:
         from config import MODEL_GOVERNANCE, SUPPORTED_MANIFEST_SCHEMA_VERSION
         git_sha = "b5c5c35a"
         try:
             git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()[:8]
-        except Exception:
-            pass
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
         feats = list(feature_names or surviving_features or [])
         feat_str = ",".join(feats)
@@ -806,11 +818,13 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
         try:
             from core import features as core_features
             n_features = len(core_features)
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             try:
                 import features as features_module
                 n_features = len(features_module.features)
-            except Exception:
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
                 n_features = 26
 
     xgb = XGBRegressor()
@@ -827,7 +841,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
                 reg.weights = meta_data.get("weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
                 reg.meta_coef_ = meta_data.get("meta_coef")
                 reg.meta_intercept_ = meta_data.get("meta_intercept")
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             reg.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
 
     # Derive feature count authoritatively from XGBoost metadata or feature_names
@@ -837,8 +852,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
         elif hasattr(xgb, "get_booster") and hasattr(xgb.get_booster(), "num_features"):
             try:
                 n_features = int(xgb.get_booster().num_features())
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if n_features is None and feature_names:
             n_features = len(feature_names)
 
@@ -855,8 +870,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
                     m_cnt = m_data.get("feature_count", 0)
                     if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
                         write_model_manifest(prefix, feature_names=feature_names)
-            except Exception:
-                pass
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
     model_ver, feat_ver, ens_ver, git_sha, feat_count = "v7.2.0", "v3.1.0", "v3.0_stacking", "b5c5c35a", n_features
     if os.path.exists(manifest_path):
@@ -885,8 +900,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
                     )
         except RuntimeError:
             raise
-        except Exception:
-            pass
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
     reg.model_version = model_ver
     reg.feature_version = feat_ver
@@ -912,7 +927,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
             lgb_reg._n_features_in = lgb_n_feat
             lgb_reg.n_features_in_ = lgb_n_feat
             reg.lgb_model = lgb_reg
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             reg.lgb_model = None
 
     if os.path.exists(f"{prefix}_cat.json"):
@@ -920,7 +936,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
             cat = CatBoostRegressor()
             cat.load_model(f"{prefix}_cat.json", format="json")
             reg.cat_model = cat
-        except Exception:
+        except Exception as ex_ens:
+            log_event("WARNING", f"Ensemble notice: {ex_ens}")
             reg.cat_model = None
 
     return reg

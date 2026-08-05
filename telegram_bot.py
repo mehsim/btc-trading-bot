@@ -1,3 +1,4 @@
+from logger import log_event
 """
 telegram_bot.py
 ----------------
@@ -54,7 +55,8 @@ def execute_telegram_api_call(method: str, payload: Dict[str, Any]) -> Dict[str,
             resp = requests.post(url, json=payload, headers=headers, timeout=15, proxies=proxies_dict)
             if resp.status_code == 200:
                 return resp.json()
-        except Exception as e:
+        except Exception as ex_telegram_bot:
+            log_event("WARNING", f"telegram_bot notice: {ex_telegram_bot}")
             if attempt < 2:
                 time.sleep(1)
                 continue
@@ -93,8 +95,8 @@ def send_daily_summary(chat_id=None, bot_state=None):
                 exit_t = float(t.get("exit_time", 0.0))
                 if (now_ts - exit_t) <= sec_24h:
                     trades_24h.append(t)
-            except Exception:
-                pass
+            except Exception as ex_telegram_bot:
+                log_event("WARNING", f"telegram_bot notice: {ex_telegram_bot}")
         
         tf_summaries = []
         total_pnl_24h = 0.0
@@ -180,8 +182,9 @@ def run_manual_confluence_report(symbol, interval):
             f"• *Decision*: *APPROVED*\n"
         )
         return report
-    except Exception as e:
-        return f"❌ *Error running manual check:* {str(e)}"
+    except Exception as ex_telegram_bot:
+        log_event("WARNING", f"telegram_bot notice: {ex_telegram_bot}")
+        return f"❌ *Error running manual check:* {str(ex_telegram_bot)}"
 
 
 def start_telegram_command_listener(bot_state=None):
@@ -221,6 +224,6 @@ def start_telegram_command_listener(bot_state=None):
                             "text": f"🏥 *Status*: Operational\n💰 *Equity*: ${eq:.2f}",
                             "parse_mode": "Markdown"
                         })
-        except Exception as e:
-            pass
+        except Exception as ex_telegram_bot:
+            log_event("WARNING", f"telegram_bot notice: {ex_telegram_bot}")
         time.sleep(3)

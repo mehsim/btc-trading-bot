@@ -1,3 +1,4 @@
+from logger import log_event
 """
 dashboard_routes.py
 -------------------
@@ -86,8 +87,8 @@ class StdoutRedirector:
     def write(self, text):
         try:
             self.original_stdout.write(text)
-        except Exception:
-            pass
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
         if text and text.strip():
             msg = text.strip()
             if not msg.startswith("["):
@@ -101,8 +102,8 @@ class StdoutRedirector:
     def flush(self):
         try:
             self.original_stdout.flush()
-        except Exception:
-            pass
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
 if not isinstance(sys.stdout, StdoutRedirector):
     sys.stdout = StdoutRedirector(sys.stdout)
@@ -348,7 +349,8 @@ def api_status():
     with bot_state_lock:
         try:
             status_data = state_manager.copy()
-        except Exception:
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
             status_data = {}
         
         # Fallback for live prices via Bybit REST API if WebSocket ticker hasn't updated yet
@@ -367,8 +369,8 @@ def api_status():
                             if s == "BTCUSDT":
                                 status_data["live_price"] = lp
                                 state_manager["live_price"] = lp
-            except Exception:
-                pass
+            except Exception as ex_dashboard_routes:
+                log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
         # Timeframe defaults for UI rendering
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
@@ -391,7 +393,8 @@ def api_status():
         real_bal = None
         try:
             real_bal = get_real_bybit_balance_cached()
-        except Exception:
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
             real_bal = None
 
         # AI Decision & Rationale dynamic structure (reflects exact execution reality)
@@ -491,13 +494,15 @@ def prometheus_metrics():
     try:
         val = state_manager["simulated_balance"]
         sim_bal = float(val) if val is not None else 80.0
-    except Exception:
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
         sim_bal = 80.0
 
     try:
         active_trades = database.get_active_trades()
         active_count = len(active_trades) if isinstance(active_trades, list) else 0
-    except Exception:
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
         active_count = 0
         
     uptime = int(time.time() - startup_time)
@@ -518,7 +523,8 @@ def api_reality_gap():
     if not history or len(history) == 0:
         try:
             history = database.get_completed_trades(limit=20)
-        except Exception:
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
             history = []
 
     valid_trades = [t for t in history if isinstance(t, dict)] if isinstance(history, list) else []
@@ -642,7 +648,8 @@ def api_institutional_summary():
     if not history or not isinstance(history, list):
         try:
             history = database.get_completed_trades(limit=100)
-        except Exception:
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
             history = []
 
     valid_trades = [t for t in history if isinstance(t, dict)]
@@ -655,7 +662,8 @@ def api_institutional_summary():
     try:
         import zoneinfo
         pkt_tz = zoneinfo.ZoneInfo("Asia/Karachi")
-    except Exception:
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
         pkt_tz = datetime.timezone(datetime.timedelta(hours=5))
 
     now_pkt = datetime.datetime.now(pkt_tz)
@@ -899,7 +907,8 @@ def api_institutional_summary():
             order_latency_ms=api_lat
         )
         shs_val = int(round(shs_score))
-    except Exception:
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
         ece_val = float(state_manager.get("last_ece", 3.8))
         psi_val = float(state_manager.get("last_psi", 0.04))
         win_rate_var = 2.0
@@ -1159,15 +1168,16 @@ def _get_walk_forward_folds():
                     })
                 if extracted:
                     return extracted
-    except Exception:
-        pass
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
     try:
         history = state_manager.get("trade_history", [])
         if not history or not isinstance(history, list) or len(history) < 5:
             try:
                 history = database.get_trade_history(limit=500)
-            except Exception:
+            except Exception as ex_dashboard_routes:
+                log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
                 history = []
 
         valid_trades = [t for t in history if isinstance(t, dict)]
@@ -1209,8 +1219,8 @@ def _get_walk_forward_folds():
                 })
             if dynamic_folds:
                 return dynamic_folds
-    except Exception:
-        pass
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
     return []
 
@@ -1229,7 +1239,8 @@ def api_exit_analytics():
     if not history or not isinstance(history, list):
         try:
             history = database.get_completed_trades(limit=100)
-        except Exception:
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
             history = []
 
     valid_trades = [t for t in history if isinstance(t, dict)]
@@ -1378,8 +1389,8 @@ def api_strategy_health():
             conn.close()
             if len(df_db) > 0:
                 history = df_db.to_dict('records')
-        except Exception:
-            pass
+        except Exception as ex_dashboard_routes:
+            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
     pnls = [float(t.get("pnl_usd", 0.0)) for t in history] if history else [1.5, 2.1, -0.8, 1.8, 2.4, -0.5, 3.2]
     stats = calculate_replay_statistics(pnls, initial_equity=100.0)
@@ -1387,7 +1398,8 @@ def api_strategy_health():
     # 2. Dynamic Git Commit Hash
     try:
         git_commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-    except Exception:
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
         git_commit = "12f29a7"
 
     # 3. Dynamic Execution Metrics using Position Risk 1R_usd
@@ -1573,8 +1585,8 @@ def get_model_governance():
                     "retrain_priority_score": retrain_score,
                     "status": status_label
                 })
-            except Exception:
-                pass
+            except Exception as ex_dashboard_routes:
+                log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
         # Sort by retrain priority score descending
         models_info.sort(key=lambda x: x.get("retrain_priority_score", 0), reverse=True)
@@ -1592,5 +1604,6 @@ def get_model_governance():
             "htf_decision_waterfall_telemetry": htf_telemetry,
             "models_governance": models_info
         })
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception as ex_dashboard_routes:
+        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
+        return jsonify({"status": "error", "message": str(ex_dashboard_routes)}), 500

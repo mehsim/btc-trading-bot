@@ -1,3 +1,4 @@
+from logger import log_event
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Any, Optional
@@ -10,14 +11,15 @@ class PortfolioRiskEngine:
             import config
             var_confidence = getattr(config, "PARAMETRIC_VAR_CONFIDENCE_LEVEL", var_confidence)
             max_var_pct = getattr(config, "PARAMETRIC_VAR_DAILY_EQUITY_CAP_PCT", max_var_pct)
-        except Exception:
-            pass
+        except Exception as ex_portfolio_risk:
+            log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
 
         self.var_confidence = var_confidence  # Configured confidence level (e.g. 0.95 or 0.99)
         try:
             from scipy.stats import norm
             self.z_score = float(norm.ppf(var_confidence))
-        except Exception:
+        except Exception as ex_portfolio_risk:
+            log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
             _z_table = {0.90: 1.28155, 0.95: 1.64485, 0.98: 2.05375, 0.99: 2.32635}
             self.z_score = _z_table.get(round(var_confidence, 2), 1.64485 if var_confidence == 0.95 else 2.32635)
         self.max_var_pct = max_var_pct  # Max 5% equity VaR limit
@@ -88,7 +90,8 @@ class PortfolioRiskEngine:
         try:
             from sklearn.covariance import LedoitWolf
             cov_matrix = LedoitWolf().fit(sub_returns.values).covariance_
-        except Exception:
+        except Exception as ex_portfolio_risk:
+            log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
             cov_matrix = sub_returns.cov().values
 
         port_variance = float(np.dot(weight_vector.T, np.dot(cov_matrix, weight_vector)))
@@ -170,13 +173,14 @@ class PortfolioRiskEngine:
             total_var = float(np.sum(eigenvalues))
             pc1_share = float(eigenvalues[0] / max(1e-9, total_var)) if total_var > 0 else 0.50
             return {"pc1_explained_variance": pc1_share}
-        except Exception:
+        except Exception as ex_portfolio_risk:
+            log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
             return {"pc1_explained_variance": 0.50}
 
     def run_monte_carlo_stress_test(
         self,
         open_positions: List[Dict],
-        returns_df: pd.DataFrame = None,
+        returns_df: Optional[pd.DataFrame] = None,
         total_equity: float = 100.0,
         num_simulations: int = 5000,
         shock_pct: float = -0.30,
@@ -282,7 +286,8 @@ class PortfolioRiskEngine:
                 z = np.random.standard_t(df=4, size=(num_simulations, n_assets))
                 z = z / np.sqrt(2.0)
                 simulated_residuals = z @ chol.T
-            except Exception:
+            except Exception as ex_portfolio_risk:
+                log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
                 simulated_residuals = np.random.normal(0, 0.02, size=(num_simulations, n_assets))
 
             simulated_returns = expected_asset_shocks + simulated_residuals
@@ -332,10 +337,10 @@ class PortfolioRiskEngine:
         candidate_lev: float,
         candidate_direction: str,
         open_positions: List[Dict],
-        returns_df: pd.DataFrame = None,
+        returns_df: Optional[pd.DataFrame] = None,
         total_equity: float = 100.0,
-        max_stress_loss_pct: float = None,
-        shock_pct: float = None,
+        max_stress_loss_pct: Optional[float] = None,
+        shock_pct: Optional[float] = None,
         seed: Optional[int] = None
     ) -> Tuple[bool, float, float, Dict]:
         """
@@ -348,8 +353,8 @@ class PortfolioRiskEngine:
                 max_stress_loss_pct = getattr(config, "MONTE_CARLO_MAX_STRESS_LOSS_PCT", 0.25)
             if shock_pct is None:
                 shock_pct = getattr(config, "MONTE_CARLO_SHOCK_PCT", -0.30)
-        except Exception:
-            pass
+        except Exception as ex_portfolio_risk:
+            log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
         if max_stress_loss_pct is None:
             max_stress_loss_pct = 0.25
         if shock_pct is None:
@@ -386,8 +391,9 @@ class PortfolioRiskEngine:
             # Dual-gate requirement: both mean loss and tail loss (Stress CVaR) must pass budget
             if loss_pct <= max_stress_loss_pct and cvar_pct <= max_cvar_pct:
                 return True, 1.0, loss_pct, res
-        except Exception as e:
-            return False, 0.0, 1.0, {"error": str(e)}
+        except Exception as ex_portfolio_risk:
+            log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
+            return False, 0.0, 1.0, {"error": str(ex_portfolio_risk)}
 
         # Exceeds stress budget! Calculate recommended scaling factor
         base_res = self.run_monte_carlo_stress_test(

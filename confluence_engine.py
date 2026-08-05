@@ -1,3 +1,4 @@
+from logger import log_event
 import os
 import time
 import numpy as np
@@ -87,8 +88,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         try:
             from data import get_history
             get_history_fn = get_history
-        except Exception:
-            pass
+        except Exception as ex_confluence_engine:
+            log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
     results = {}
     hard_gate_failed = False
     total_score = 0
@@ -100,7 +101,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         try:
             df_1d = get_history_fn(symbol=symbol, interval="D", limit=100)
             set_valid_htf_cache(htf_cache, (symbol, "D"), df_1d)
-        except Exception as e:
+        except Exception as ex_confluence_engine:
+            log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
             df_1d = None
 
     weight_1d = 1
@@ -175,7 +177,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         try:
             df_4h = get_history_fn(symbol=symbol, interval="240", limit=100)
             set_valid_htf_cache(htf_cache, (symbol, "240"), df_4h)
-        except Exception:
+        except Exception as ex_confluence_engine:
+            log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
             df_4h = None
 
     if df_4h is None or len(df_4h) < 21:
@@ -229,8 +232,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             max_score += weight_ob
             if ob_pass:
                 total_score += weight_ob
-        except Exception as e:
-            results["Orderbook_L2"] = {"pass": False, "detail": f"Orderbook check failed ({e}) [FAIL CLOSED]", "weight": weight_ob}
+        except Exception as ex_confluence_engine:
+            log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
+            results["Orderbook_L2"] = {"pass": False, "detail": f"Orderbook check failed ({ex_confluence_engine}) [FAIL CLOSED]", "weight": weight_ob}
             max_score += weight_ob
     else:
         results["Orderbook_L2"] = {"pass": False, "detail": "Orderbook unavailable [FAIL CLOSED]", "weight": weight_ob}
@@ -246,8 +250,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             max_score += weight_chop
             if chop_pass:
                 total_score += weight_chop
-        except Exception as e:
-            results["Choppiness_Gate"] = {"pass": False, "detail": f"Choppiness check failed ({e}) [FAIL CLOSED]", "weight": weight_chop}
+        except Exception as ex_confluence_engine:
+            log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
+            results["Choppiness_Gate"] = {"pass": False, "detail": f"Choppiness check failed ({ex_confluence_engine}) [FAIL CLOSED]", "weight": weight_chop}
             max_score += weight_chop
     else:
         results["Choppiness_Gate"] = {"pass": False, "detail": "Choppiness check unavailable [FAIL CLOSED]", "weight": weight_chop}
@@ -289,9 +294,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             candle_pass = True
             detail_msg = "Safe (Neutral trend)"
 
-    except Exception as e:
+    except Exception as ex_confluence_engine:
+        log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
         candle_pass = True
-        detail_msg = f"Skipped ({e})"
+        detail_msg = f"Skipped ({ex_confluence_engine})"
     results["Counter_Momentum"] = {"pass": candle_pass, "detail": detail_msg, "weight": weight_cm}
     max_score += weight_cm
     if candle_pass:
@@ -333,7 +339,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         if df_1h is not None and "ADX" in df_1h.columns and len(df_1h) > 0:
             adx_val = float(df_1h["ADX"].iloc[-1])
         effective_conf_threshold = trade_frequency_optimizer.calculate_regime_adaptive_confidence_threshold(adx_val, dynamic_conf_threshold)
-    except Exception:
+    except Exception as ex_confluence_engine:
+        log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
         effective_conf_threshold = dynamic_conf_threshold
 
     approved = (calibrated_confidence >= effective_conf_threshold) and trend_gates_passed and traditional_approved

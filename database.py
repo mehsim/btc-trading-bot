@@ -1,3 +1,4 @@
+from logger import log_event
 import math
 import sqlite3
 import os
@@ -16,10 +17,12 @@ def round_monetary(val: Any, decimals: int = 4) -> float:
         d = Decimal(str(val))
         fmt = "0." + "0" * decimals if decimals > 0 else "0"
         return float(d.quantize(Decimal(fmt), rounding=ROUND_HALF_UP))
-    except Exception:
+    except Exception as ex_database:
+        log_event("WARNING", f"database notice: {ex_database}")
         try:
             return round(float(val), decimals)
-        except Exception:
+        except Exception as ex_database:
+            log_event("WARNING", f"database notice: {ex_database}")
             return 0.0
 
 DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
@@ -43,15 +46,15 @@ def get_db_connection():
             try:
                 if 'conn' in locals() and conn:
                     conn.close()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             for ext in ["", "-wal", "-shm"]:
                 target = f"{DB_FILE}{ext}"
                 if os.path.exists(target):
                     try:
                         os.remove(target)
-                    except Exception:
-                        pass
+                    except Exception as ex_database:
+                        log_event("WARNING", f"database notice: {ex_database}")
             time.sleep(0.5)
     conn = sqlite3.connect(DB_FILE, timeout=60.0)
     conn.execute("PRAGMA busy_timeout = 60000;")
@@ -128,8 +131,8 @@ def init_db():
                 if col_name not in cols:
                     try:
                         cursor.execute(f"ALTER TABLE completed_trades ADD COLUMN {col_name} TEXT;")
-                    except Exception:
-                        pass
+                    except Exception as ex_database:
+                        log_event("WARNING", f"database notice: {ex_database}")
             
             # 3. Create Active Trades Table
             cursor.execute("""
@@ -267,8 +270,8 @@ def save_prediction(pred) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to save prediction: {e} | Payload: {json.dumps(pred)}")
             return False
         finally:
@@ -286,8 +289,8 @@ def get_prediction_history(limit=500):
                 if row[0]:
                     try:
                         res.append(json.loads(row[0]))
-                    except Exception:
-                        pass
+                    except Exception as ex_database:
+                        log_event("WARNING", f"database notice: {ex_database}")
             return res[::-1]  # Return in chronological order
         except Exception as e:
             print(f"[Database Error] Failed to fetch prediction history: {e}")
@@ -314,8 +317,8 @@ def save_pending_pain_check(trade) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to save pending pain check: {e} | Payload: {json.dumps(trade)}")
             return False
         finally:
@@ -345,8 +348,8 @@ def delete_pending_pain_check(trade_id) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to delete pending pain check {trade_id}: {e}")
             return False
         finally:
@@ -408,8 +411,8 @@ def save_completed_trade(trade) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] CRITICAL: Failed to save completed trade: {e} | Payload: {json.dumps(trade)}")
             success = False
         finally:
@@ -508,8 +511,8 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database Error] Transaction rolled back for trade {t_id}: {e}")
             return False
         finally:
@@ -538,8 +541,8 @@ def get_trade_history(limit=500):
                 if row[0]:
                     try:
                         res.append(json.loads(row[0]))
-                    except Exception:
-                        pass
+                    except Exception as ex_database:
+                        log_event("WARNING", f"database notice: {ex_database}")
             return res[::-1]  # Return in chronological order
         except Exception as e:
             print(f"[Database Error] Failed to fetch trade history: {e}")
@@ -577,8 +580,8 @@ def save_active_trades(tf, trades) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to save active trades for {tf}: {e} | Payload: {json.dumps(trades)}")
             return False
         finally:
@@ -610,8 +613,8 @@ def set_setting(key, value) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to save setting {key}: {e}")
             return False
         finally:
@@ -634,8 +637,8 @@ def save_cached_derivatives(symbol, records) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to save cached derivatives for {symbol}: {e}")
             return False
         finally:
@@ -679,8 +682,8 @@ def save_cached_sentiment(records) -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to save cached sentiment: {e}")
             return False
         finally:
@@ -725,8 +728,8 @@ def purge_old_order_flow_logs(retention_days: int = 60) -> int:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to purge old order flow logs: {e}")
             return 0
         finally:
@@ -761,8 +764,8 @@ def archive_legacy_recovery_trades() -> int:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed to archive legacy trades: {e}")
             return 0
         finally:
@@ -788,8 +791,8 @@ def clear_all_trade_history() -> bool:
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
             print(f"[Database ERROR] Failed clearing trade history: {e}")
             success = False
         finally:
@@ -800,8 +803,8 @@ def clear_all_trade_history() -> bool:
             try:
                 with open(fname, "w") as f:
                     json.dump([], f) if fname != "pain_feedback_state.json" else json.dump({}, f)
-            except Exception:
-                pass
+            except Exception as ex_database:
+                log_event("WARNING", f"database notice: {ex_database}")
     return success
 
 

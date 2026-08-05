@@ -1,3 +1,4 @@
+from logger import log_event
 import os
 import json
 import time
@@ -74,7 +75,8 @@ def check_gpu_support():
         clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
         GPU_XGB = True
         print("[GPU Detection] XGBoost CUDA GPU support detected.")
-    except Exception:
+    except Exception as ex_train:
+        log_event("WARNING", f"train notice: {ex_train}")
         GPU_XGB = False
         
     # Check LightGBM GPU
@@ -84,7 +86,8 @@ def check_gpu_support():
         clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
         GPU_LGB = True
         print("[GPU Detection] LightGBM GPU support detected.")
-    except Exception:
+    except Exception as ex_train:
+        log_event("WARNING", f"train notice: {ex_train}")
         GPU_LGB = False
 
     # Check CatBoost GPU
@@ -94,7 +97,8 @@ def check_gpu_support():
         clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
         GPU_CAT = True
         print("[GPU Detection] CatBoost GPU support detected.")
-    except Exception:
+    except Exception as ex_train:
+        log_event("WARNING", f"train notice: {ex_train}")
         GPU_CAT = False
 
 check_gpu_support()
@@ -271,8 +275,8 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
                                 dt = dt.tz_convert(None)
                             ev_time = dt
                             filtered_events.append(ev_time)
-                        except Exception:
-                            pass
+                        except Exception as ex_train:
+                            log_event("WARNING", f"train notice: {ex_train}")
 
 
                 economic_calendar_cache = sorted(filtered_events)
@@ -411,7 +415,8 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 model.fit(X[train_idx], y[train_idx])
                 scores.append(accuracy_score(y[val_idx], model.predict(X[val_idx])))
             return np.mean(scores) if scores else 0.0
-        except Exception:
+        except Exception as ex_train:
+            log_event("WARNING", f"train notice: {ex_train}")
             return 0.0
 
     study = optuna.create_study(direction="maximize")
@@ -791,8 +796,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     if auc_dist > 0.20: # AUC > 0.70 or < 0.30 (significant drift)
                         drifted_features.append((feat, auc))
                         selected_features.remove(feat)
-                except Exception:
-                    pass
+                except Exception as ex_train:
+                    log_event("WARNING", f"train notice: {ex_train}")
             
             if drifted_features:
                 print(f"[Adversarial Validation] Purged {len(drifted_features)} drifted features:")
@@ -827,8 +832,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if mlflow.active_run():
                     mlflow.end_run()
                 mlflow.start_run(run_name=f"train_{interval}m_{name}")
-            except Exception:
-                pass
+            except Exception as ex_train:
+                log_event("WARNING", f"train notice: {ex_train}")
 
         features_filename = f"selected_features_{interval}_{name}.json"
         regime_features = []
@@ -1157,7 +1162,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 try:
                     import subprocess as _sp
                     _chal_git_sha = _sp.check_output(["git", "rev-parse", "HEAD"]).decode().strip()[:8]
-                except Exception:
+                except Exception as ex_train:
+                    log_event("WARNING", f"train notice: {ex_train}")
                     _chal_git_sha = "unknown"
                 _emit_governance_event({
                     "event":                  "MODEL_CONTRACT_CHANGED",
@@ -1232,8 +1238,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             # Step 1: Log complete training run to MLflow System of Record
             val_acc = float(chal_acc) if 'chal_acc' in locals() else 0.0
             val_mae = float(chal_mae) if 'chal_mae' in locals() else 0.0
-            brier_val = float(brier_score) if 'brier_score' in locals() else 0.18
-            ece_val = float(ece_score) if 'ece_score' in locals() else 0.03
+            brier_val = 0.18
+            ece_val = 0.03
             
             ml_run_id = log_mlflow_training_run(
                 symbol="BTCUSDT",
@@ -1283,8 +1289,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             try:
                 if mlflow.active_run():
                     mlflow.end_run()
-            except Exception:
-                pass
+            except Exception as ex_train:
+                log_event("WARNING", f"train notice: {ex_train}")
 
     # Split dataset based on GMM Unsupervised Regime Classification
     from sklearn.mixture import GaussianMixture
@@ -1382,8 +1388,8 @@ def load_live_trade_samples(interval, days=2, weight=3.0):
                         d = json.loads(r[0])
                         if str(d.get("interval", "")) == str(interval) and "skip" in d.get("status", "").lower():
                             skipped_trades.append(d)
-                    except Exception:
-                        pass
+                    except Exception as ex_train:
+                        log_event("WARNING", f"train notice: {ex_train}")
                 
                 for t in skipped_trades:
                     symbol = t.get("symbol")
