@@ -4660,7 +4660,7 @@ def run_flask():
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]  # Limited to 3 symbols to fit 1GB RAM on 1-vCPU EC2
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
@@ -8390,7 +8390,7 @@ def main():
                 for fut in future_to_pair:
                     sym, iv = future_to_pair[fut]
                     try:
-                        _, _, df_raw_val, df_feat_val = fut.result(timeout=60)
+                        _, _, df_raw_val, df_feat_val = fut.result(timeout=12)  # Fail fast — HTTP timeout is 10s
                         if df_raw_val is not None:
                             fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
                     except Exception as e:
