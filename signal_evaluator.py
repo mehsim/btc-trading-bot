@@ -327,7 +327,7 @@ class SignalEvaluator:
                                 "status": f"Fallback ({direction})",
                                 "calibrated_confidence": float(conf),
                                 "raw_confidence": float(conf),
-                                "dynamic_threshold": 0.50,
+                                "dynamic_threshold": None,
                                 "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
                             })
                             if len(history) > 200:

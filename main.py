@@ -2556,7 +2556,7 @@ def load_history():
     # 2. Sync from AWS Server API if running locally
     elif not space_id:
         try:
-            server_ip_default = os.environ.get("SERVER_IP", "47.129.153.199")
+            server_ip_default = os.environ.get("SERVER_IP", "127.0.0.1")
             aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or server_ip_default
 
             if not aws_host.startswith("http://") and not aws_host.startswith("https://"):

@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-TARGET_URL = os.environ.get("HEARTBEAT_TARGET_URL", "http://47.129.153.199:5001/api/status")
+TARGET_URL = os.environ.get("HEARTBEAT_TARGET_URL", "http://127.0.0.1:5001/api/status")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 MAX_FAILURES = 3
