@@ -1054,9 +1054,21 @@ def train_models(interval=INTERVAL, pages=PAGES):
             from core import compute_sample_uniqueness
             t1_sub = pd.Series(np.arange(len(y_train_t)) + cv.lookahead, index=y_train_t.index)
             uniqueness_train = compute_sample_uniqueness(t1_sub, y_train_t.index).values
-            sample_weight_train = compute_sample_weight(class_weight='balanced', y=y_train_t)
             decay_weights = np.linspace(0.3, 1.0, len(y_train_t))
-            sample_weight_train = sample_weight_train * uniqueness_train * decay_weights
+            base_w = uniqueness_train * decay_weights
+            
+            w_train = base_w.copy()
+            classes = np.unique(y_train_t)
+            n_samples = len(y_train_t)
+            for c in classes:
+                mask = (y_train_t.values == c)
+                c_sum = base_w[mask].sum()
+                if c_sum > 0:
+                    w_train[mask] *= (n_samples / (len(classes) * c_sum))
+            
+            sample_weight_train = w_train
+            class_totals = [w_train[y_train_t.values == c].sum() for c in classes]
+            assert max(class_totals) / min(class_totals) < 1.05, f"class balance broken: {class_totals}"
             
             if first_fold:
                 print("  Optimizing hyperparameters on first fold...")
