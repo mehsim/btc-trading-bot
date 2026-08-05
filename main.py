@@ -1,3 +1,4 @@
+from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -581,7 +582,7 @@ class HTFTrendCache:
             
         return 0.0, 0.0
 
-    def invalidate(self, symbol: str = None):
+    def invalidate(self, symbol: Optional[str] = None):
         with self._lock:
             if symbol:
                 for iv in ["60", "240"]:
@@ -4780,11 +4781,13 @@ def load_model_weights(iv):
 
         from mlops_engine import load_production_model_from_registry
 
-        reg_model_trending, _ = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
+        reg_model_trending, ver_trending = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
         if reg_model_trending is not None:
             models_by_interval[iv]["trending"]["trend"] = reg_model_trending
+            models_by_interval[iv]["trending"]["model_version"] = ver_trending
         elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
             models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
+            models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
 
         if os.path.exists(f"{prefixes['trending_price']}_xgb.json") and check_startup_manifest_health(prefixes['trending_price']):
             models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
@@ -4793,11 +4796,13 @@ def load_model_weights(iv):
             meta_clf.load_model(prefixes["trending_meta"])
             models_by_interval[iv]["trending"]["meta"] = meta_clf
 
-        reg_model_ranging, _ = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
+        reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
         if reg_model_ranging is not None:
             models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
+            models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
         elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
             models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
+            models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
         if os.path.exists(f"{prefixes['ranging_price']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_price']):
             models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
         if os.path.exists(prefixes["ranging_meta"]):

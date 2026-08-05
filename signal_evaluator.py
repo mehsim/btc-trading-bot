@@ -149,8 +149,7 @@ class SignalEvaluator:
                     cal_ver = calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default"
                     cal_ece = float(calibrator.get("ece", 0.035)) if isinstance(calibrator, dict) else 0.035
 
-                    from mlops_engine import load_production_model_from_registry
-                    _, served_version = load_production_model_from_registry(interval=str(interval), regime=_regime_key, live_features=_feat_list)
+                    served_version = models.get("model_version") or f"btc_{interval}m_{_regime_key}_clf:v1.0"
 
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_{tf_key}"] = {
