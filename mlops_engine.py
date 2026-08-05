@@ -33,41 +33,64 @@ from trade_calculators import safe_float
 
 def calculate_brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     """
-    F-10 Calibration Metric: Brier Score
-    BS = (1/N) * sum((prob - label)^2)
-    Lower Brier score indicates superior calibration (0.0 is perfect).
+    F-10 Calibration Metric: Brier Score (Binary & Multiclass)
+    For 1D binary: BS = (1/N) * sum((prob - label)^2)
+    For 2D multiclass: BS = (1/N) * sum_i( sum_k( (p_ik - y_ik)^2 ) )
     """
-    y_t = np.asarray(y_true, dtype=float)
+    y_t = np.asarray(y_true, dtype=int)
     y_p = np.asarray(y_prob, dtype=float)
     if len(y_t) == 0 or len(y_t) != len(y_p):
         return 0.25
-    return float(np.mean((y_p - y_t) ** 2))
+
+    if y_p.ndim == 2 and y_p.shape[1] > 1:
+        n_classes = y_p.shape[1]
+        y_t_clipped = np.clip(y_t, 0, n_classes - 1)
+        one_hot = np.eye(n_classes)[y_t_clipped]
+        return float(np.mean(np.sum((y_p - one_hot) ** 2, axis=1)))
+    else:
+        if set(np.unique(y_t)) > {0, 1}:
+            y_t = (y_t == np.max(y_t)).astype(int)
+        y_p_1d = y_p.ravel()
+        assert set(np.unique(y_t)) <= {0, 1}, f"Brier binary targets must be in {0, 1}, got {np.unique(y_t)}"
+        return float(np.mean((y_p_1d - y_t) ** 2))
 
 def calculate_expected_calibration_error(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
     """
     F-10 Calibration Metric: Expected Calibration Error (ECE)
     ECE = sum(|acc(bin) - conf(bin)| * (|bin| / N))
-    Quantifies deviation between stated probability confidence and actual realized win rate.
     """
-    y_t = np.asarray(y_true, dtype=float)
+    y_t = np.asarray(y_true, dtype=int)
     y_p = np.asarray(y_prob, dtype=float)
     if len(y_t) == 0 or len(y_t) != len(y_p):
         return 0.0
 
+    if y_p.ndim == 2 and y_p.shape[1] > 1:
+        confs = np.max(y_p, axis=1)
+        preds = np.argmax(y_p, axis=1)
+        accs = (preds == y_t).astype(float)
+        y_t_eval = accs
+        y_p_eval = confs
+    else:
+        if set(np.unique(y_t)) > {0, 1}:
+            y_t = (y_t == np.max(y_t)).astype(int)
+        y_t_eval = y_t.astype(float)
+        y_p_eval = y_p.ravel()
+        assert set(np.unique(y_t)) <= {0, 1}, f"ECE binary targets must be in {0, 1}, got {np.unique(y_t)}"
+
     bin_boundaries = np.linspace(0, 1, n_bins + 1)
     ece = 0.0
-    total_samples = len(y_t)
+    total_samples = len(y_t_eval)
 
     for i in range(n_bins):
         bin_lower = bin_boundaries[i]
         bin_upper = bin_boundaries[i + 1]
         
-        in_bin = (y_p >= bin_lower) & (y_p < bin_upper) if i < n_bins - 1 else (y_p >= bin_lower) & (y_p <= bin_upper)
+        in_bin = (y_p_eval >= bin_lower) & (y_p_eval < bin_upper) if i < n_bins - 1 else (y_p_eval >= bin_lower) & (y_p_eval <= bin_upper)
         bin_size = np.sum(in_bin)
         
         if bin_size > 0:
-            avg_confidence = np.mean(y_p[in_bin])
-            avg_accuracy = np.mean(y_t[in_bin])
+            avg_confidence = np.mean(y_p_eval[in_bin])
+            avg_accuracy = np.mean(y_t_eval[in_bin])
             ece += np.abs(avg_accuracy - avg_confidence) * (bin_size / total_samples)
 
     return float(ece)
@@ -102,7 +125,7 @@ class ModelRegistry:
             "model_name": model_name,
             "metrics": metrics,
             "stage": stage,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "registered_at_utc": datetime.now(timezone.utc).isoformat()
         }
 
         if stage == STAGE_PRODUCTION:
@@ -136,11 +159,11 @@ def log_mlflow_training_run(
     regime: str,
     features: List[str],
     metrics: Dict[str, float],
-    params: Dict[str, Any] = None,
-    manifest_path: str = None,
+    params: Optional[Dict[str, Any]] = None,
+    manifest_path: Optional[str] = None,
     xgb_model: Any = None,
-    git_sha: str = None,
-    feature_hash: str = None
+    git_sha: Optional[str] = None,
+    feature_hash: Optional[str] = None
 ) -> Optional[str]:
     """
     Step 1: Logs complete training run to MLflow tracking server and registers model version.
@@ -201,7 +224,7 @@ def log_mlflow_training_run(
         return None
 
 
-def promote_if_better(name: str, challenger_version: str, gates: Dict[str, float] = None) -> Tuple[bool, str]:
+def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[str, float]] = None) -> Tuple[bool, str]:
     """
     Step 2: Promotion gates replace unconditional overwrite.
     - Absolute floors: ECE <= 0.08, Brier <= 0.22.
@@ -255,7 +278,7 @@ def promote_if_better(name: str, challenger_version: str, gates: Dict[str, float
         return True, f"Local promotion fallback (MLflow check skipped: {e})"
 
 
-def load_production_model_from_registry(interval: str, regime: str, live_features: List[str] = None) -> Tuple[Any, str]:
+def load_production_model_from_registry(interval: str, regime: str, live_features: Optional[List[str]] = None) -> Tuple[Any, str]:
     """
     Step 3: Model serving reads from registry / system of record.
     Asserts feature_contract_hash match before serving.
@@ -588,7 +611,7 @@ def calculate_confidence_calibration_buckets(trade_history: list) -> list:
     return buckets
 
 
-def calculate_feature_importance_drift(baseline_weights: dict = None, current_weights: dict = None) -> dict:
+def calculate_feature_importance_drift(baseline_weights: Optional[dict] = None, current_weights: Optional[dict] = None) -> dict:
     """
     Measures Feature Importance Drift (FID) across model retraining cycles.
     """
@@ -648,7 +671,7 @@ def record_trade_feature_store(trade_record: dict) -> dict:
     return feature_vector
 
 
-def estimate_expected_r_multiple(context_dict: dict = None) -> dict:
+def estimate_expected_r_multiple(context_dict: Optional[dict] = None) -> dict:
     """
     Trade Outcome Meta-Model: Estimates expected R-multiple regression target E[R | Context].
     """
@@ -678,7 +701,7 @@ global_interval_tracker = IntervalPerformanceTracker()
 def evaluate_champion_challenger_promotion(
     champion_metrics: dict,
     challenger_metrics: dict,
-    governance_policy: dict = None
+    governance_policy: Optional[dict] = None
 ) -> Tuple[bool, str, dict]:
     """
     Items 1 & 2: Evaluates champion-challenger promotion gate on out-of-sample Sharpe ratio, ECE, and Brier score.
@@ -726,7 +749,7 @@ def evaluate_champion_challenger_promotion(
 def calculate_psi_per_feature(
     baseline_df: pd.DataFrame,
     target_df: pd.DataFrame,
-    feature_names: list = None
+    feature_names: Optional[list] = None
 ) -> Dict[str, Dict[str, Any]]:
     """
     Item 7: Calculates Population Stability Index (PSI) per feature with sample size telemetry.
