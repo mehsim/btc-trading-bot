@@ -85,18 +85,12 @@ def generate_manifests():
 
             if m_count is not None:
                 feat_list = extended_feats[:m_count] if len(extended_feats) >= m_count else full_features[:m_count]
-            elif iv == "15":
-                feat_list = load_json_feats("selected_features_15.json") or (extended_feats[:m_count] if m_count else extended_feats[:20])
-            elif iv == "30":
-                feat_list = load_json_feats("selected_features_30.json") or full_features[:25]
-            elif iv == "60":
-                feat_list = load_json_feats("selected_features_60.json") or full_features[:34]
-            elif iv == "120":
-                feat_list = load_json_feats("selected_features_120.json") or full_features[:46]
-            elif iv == "240":
-                feat_list = load_json_feats("selected_features_240.json") or full_features[:26]
             else:
-                feat_list = full_features
+                json_feats = load_json_feats(f"selected_features_{iv}.json")
+                if json_feats and len(json_feats) <= len(extended_feats):
+                    feat_list = json_feats
+                else:
+                    feat_list = extended_feats
 
             model_ver_str = f"v7.2.0-{git_sha}"
 
