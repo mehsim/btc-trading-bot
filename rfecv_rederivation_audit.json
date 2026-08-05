@@ -1,0 +1,62 @@
+{
+  "trending_15": {
+    "existing_count": 22,
+    "rederived_count": 22,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "ranging_15": {
+    "existing_count": 22,
+    "rederived_count": 22,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "trending_30": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "ranging_30": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "trending_60": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "ranging_60": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "trending_120": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "ranging_120": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "trending_240": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  },
+  "ranging_240": {
+    "existing_count": 0,
+    "rederived_count": 0,
+    "delta": 0,
+    "status": "PURGED_VALIDATED"
+  }
+}

@@ -3480,13 +3480,14 @@ def get_statistical_validation():
     sample_rets, base_rets, n_completed_db = decision_outcome_db.get_completed_returns()
     n_completed = max(n_completed_db, len(bot_state.get("trade_history", [])) if "bot_state" in globals() and isinstance(bot_state, dict) else 45)
     
-    optuna_trials = len(bot_state.get("trade_history", [])) if "bot_state" in globals() and isinstance(bot_state, dict) else 12
+    gov_state = globals().get("governance_state", {})
+    study_trial_count = gov_state.get("last_study_trial_count", 12) if isinstance(gov_state, dict) else 12
     governed_res = statistical_validation.calculate_governed_validation_matrix(
         component_name="15m Structural Swing Stop & Dynamic Leverage",
         baseline_returns=base_rets,
         component_returns=sample_rets,
         completed_trades=n_completed,
-        num_trials=max(12, optuna_trials)
+        num_trials=study_trial_count
     )
     return jsonify(governed_res)
 
@@ -8054,8 +8055,8 @@ def main():
                             "stop_state_meta": active_trade.get("stop_state_meta", {}),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
                             "fill_pct": float(active_trade.get("fill_pct", 100.0)),
-                            "modeled_slippage_bps": float(active_trade.get("modeled_slippage_bps", 3.0)),
-                            "realized_slippage_bps": float(active_trade.get("realized_slippage_bps", round(abs(current_price - entry_price) / max(1e-4, entry_price) * 1e4 if exit_reason in ["SL", "STOP_LOSS"] else 2.5, 2))),
+                            "modeled_slippage_bps": float(active_trade.get("modeled_slippage_bps")) if active_trade.get("modeled_slippage_bps") is not None else None,
+                            "realized_slippage_bps": float(active_trade.get("realized_slippage_bps")) if active_trade.get("realized_slippage_bps") is not None else (round(abs(current_price - float(active_trade.get("stop_loss", current_price))) / max(1e-4, float(active_trade.get("stop_loss", current_price))) * 1e4, 2) if exit_reason in ["SL", "STOP_LOSS"] and active_trade.get("stop_loss") else None),
                             "bybit_order_id": active_trade.get("bybit_order_id"),
                             "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
                         })

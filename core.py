@@ -153,7 +153,8 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
     s.attrs["outcome_breakdown"] = {
         "long_win_pct": round(float(np.mean(labels == 2)) * 100.0, 2),
         "short_win_pct": round(float(np.mean(labels == 0)) * 100.0, 2),
-        "neutral_or_stopped_pct": round(float(np.mean(labels == 1)) * 100.0, 2)
+        "timed_out_pct": round(float(np.mean(labels == 1)) * 100.0, 2),
+        "stopped_out_pct": round(float((ambiguous_count / max(1, n * lookahead)) * 100.0), 2)
     }
     return s
 
