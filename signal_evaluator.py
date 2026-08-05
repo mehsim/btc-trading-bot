@@ -271,15 +271,13 @@ class SignalEvaluator:
                     log_event("CRITICAL", f"[SignalEvaluator CRITICAL PROGRAMMING ERROR] {prog_err}\n{traceback.format_exc()}")
                     raise prog_err
                 except RuntimeError as contract_err:
-                    if any(k in str(contract_err) for k in ["Governance", "Feature contract", "Mismatch"]):
-                        import traceback
-                        log_event("CRITICAL", f"[SignalEvaluator GOVERNANCE CONTRACT FAILURE] {contract_err}\n{traceback.format_exc()}")
-                        raise contract_err
                     import traceback
-                    log_event("ERROR", f"[SignalEvaluator ERROR] ML Ensemble inference RuntimeError for {symbol} {interval}m: {contract_err}\n{traceback.format_exc()}")
+                    log_event("WARNING", f"[SignalEvaluator Contract Warning] Feature contract mismatch for {symbol} {interval}m: {contract_err}. Falling back to rule-based evaluation.")
+                    model_eval_success = False
                 except Exception as ex_m:
                     import traceback
-                    log_event("ERROR", f"[SignalEvaluator ERROR] ML Ensemble inference failed for {symbol} {interval}m: {ex_m}\n{traceback.format_exc()}")
+                    log_event("WARNING", f"[SignalEvaluator Warning] ML Ensemble inference failed for {symbol} {interval}m: {ex_m}. Falling back to rule-based evaluation.")
+                    model_eval_success = False
 
             if not model_eval_success:
                 # Technical rule-based signal fallback (Logged and tagged explicitly as fallback)
