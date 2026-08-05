@@ -1991,18 +1991,23 @@ def start_telegram_command_listener():
                                 "parse_mode": "Markdown"
                             })
                             
-                        elif text.startswith("/skipped"):
+                        elif text.startswith("/skipped") or (text.lower().strip() in TF_MAP_SKIPPED and sender_chat_id in pending_skipped):
+                            clean_text = text.lower().strip()
                             parts = text.split()
                             target_tf_code = None
                             if len(parts) > 1:
                                 target_tf_code = TF_MAP_SKIPPED.get(parts[1].lower().strip())
+                            elif clean_text in TF_MAP_SKIPPED:
+                                target_tf_code = TF_MAP_SKIPPED.get(clean_text)
                                 
                             if target_tf_code:
+                                pending_skipped.pop(sender_chat_id, None)
                                 rep_text = get_skipped_trades_report(target_tf_code)
                                 execute_telegram_api_call("sendMessage", {
                                     "chat_id": sender_chat_id,
                                     "text": rep_text,
-                                    "parse_mode": "Markdown"
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": {"remove_keyboard": True}
                                 })
                             else:
                                 pending_skipped[sender_chat_id] = {
