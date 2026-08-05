@@ -802,13 +802,8 @@ def get_manifest_hmac_secret() -> bytes:
         if os.path.exists(secret_file):
             with open(secret_file, "r") as f:
                 secret = f.read().strip()
-        else:
-            secret = hashlib.sha256(os.urandom(32)).hexdigest()
-            try:
-                with open(secret_file, "w") as f:
-                    f.write(secret)
-            except Exception:
-                pass
+    if not secret:
+        raise RuntimeError("MANIFEST_HMAC_SECRET environment variable or .manifest_hmac_secret file required for manifest signing/verification")
     return secret.encode("utf-8")
 
 

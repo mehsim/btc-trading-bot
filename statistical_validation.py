@@ -525,9 +525,9 @@ class StatisticalValidation:
             "multiple_testing": {
                 "experiment_family": "15m_strategy_experiments",
                 "num_tests": 12,
-                "fdr_method": "Benjamini-Hochberg",
+                "fdr_method": "Bonferroni",
                 "alpha": 0.05,
-                "q_value": round(p_val * 1.05, 4)
+                "q_value": min(1.0, round(float(p_val * 12.0), 4))
             }
         }
 
