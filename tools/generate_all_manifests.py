@@ -29,10 +29,48 @@ def load_json_feats(filename):
                 return data
     return None
 
+def extract_model_feature_count(model_prefix):
+    model_file = f"{model_prefix}_xgb.json"
+    if os.path.exists(model_file):
+        try:
+            from xgboost import XGBClassifier, XGBRegressor
+            try:
+                model = XGBClassifier()
+                model.load_model(model_file)
+            except Exception:
+                model = XGBRegressor()
+                model.load_model(model_file)
+            return model.get_booster().num_features()
+        except Exception:
+            pass
+    return None
+
+def get_full_feature_names():
+    try:
+        import pandas as pd
+        import numpy as np
+        import time
+        from features import add_features
+        now_ts = int(time.time() * 1000)
+        df = pd.DataFrame({
+            'timestamp': [now_ts + i*900000 for i in range(100)],
+            'open': np.random.randn(100) + 50000,
+            'high': np.random.randn(100) + 50100,
+            'low': np.random.randn(100) + 49900,
+            'close': np.random.randn(100) + 50000,
+            'volume': np.random.randn(100) * 10 + 100
+        })
+        df = add_features(df)
+        cols = [c for c in df.columns if c not in ['open','high','low','close','volume','timestamp']]
+        return cols
+    except Exception:
+        return full_features
+
 def generate_manifests():
     git_sha = get_git_sha()
     timeframes = ["15", "30", "60", "120", "240"]
     regimes = ["trending", "ranging"]
+    extended_feats = get_full_feature_names()
 
     print(f"Generating authoritative model manifests (Git SHA: {git_sha})...")
 
@@ -42,9 +80,13 @@ def generate_manifests():
             prefix_t = f"ensemble_{rg}_trend_{iv}"
             prefix_p = f"ensemble_{rg}_price_{iv}"
 
-            # Resolve feature names authoritatively based on timeframe contract
-            if iv == "15":
-                feat_list = full_features[:70]
+            # Check model expected feature count
+            m_count = extract_model_feature_count(prefix_t)
+
+            if m_count is not None:
+                feat_list = extended_feats[:m_count] if len(extended_feats) >= m_count else full_features[:m_count]
+            elif iv == "15":
+                feat_list = load_json_feats("selected_features_15.json") or (extended_feats[:m_count] if m_count else extended_feats[:20])
             elif iv == "30":
                 feat_list = load_json_feats("selected_features_30.json") or full_features[:25]
             elif iv == "60":
