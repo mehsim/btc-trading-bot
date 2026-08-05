@@ -1047,7 +1047,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             X_val, y_val_t, y_val_p = X.iloc[val_idx], y_trend.iloc[val_idx], y_price.iloc[val_idx]
             
             from core import compute_sample_uniqueness
-            t1_sub = pd.Series(y_train_t.index + pd.Timedelta(minutes=cv.lookahead * 15), index=y_train_t.index)
+            t1_sub = pd.Series(np.arange(len(y_train_t)) + cv.lookahead, index=y_train_t.index)
             uniqueness_train = compute_sample_uniqueness(t1_sub, y_train_t.index).values
             sample_weight_train = compute_sample_weight(class_weight='balanced', y=y_train_t)
             decay_weights = np.linspace(0.3, 1.0, len(y_train_t))
