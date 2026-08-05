@@ -9707,35 +9707,31 @@ def safe_main():
 if __name__ == "__main__":
     import threading
     # Start main bot loop in background thread
-    threading.Thread(target=safe_main, daemon=True).start()
+    threading.Thread(target=safe_main, name="main-bot-loop", daemon=True).start()
     # Start background Telegram command listener thread
-    threading.Thread(target=start_telegram_command_listener, args=(bot_state,), daemon=True).start()
+    threading.Thread(target=start_telegram_command_listener, args=(bot_state,), name="telegram-listener", daemon=True).start()
     send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")
     # Start background news sentiment updater thread
-    threading.Thread(target=run_news_sentiment_updater, daemon=True).start()
+    threading.Thread(target=run_news_sentiment_updater, name="news-sentiment", daemon=True).start()
     # Start background Bybit balance updater thread
-    threading.Thread(target=run_bybit_balance_updater, daemon=True).start()
+    threading.Thread(target=run_bybit_balance_updater, name="bybit-balance", daemon=True).start()
     # Start Bybit WebSocket feed in a background thread
-    threading.Thread(target=start_ws, daemon=True).start()
+    threading.Thread(target=start_ws, name="ws-public-feed", daemon=True).start()
     # Start Bybit Private WebSocket feed in a background thread
-    threading.Thread(target=start_private_ws, daemon=True).start()
+    threading.Thread(target=start_private_ws, name="ws-private-feed", daemon=True).start()
     # Start WebSocket keep-alive watchdog thread in a background thread
-    threading.Thread(target=run_websocket_watchdog, daemon=True).start()
+    threading.Thread(target=run_websocket_watchdog, name="ws-watchdog", daemon=True).start()
     # Start Bybit REST API fallback price updater thread
-    threading.Thread(target=run_fallback_price_updater, daemon=True).start()
-    # Start automated rolling retraining scheduler in a background thread (Moved to retrain_worker.py)
-    # threading.Thread(target=run_rolling_retrain_scheduler, daemon=True).start()
+    threading.Thread(target=run_fallback_price_updater, name="price-fallback", daemon=True).start()
     # Start background order flow persister thread
-    threading.Thread(target=run_order_flow_persister, daemon=True).start()
-    # Start daily Telegram trade journal digest scheduler (Moved to retrain_worker.py / cron)
-    # threading.Thread(target=run_daily_journal_scheduler, daemon=True).start()
+    threading.Thread(target=run_order_flow_persister, name="order-flow-persister", daemon=True).start()
     # Start funding rate arbitrage monitor thread
-    threading.Thread(target=run_funding_rate_arbitrage_monitor, daemon=True).start()
+    threading.Thread(target=run_funding_rate_arbitrage_monitor, name="funding-arb-monitor", daemon=True).start()
     # Start daily database and trade journal backup thread
-    threading.Thread(target=run_daily_backup_scheduler, daemon=True).start()
+    threading.Thread(target=run_daily_backup_scheduler, name="daily-backup-scheduler", daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread
-    threading.Thread(target=run_daily_summary_scheduler, daemon=True).start()
+    threading.Thread(target=run_daily_summary_scheduler, name="daily-summary-scheduler", daemon=True).start()
     from signal_evaluator import run_signal_evaluator_loop
-    threading.Thread(target=run_signal_evaluator_loop, args=(bot_state,), daemon=True).start()
+    threading.Thread(target=run_signal_evaluator_loop, args=(bot_state,), name="signal-evaluator", daemon=True).start()
     # Run Flask on main thread so HF health check passes immediately
     run_flask()
