@@ -18,21 +18,26 @@ from core import add_features, calibrate_confidence, features
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 from config import ENABLE_REGIME_HYSTERESIS, STRONG_TREND_ADX_ENTER, STRONG_TREND_ADX_EXIT
 
+from collections import OrderedDict
+
 TF_MAP = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
 
 class SignalEvaluator:
     def __init__(self, bot_state):
         self.bot_state = bot_state
         self.state_lock = threading.Lock()
-        self.models_by_interval = {}
+        self.models_by_interval = OrderedDict()
+        self.max_cache_size = 12
 
     def get_models(self, interval: str, is_trending: bool):
         regime_key = "trending" if is_trending else "ranging"
         cache_key = f"{interval}_{regime_key}"
-        if cache_key in self.models_by_interval:
-            return self.models_by_interval[cache_key]
-        if interval in self.models_by_interval and isinstance(self.models_by_interval[interval], dict) and regime_key in self.models_by_interval[interval]:
-            return self.models_by_interval[interval][regime_key]
+        with self.state_lock:
+            if cache_key in self.models_by_interval:
+                self.models_by_interval.move_to_end(cache_key)
+                return self.models_by_interval[cache_key]
+            if interval in self.models_by_interval and isinstance(self.models_by_interval[interval], dict) and regime_key in self.models_by_interval[interval]:
+                return self.models_by_interval[interval][regime_key]
 
         import json, os, gc
 
@@ -94,12 +99,6 @@ class SignalEvaluator:
                 log_event("ERROR", f"[SignalEvaluator ERROR] Ensemble loading returned None for {interval}m ({regime_key})")
                 return None
                 
-            # Keep at most 2 active regime models in memory
-            if len(self.models_by_interval) >= 2:
-                old_k = list(self.models_by_interval.keys())[0]
-                del self.models_by_interval[old_k]
-                gc.collect()
-
             res = {
                 "trend": m_trend,
                 "price": m_price,
@@ -110,7 +109,11 @@ class SignalEvaluator:
                 "calibrator_version": cal_ver_str,
                 "calibrator_ece": cal_ece_val
             }
-            self.models_by_interval[cache_key] = res
+            with self.state_lock:
+                while len(self.models_by_interval) >= self.max_cache_size:
+                    self.models_by_interval.popitem(last=False)
+                    gc.collect()
+                self.models_by_interval[cache_key] = res
             return res
         except Exception as e:
             log_event("ERROR", f"[SignalEvaluator ERROR] Lazy model loading for {interval}m ({regime_key}): {e}")
@@ -263,11 +266,18 @@ class SignalEvaluator:
                     model_eval_success = True
                 except (NameError, AttributeError) as prog_err:
                     import traceback
-                    print(f"[SignalEvaluator CRITICAL PROGRAMMING ERROR] {prog_err}\n{traceback.format_exc()}")
+                    log_event("CRITICAL", f"[SignalEvaluator CRITICAL PROGRAMMING ERROR] {prog_err}\n{traceback.format_exc()}")
                     raise prog_err
+                except RuntimeError as contract_err:
+                    if any(k in str(contract_err) for k in ["Governance", "Feature contract", "Mismatch"]):
+                        import traceback
+                        log_event("CRITICAL", f"[SignalEvaluator GOVERNANCE CONTRACT FAILURE] {contract_err}\n{traceback.format_exc()}")
+                        raise contract_err
+                    import traceback
+                    log_event("ERROR", f"[SignalEvaluator ERROR] ML Ensemble inference RuntimeError for {symbol} {interval}m: {contract_err}\n{traceback.format_exc()}")
                 except Exception as ex_m:
                     import traceback
-                    print(f"[SignalEvaluator ERROR] ML Ensemble inference failed for {symbol} {interval}m: {ex_m}\n{traceback.format_exc()}")
+                    log_event("ERROR", f"[SignalEvaluator ERROR] ML Ensemble inference failed for {symbol} {interval}m: {ex_m}\n{traceback.format_exc()}")
 
             if not model_eval_success:
                 # Technical rule-based signal fallback (Logged and tagged explicitly as fallback)

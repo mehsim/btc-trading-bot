@@ -235,8 +235,8 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         from config import MODEL_GOVERNANCE
         gates = MODEL_GOVERNANCE
 
-    max_ece_ceiling = gates.get("max_ece", 0.15)
-    max_brier_ceiling = gates.get("max_brier", 0.25)
+    max_ece_ceiling = gates.get("max_ece", MODEL_GOVERNANCE.get("max_ece", 0.08))
+    max_brier_ceiling = gates.get("max_brier", MODEL_GOVERNANCE.get("max_brier", 0.22))
 
     if not MLFLOW_AVAILABLE:
         return True, "MLflow unavailable; falling back to local verification"
