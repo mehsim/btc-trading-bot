@@ -602,7 +602,10 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
     if not api_key or not api_secret:
         if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "true":
             return _real_balance_cache or 100.0
-        raise AccountBalanceUnavailableException("BYBIT_API_KEY or BYBIT_API_SECRET missing in environment")
+        with _real_balance_lock:
+            _real_balance_cache = 0.0
+            _last_real_balance_sync = now
+        return 0.0
 
     # Support UNIFIED, CONTRACT, and SPOT account types for seamless synchronization
     for acct_type in ["UNIFIED", "CONTRACT", "SPOT"]:

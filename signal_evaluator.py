@@ -390,11 +390,17 @@ class SignalEvaluator:
 def run_signal_evaluator_loop(bot_state):
     print("[SignalEvaluator] Background market evaluation worker thread started.")
     evaluator = SignalEvaluator(bot_state)
+    import gc, ctypes
     while True:
         try:
             for iv in ["15", "30", "60", "120", "240"]:
                 evaluator.evaluate_interval(symbol="BTCUSDT", interval=iv)
                 time.sleep(1)
+            gc.collect()
+            try:
+                ctypes.CDLL('libc.so.6').malloc_trim(0)
+            except (OSError, AttributeError):
+                pass
         except Exception as e:
             print(f"[SignalEvaluator Loop Error] {e}")
         time.sleep(60)
