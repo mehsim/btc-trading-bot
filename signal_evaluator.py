@@ -464,14 +464,34 @@ class SignalEvaluator:
             }
 
 
+def verify_manifest_health():
+    """Startup assertion verifying presence of all 10 required feature-contract manifests."""
+    import os
+    missing = []
+    for rg in ["trending", "ranging"]:
+        for iv in ["15", "30", "60", "120", "240"]:
+            mf = f"ensemble_{rg}_trend_{iv}_manifest.json"
+            if not os.path.exists(mf):
+                missing.append(mf)
+    if missing:
+        log_event("WARNING", f"[SignalEvaluator Startup Warning] Missing {len(missing)}/10 manifests: {missing}")
+    else:
+        log_event("INFO", "[SignalEvaluator Startup] All 10 feature-contract manifests present and verified.")
+
 def run_signal_evaluator_loop(bot_state):
-    print("[SignalEvaluator] Background market evaluation worker thread started.")
+    log_event("INFO", "[SignalEvaluator] Background market evaluation worker thread started.")
+    verify_manifest_health()
     evaluator = SignalEvaluator(bot_state)
     import gc, ctypes
     while True:
         try:
             for iv in ["15", "30", "60", "120", "240"]:
-                evaluator.evaluate_interval(symbol="BTCUSDT", interval=iv)
+                try:
+                    evaluator.evaluate_interval(symbol="BTCUSDT", interval=iv)
+                except RuntimeError as run_err:
+                    log_event("CRITICAL", f"[SignalEvaluator Governance Alert] Interval {iv}m failed contract verification: {run_err}")
+                except Exception as iv_err:
+                    log_event("ERROR", f"[SignalEvaluator Error] Interval {iv}m evaluation error: {iv_err}")
                 time.sleep(1)
             gc.collect()
             try:
@@ -479,5 +499,5 @@ def run_signal_evaluator_loop(bot_state):
             except (OSError, AttributeError):
                 pass
         except Exception as e:
-            print(f"[SignalEvaluator Loop Error] {e}")
+            log_event("ERROR", f"[SignalEvaluator Loop Error] {e}")
         time.sleep(60)

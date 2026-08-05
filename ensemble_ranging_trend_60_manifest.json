@@ -1,7 +1,7 @@
 {
   "manifest_schema_version": 3,
-  "prefix": "ensemble_ranging_price_60",
-  "timestamp": "2026-08-05T16:36:17.622867+00:00",
+  "prefix": "ensemble_ranging_trend_60",
+  "timestamp": "2026-08-05T16:36:17.610900+00:00",
   "model_version": "v7.2.0-b31b3cbf",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
@@ -87,7 +87,7 @@
   "parent_model_hash": null,
   "promotion_reason": "Initial deployment / benchmark promotion",
   "replaced_model_hash": null,
-  "rollback_reference": "ensemble_ranging_price_60_backup",
+  "rollback_reference": "ensemble_ranging_trend_60_backup",
   "governance_policy": {
     "version": "v2.4",
     "max_ece": 0.08,
