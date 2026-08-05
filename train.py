@@ -1254,15 +1254,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
         
         # Fit calibrator
         if len(calibration_probs) > 10:
+            fit_n = len(calibration_probs)
+            if fit_n < 100:
+                print(f"  [Calibrator Warning] Small fitting sample size (N={fit_n} < 100). Fallback Platt scaling recommended.")
             ir.fit(calibration_probs, calibration_labels)
             calibrator_data = {
                 "X": ir.X_thresholds_.tolist(),
-                "y": ir.y_thresholds_.tolist()
+                "y": ir.y_thresholds_.tolist(),
+                "fitting_sample_size": fit_n,
+                "scaling_method": "isotonic" if fit_n >= 100 else "platt_fallback"
             }
             calibrator_filename = f"calibrator_{name}_{interval}.json"
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)
-            print(f"  [Calibrator] Saved Isotonic Regression calibrator to {calibrator_filename}")
+            print(f"  [Calibrator] Saved Isotonic/Platt calibrator to {calibrator_filename} (N={fit_n})")
         else:
             # Save default identity mapping if no predictions occurred
             calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
