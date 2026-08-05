@@ -150,6 +150,11 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
     s = pd.Series(labels, index=df.index)
     s.attrs["ambiguous_bar_pct"] = ambiguous_bar_pct
     s.attrs["neutral_pct"] = round(float(np.mean(labels == 1)) * 100.0, 2)
+    s.attrs["outcome_breakdown"] = {
+        "long_win_pct": round(float(np.mean(labels == 2)) * 100.0, 2),
+        "short_win_pct": round(float(np.mean(labels == 0)) * 100.0, 2),
+        "neutral_or_stopped_pct": round(float(np.mean(labels == 1)) * 100.0, 2)
+    }
     return s
 
 
