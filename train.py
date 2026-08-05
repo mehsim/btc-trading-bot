@@ -1221,9 +1221,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 # Calculate real Brier score and ECE for challenger
                 from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
                 try:
-                    chal_prob_t = final_ensemble_t.predict_proba(X_holdout)
-                    chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_t))
-                    chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_t))
+                    chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
+                    chal_prob_1d = np.asarray(chal_prob_raw[:, -1] if (isinstance(chal_prob_raw, np.ndarray) and chal_prob_raw.ndim == 2 and chal_prob_raw.shape[1] >= 2) else chal_prob_raw).ravel()
+                    y_true_1d = np.asarray(y_holdout_trend).ravel()
+                    chal_brier = float(calculate_brier_score(y_true_1d, chal_prob_1d))
+                    chal_ece = float(calculate_expected_calibration_error(y_true_1d, chal_prob_1d))
                 except Exception as ex_brier:
                     log_event("WARNING", f"Holdout calibration metric calculation notice: {ex_brier}")
                     chal_brier = 0.18
@@ -1252,9 +1254,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
             chal_mae = 0.01
             try:
                 from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
-                chal_prob_t = final_ensemble_t.predict_proba(X_holdout)
-                chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_t))
-                chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_t))
+                chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
+                chal_prob_1d = np.asarray(chal_prob_raw[:, -1] if (isinstance(chal_prob_raw, np.ndarray) and chal_prob_raw.ndim == 2 and chal_prob_raw.shape[1] >= 2) else chal_prob_raw).ravel()
+                y_true_1d = np.asarray(y_holdout_trend).ravel()
+                chal_brier = float(calculate_brier_score(y_true_1d, chal_prob_1d))
+                chal_ece = float(calculate_expected_calibration_error(y_true_1d, chal_prob_1d))
             except Exception as ex_brier:
                 log_event("WARNING", f"Holdout calibration metric calculation notice: {ex_brier}")
                 chal_brier = 0.18

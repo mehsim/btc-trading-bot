@@ -12,10 +12,10 @@ import os
 import sys
 
 # Current Baseline Count (Ratchets down only)
-BASELINE = 112
+BASELINE = 110
 
-# Files to exclude (external libraries, build output, virtual environments)
-EXCLUDE_DIRS = {".venv", "venv", "build", "dist", ".git", ".pytest_cache", "node_modules", "mlartifacts"}
+# Files to exclude (external libraries, build output, virtual environments, tooling)
+EXCLUDE_DIRS = {".venv", "venv", "build", "dist", ".git", ".pytest_cache", "node_modules", "mlartifacts", "tools"}
 EXCLUDE_FILES = {"setup.py"}
 
 
