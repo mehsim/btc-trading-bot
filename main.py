@@ -8385,7 +8385,7 @@ def main():
  
             print(f"[Parallel Fetch] Querying {len(check_queue)} candle combinations in parallel...")
             t_start = time.time()
-            with ThreadPoolExecutor(max_workers=16) as executor:
+            with ThreadPoolExecutor(max_workers=4) as executor:
                 future_to_pair = {executor.submit(fetch_single_history, sym, iv): (sym, iv) for sym, iv in check_queue}
                 for fut in future_to_pair:
                     sym, iv = future_to_pair[fut]
