@@ -345,4 +345,4 @@ def run_signal_evaluator_loop(bot_state):
                 time.sleep(1)
         except Exception as e:
             print(f"[SignalEvaluator Loop Error] {e}")
-        time.sleep(15)
+        time.sleep(60)

@@ -4978,7 +4978,7 @@ def run_fallback_price_updater():
         except Exception as e:
             print(f"[Price Fallback Exception] {e}")
 
-        time.sleep(5)  # Short sleep, actual polling gated by interval checks above
+        time.sleep(15)  # Gated sleep to conserve CPU cycles
 
 def send_email_notification(subject, body):
     """
@@ -8385,7 +8385,7 @@ def main():
  
             print(f"[Parallel Fetch] Querying {len(check_queue)} candle combinations in parallel...")
             t_start = time.time()
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=2) as executor:
                 future_to_pair = {executor.submit(fetch_single_history, sym, iv): (sym, iv) for sym, iv in check_queue}
                 for fut in future_to_pair:
                     sym, iv = future_to_pair[fut]
