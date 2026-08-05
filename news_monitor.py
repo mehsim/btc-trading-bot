@@ -7,7 +7,6 @@ Economic news monitor, blackout evaluator, and social news fetchers (Reddit RSS,
 import os
 import time
 import requests
-import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple
 
 

@@ -2225,7 +2225,6 @@ from ta.volume import MFIIndicator
 print("[System Debug] ta imported.")
 print("[System Debug] Importing data.py...")
 from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
-import xml.etree.ElementTree as ET
 print("[System Debug] Importing Flask...")
 from flask import Flask, jsonify, render_template, request, make_response
 
@@ -5620,12 +5619,7 @@ def evaluate_predictions(df_completed, interval, symbol):
 # =========================
 sentiment_pipeline = None
 
-def safe_parse_xml(xml_content):
-    """
-    Safely parses XML content using defusedxml to eliminate XXE vulnerabilities (CWE-611, B314).
-    """
-    import defusedxml.ElementTree as SafeET
-    return SafeET.fromstring(xml_content)
+from news_monitor import safe_parse_xml
 
 
 def get_reddit_posts():
