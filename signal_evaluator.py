@@ -24,44 +24,49 @@ class SignalEvaluator:
         self.bot_state = bot_state
         self.state_lock = threading.Lock()
         self.models_by_interval = {}
-        self.load_models()
 
-    def load_models(self):
-        import json, os
-        for iv in ["15", "30", "60", "120", "240"]:
-            try:
-                # Load RFECV-selected feature lists for this interval
-                def _load_feats(primary, fallback=None):
-                    for fname in filter(None, [primary, fallback, f"selected_features_{iv}.json", "selected_features_30.json"]):
-                        if os.path.exists(fname):
-                            try:
-                                with open(fname) as f:
-                                    feat = json.load(f)
-                                    if feat:
-                                        return feat
-                            except Exception:
-                                pass
-                    return features  # global fallback
+    def get_models(self, interval: str, is_trending: bool):
+        regime_key = "trending" if is_trending else "ranging"
+        cache_key = f"{interval}_{regime_key}"
+        if cache_key in self.models_by_interval:
+            return self.models_by_interval[cache_key]
 
-                feat_trending = _load_feats(f"selected_features_{iv}_trending.json", f"selected_features_{iv}.json")
-                feat_ranging  = _load_feats(f"selected_features_{iv}_ranging.json",  f"selected_features_{iv}.json")
+        import json, os, gc
+        def _load_feats(primary, fallback=None):
+            for fname in filter(None, [primary, fallback, f"selected_features_{interval}.json", "selected_features_30.json"]):
+                if os.path.exists(fname):
+                    try:
+                        with open(fname) as f:
+                            feat = json.load(f)
+                            if feat:
+                                return feat
+                    except (ValueError, TypeError, KeyError, OSError):
+                        pass
+            return features
 
-                self.models_by_interval[iv] = {
-                    "trending": {
-                        "trend": load_ensemble_classifier(f"ensemble_trending_trend_{iv}", len(feat_trending)),
-                        "price": load_ensemble_regressor(f"ensemble_trending_price_{iv}", len(feat_trending))
-                    },
-                    "ranging": {
-                        "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{iv}", len(feat_ranging)),
-                        "price": load_ensemble_regressor(f"ensemble_ranging_price_{iv}", len(feat_ranging))
-                    },
-                    "selected_features_trending": feat_trending,
-                    "selected_features_ranging":  feat_ranging,
-                }
-                print(f"[SignalEvaluator] Loaded ML models for interval {iv}m (trending={len(feat_trending)} feats, ranging={len(feat_ranging)} feats).")
-            except Exception as e:
-                print(f"[SignalEvaluator Info] Model loading for {iv}m: {e}")
+        feat_list = _load_feats(f"selected_features_{interval}_{regime_key}.json", f"selected_features_{interval}.json")
+        try:
+            m_trend = load_ensemble_classifier(f"ensemble_{regime_key}_trend_{interval}", len(feat_list))
+            m_price = load_ensemble_regressor(f"ensemble_{regime_key}_price_{interval}", len(feat_list))
+            if m_trend is None or m_price is None:
+                return None
+                
+            # Keep at most 2 active regime models in memory
+            if len(self.models_by_interval) >= 2:
+                old_k = list(self.models_by_interval.keys())[0]
+                del self.models_by_interval[old_k]
+                gc.collect()
 
+            res = {
+                "trend": m_trend,
+                "price": m_price,
+                "selected_features": feat_list
+            }
+            self.models_by_interval[cache_key] = res
+            return res
+        except Exception as e:
+            print(f"[SignalEvaluator Info] Lazy model loading for {interval}m ({regime_key}): {e}")
+            return None
 
     def evaluate_interval(self, symbol="BTCUSDT", interval="15"):
         tf_key = TF_MAP.get(interval, f"{interval}m")
@@ -92,14 +97,13 @@ class SignalEvaluator:
                 self.bot_state[f"regime_{tf_key}"] = regime_str
                 self.bot_state[f"adx_{tf_key}"] = adx_val
 
-            # Model evaluation if models loaded
+            # Lazy model evaluation
             model_eval_success = False
-            if interval in self.models_by_interval:
+            models = self.get_models(interval, is_trending)
+            if models is not None:
                 try:
-                    models = self.models_by_interval[interval]["trending" if is_trending else "ranging"]
                     _regime_key = "trending" if is_trending else "ranging"
-                    _feat_key = f"selected_features_{_regime_key}"
-                    _feat_list = self.models_by_interval[interval].get(_feat_key) or features
+                    _feat_list = models.get("selected_features") or features
 
                     # Guard: if selected_features has fewer cols than model expects, use all features
                     # so _slice_model_input can correctly truncate to model's expected count.
