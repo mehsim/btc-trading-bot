@@ -15,13 +15,20 @@ from typing import Dict, Any, List
 DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
 from database import db_lock
 
+_db_initialized = False
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_knowledge_db():
+    global _db_initialized
+    if _db_initialized:
+        return
     with db_lock:
+        if _db_initialized:
+            return
         conn = get_db_connection()
         try:
             conn.execute("""
@@ -56,12 +63,14 @@ def init_knowledge_db():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_kr_cluster ON knowledge_rules(cluster_key);")
             
             conn.commit()
+            _db_initialized = True
         except Exception as e:
             print(f"[knowledge_base Error] Init failed: {e}")
         finally:
             conn.close()
 
 def save_rule(rule_dict: Dict[str, Any]) -> bool:
+    init_knowledge_db()
     with db_lock:
         conn = get_db_connection()
         try:
@@ -91,6 +100,7 @@ def save_rule(rule_dict: Dict[str, Any]) -> bool:
             conn.close()
 
 def get_active_rules() -> List[Dict[str, Any]]:
+    init_knowledge_db()
     with db_lock:
         conn = get_db_connection()
         try:
@@ -118,5 +128,3 @@ def get_rule_lifecycle_status(sample_size: int) -> str:
     elif sample_size >= 20:
         return "HYPOTHESIS"
     return "DRAFT"
-
-init_knowledge_db()

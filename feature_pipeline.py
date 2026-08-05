@@ -151,7 +151,7 @@ def calculate_adaptive_triple_barrier_labels(
 ) -> pd.Series:
     """
     Pillar 2: Adaptive Triple Barrier Labeling.
-    Evaluates High/Low price barriers with dynamic timeframe parameters, emitting {0: Bearish, 1: Neutral, 2: Bullish} labels.
+    Evaluates High/Low price barriers dynamically resolved from TIMEFRAME_CONFIG by timeframe interval and market regime, emitting {0: Bearish, 1: Neutral, 2: Bullish} labels.
     """
     from config import TIMEFRAME_CONFIG
     cfg = TIMEFRAME_CONFIG.get(str(interval), {

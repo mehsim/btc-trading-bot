@@ -752,6 +752,11 @@ def is_feature_contract_compatible(
     and feature_names (order-sensitive) against the challenger feature list.
     Uses the RFECV-selected feature list as the challenger source of truth.
     """
+    from config import SUPPORTED_MANIFEST_SCHEMA_VERSION
+    schema_v = champion_manifest.get("manifest_schema_version", 1)
+    if schema_v < SUPPORTED_MANIFEST_SCHEMA_VERSION:
+        return False, f"Manifest schema version {schema_v} is deprecated; schema version {SUPPORTED_MANIFEST_SCHEMA_VERSION} required."
+
     champ_count = champion_manifest.get("feature_count")
     champ_hash  = champion_manifest.get("feature_contract_hash")
     champ_names = champion_manifest.get("feature_names", [])
