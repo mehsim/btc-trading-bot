@@ -809,8 +809,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         selector.fit(X_prelim, y_prelim)
         selected_features = [f for f, support in zip(features, selector.support_) if support]
         from feature_pipeline import filter_multicollinear_features
-        selected_features = filter_multicollinear_features(df_sub, selected_features, threshold=0.85)
-        print(f"[Correlation Filter] Retained {len(selected_features)} uncorrelated features (threshold |r| <= 0.85).")
+        selected_features = filter_multicollinear_features(df_sub, selected_features, vif_threshold=10.0)
+        print(f"[Correlation Filter] Retained {len(selected_features)} uncorrelated features (VIF <= 10.0).")
 
     # Force-protect domain-critical features from RFECV elimination
     protected = ["close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2"]
