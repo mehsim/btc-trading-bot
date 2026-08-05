@@ -891,11 +891,14 @@ def api_institutional_summary():
         if len(tail_losses) > 0:
             cvar_usd = abs(float(np.mean(tail_losses)))
             cvar_pct_val = round((cvar_usd / max(1.0, sim_balance)) * 100.0, 2)
+            cvar_method = "EMPIRICAL_TAIL"
         else:
             cvar_pct_val = round(var_pct_val * 1.25, 2)
+            cvar_method = "EMPIRICAL_VAR_MULTIPLIER_FALLBACK"
     else:
         var_pct_val = round(max(0.0, dynamic_dd * 0.4), 2)
         cvar_pct_val = round(var_pct_val * 1.25, 2)
+        cvar_method = "DRAWDOWN_MULTIPLIER_FALLBACK"
 
     pos_by_sym = {}
     for p in active_positions:
@@ -1101,6 +1104,7 @@ def api_institutional_summary():
             "max_allowed_risk_pct": max_risk_val,
             "portfolio_var_pct": var_pct_val,
             "cvar_pct": cvar_pct_val,
+            "cvar_method": cvar_method,
             "exposures": dynamic_exposures,
             "correlation_risk": corr_risk_label,
             "net_exposure_pct": round(float(portfolio_exposure_pct), 1)

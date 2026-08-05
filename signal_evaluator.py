@@ -182,6 +182,7 @@ class SignalEvaluator:
 
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:
+                        eval_threshold = 0.52
                         norm_bear = prob_bearish / max(1e-9, dir_total)
                         norm_bull = prob_bullish / max(1e-9, dir_total)
                         if norm_bull >= 0.52:
@@ -194,6 +195,7 @@ class SignalEvaluator:
                             direction = "Neutral"
                             raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
                     else:
+                        eval_threshold = 0.50
                         if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= 0.50:
                             direction = "Bullish"
                             raw_conf = prob_bullish
@@ -258,7 +260,7 @@ class SignalEvaluator:
                                     "status": f"Evaluated ({direction})",
                                     "calibrated_confidence": float(calibrated_conf),
                                     "raw_confidence": float(raw_conf),
-                                    "dynamic_threshold": 0.52,
+                                    "dynamic_threshold": float(eval_threshold),
                                     "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
                                 })
                                 if len(history) > 200:

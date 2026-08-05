@@ -231,8 +231,8 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
     - Relative gates vs Production incumbent: Brier < 0.98 * incumbent, Sharpe OOS >= incumbent.
     - Archives previous Production model version rather than deleting (enabling rollback).
     """
+    from config import MODEL_GOVERNANCE
     if gates is None:
-        from config import MODEL_GOVERNANCE
         gates = MODEL_GOVERNANCE
 
     max_ece_ceiling = gates.get("max_ece", MODEL_GOVERNANCE.get("max_ece", 0.08))
