@@ -12,13 +12,7 @@ import time
 import threading
 from typing import Dict, Any, List
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
-db_lock = threading.Lock()
-
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    return conn
+from database import db_lock, get_db_connection
 
 def init_transition_db():
     with db_lock:

@@ -17,13 +17,7 @@ import database
 import numpy as np
 from trade_calculators import calculate_replay_statistics
 
-def safe_float(val, default=0.0):
-    if val is None or val == "MT":
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
+from trade_calculators import safe_float
 
 dashboard_bp = Blueprint("dashboard", __name__)
 startup_time = time.time()

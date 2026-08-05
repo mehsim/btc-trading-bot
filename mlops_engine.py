@@ -29,13 +29,7 @@ def init_mlflow(experiment_name: str = "BTC_Trading_Bot"):
         print(f"[MLflow Warning] Failed to initialize MLflow: {e}")
         return False
 
-def safe_float(val, default=0.0):
-    if val is None or val == "MT":
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
+from trade_calculators import safe_float
 
 def calculate_brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     """

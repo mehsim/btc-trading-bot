@@ -2,13 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Any, Optional
 
-def safe_float(val, default=0.0):
-    if val is None or val == "MT":
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
+from trade_calculators import safe_float
 
 class PortfolioRiskEngine:
     def __init__(self, var_confidence: float = 0.95, max_var_pct: float = 0.05):
@@ -30,9 +24,21 @@ class PortfolioRiskEngine:
 
     def calculate_parametric_var(self, open_positions: List[Dict], returns_df: pd.DataFrame, total_equity: float) -> Tuple[float, float, bool]:
         """
-        Computes 1-day Parametric Value at Risk (VaR):
-        VaR = z_score * portfolio_std_dev * portfolio_value
-        Returns: (var_dollars, var_pct_equity, is_within_limit)
+        Calculates 1-day Parametric Value at Risk (VaR) for active portfolio positions.
+
+        Contract & Method Signature:
+        - Inputs:
+            - open_positions: List[Dict] — List of position dicts with keys 'symbol' (str) and 'position_size_usd' (float).
+            - returns_df: pd.DataFrame — Historical log returns per asset.
+            - total_equity: float — Total account equity in USD (must be > 0).
+        - Outputs:
+            - Tuple[float, float, bool]:
+                1. var_dollars (float): 1-day VaR exposure in USD.
+                2. var_pct_equity (float): VaR as a fraction of total equity (e.g. 0.035 for 3.5%).
+                3. is_within_limit (bool): True if var_pct_equity <= self.max_var_pct (e.g. <= 0.05), False otherwise.
+        - Failure Contract:
+            - If total_equity <= 0, returns (0.0, 1.0, False) to fail closed and halt trading.
+            - If open_positions is empty, returns (0.0, 0.0, True).
         """
         if total_equity <= 0:
             return 0.0, 1.0, False

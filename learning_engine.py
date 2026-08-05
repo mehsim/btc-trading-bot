@@ -29,13 +29,7 @@ from learning_report import generate_trade_learning_report
 from audit_logger import log_learning_action
 from schema_validator import schema_validator
 
-def safe_float(val, default=0.0):
-    if val is None or val == "MT":
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
+from trade_calculators import safe_float
 from feature_availability import record_feature_sample
 from regime_transition_analyzer import record_transition_trade
 
