@@ -2962,8 +2962,8 @@ def execute_bybit_order_ws_or_rest(endpoint, payload):
                 print(f"[WebSocket Private Execution] Sending {op} reqId={req_id}")
                 active_private_ws.send(json.dumps(ws_payload))
                 
-                # Wait for response (timeout 4.0s for high volatility/latency resilience)
-                timeout = 4.0
+                # Wait for response (timeout 2.0s)
+                timeout = 2.0
                 start_t = time.time()
                 while time.time() - start_t < timeout:
                     with _ws_responses_lock:
@@ -2973,7 +2973,7 @@ def execute_bybit_order_ws_or_rest(endpoint, payload):
                             resp = _ws_responses.pop(req_id)
                             print(f"[WebSocket Private Execution] Received response for reqId={req_id} retCode={resp.get('retCode')}")
                             return resp
-                    time.sleep(0.01)
+                    time.sleep(0.05)  # Reduced from 0.01 to cut spin rate by 5x
                 print(f"[WebSocket Private Execution Warning] Timeout waiting for reqId={req_id}. Falling back to REST...")
             except Exception as e:
                 print(f"[WebSocket Private Execution Error] {e}. Falling back to REST...")
@@ -9621,7 +9621,7 @@ def main():
         except Exception:
             pass
 
-        time.sleep(10)
+        time.sleep(30)  # Candles close every 15m minimum — no need to check faster than 30s
 
 def run_order_flow_persister():
     print("[Order Flow] Persister background thread started.")
