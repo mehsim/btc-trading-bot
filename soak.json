@@ -1,0 +1,23 @@
+{
+  "days": 30,
+  "total_candles_processed": 2880,
+  "total_duration_sec": 15.7,
+  "latencies_ms": {
+    "p50": 1.242,
+    "p95": 1.484,
+    "p99": 1.743,
+    "max": 6.127
+  },
+  "db_write_latencies_ms": {
+    "p50": 4.039,
+    "p95": 5.48,
+    "p99": 6.954
+  },
+  "memory_mb": {
+    "initial_rss": 161.27,
+    "final_rss": 168.14,
+    "rss_growth_pct": 4.26
+  },
+  "queue_full_count": 0,
+  "database_locked_errors": 0
+}

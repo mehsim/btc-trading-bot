@@ -1,0 +1,8 @@
+{
+  "feature_names": [
+    "RSI",
+    "ATR_norm",
+    "ADX",
+    "volume_ratio"
+  ]
+}

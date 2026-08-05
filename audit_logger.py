@@ -10,7 +10,7 @@ import sqlite3
 import os
 import time
 import threading
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from database import db_lock, get_db_connection
 
@@ -35,7 +35,7 @@ def init_audit_log_db():
         finally:
             conn.close()
 
-def log_learning_action(action_type: str, component: str, trade_id: str = None, details: Dict[str, Any] = None, learning_version: str = "v1.0.0"):
+def log_learning_action(action_type: str, component: str, trade_id: Optional[str] = None, details: Optional[Dict[str, Any]] = None, learning_version: str = "v1.0.0"):
     import json
     with db_lock:
         conn = get_db_connection()

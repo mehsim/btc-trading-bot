@@ -9,7 +9,7 @@ Sharpe ratio, Sortino ratio, Max Drawdown, fee savings, and trade win rates.
 import os
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class MonthlyPDFReporter:
     def __init__(self, output_dir: str = "."):
@@ -38,7 +38,7 @@ class MonthlyPDFReporter:
         }
         return report_data
 
-    def generate_monthly_component_attribution_report(self, trade_history: list = None) -> Dict[str, Any]:
+    def generate_monthly_component_attribution_report(self, trade_history: Optional[list] = None) -> Dict[str, Any]:
         """
         Automated Monthly Component Performance Attribution Report:
         Measures individual component contribution to PF, Win Rate, Drawdown, Sharpe, Expectancy, and Recovery Factor.

@@ -1,7 +1,7 @@
 import time
 import numpy as np
 import threading
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 class APITelemetryTracker:
     def __init__(self, capacity: int = 50):
@@ -10,7 +10,7 @@ class APITelemetryTracker:
         self.latencies_sec: List[float] = []
         self.call_logs: List[Dict] = []
 
-    def record_call(self, endpoint: str, latency_sec: float, status_code: int = 200, error_type: str = None):
+    def record_call(self, endpoint: str, latency_sec: float, status_code: int = 200, error_type: Optional[str] = None):
         """Records an API call execution time and latency."""
         with self.lock:
             self.latencies_sec.append(latency_sec)

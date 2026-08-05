@@ -1,0 +1,105 @@
+{
+  "Production": {
+    "run_id": "train_240m_ranging_1785875403",
+    "model_name": "ensemble_ranging_240",
+    "metrics": {
+      "val_accuracy": 0.0,
+      "val_mae": 0.0
+    },
+    "stage": "Production",
+    "timestamp": "2026-08-04T20:30:03.164627+00:00"
+  },
+  "Staging": null,
+  "Archived": [
+    {
+      "run_id": "train_240m_trending_1785874480",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:14:40.808895+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1785874490",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:14:50.219682+00:00"
+    },
+    {
+      "run_id": "train_30m_trending_1785875247",
+      "model_name": "ensemble_trending_30",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:27:27.617505+00:00"
+    },
+    {
+      "run_id": "train_30m_ranging_1785875258",
+      "model_name": "ensemble_ranging_30",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:27:38.007627+00:00"
+    },
+    {
+      "run_id": "train_60m_trending_1785875302",
+      "model_name": "ensemble_trending_60",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:28:22.585150+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1785875312",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:28:32.813507+00:00"
+    },
+    {
+      "run_id": "train_120m_trending_1785875350",
+      "model_name": "ensemble_trending_120",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:29:10.280225+00:00"
+    },
+    {
+      "run_id": "train_120m_ranging_1785875361",
+      "model_name": "ensemble_ranging_120",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:29:21.763420+00:00"
+    },
+    {
+      "run_id": "train_240m_trending_1785875395",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.0,
+        "val_mae": 0.0
+      },
+      "stage": "Production",
+      "timestamp": "2026-08-04T20:29:55.559006+00:00"
+    }
+  ]
+}

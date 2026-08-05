@@ -8,13 +8,13 @@ and automatically widens stop-loss buffers or pauses short TF entries 15 minutes
 
 import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 class EconomicCalendarGuard:
     def __init__(self, blackout_window_mins: int = 15):
         self.blackout_window_mins = blackout_window_mins
 
-    def check_news_blackout(self, current_time_utc: datetime = None) -> Tuple[bool, str]:
+    def check_news_blackout(self, current_time_utc: Optional[datetime] = None) -> Tuple[bool, str]:
         """
         Checks if current time falls within a high-impact news blackout window.
         Returns: (is_blackout_active, reason_message)

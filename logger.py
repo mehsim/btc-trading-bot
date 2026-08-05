@@ -1,3 +1,4 @@
+from typing import Optional
 """
 logger.py
 ---------
@@ -38,7 +39,7 @@ def setup_logger(name="trading_bot", level=logging.INFO):
 
 bot_logger = setup_logger("trading_bot")
 
-def log_event(level: str, msg: str, correlation_id: str = None, extra: dict = None):
+def log_event(level: str, msg: str, correlation_id: Optional[str] = None, extra: Optional[dict] = None):
     lvl = getattr(logging, level.upper(), logging.INFO)
     extra_dict = {"correlation_id": correlation_id or str(uuid.uuid4())}
     if extra:

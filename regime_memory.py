@@ -9,7 +9,7 @@ import sqlite3
 import os
 import time
 import threading
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from database import db_lock, get_db_connection
 
@@ -37,7 +37,7 @@ def init_regime_db():
         finally:
             conn.close()
 
-def record_regime_trade(regime_type: str, pnl_usd: float, realized_r: float, regime_id: str = None) -> str:
+def record_regime_trade(regime_type: str, pnl_usd: float, realized_r: float, regime_id: Optional[str] = None) -> str:
     now = time.time()
     if not regime_id:
         regime_id = f"{regime_type}_{time.strftime('%Y_%m_%d')}"

@@ -1,3 +1,4 @@
+from typing import Optional
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
@@ -40,7 +41,7 @@ class MetaModelGatekeeper:
         self.conf_threshold = confidence_threshold
         self.meta_classifier = SupervisedMetaClassifier(min_profit_prob=0.45)
 
-    def is_meta_trade_approved(self, primary_trend: str, primary_conf: float, market_regime: str, recent_win_rate: float, feature_vector: np.ndarray = None) -> tuple:
+    def is_meta_trade_approved(self, primary_trend: str, primary_conf: float, market_regime: str, recent_win_rate: float, feature_vector: Optional[np.ndarray] = None) -> tuple:
         if primary_conf < 0.55:
             return False, "REJECTED: Meta-Model Gatekeeper predicts 'No Trade' (Low confidence signal)"
         if recent_win_rate < 40.0:

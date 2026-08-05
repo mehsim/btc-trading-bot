@@ -2,7 +2,7 @@ import os
 import json
 import numpy as np
 import threading
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 KELLY_DATA_FILE = "kelly_trade_history.json"
 
@@ -51,7 +51,7 @@ class KellyTracker:
             except Exception as e:
                 print(f"[KellyTracker Error] Failed to save trade history: {e}")
 
-    def compute_kelly_fraction(self, timeframe: str = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25) -> float:
+    def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25) -> float:
         """
         Computes dynamic Quarter-Kelly fraction per timeframe:
         Kelly = (W * R - (1 - W)) / R
@@ -67,10 +67,13 @@ class KellyTracker:
             else:
                 filtered = self.history
 
-            if len(filtered) < min_trades:
+            from config import MIN_KELLY_SAMPLE_SIZE
+            effective_min_trades = max(min_trades, MIN_KELLY_SAMPLE_SIZE)
+            if len(filtered) < effective_min_trades:
                 return 0.0
 
             returns = [t["return_pct"] for t in filtered[-100:]]
+            slippages = [abs(t.get("slippage_pct", 0.0005)) for t in filtered[-100:]]
             wins = [r for r in returns if r > 0]
             losses = [abs(r) for r in returns if r < 0]
 
@@ -78,13 +81,25 @@ class KellyTracker:
             if len(wins) < 1 or len(losses) < min_losses:
                 return 0.0
 
-            w_rate = len(wins) / len(returns)
+            n = len(returns)
+            p_hat = len(wins) / float(n)
+            
+            # Wilson Score 95% confidence interval lower bound (z = 1.96)
+            z = 1.96
+            denom = 1.0 + (z**2 / n)
+            center = p_hat + (z**2 / (2.0 * n))
+            spread = z * np.sqrt((p_hat * (1.0 - p_hat) / n) + (z**2 / (4.0 * n**2)))
+            w_rate = max(0.0, (center - spread) / denom)
+
             avg_win = float(np.mean(wins))
-            # Loss floor safeguard: enforce min loss floor of 0.1% (0.001) to prevent infinite R-ratio
+            avg_slippage = float(np.mean(slippages)) if slippages else 0.0005
             raw_avg_loss = float(np.mean(losses))
             avg_loss = max(0.001, raw_avg_loss)
 
-            r_ratio = avg_win / max(1e-9, avg_loss)
+            # Realized execution payoff ratio deducting average slippage
+            net_win = max(0.0001, avg_win - avg_slippage)
+            net_loss = avg_loss + avg_slippage
+            r_ratio = net_win / max(1e-9, net_loss)
             if r_ratio <= 0:
                 return 0.0
 

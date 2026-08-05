@@ -266,11 +266,37 @@ class PortfolioRiskEngine:
         shocks_to_evaluate = [-abs(shock_pct), +abs(shock_pct)]
         results_per_shock = []
 
+        from config import HISTORICAL_STRESS_QUANTILE, MIN_STRESS_HISTORICAL_BARS
         for current_shock in shocks_to_evaluate:
-            expected_asset_shocks = beta_vec * current_shock
+            n_assets = len(symbols)
+            expected_asset_shocks = np.zeros(n_assets)
+            
+            for i, s in enumerate(symbols):
+                use_quantile = False
+                if returns_df is not None and s in returns_df.columns:
+                    s_returns = returns_df[s].dropna()
+                    if len(s_returns) >= MIN_STRESS_HISTORICAL_BARS:
+                        q_level = HISTORICAL_STRESS_QUANTILE * 100.0 if current_shock < 0 else (1.0 - HISTORICAL_STRESS_QUANTILE) * 100.0
+                        expected_asset_shocks[i] = float(np.percentile(s_returns, q_level))
+                        use_quantile = True
+                if not use_quantile:
+                    if returns_df is not None and not returns_df.empty and len(returns_df) < MIN_STRESS_HISTORICAL_BARS:
+                        log_event("INFO", f"[Stress Test Info] Sparse history for {s} (< {MIN_STRESS_HISTORICAL_BARS} bars); falling back to beta stress shock.")
+                    expected_asset_shocks[i] = beta_vec[i] * current_shock
 
             n_assets = len(symbols)
             stressed_corr = np.full((n_assets, n_assets), 0.95)
+            if returns_df is not None and not returns_df.empty and len(returns_df) >= 50 and n_assets > 1:
+                try:
+                    mkt = returns_df.mean(axis=1)
+                    panic_mask = mkt <= mkt.quantile(0.10)
+                    panic_df = returns_df[panic_mask].dropna()
+                    if len(panic_df) >= 20:
+                        emp_corr = panic_df.corr().values
+                        emp_corr = np.nan_to_num(emp_corr, nan=0.95)
+                        stressed_corr = np.maximum(0.70, emp_corr)
+                except Exception:
+                    pass
             np.fill_diagonal(stressed_corr, 1.0)
 
             vol_vec = np.array([0.03] * n_assets)

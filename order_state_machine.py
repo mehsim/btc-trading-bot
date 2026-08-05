@@ -1,3 +1,4 @@
+from typing import Optional
 import time
 import random
 import uuid
@@ -50,7 +51,7 @@ def generate_client_order_id(symbol: str, side: str) -> str:
     idempotency_cache.add(cl_id)
     return cl_id
 
-def calculate_exponential_backoff_with_jitter(attempt: int, base_delay: float = None, max_delay: float = None, jitter_pct: float = 0.20) -> float:
+def calculate_exponential_backoff_with_jitter(attempt: int, base_delay: Optional[float] = None, max_delay: Optional[float] = None, jitter_pct: float = 0.20) -> float:
     dyn_base, dyn_max, _ = global_api_telemetry.get_telemetry_params()
     eff_base = base_delay if base_delay is not None else dyn_base
     eff_max = max_delay if max_delay is not None else dyn_max
@@ -60,7 +61,7 @@ def calculate_exponential_backoff_with_jitter(attempt: int, base_delay: float = 
     return max(0.1, delay + jitter)
 
 class ManagedOrder:
-    def __init__(self, client_order_id: str, symbol: str, side: str, order_type: str, qty: float, price: float = None):
+    def __init__(self, client_order_id: str, symbol: str, side: str, order_type: str, qty: float, price: Optional[float] = None):
         self.client_order_id = client_order_id
         self.symbol = symbol
         self.side = side

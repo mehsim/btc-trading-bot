@@ -341,6 +341,7 @@ def add_triple_barrier_labels(df, interval):
     tp_mult_trending = cfg.get("tp_mult_trending", 2.5)
     tp_mult_ranging = cfg.get("tp_mult_ranging", 1.5)
         
+    is_trending_state = False
     for i in range(n_samples):
         p_t = closes[i]
         atr_t = atr_vals[i]
@@ -348,7 +349,13 @@ def add_triple_barrier_labels(df, interval):
         if atr_t <= 0:
             atr_t = p_t * 0.001
             
-        tp_mult = tp_mult_trending if adx_t >= 20.0 else tp_mult_ranging
+        # Hysteretic regime assignment (ADX >= 22.0 to enter trending, <= 18.0 to exit ranging)
+        if adx_t >= 22.0:
+            is_trending_state = True
+        elif adx_t <= 18.0:
+            is_trending_state = False
+            
+        tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
         
         # Symmetric threshold modeling
         upper_barrier = p_t + tp_mult * atr_t
@@ -387,7 +394,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
     if len(df_clean) < 100:
         return {}
     X = df_clean[selected_feats].values
-    cv = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=10, embargo_pct=0.01)
+    cv = PurgedEmbargoTimeSeriesSplit(n_splits=3, interval=interval, embargo_pct=0.01)
     
     def objective(trial):
         tp_m_ranging = trial.suggest_float("tp_mult_ranging", 1.0, 3.0)
@@ -786,7 +793,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_prelim = df_sub["target_trend"]
         
         # Use a small estimator and 3-fold Purged CV for rapid feature elimination
-        cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
+        cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, interval=interval, embargo_pct=0.01)
         estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
         
         selector = RFECV(
@@ -916,7 +923,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 tree_method="hist",
                 n_jobs=1
             )
-            cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=3, lookahead=6, embargo_pct=0.01)
+            cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=3, interval=interval, embargo_pct=0.01)
             selector = RFECV(
                 estimator=estimator,
                 step=2,
@@ -1004,7 +1011,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_holdout_price = y_price_full.iloc[split_idx:]
 
         # Purged and Embargoed Time-Series Cross Validation
-        cv = PurgedEmbargoTimeSeriesSplit(n_splits=5, lookahead=6, embargo_pct=0.01)
+        cv = PurgedEmbargoTimeSeriesSplit(n_splits=5, interval=interval, embargo_pct=0.01)
         
         meta_features_list = []
         meta_labels_list = []
@@ -1039,9 +1046,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
             X_train, y_train_t, y_train_p = X.iloc[train_idx], y_trend.iloc[train_idx], y_price.iloc[train_idx]
             X_val, y_val_t, y_val_p = X.iloc[val_idx], y_trend.iloc[val_idx], y_price.iloc[val_idx]
             
+            from core import compute_sample_uniqueness
+            t1_sub = pd.Series(y_train_t.index + pd.Timedelta(minutes=cv.lookahead * 15), index=y_train_t.index)
+            uniqueness_train = compute_sample_uniqueness(t1_sub, y_train_t.index).values
             sample_weight_train = compute_sample_weight(class_weight='balanced', y=y_train_t)
             decay_weights = np.linspace(0.3, 1.0, len(y_train_t))
-            sample_weight_train = sample_weight_train * decay_weights
+            sample_weight_train = sample_weight_train * uniqueness_train * decay_weights
             
             if first_fold:
                 print("  Optimizing hyperparameters on first fold...")

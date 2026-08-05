@@ -114,9 +114,12 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
         long_won = False
         short_won = False
 
+        ambiguous_count = 0
         for k in range(1, lookahead + 1):
             h_k = highs[i + k]
             l_k = lows[i + k]
+            if (h_k >= long_tp and l_k <= long_sl) or (l_k <= short_tp and h_k >= short_sl):
+                ambiguous_count += 1
 
             if not long_won:
                 if l_k <= long_sl:
@@ -143,4 +146,34 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
         else:
             labels[i] = 1
 
-    return pd.Series(labels, index=df.index)
+    ambiguous_bar_pct = round((ambiguous_count / max(1, n * lookahead)) * 100.0, 4)
+    s = pd.Series(labels, index=df.index)
+    s.attrs["ambiguous_bar_pct"] = ambiguous_bar_pct
+    return s
+
+
+def compute_sample_uniqueness(t1: pd.Series, close_idx: pd.Index) -> pd.Series:
+    """
+    Computes average sample uniqueness per observation to weight overlapping labels (AFML Ch. 4).
+    Prevents overstating effective sample size.
+    """
+    count = pd.Series(0.0, index=close_idx)
+    for start, end in t1.items():
+        if pd.isna(end):
+            continue
+        try:
+            count.loc[start:end] += 1.0
+        except Exception:
+            pass
+
+    uniqueness = {}
+    for start, end in t1.items():
+        if pd.isna(end):
+            uniqueness[start] = 1.0
+        else:
+            try:
+                c_slice = count.loc[start:end]
+                uniqueness[start] = float((1.0 / np.maximum(1.0, c_slice)).mean())
+            except Exception:
+                uniqueness[start] = 1.0
+    return pd.Series(uniqueness, index=t1.index).reindex(close_idx).fillna(1.0)

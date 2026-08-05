@@ -1,11 +1,12 @@
 {
   "manifest_schema_version": 3,
+  "governance_version": 2,
   "prefix": "ensemble_ranging_trend_240",
-  "timestamp": "2026-08-05T17:36:01.469893+00:00",
-  "model_version": "v7.2.0-dd5824b6-202608051736",
+  "timestamp": "2026-08-05T20:49:39.828814+00:00",
+  "model_version": "v7.2.0-7b4a3a28-202608052049",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "dd5824b6",
+  "git_sha": "7b4a3a28",
   "feature_count": 26,
   "feature_names": [
     "open_interest",
@@ -66,19 +67,33 @@
   "vif_values": {},
   "feature_contract_hash": "29d018979028",
   "feature_pipeline_hash": "499fdd9b615f",
-  "training_data_hash": null,
-  "preprocessing_hash": null,
-  "parent_model_hash": null,
+  "training_data_hash": "23491a98a70744ba50c5a2ea7c0a2d7615579fde48f50f090c902003aca72cc9",
+  "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
+  "parent_model_hash": "4649bd5b62258333792de71d8331fecc2bffc1f3abc74ed9fe61f3a6ad183939",
   "promotion_reason": "Initial deployment / benchmark promotion",
-  "replaced_model_hash": null,
+  "replaced_model_hash": "4649bd5b62258333792de71d8331fecc2bffc1f3abc74ed9fe61f3a6ad183939",
   "rollback_reference": "ensemble_ranging_trend_240_backup",
   "governance_policy": {
     "version": "v2.4",
     "max_ece": 0.08,
-    "max_brier": 0.22,
+    "max_brier": 0.5,
+    "min_oos_sharpe": 0.5,
     "min_sharpe_delta": 0.1,
+    "max_cv_bal_acc_std": 0.05,
+    "max_cv_fold_range": 0.12,
+    "enforce_stability_gate": false,
     "min_samples": 20
   },
+  "dependencies": {
+    "python": "3.14.6",
+    "scikit-learn": "1.9.0",
+    "pandas": "2.3.3",
+    "numpy": "2.4.6",
+    "xgboost": "3.3.0",
+    "lightgbm": "4.6.0",
+    "catboost": "1.2.10"
+  },
   "promotion_metrics": {},
-  "metrics": {}
+  "metrics": {},
+  "hmac_signature": "cdabb277c4448daf4251e2966e42ea8147a3a05184b9639b1b6b7d41ea32212e"
 }

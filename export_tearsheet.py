@@ -56,19 +56,29 @@ def export_performance_tearsheet(db_path: str = "trading_bot.db") -> dict:
     peak_balance = max(initial_balance, initial_balance + df["peak"].max()) if not df.empty else initial_balance
     max_drawdown_pct = (max_drawdown_usd / peak_balance * 100.0) if peak_balance > 0 else 0.0
     
-    # Risk-Adjusted Ratios (Sharpe, Sortino, Calmar)
-    pnl_series = df["pnl_usd"].values
-    mean_pnl = np.mean(pnl_series)
-    std_pnl = np.std(pnl_series, ddof=1) if len(pnl_series) > 1 else 1e-6
+    # Risk-Adjusted Ratios (Sharpe, Sortino, Calmar - Continuous 365-day resampled returns)
+    capital_at_risk = df["position_size_usd"].values if "position_size_usd" in df.columns else np.full(len(df), 100.0)
+    returns = df["pnl_usd"].values / np.maximum(1.0, capital_at_risk)
     
-    # Sharpe Ratio (assumes ~252 trading sessions per year)
-    sharpe_ratio = float((mean_pnl / (std_pnl + 1e-8)) * np.sqrt(252)) if std_pnl > 0 else 0.0
-    
-    # Sortino Ratio (downside risk only)
-    downside_returns = pnl_series[pnl_series < 0]
-    downside_std = np.std(downside_returns, ddof=1) if len(downside_returns) > 1 else 1e-6
-    sortino_ratio = float((mean_pnl / (downside_std + 1e-8)) * np.sqrt(252)) if downside_std > 0 else 0.0
-    
+    if "timestamp" in df.columns:
+        try:
+            df_temp = pd.DataFrame({"returns": returns}, index=pd.to_datetime(df["timestamp"]))
+            daily_returns = df_temp["returns"].resample("1D").sum()
+        except Exception:
+            daily_returns = pd.Series(returns)
+    else:
+        daily_returns = pd.Series(returns)
+
+    mean_daily = float(daily_returns.mean()) if len(daily_returns) > 0 else 0.0
+    std_daily = float(daily_returns.std(ddof=1)) if len(daily_returns) > 1 else 1e-6
+
+    # 365 continuous crypto days annualization
+    sharpe_ratio = float((mean_daily / (std_daily + 1e-8)) * np.sqrt(365)) if std_daily > 0 else 0.0
+
+    # Sortino Ratio: downside deviation about 0.0 target
+    downside_dev = float(np.sqrt(np.mean(np.minimum(daily_returns.values, 0.0)**2)))
+    sortino_ratio = float((mean_daily / (downside_dev + 1e-8)) * np.sqrt(365)) if downside_dev > 0 else 0.0
+
     # Calmar Ratio
     calmar_ratio = float(total_pnl / max_drawdown_usd) if max_drawdown_usd > 0 else 0.0
 

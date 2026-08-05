@@ -7,11 +7,11 @@ to return the top N most similar past trades for any candidate signal.
 """
 
 import math
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from experience_db import get_recent_experiences
 
 class TradeSimilaritySearch:
-    def __init__(self, feature_weights: Dict[str, float] = None):
+    def __init__(self, feature_weights: Optional[Dict[str, float]] = None):
         if feature_weights is None:
             self.feature_weights = {
                 "adx": 1.5,

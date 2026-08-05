@@ -893,11 +893,13 @@ def api_institutional_summary():
             cvar_pct_val = round((cvar_usd / max(1.0, sim_balance)) * 100.0, 2)
             cvar_method = "EMPIRICAL_TAIL"
         else:
-            cvar_pct_val = round(var_pct_val * 1.25, 2)
+            from config import CVAR_PARAMETRIC_FALLBACK_RATIO
+            cvar_pct_val = round(var_pct_val * CVAR_PARAMETRIC_FALLBACK_RATIO, 2)
             cvar_method = "EMPIRICAL_VAR_MULTIPLIER_FALLBACK"
     else:
+        from config import CVAR_PARAMETRIC_FALLBACK_RATIO
         var_pct_val = round(max(0.0, dynamic_dd * 0.4), 2)
-        cvar_pct_val = round(var_pct_val * 1.25, 2)
+        cvar_pct_val = round(var_pct_val * CVAR_PARAMETRIC_FALLBACK_RATIO, 2)
         cvar_method = "DRAWDOWN_MULTIPLIER_FALLBACK"
 
     pos_by_sym = {}

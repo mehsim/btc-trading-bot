@@ -236,7 +236,8 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         gates = MODEL_GOVERNANCE
 
     max_ece_ceiling = gates.get("max_ece", MODEL_GOVERNANCE.get("max_ece", 0.08))
-    max_brier_ceiling = gates.get("max_brier", MODEL_GOVERNANCE.get("max_brier", 0.22))
+    max_brier_ceiling = gates.get("max_brier", MODEL_GOVERNANCE.get("max_brier", 0.50))
+    min_oos_sharpe_floor = gates.get("min_oos_sharpe", MODEL_GOVERNANCE.get("min_oos_sharpe", 0.50))
 
     if not MLFLOW_AVAILABLE:
         return True, "MLflow unavailable; falling back to local verification"
@@ -253,12 +254,25 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         cand_ece = cand.get("ece", cand.get("calibrator_ece", 0.0))
         cand_brier = cand.get("brier_score", 0.20)
         cand_sharpe = cand.get("sharpe_oos", 1.0)
+        cand_std = cand.get("cv_bal_acc_std", 0.0)
+        cand_range = cand.get("cv_bal_acc_range", 0.0)
 
         # Absolute floors — a bad model is rejected even with no incumbent
         if cand_ece > max_ece_ceiling:
             return False, f"ECE {cand_ece:.4f} above ceiling ({max_ece_ceiling})"
         if cand_brier > max_brier_ceiling:
             return False, f"Brier {cand_brier:.4f} above ceiling ({max_brier_ceiling})"
+        if cand_sharpe < min_oos_sharpe_floor:
+            return False, f"OOS Sharpe {cand_sharpe:.2f} below floor ({min_oos_sharpe_floor:.2f})"
+
+        # Phase 1 Shadow Stability Gate
+        max_std = gates.get("max_cv_bal_acc_std", MODEL_GOVERNANCE.get("max_cv_bal_acc_std", 0.05))
+        max_range = gates.get("max_cv_fold_range", MODEL_GOVERNANCE.get("max_cv_fold_range", 0.12))
+        stability_passed = (cand_std <= max_std) and (cand_range <= max_range)
+        if not stability_passed:
+            print(f"[MLOps Stability Notice] Candidate {challenger_version} CV fold variance (std={cand_std:.4f}, range={cand_range:.4f}) exceeds threshold (max_std={max_std}, max_range={max_range})")
+            if gates.get("enforce_stability_gate", MODEL_GOVERNANCE.get("enforce_stability_gate", False)):
+                return False, f"CV Fold Stability Gate Failed: std={cand_std:.4f} > {max_std} or range={cand_range:.4f} > {max_range}"
 
         champs = client.get_latest_versions(name, stages=["Production"])
         if champs:

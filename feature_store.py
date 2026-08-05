@@ -10,7 +10,7 @@ import os
 import json
 import time
 import hashlib
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 FEATURE_STORE_VERSION = "v1.2-institutional"
 
@@ -30,7 +30,7 @@ class FeatureStore:
         symbol: str,
         interval: str,
         features: Dict[str, Any],
-        timestamp: float = None
+        timestamp: Optional[float] = None
     ) -> Dict[str, Any]:
         """Saves versioned feature snapshot."""
         ts = timestamp or time.time()

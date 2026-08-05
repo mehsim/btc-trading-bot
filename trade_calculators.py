@@ -531,7 +531,7 @@ SYMBOL_LIQUIDITY_BENCHMARKS = {
 }
 
 
-def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: float = None) -> float:
+def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: Optional[float] = None) -> float:
     """
     Score 0.0-1.0 based on dynamic L2 orderbook depth and bid-ask spread.
     Fails closed (returns 0.0) if depth data cannot be retrieved or orderbook is illiquid.
@@ -569,10 +569,69 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: fl
         spread_multiplier = max(0.0, min(1.0, 1.0 - max(0.0, spread - 0.0015) / 0.0035))
         
         final_score = depth_score * spread_multiplier
-        return max(0.0, min(1.0, round(float(final_score), 4)))
+        if final_score is None or np.isnan(final_score):
+            return 0.0
+
+        if final_score <= 0.0:
+            return 0.0
+
+        from config import MIN_LIQUIDITY_MULTIPLIER
+        clamped_multiplier = max(MIN_LIQUIDITY_MULTIPLIER, min(1.0, float(final_score)))
+        return round(float(clamped_multiplier), 4)
     except Exception as e:
         print(f"[Liquidity Guard Warning] Dynamic orderbook score error for {symbol}: {e}")
         return 0.0
+
+
+def calculate_dynamic_cost_ceiling(expected_change_pct: float) -> float:
+    """Calculates dynamic execution cost ceiling scaling with expected move (20% of alpha move)."""
+    alpha = abs(float(expected_change_pct or 0.0))
+    return float(min(0.005, max(0.0005, 0.20 * alpha)))
+
+
+def calibrate_almgren_chriss_gamma(execution_telemetry: list, current_gamma: float = 2.5e-7) -> dict:
+    """
+    Calibrates Almgren-Chriss market impact gamma on a scheduled basis (monthly or 1k fills).
+    Writes detailed audit history to almgren_chriss_calibration.json.
+    """
+    import datetime, json, os
+    audit_file = "almgren_chriss_calibration.json"
+    n_fills = len(execution_telemetry or [])
+    
+    # Simple linear fit of shortfall vs trade size
+    if n_fills >= 10:
+        sizes = np.array([abs(t.get("qty", 0.0)) for t in execution_telemetry])
+        shortfalls = np.array([abs(t.get("slippage_pct", 0.0)) for t in execution_telemetry])
+        if np.sum(sizes**2) > 0:
+            new_gamma = float(np.sum(sizes * shortfalls) / np.sum(sizes**2))
+            fit_rmse = float(np.sqrt(np.mean((shortfalls - new_gamma * sizes)**2)))
+        else:
+            new_gamma = current_gamma
+            fit_rmse = 0.0
+    else:
+        new_gamma = current_gamma
+        fit_rmse = 0.0
+
+    record = {
+        "calibration_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "fills_count": n_fills,
+        "fit_error_rmse": round(fit_rmse, 6),
+        "prev_gamma": current_gamma,
+        "new_gamma": round(new_gamma, 9)
+    }
+
+    try:
+        history = []
+        if os.path.exists(audit_file):
+            with open(audit_file, "r") as f:
+                history = json.load(f)
+        history.append(record)
+        with open(audit_file, "w") as f:
+            json.dump(history[-100:], f, indent=2)
+    except Exception as ex:
+        print(f"[Almgren-Chriss Audit Warning] Failed to write calibration record: {ex}")
+
+    return record
 
 
 
@@ -970,7 +1029,7 @@ def calculate_break_even_stop(
     return round(target_sl, 4)
 
 
-def calculate_probabilistic_utility_bootstrap(
+def calculate_probabilistic_utility_confidence_interval(
     symbol: str,
     entry_price: float,
     candidate_tp: float,
@@ -981,10 +1040,11 @@ def calculate_probabilistic_utility_bootstrap(
     leverage: float = 10.0,
     position_size_usd: float = 100.0,
     waiting_signals_utility: float = 0.0,
+    sample_trades_count: int = 30,
     num_resamples: int = 1000
 ) -> dict:
     """
-    Computes Probabilistic Net Utility with 1,000 Non-Parametric Bootstrap resamples.
+    Computes Probabilistic Net Utility with Beta posterior uncertainty sampling.
     Net Utility = P(TP) * Reward_USD - P(SL) * Loss_USD - Full_Friction_USD - Dynamic_Opp_Cost
     """
     import numpy as np
@@ -995,10 +1055,12 @@ def calculate_probabilistic_utility_bootstrap(
     tcm_cost = position_size_usd * leverage * (0.0011 + 0.0005) # Taker fees (entry+exit) + slippage
     opp_cost = max(0.0, waiting_signals_utility - (reward_usd * win_prob - loss_usd * loss_prob))
     
-    # Generate non-parametric bootstrap return outcomes
-    np.random.seed(42)
-    sample_outcomes = np.random.choice([reward_usd, -loss_usd], size=(num_resamples,), p=[win_prob, 1.0 - win_prob])
-    sample_utilities = sample_outcomes - tcm_cost - opp_cost
+    # Beta posterior uncertainty sampling over win probability
+    wins_est = int(round(win_prob * sample_trades_count))
+    losses_est = max(0, sample_trades_count - wins_est)
+    p_draws = np.random.beta(wins_est + 1, losses_est + 1, size=(num_resamples,))
+    
+    sample_utilities = (p_draws * reward_usd) - ((1.0 - p_draws) * loss_usd) - tcm_cost - opp_cost
 
     ci_lower = float(np.percentile(sample_utilities, 2.5))
     ci_upper = float(np.percentile(sample_utilities, 97.5))
@@ -1015,6 +1077,8 @@ def calculate_probabilistic_utility_bootstrap(
         "friction_cost": round(tcm_cost, 4),
         "opp_cost": round(opp_cost, 4)
     }
+
+calculate_probabilistic_utility_bootstrap = calculate_probabilistic_utility_confidence_interval
 
 
 class UnifiedTargetGenerator:

@@ -1,3 +1,4 @@
+from typing import Optional
 """
 db_snapshot_manager.py
 ----------------------
@@ -13,7 +14,7 @@ import sqlite3
 DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "db_snapshots")
 
-def create_db_snapshot(snapshot_tag: str = None) -> str:
+def create_db_snapshot(snapshot_tag: Optional[str] = None) -> str:
     """
     Safely creates a snapshot copy of trading_bot.db using SQLite backup API.
     """

@@ -43,7 +43,7 @@ class CUSUMDriftDetector:
             print(f"[CUSUM Drift Detector Warning] Failed to persist CUSUM state to database: {e}")
 
 
-    def update(self, actual_outcome: int, predicted_confidence: float = 0.70, trade_id: str = None) -> Tuple[bool, float, float]:
+    def update(self, actual_outcome: int, predicted_confidence: float = 0.70, trade_id: Optional[str] = None) -> Tuple[bool, float, float]:
         """
         Rule 24: CUSUM Drift Detection with Idempotency & Confidence Weighting:
         actual_outcome: 1 if profitable, 0 if loss
@@ -125,11 +125,19 @@ class PSIDriftDetector:
     def __init__(self, warning_psi: float = 0.10, severe_psi: float = 0.25):
         self.warning_psi = warning_psi
         self.severe_psi = severe_psi
+        self.insufficient_counts: Dict[str, int] = {}
 
-    def check_feature_drift(self, baseline_feature: np.ndarray, live_feature: np.ndarray) -> Tuple[bool, Optional[float], str]:
+    def check_feature_drift(self, baseline_feature: np.ndarray, live_feature: np.ndarray, feature_name: str = "feature") -> Tuple[bool, Optional[float], str]:
         psi_score = calculate_psi(baseline_feature, live_feature)
         if psi_score is None:
+            c = self.insufficient_counts.get(feature_name, 0) + 1
+            self.insufficient_counts[feature_name] = c
+            from config import PSI_INSUFFICIENT_CYCLES_THRESHOLD
+            if c >= PSI_INSUFFICIENT_CYCLES_THRESHOLD:
+                log_event("WARNING", f"[PSI Drift Warning] Feature '{feature_name}' returned INSUFFICIENT_DATA for {c} consecutive cycles.")
             return False, None, "INSUFFICIENT_DATA"
+        
+        self.insufficient_counts[feature_name] = 0
         if psi_score >= self.severe_psi:
             return True, psi_score, "SEVERE_DRIFT"
         elif psi_score >= self.warning_psi:
@@ -138,7 +146,7 @@ class PSIDriftDetector:
 
 
 
-def evaluate_drift_and_trigger_playbook(cusum_detector: CUSUMDriftDetector, psi_detector: PSIDriftDetector, recent_outcomes: list, live_features: np.ndarray = None, baseline_features: np.ndarray = None) -> dict:
+def evaluate_drift_and_trigger_playbook(cusum_detector: CUSUMDriftDetector, psi_detector: PSIDriftDetector, recent_outcomes: list, live_features: Optional[np.ndarray] = None, baseline_features: Optional[np.ndarray] = None) -> dict:
     """
     Automated 5-Step Drift Playbook:
     1. De-risk: Reduce position cap to 50% on moderate drift (PSI >= 0.10)

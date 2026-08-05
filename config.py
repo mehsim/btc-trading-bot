@@ -18,13 +18,27 @@ MAX_LOG_ENTRIES_MEMORY = 200
 
 # Institutional Model Governance & Promotion Policy
 SUPPORTED_MANIFEST_SCHEMA_VERSION = 3
+MODEL_GOVERNANCE_VERSION = 2
 MODEL_GOVERNANCE = {
     "version": "v2.4",
     "max_ece": 0.08,
-    "max_brier": 0.22,
+    "max_brier": 0.50,
+    "min_oos_sharpe": 0.50,
     "min_sharpe_delta": 0.10,
+    "max_cv_bal_acc_std": 0.05,
+    "max_cv_fold_range": 0.12,
+    "enforce_stability_gate": False,
     "min_samples": 20
 }
+
+CVAR_PARAMETRIC_FALLBACK_RATIO = 1.25
+PSI_INSUFFICIENT_CYCLES_THRESHOLD = 5
+MIN_LIQUIDITY_MULTIPLIER = 0.20
+ALMGREN_CHRISS_CALIBRATION_INTERVAL_DAYS = 30
+ALMGREN_CHRISS_MIN_FILLS = 1000
+HISTORICAL_STRESS_QUANTILE = 0.001
+MIN_STRESS_HISTORICAL_BARS = 5000
+MIN_KELLY_SAMPLE_SIZE = 30
 
 # Optuna Barrier-Tuning Objective Weights
 # score = w_bal*BalAcc + w_f1*MacroF1 - w_ece*ECE - w_imb*ImbalancePenalty

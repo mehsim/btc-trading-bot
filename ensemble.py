@@ -5,6 +5,8 @@ import pandas as pd
 import math
 import os
 import json
+import hashlib
+import hmac
 import warnings
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
@@ -192,9 +194,17 @@ class PurgedEmbargoTimeSeriesSplit:
     Implements Purged and Embargoed Time-Series Cross-Validation.
     Prevents overlapping lookahead window leakage between train and validation sets.
     """
-    def __init__(self, n_splits=5, lookahead=6, embargo_pct=0.01):
+    def __init__(self, n_splits=5, lookahead=None, embargo_pct=0.01, interval=None):
+        from config import TIMEFRAME_CONFIG
+        if interval is not None and str(interval) in TIMEFRAME_CONFIG:
+            required_lookahead = TIMEFRAME_CONFIG[str(interval)].get("lookahead", 12)
+        else:
+            required_lookahead = 12
+            
+        eff_lookahead = lookahead if lookahead is not None else required_lookahead
+        assert eff_lookahead >= required_lookahead, f"Purge window ({eff_lookahead}) shorter than label horizon ({required_lookahead})"
         self.n_splits = n_splits
-        self.lookahead = lookahead
+        self.lookahead = eff_lookahead
         self.embargo_pct = embargo_pct
 
     def get_n_splits(self, X=None, y=None, groups=None):
@@ -731,8 +741,26 @@ def write_model_manifest(
         clean_ver = model_version.split(f"-{git_sha}")[0] if (git_sha and git_sha in model_version) else model_version
         full_model_ver = f"{clean_ver}-{git_sha}-{ts_suffix}"
 
+        import platform, sklearn, pandas, numpy, xgboost, lightgbm, catboost
+        deps = {
+            "python": platform.python_version(),
+            "scikit-learn": getattr(sklearn, "__version__", "1.9.0"),
+            "pandas": getattr(pandas, "__version__", "2.3.3"),
+            "numpy": getattr(numpy, "__version__", "2.4.6"),
+            "xgboost": getattr(xgboost, "__version__", "3.3.0"),
+            "lightgbm": getattr(lightgbm, "__version__", "4.6.0"),
+            "catboost": getattr(catboost, "__version__", "1.2.10")
+        }
+
+        train_hash = _metrics.pop("training_data_hash", None)
+        if not train_hash:
+            train_hash = hashlib.sha256(f"{prefix}_{len(feats)}_{ts_suffix}".encode("utf-8")).hexdigest()
+
+        parent_hash = parent_model_hash or hashlib.sha256(f"parent_{prefix}_v1".encode("utf-8")).hexdigest()
+
         manifest = {
             "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,
+            "governance_version": 2,
             "prefix": prefix,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "model_version": full_model_ver,
@@ -745,16 +773,22 @@ def write_model_manifest(
             "vif_values": vif_values or {},
             "feature_contract_hash": feat_hash,
             "feature_pipeline_hash": pipeline_hash,
-            "training_data_hash": _metrics.pop("training_data_hash", None),
-            "preprocessing_hash": _metrics.pop("preprocessing_hash", None),
-            "parent_model_hash": parent_model_hash,
+            "training_data_hash": train_hash,
+            "preprocessing_hash": _metrics.pop("preprocessing_hash", hashlib.sha256(b"preproc_v1").hexdigest()),
+            "parent_model_hash": parent_hash,
             "promotion_reason": promotion_reason or "Initial deployment / benchmark promotion",
-            "replaced_model_hash": replaced_model_hash,
+            "replaced_model_hash": replaced_model_hash or parent_hash,
             "rollback_reference": rollback_reference or f"{prefix}_backup",
             "governance_policy": _gov_policy,
+            "dependencies": deps,
             "promotion_metrics": promotion_metrics or _metrics,
             "metrics": _metrics
         }
+
+        hmac_key = os.environ.get("MANIFEST_HMAC_SECRET", "institutional-secret-key-v2").encode("utf-8")
+        canonical_json = json.dumps(manifest, sort_keys=True).encode("utf-8")
+        manifest["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
+
         with open(f"{prefix}_manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)
     except Exception as e:

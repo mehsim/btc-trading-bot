@@ -6,7 +6,7 @@ Captures model beliefs, reason codes, indicators, and market context at trade ex
 """
 
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 def build_decision_snapshot(
     symbol: str,
@@ -20,7 +20,7 @@ def build_decision_snapshot(
     funding: float = 0.0,
     htf: str = "BEARISH",
     ltf: str = "BULLISH",
-    reason_codes: List[str] = None
+    reason_codes: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Constructs a standardized decision snapshot dictionary.

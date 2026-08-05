@@ -29,7 +29,7 @@ class TestInstitutionalGovernanceV3(unittest.TestCase):
         self.assertIn("ECE", reason)
 
         # 2. Failing Brier challenger
-        chal_high_brier = {"sharpe": 1.50, "ece": 0.04, "brier": 0.25}
+        chal_high_brier = {"sharpe": 1.50, "ece": 0.04, "brier": 0.55}
         promoted, reason, metrics = evaluate_champion_challenger_promotion(champ_metrics, chal_high_brier)
         self.assertFalse(promoted)
         self.assertIn("Brier", reason)

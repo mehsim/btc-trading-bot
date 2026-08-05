@@ -6,7 +6,7 @@ Institutional TCM with Almgren-Chriss volatility-adjusted market impact:
 """
 
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class TransactionCostModel:
     def __init__(self, default_taker_fee_bp: float = 6.0, default_maker_fee_bp: float = 1.0,
@@ -24,8 +24,8 @@ class TransactionCostModel:
         bid_ask_spread_bp: float = 1.5,
         garch_sigma: float = 0.015,  # Almgren-Chriss: live realized vol from garch_monitor
         is_maker: bool = False,
-        max_acceptable_cost_bp: float = None,
-        orderbook_depth_usd: float = None
+        max_acceptable_cost_bp: Optional[float] = None,
+        orderbook_depth_usd: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Almgren-Chriss extended market impact against instantaneous orderbook depth:

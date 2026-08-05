@@ -45,7 +45,7 @@ class WickBufferCalculator:
     def __init__(self, lookback_bars=50):
         self.lookback_bars = lookback_bars
 
-    def get_buffer_distance(self, entry_price: float, df: pd.DataFrame = None) -> float:
+    def get_buffer_distance(self, entry_price: float, df: Optional[pd.DataFrame] = None) -> float:
         if df is None or df.empty or len(df) < 10:
             return entry_price * 0.004
         
@@ -70,7 +70,7 @@ class WickBufferCalculator:
 auto_stop_floor = AutoStopFloor()
 wick_buffer_calc = WickBufferCalculator()
 
-def calculate_final_stop_distance(entry_price: float, atr_dollar: float, symbol: str, df: pd.DataFrame = None, gmm_multiplier: float = 1.5, database_module=None) -> float:
+def calculate_final_stop_distance(entry_price: float, atr_dollar: float, symbol: str, df: Optional[pd.DataFrame] = None, gmm_multiplier: float = 1.5, database_module=None) -> float:
     atr_stop = gmm_multiplier * atr_dollar
     min_floor_pct = auto_stop_floor.get_floor(symbol, database_module=database_module)
     min_floor_dist = entry_price * min_floor_pct
@@ -105,7 +105,7 @@ def check_symbol_total_exposure(symbol: str, active_trades: list, proposed_size:
     available = max(0.0, max_exposure - current_exposure)
     return min(proposed_size, available)
 
-def calculate_per_interval_kelly(interval: str, trade_history: list = None) -> float:
+def calculate_per_interval_kelly(interval: str, trade_history: Optional[list] = None) -> float:
     """Computes dynamic Quarter-Kelly fraction per timeframe."""
     return global_kelly_tracker.compute_kelly_fraction(timeframe=str(interval), min_trades=30, max_kelly_cap=0.20)
 
@@ -199,7 +199,7 @@ def extract_or_build_returns_df(df_dict: dict) -> pd.DataFrame:
     returns_df = pd.DataFrame(close_series).dropna()
     return returns_df if not returns_df.empty else None
 
-def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: pd.DataFrame = None) -> tuple:
+def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: Optional[pd.DataFrame] = None) -> tuple:
     """Rule 14: Parametric VaR Heat Cap & Portfolio Notional Heat Cap."""
     if total_equity <= 0:
         return False, 0.0
@@ -387,8 +387,8 @@ class JointRiskBudgetAllocator:
         portfolio_heat: float = 0.0,
         mhi_score: float = 90.0,
         top_book_depth_usd: float = 50000.0,
-        df_completed: pd.DataFrame = None,
-        context_multipliers: Dict[str, float] = None,
+        df_completed: Optional[pd.DataFrame] = None,
+        context_multipliers: Optional[Dict[str, float]] = None,
         database_module = None
     ) -> Dict[str, Any]:
         """

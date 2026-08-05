@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 class ProductionRegimeEngine:
     """
     Production-grade Market Regime Detector with v2 4-State ADX Hysteresis (32/28)
     and Volatility-Adjusted Confluence Safeguards.
     """
-    def __init__(self, strong_enter: float = 32.0, strong_exit: float = 28.0, mod_low: float = 22.0, adx_high: float = None, adx_low: float = None):
+    def __init__(self, strong_enter: float = 32.0, strong_exit: float = 28.0, mod_low: float = 22.0, adx_high: Optional[float] = None, adx_low: Optional[float] = None):
         self.legacy_mode = adx_high is not None
         self.strong_enter = adx_high if adx_high is not None else strong_enter
         self.strong_exit = adx_low if adx_low is not None else strong_exit
