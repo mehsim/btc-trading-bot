@@ -1,11 +1,11 @@
 {
   "manifest_schema_version": 3,
   "prefix": "ensemble_trending_price_30",
-  "timestamp": "2026-08-05T17:02:06.997851+00:00",
-  "model_version": "v7.2.0-61cabe0b",
+  "timestamp": "2026-08-05T17:24:38.464536+00:00",
+  "model_version": "v7.2.0-21fd2efd-21fd2efd-202608051724",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "61cabe0b",
+  "git_sha": "21fd2efd",
   "feature_count": 25,
   "feature_names": [
     "open_interest",

@@ -727,7 +727,8 @@ def write_model_manifest(
         _metrics = dict(metrics or {})
         _gov_policy = governance_policy or MODEL_GOVERNANCE
 
-        full_model_ver = f"{model_version}-{git_sha}" if not model_version.endswith(f"-{git_sha}") else model_version
+        ts_suffix = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M")
+        full_model_ver = f"{model_version}-{git_sha}-{ts_suffix}"
 
         manifest = {
             "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,
