@@ -65,6 +65,7 @@ from telegram_bot import send_telegram_alert, execute_telegram_api_call
 from websocket_client import init_bybit_websocket_listeners, get_ws_status
 from dashboard_routes import dashboard_bp
 from risk_limits import assert_risk_governance_invariants
+from decision_journal import DecisionRecord, write_decision
 
 # F-09 Governance Startup Lock: Assert hard safety bounds before trading initialization
 assert_risk_governance_invariants()
@@ -9360,16 +9361,50 @@ def main():
                                                         df_dict[pos_sym] = df_pos
                                                 except Exception:
                                                     pass
+                                        rec = DecisionRecord(symbol=symbol, interval=str(iv))
+                                        rec.snapshot(
+                                            prediction=pred_info,
+                                            equity=float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))),
+                                            open_positions_count=len(active_trades_list),
+                                            wallet_exceeded=wallet_exceeded
+                                        )
+                                        rec.signal_source      = str(pred_info.get("signal_source") or "RULE_BASED_FALLBACK")
+                                        rec.is_fallback        = int(pred_info.get("is_fallback", False))
+                                        rec.direction          = ml_trend
+                                        rec.raw_confidence     = pred_info.get("raw_confidence")
+                                        rec.calibrated_conf    = pred_info.get("calibrated_confidence")
+                                        rec.calibrator_version = pred_info.get("calibrator_version")
+                                        rec.calibrator_ece     = pred_info.get("calibrator_ece")
+                                        rec.model_version      = pred_info.get("model_version")
+                                        rec.feature_hash       = pred_info.get("feature_contract_hash") or pred_info.get("feature_hash")
+                                        rec.manifest_schema    = pred_info.get("manifest_schema_version")
+                                        rec.git_sha            = pred_info.get("git_sha")
+                                        rec.regime             = pred_info.get("regime_mode") or pred_info.get("regime")
+                                        rec.adx                = pred_info.get("adx")
+                                        rec.atr_norm           = pred_info.get("atr_norm")
+                                        rec.liquidity_score    = bot_state.get("liquidity_score", 1.0)
+                                        rec.position_size_usd  = position_size_usd
+                                        rec.leverage           = leverage_val
+
                                         try:
                                             passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
-                                                symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend
+                                                symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=rec
                                             )
+                                            rec.outcome = "EXECUTED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
+                                            rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else checklist_msg
+                                            if passed_checklist and not wallet_exceeded:
+                                                rec.position_size_usd = capped_size * dd_mult
+                                                rec.trade_id = f"{symbol}_{trade_uuid}"
                                         except Exception as risk_err:
+                                            rec.outcome = "ERROR"
+                                            rec.reject_reason = f"Risk checklist exception: {risk_err}"
                                             print(f"[{symbol} {iv}m CRITICAL RISK CHECKLIST EXCEPTION] {risk_err}. Aborting trade entry (Fail-Closed).")
                                             passed_checklist = False
                                             checklist_msg = f"REJECTED: Risk Checklist Exception ({risk_err})"
                                             dd_mult = 0.0
                                             capped_size = 0.0
+                                        finally:
+                                            write_decision(rec)
 
                                         print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
                                         if not passed_checklist or wallet_exceeded:

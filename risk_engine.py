@@ -238,7 +238,7 @@ def check_margin_utilization(used_margin: float, total_equity: float, max_levera
         return "WARNING_ALERT"
     return "NORMAL"
 
-def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish") -> tuple:
+def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish", journal: Any = None) -> tuple:
     try:
         if not isinstance(bot_state, dict):
             bot_state = {}
@@ -275,12 +275,23 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         
         # 2. Portfolio heat & Parametric VaR check
         returns_df = extract_or_build_returns_df(df_dict)
+        eval_positions = list(active_trades) + [{"symbol": symbol, "position_size_usd": capped_size}]
+        var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, equity)
+        if journal:
+            journal.gate("var", (var_pct * 100.0) if var_pct is not None else None, var_ok)
+
+        if not var_ok:
+            return False, f"REJECTED: Parametric VaR ({var_pct*100.0:.2f}%) exceeds maximum 5% capital cap", dd_mult, 0.0
+
         heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df)
+        if journal:
+            journal.gate("heat", heat_pct, heat_safe)
+
         if not heat_safe:
             return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit", dd_mult, 0.0
 
         # 2.5 Monte Carlo -30% Stress Test Check
-        mc_approved, mc_scale_factor, mc_loss_pct, _ = portfolio_risk_engine.check_candidate_stress_budget(
+        mc_approved, mc_scale_factor, mc_loss_pct, mc_summary = portfolio_risk_engine.check_candidate_stress_budget(
             candidate_symbol=symbol,
             candidate_size_usd=capped_size,
             candidate_lev=leverage_val,
@@ -291,6 +302,15 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
             max_stress_loss_pct=0.25,
             shock_pct=-0.30
         )
+        if journal:
+            mc_cvar = mc_summary.get("stress_cvar_999_pct") if isinstance(mc_summary, dict) else None
+            mc_seed = mc_summary.get("simulation_seed") if isinstance(mc_summary, dict) else None
+            journal.gate("stress", (mc_loss_pct * 100.0) if mc_loss_pct is not None else None, mc_approved)
+            if mc_cvar is not None:
+                journal.gate_stress_cvar = mc_cvar * 100.0
+            if mc_seed is not None:
+                journal.simulation_seed = mc_seed
+
         if not mc_approved:
             return False, f"REJECTED: Monte Carlo -30% Stress Test projected loss ({mc_loss_pct*100.0:.1f}%) exceeds max 25% equity budget", dd_mult, 0.0
 
@@ -299,7 +319,11 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         
         # 3. Correlation check
         corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict)
-        if corr_val > 0.7:
+        corr_ok = corr_val <= 0.7
+        if journal:
+            journal.gate("corr", corr_val, corr_ok)
+
+        if not corr_ok:
             return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult, 0.0
             
         return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Sigmoid DD Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Stress Loss: {mc_loss_pct*100.0:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
