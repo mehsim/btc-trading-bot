@@ -1383,29 +1383,29 @@ def train_models(interval=INTERVAL, pages=PAGES):
         else:
             print(f"  [Champion-Challenger] No existing champion for {name.upper()}. Saving challenger.")
 
+        # Always compute challenger predictions on frozen holdout dataset
+        chal_pred_t = final_ensemble_t.predict(X_holdout)
+        chal_pred_p = final_ensemble_p.predict(X_holdout)
+        chal_acc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_t))
+        chal_mae = float(mean_absolute_error(y_holdout_price, chal_pred_p))
+
+        from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
+        try:
+            chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
+            chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_raw))
+            chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_raw))
+        except Exception as ex_brier:
+            log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
+            chal_brier = 0.99
+            chal_ece = 0.99
+            should_save = False
+
         if champion_t is not None:
             try:
                 champ_pred_t = champion_t.predict(X_holdout)
                 champ_pred_p = champion_p.predict(X_holdout)
                 champ_acc = float(balanced_accuracy_score(y_holdout_trend, champ_pred_t))
                 champ_mae = float(mean_absolute_error(y_holdout_price, champ_pred_p))
-
-                chal_pred_t = final_ensemble_t.predict(X_holdout)
-                chal_pred_p = final_ensemble_p.predict(X_holdout)
-                chal_acc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_t))
-                chal_mae = float(mean_absolute_error(y_holdout_price, chal_pred_p))
-
-                # Calculate real Multiclass Brier score and ECE for challenger
-                from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
-                try:
-                    chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
-                    chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_raw))
-                    chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_raw))
-                except Exception as ex_brier:
-                    log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
-                    chal_brier = 0.99
-                    chal_ece = 0.99
-                    should_save = False
 
                 print(f"  [Champion-Challenger] Frozen Hold-Out Comparison for {name.upper()}:")
                 print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
@@ -1426,18 +1426,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_brier = 0.99
                 chal_ece = 0.99
         else:
-            chal_acc = 0.55
-            chal_mae = 0.01
-            try:
-                from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
-                chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
-                chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_raw))
-                chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_raw))
-            except Exception as ex_brier:
-                log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
-                chal_brier = 0.99
-                chal_ece = 0.99
-                should_save = False
+            print(f"  [Champion-Challenger] No existing champion (or contract updated) for {name.upper()}. Promoting challenger.")
 
         if should_save:
             from mlops_engine import log_mlflow_training_run, promote_if_better
