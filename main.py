@@ -769,18 +769,29 @@ def run_manual_confluence_report(symbol, interval):
         pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
         pred_change = pred_pct * float(latest_candle["close"])
         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
-        
         probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
-        winning_class = int(np.argmax(probs))
-        if winning_class == 2:
+        if len(probs) >= 3:
+            prob_bearish = float(probs[0])
+            prob_neutral = float(probs[1])
+            prob_bullish = float(probs[2])
+        elif len(probs) == 2:
+            prob_bearish = float(probs[0])
+            prob_neutral = 0.0
+            prob_bullish = float(probs[1])
+        else:
+            prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
+            prob_neutral = 0.0
+            prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
+
+        if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= 0.50:
             ml_trend = "Bullish"
-            ml_confidence = float(probs[2])
-        elif winning_class == 0:
+            ml_confidence = prob_bullish
+        elif prob_bearish > max(prob_bullish, prob_neutral) and prob_bearish >= 0.50:
             ml_trend = "Bearish"
-            ml_confidence = float(probs[0])
+            ml_confidence = prob_bearish
         else:
             ml_trend = "Neutral"
-            ml_confidence = float(probs[1])
+            ml_confidence = max(prob_bullish, prob_bearish, prob_neutral)
             
         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
@@ -8529,9 +8540,18 @@ def main():
                             all_pass = False
                             continue
                         
-                        prob_bearish = float(probs[0])
-                        prob_neutral = float(probs[1])
-                        prob_bullish = float(probs[2])
+                        if len(probs) >= 3:
+                            prob_bearish = float(probs[0])
+                            prob_neutral = float(probs[1])
+                            prob_bullish = float(probs[2])
+                        elif len(probs) == 2:
+                            prob_bearish = float(probs[0])
+                            prob_neutral = 0.0
+                            prob_bullish = float(probs[1])
+                        else:
+                            prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
+                            prob_neutral = 0.0
+                            prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
                         
                         winning_class = int(np.argmax(probs))
                         dir_total = prob_bearish + prob_bullish

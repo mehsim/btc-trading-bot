@@ -122,11 +122,19 @@ class SignalEvaluator:
                     probs = models["trend"].predict_proba(row_X_sliced)[0]
                     pred_pct = float(models["price"].predict(row_X_sliced)[0])
                     
-                    prob_bearish = float(probs[0])
-                    prob_neutral = float(probs[1]) if len(probs) > 1 else 0.0
-                    prob_bullish = float(probs[2]) if len(probs) > 2 else float(probs[0])
-                    winning_class = int(np.argmax(probs))
-                    
+                    if len(probs) >= 3:
+                        prob_bearish = float(probs[0])
+                        prob_neutral = float(probs[1])
+                        prob_bullish = float(probs[2])
+                    elif len(probs) == 2:
+                        prob_bearish = float(probs[0])
+                        prob_neutral = 0.0
+                        prob_bullish = float(probs[1])
+                    else:
+                        prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
+                        prob_neutral = 0.0
+                        prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
+
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:
                         norm_bear = prob_bearish / max(1e-9, dir_total)
@@ -139,10 +147,17 @@ class SignalEvaluator:
                             raw_conf = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
                         else:
                             direction = "Neutral"
-                            raw_conf = prob_neutral
+                            raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
                     else:
-                        direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
-                        raw_conf = float(probs[winning_class])
+                        if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= 0.50:
+                            direction = "Bullish"
+                            raw_conf = prob_bullish
+                        elif prob_bearish > max(prob_bullish, prob_neutral) and prob_bearish >= 0.50:
+                            direction = "Bearish"
+                            raw_conf = prob_bearish
+                        else:
+                            direction = "Neutral"
+                            raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
 
                     calibrator = models.get("calibrator")
                     if calibrator is not None and isinstance(calibrator, dict) and "X" in calibrator and "y" in calibrator and direction in ["Bullish", "Bearish"]:
