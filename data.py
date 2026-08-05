@@ -794,10 +794,10 @@ def get_fear_and_greed_history():
             fng_cache_time = time.time()
             return df_cache
             
-        if fng_cache is not None:
-            return fng_cache
-            
-        return pd.DataFrame(columns=["timestamp", "fear_greed"])
+    if fng_cache is not None:
+        return fng_cache
+
+    return pd.DataFrame(columns=["timestamp", "fear_greed"])
 
 def merge_derivatives_sentiment_features(df, symbol, interval):
     if df.empty:
@@ -808,26 +808,37 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
 
     min_ts = int(df["timestamp"].min())
     max_ts = int(df["timestamp"].max())
-    
-    # Fetch
-    df_oi = get_bybit_oi_history(symbol=symbol, interval=interval, start_ts_ms=min_ts, end_ts_ms=max_ts)
-    df_funding = get_bybit_funding_history(symbol=symbol, start_ts_ms=min_ts, end_ts_ms=max_ts)
-    df_fng = get_fear_and_greed_history()
-    
+
+    # Hermetic Fetch with Fallback
+    try:
+        df_oi = get_bybit_oi_history(symbol=symbol, interval=interval, start_ts_ms=min_ts, end_ts_ms=max_ts)
+    except Exception:
+        df_oi = pd.DataFrame(columns=["timestamp", "open_interest"])
+
+    try:
+        df_funding = get_bybit_funding_history(symbol=symbol, start_ts_ms=min_ts, end_ts_ms=max_ts)
+    except Exception:
+        df_funding = pd.DataFrame(columns=["timestamp", "funding_rate"])
+
+    try:
+        df_fng = get_fear_and_greed_history()
+    except Exception:
+        df_fng = pd.DataFrame(columns=["timestamp", "fear_greed"])
+
     # Merge open interest
     if not df_oi.empty:
         df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
     else:
         df["open_interest"] = 0.0
-        
+
     # Merge funding rate
     if not df_funding.empty:
         df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
     else:
         df["funding_rate"] = 0.0
-        
+
     # Merge fear and greed
     if not df_fng.empty:
         df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)

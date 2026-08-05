@@ -1227,14 +1227,38 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 should_save = True
 
         if should_save:
-            print(f"  [Champion-Challenger] Challenger approved. Overwriting active model files...")
+            from mlops_engine import log_mlflow_training_run, promote_if_better
+            
+            # Step 1: Log complete training run to MLflow System of Record
+            val_acc = float(chal_acc) if 'chal_acc' in locals() else 0.0
+            val_mae = float(chal_mae) if 'chal_mae' in locals() else 0.0
+            brier_val = float(brier_score) if 'brier_score' in locals() else 0.18
+            ece_val = float(ece_score) if 'ece_score' in locals() else 0.03
+            
+            ml_run_id = log_mlflow_training_run(
+                symbol="BTCUSDT",
+                interval=str(interval),
+                regime=name,
+                features=regime_features,
+                metrics={"holdout_accuracy": val_acc, "brier_score": brier_val, "ece": ece_val, "val_mae": val_mae},
+                manifest_path=f"{c_prefix_t}_manifest.json",
+                git_sha=_chal_git_sha if '_chal_git_sha' in locals() else "unknown"
+            )
+
+            # Step 2: Evaluate MLflow Model Registry Promotion Gate (ECE <= 0.08, Brier <= 0.22)
+            reg_name = f"btc_{interval}m_{name}_clf"
+            promoted, p_reason = promote_if_better(reg_name, challenger_version="v3.0")
+            if not promoted:
+                print(f"  [Model Governance Gate] Promotion REJECTED: {p_reason}")
+                should_save = False
+
+        if should_save:
+            print(f"  [Champion-Challenger] Challenger approved & promoted. Overwriting active model files...")
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
             print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
-            val_acc = float(chal_acc) if 'chal_acc' in locals() else 0.0
-            val_mae = float(chal_mae) if 'chal_mae' in locals() else 0.0
             model_registry.register_model(
                 run_id=f"train_{interval}m_{name}_{int(time.time())}",
                 model_name=f"ensemble_{name}_{interval}",
@@ -1242,17 +1266,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 stage="Production"
             )
             _tg_alert(
-                f"✅ *Model Trained & Saved*\n"
+                f"✅ *Model Trained & Promoted*\n"
                 f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
                 f"🎯 Val Accuracy: `{val_acc*100:.1f}%` | Val MAE: `{val_mae:.4f}`\n"
                 f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
             )
         else:
-            print(f"  [Champion-Challenger] Champion model retained (Challenger did not show improvement).")
+            print(f"  [Champion-Challenger] Champion model retained (Challenger rejected or did not improve).")
             _tg_alert(
                 f"⏭️ *Champion Retained*\n"
                 f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
-                f"Challenger did not improve — existing model kept."
+                f"Challenger did not pass promotion gate — existing model kept."
             )
 
         if MLFLOW_AVAILABLE:

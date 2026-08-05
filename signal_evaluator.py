@@ -149,6 +149,9 @@ class SignalEvaluator:
                     cal_ver = calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default"
                     cal_ece = float(calibrator.get("ece", 0.035)) if isinstance(calibrator, dict) else 0.035
 
+                    from mlops_engine import load_production_model_from_registry
+                    _, served_version = load_production_model_from_registry(interval=str(interval), regime=_regime_key, live_features=_feat_list)
+
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_{tf_key}"] = {
                             "symbol": str(symbol),
@@ -157,9 +160,11 @@ class SignalEvaluator:
                             "calibrated_confidence": float(calibrated_conf),
                             "predicted_change": float(pred_pct * float(last_row["close"])),
                             "signal_source": "ML_ENSEMBLE",
+                            "model_version": served_version,
                             "calibrator_version": cal_ver,
                             "calibrator_ece": cal_ece,
-                            "is_fallback": False
+                            "is_fallback": False,
+                            "timestamp": time.time()
                         }
                     model_eval_success = True
                 except (NameError, AttributeError) as prog_err:

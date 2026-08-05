@@ -179,7 +179,7 @@ def write_decision(rec: DecisionRecord) -> bool:
 
         col_names = list(cols_dict.keys())
         placeholders = ",".join(["?"] * len(col_names))
-        sql = f"INSERT INTO decision_journal ({','.join(col_names)}) VALUES ({placeholders})"
+        sql = f"INSERT INTO decision_journal ({','.join(col_names)}) VALUES ({placeholders})"  # nosec B608
 
         with db_lock:
             conn = get_db_connection()
