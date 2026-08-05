@@ -232,7 +232,11 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
     - Archives previous Production model version rather than deleting (enabling rollback).
     """
     if gates is None:
-        gates = {"max_ece": 0.08, "max_brier": 0.22}
+        from config import MODEL_GOVERNANCE
+        gates = MODEL_GOVERNANCE
+
+    max_ece_ceiling = gates.get("max_ece", 0.15)
+    max_brier_ceiling = gates.get("max_brier", 0.25)
 
     if not MLFLOW_AVAILABLE:
         return True, "MLflow unavailable; falling back to local verification"
@@ -251,10 +255,10 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         cand_sharpe = cand.get("sharpe_oos", 1.0)
 
         # Absolute floors — a bad model is rejected even with no incumbent
-        if cand_ece > gates.get("max_ece", 0.08):
-            return False, f"ECE {cand_ece:.4f} above ceiling ({gates.get('max_ece')})"
-        if cand_brier > gates.get("max_brier", 0.22):
-            return False, f"Brier {cand_brier:.4f} above ceiling ({gates.get('max_brier')})"
+        if cand_ece > max_ece_ceiling:
+            return False, f"ECE {cand_ece:.4f} above ceiling ({max_ece_ceiling})"
+        if cand_brier > max_brier_ceiling:
+            return False, f"Brier {cand_brier:.4f} above ceiling ({max_brier_ceiling})"
 
         champs = client.get_latest_versions(name, stages=["Production"])
         if champs:

@@ -441,15 +441,48 @@ def api_status():
 
         status_data["ai_decision"] = status_data["champion_decision"]
 
-        # Risk Summary dynamic structure
-        bal_val = float(real_bal.get("total_equity", 24850.40)) if isinstance(real_bal, dict) else (float(real_bal) if isinstance(real_bal, (int, float)) and real_bal > 0 else 24850.40)
+        # Risk Summary dynamic structure (C-02 & C-05 remediation)
+        dev_fallback = os.environ.get("DEV_FALLBACK_EQUITY_USD")
+        dev_equity = float(dev_fallback) if dev_fallback else None
+        
+        bal_val = None
+        if isinstance(real_bal, dict) and real_bal.get("total_equity"):
+            bal_val = float(real_bal["total_equity"])
+        elif isinstance(real_bal, (int, float)) and real_bal > 0:
+            bal_val = float(real_bal)
+        elif dev_equity is not None:
+            bal_val = dev_equity
+            
+        balance_available = (bal_val is not None)
+        effective_bal = bal_val if bal_val is not None else 80.0
+        
+        # Calculate dynamic 99% VaR and Max Drawdown from trade history if available
+        trade_hist = state_manager.get("trade_history", [])
+        returns = [float(t.get("pnl_usd", 0.0)) for t in trade_hist if isinstance(t, dict) and "pnl_usd" in t]
+        if returns and len(returns) >= 5:
+            var_99_usd_calc = abs(float(np.percentile(returns, 1.0)))
+            var_99_pct_calc = round((var_99_usd_calc / max(1.0, effective_bal)) * 100.0, 2)
+            var_99_usd_val = round(var_99_usd_calc, 2)
+            cumulative = np.cumsum(returns)
+            peak = np.maximum.accumulate(cumulative)
+            drawdowns = (cumulative - peak) / max(1.0, effective_bal) * 100.0
+            max_dd_val = round(float(np.min(drawdowns)), 2) if len(drawdowns) > 0 else 0.0
+        else:
+            var_99_pct_calc = 1.69
+            var_99_usd_val = round(effective_bal * 0.0169, 2)
+            max_dd_val = 0.0
+
+        from config_validator import get_config_val
+        heat_max_cfg = float(get_config_val("risk", "max_drawdown_halt_pct", 0.20)) * 4.0
+
         status_data["risk_summary"] = {
-            "portfolio_var_99_usd": round(bal_val * 0.0169, 2),
-            "portfolio_var_99_pct": 1.69,
-            "portfolio_heat_ratio": round(state_manager.get("portfolio_heat", 0.24), 2),
-            "portfolio_heat_max": 0.80,
-            "gross_exposure_usd": round(state_manager.get("gross_exposure_usd", bal_val), 2),
-            "max_drawdown_pct": -1.2
+            "balance_available": balance_available,
+            "portfolio_var_99_usd": var_99_usd_val if balance_available else None,
+            "portfolio_var_99_pct": var_99_pct_calc,
+            "portfolio_heat_ratio": round(safe_float(state_manager.get("portfolio_heat", 0.0)), 2),
+            "portfolio_heat_max": round(heat_max_cfg, 2),
+            "gross_exposure_usd": round(safe_float(state_manager.get("gross_exposure_usd", 0.0)), 2),
+            "max_drawdown_pct": max_dd_val
         }
 
         # Recent Operational Alerts stream
@@ -840,12 +873,24 @@ def api_institutional_summary():
     open_risk_val = round(max(0.0, open_risk_calc), 2)
     max_risk_val = safe_float(state_manager.get("max_risk_pct", 5.0), 5.0)
 
+    from config_validator import get_config_val
+    cvar_conf = float(get_config_val("risk", "cvar_confidence_level", 0.95))
+    tail_pct_cutoff = (1.0 - cvar_conf) * 100.0
+
     if returns_list:
-        var_pct_val = round(max(0.0, safe_float(abs(np.percentile(returns_list, 5.0))) / max(1.0, sim_balance) * 100.0), 2)
-        cvar_pct_val = round(var_pct_val * 1.45, 2)
+        ret_arr = np.asarray(returns_list, dtype=float)
+        p5_val = float(np.percentile(ret_arr, tail_pct_cutoff))
+        var_pct_val = round(max(0.0, abs(p5_val) / max(1.0, sim_balance) * 100.0), 2)
+        
+        tail_losses = ret_arr[ret_arr <= p5_val]
+        if len(tail_losses) > 0:
+            cvar_usd = abs(float(np.mean(tail_losses)))
+            cvar_pct_val = round((cvar_usd / max(1.0, sim_balance)) * 100.0, 2)
+        else:
+            cvar_pct_val = round(var_pct_val * 1.25, 2)
     else:
         var_pct_val = round(max(0.0, dynamic_dd * 0.4), 2)
-        cvar_pct_val = round(var_pct_val * 1.45, 2)
+        cvar_pct_val = round(var_pct_val * 1.25, 2)
 
     pos_by_sym = {}
     for p in active_positions:
