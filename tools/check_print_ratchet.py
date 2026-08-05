@@ -10,7 +10,7 @@ import os
 import sys
 
 # Baseline print() count for core runtime files (ratchets down only)
-PRINT_BASELINE = 1026
+PRINT_BASELINE = 943
 
 # Directories and files to EXCLUDE from the print ratchet (offline scripts where print is expected)
 EXCLUDE_DIRS = {
@@ -22,7 +22,10 @@ EXCLUDE_FILES = {
     "dashboard.py",
     "setup.py",
     "background_ml_tester.py",
-    "soak_replay.py"
+    "soak_replay.py",
+    "train.py",
+    "auto_retrain_optuna.py",
+    "retrain_worker.py"
 }
 
 

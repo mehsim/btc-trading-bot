@@ -26,6 +26,17 @@ MODEL_GOVERNANCE = {
     "min_samples": 20
 }
 
+# Optuna Barrier-Tuning Objective Weights
+# score = w_bal*BalAcc + w_f1*MacroF1 - w_ece*ECE - w_imb*ImbalancePenalty
+MODEL_SELECTION = {
+    "balanced_accuracy_weight":  1.00,
+    "macro_f1_weight":           0.30,
+    "ece_penalty_weight":        0.20,   # actual ECE from mlops_engine — no proxy
+    "imbalance_penalty_weight":  0.40,
+    "imbalance_neutral_cap":     0.70,   # penalty activates above this Neutral fraction
+    "imbalance_min_class_pct":   0.10,   # warning threshold for any directional class
+}
+
 # Order Execution Bounds
 MIN_ORDER_VALUE_USDT = 5.1
 MAX_SCALED_RISK_CAP_RATIO = 1.10  # 110% hard cap on approved risk when order size is scaled up

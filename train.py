@@ -21,11 +21,36 @@ from lightgbm import LGBMClassifier, LGBMRegressor
 from catboost import CatBoostClassifier, CatBoostRegressor
 
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, mean_absolute_error
+from sklearn.metrics import (
+    accuracy_score, balanced_accuracy_score, f1_score, mean_absolute_error,
+    classification_report, confusion_matrix, matthews_corrcoef,
+    cohen_kappa_score, average_precision_score
+)
+from config import MODEL_SELECTION
+from mlops_engine import calculate_expected_calibration_error
 from data import get_history, merge_derivatives_sentiment_features
 import threading
 import requests
 import features as features_module
+
+def safe_mean(values: list):
+    """Mean of non-None, non-NaN values. Returns None if no valid values."""
+    valid = [v for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
+    return float(np.mean(valid)) if valid else None
+
+def safe_stat(values: list) -> dict:
+    """mean/median/std/min/max over valid values. All fields None if no valid values."""
+    valid = [v for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
+    if not valid:
+        return {"mean": None, "median": None, "std": None, "min": None, "max": None}
+    arr = np.array(valid, dtype=float)
+    return {
+        "mean":   round(float(np.mean(arr)),   4),
+        "median": round(float(np.median(arr)), 4),
+        "std":    round(float(np.std(arr)),    4),
+        "min":    round(float(np.min(arr)),    4),
+        "max":    round(float(np.max(arr)),    4),
+    }
 
 def _emit_governance_event(event: dict):
     """Appends a structured governance event to the audit trail."""
@@ -407,14 +432,36 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                     break
         y = labels
         scores = []
+        optuna_fold_scores = []
+        from sklearn.utils.class_weight import compute_sample_weight
         try:
             for train_idx, val_idx in cv.split(X, y):
                 if len(train_idx) < 10 or len(val_idx) < 10:
                     continue
                 model = XGBClassifier(n_estimators=30, max_depth=3, learning_rate=0.1, random_state=42, n_jobs=1)
-                model.fit(X[train_idx], y[train_idx])
-                scores.append(accuracy_score(y[val_idx], model.predict(X[val_idx])))
-            return np.mean(scores) if scores else 0.0
+                sw = compute_sample_weight('balanced', y[train_idx])
+                model.fit(X[train_idx], y[train_idx], sample_weight=sw)
+                preds = model.predict(X[val_idx])
+                proba = model.predict_proba(X[val_idx])
+
+                bal_acc = balanced_accuracy_score(y[val_idx], preds)
+                macro_f1 = f1_score(y[val_idx], preds, average="macro", zero_division=0)
+                ece = calculate_expected_calibration_error(y[val_idx], proba, n_bins=10)
+
+                neutral_frac = (y[val_idx] == 1).mean()
+                neutral_cap = MODEL_SELECTION.get("imbalance_neutral_cap", 0.70)
+                imbalance_pen = max(0.0, neutral_frac - neutral_cap)
+
+                w_bal = MODEL_SELECTION.get("balanced_accuracy_weight", 1.00)
+                w_f1 = MODEL_SELECTION.get("macro_f1_weight", 0.30)
+                w_ece = MODEL_SELECTION.get("ece_penalty_weight", 0.20)
+                w_imb = MODEL_SELECTION.get("imbalance_penalty_weight", 0.40)
+
+                fold_score = (w_bal * bal_acc) + (w_f1 * macro_f1) - (w_ece * ece) - (w_imb * imbalance_pen)
+                scores.append(fold_score)
+                optuna_fold_scores.append(fold_score)
+
+            return safe_mean(scores) if scores else 0.0
         except Exception as ex_train:
             log_event("WARNING", f"train notice: {ex_train}")
             return 0.0
@@ -897,6 +944,55 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_trend_full = df_regime["target_trend"]
         y_price_full = df_regime["target_price_change"]
 
+        # === LABEL DISTRIBUTION — PERMANENT GOVERNANCE CHECK ===
+        n_total = len(y_trend_full)
+        n_bear = int((y_trend_full == 0).sum())
+        n_neutral = int((y_trend_full == 1).sum())
+        n_bull = int((y_trend_full == 2).sum())
+        bear_pct = (n_bear / n_total * 100) if n_total > 0 else 0.0
+        neut_pct = (n_neutral / n_total * 100) if n_total > 0 else 0.0
+        bull_pct = (n_bull / n_total * 100) if n_total > 0 else 0.0
+
+        print(f"\n  [Label Distribution — {name.upper()} regime, {interval}m]")
+        print(f"    Bearish  (0): {n_bear:>6}  ({bear_pct:5.1f}%)")
+        print(f"    Neutral  (1): {n_neutral:>6}  ({neut_pct:5.1f}%)")
+        print(f"    Bullish  (2): {n_bull:>6}  ({bull_pct:5.1f}%)")
+        print(f"    Total       : {n_total:>6}  (100.0%)")
+
+        _emit_governance_event({
+            "event": "label_distribution", "interval": interval, "regime": name,
+            "n_total": n_total,
+            "bearish_pct": round(bear_pct, 2),
+            "neutral_pct": round(neut_pct, 2),
+            "bullish_pct": round(bull_pct, 2)
+        })
+
+        # === SEVERE IMBALANCE WARNING GATE ===
+        _warn_threshold = MODEL_SELECTION.get("imbalance_min_class_pct", 0.10)
+        if (bear_pct / 100) < _warn_threshold or (bull_pct / 100) < _warn_threshold:
+            _imb_msg = (
+                f"[IMBALANCE WARNING] Regime={name.upper()} {interval}m — "
+                f"Bearish={bear_pct:.1f}%, Neutral={neut_pct:.1f}%, Bullish={bull_pct:.1f}%. "
+                f"Directional class < {_warn_threshold*100:.0f}%. "
+                f"Risk: model may learn degenerate all-Neutral predictions."
+            )
+            print(f"\n  ⚠️  {_imb_msg}")
+            log_event("WARNING", _imb_msg)
+            _emit_governance_event({
+                "event": "label_imbalance_warning", "interval": interval, "regime": name,
+                "severity": "WARNING",
+                "bearish_pct": round(bear_pct, 2),
+                "neutral_pct": round(neut_pct, 2),
+                "bullish_pct": round(bull_pct, 2),
+                "threshold_pct": round(_warn_threshold * 100, 1)
+            })
+            _tg_alert(
+                f"⚠️ *Label Imbalance Warning*\n"
+                f"Regime: *{name.upper()}* | Interval: *{interval}m*\n"
+                f"Bear={bear_pct:.1f}%  Neutral={neut_pct:.1f}%  Bull={bull_pct:.1f}%\n"
+                f"Risk: model may collapse to all-Neutral predictions."
+            )
+
         # F-03 ML Validity: Freeze true final 15% hold-out dataset untouched during CV & tuning
         split_idx = int(len(X_full) * 0.85)
         X = X_full.iloc[:split_idx]
@@ -914,7 +1010,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
         meta_labels_list = []
         
         primary_accuracies = []
+        primary_bal_accuracies = []
+        primary_macro_f1s = []
+        primary_mccs = []
+        primary_kappas = []
+        primary_pr_auc_bears = []
+        primary_pr_auc_bulls = []
         primary_maes = []
+        all_y_val_agg = []
+        all_pred_agg = []
         
         calibration_probs = []
         calibration_labels = []
@@ -969,12 +1073,48 @@ def train_models(interval=INTERVAL, pages=PAGES):
             pred_val_t = ensemble_t.predict(X_val)
             pred_val_p = ensemble_p.predict(X_val)
             
-            # Metrics
+            # Classification metrics
             acc = accuracy_score(y_val_t, pred_val_t)
+            bal_acc = balanced_accuracy_score(y_val_t, pred_val_t)
+            macro_f1 = f1_score(y_val_t, pred_val_t, average="macro", zero_division=0)
+            mcc = matthews_corrcoef(y_val_t, pred_val_t)
+            kappa = cohen_kappa_score(y_val_t, pred_val_t)
             mae = mean_absolute_error(y_val_p, pred_val_p)
-            print(f"    - Chronological Walk-Forward Fold {fold+1} Accuracy: {acc*100:.2f}% | MAE: {mae:.5f}")
+            
+            # PR-AUC with zero-positive guard
+            proba_val = ensemble_t.predict_proba(X_val)
+            y_val_arr = y_val_t.values
+
+            if np.sum(y_val_arr == 0) > 0:
+                pr_auc_bear = average_precision_score((y_val_arr == 0).astype(int), proba_val[:, 0])
+            else:
+                pr_auc_bear = None
+
+            if np.sum(y_val_arr == 2) > 0:
+                pr_auc_bull = average_precision_score((y_val_arr == 2).astype(int), proba_val[:, 2])
+            else:
+                pr_auc_bull = None
+
+            pr_bear_str = f"{pr_auc_bear:.3f}" if pr_auc_bear is not None else "N/A"
+            pr_bull_str = f"{pr_auc_bull:.3f}" if pr_auc_bull is not None else "N/A"
+
+            print(
+                f"    - Fold {fold+1}: RawAcc={acc*100:.1f}%  BalAcc={bal_acc*100:.1f}%  "
+                f"MacroF1={macro_f1:.3f}  MCC={mcc:.3f}  Kappa={kappa:.3f}  "
+                f"PR-AUC(Bear={pr_bear_str} Bull={pr_bull_str})  MAE={mae:.5f}"
+            )
+            print(classification_report(y_val_t, pred_val_t, target_names=["Bearish", "Neutral", "Bullish"], zero_division=0))
+
             primary_accuracies.append(acc)
+            primary_bal_accuracies.append(bal_acc)
+            primary_macro_f1s.append(macro_f1)
+            primary_mccs.append(mcc)
+            primary_kappas.append(kappa)
+            primary_pr_auc_bears.append(pr_auc_bear)
+            primary_pr_auc_bulls.append(pr_auc_bull)
             primary_maes.append(mae)
+            all_y_val_agg.extend(y_val_arr.tolist())
+            all_pred_agg.extend(pred_val_t.tolist())
             
             # Out of sample prediction probabilities for calibration
             probs_val = ensemble_t.predict_proba(X_val)
@@ -992,10 +1132,47 @@ def train_models(interval=INTERVAL, pages=PAGES):
             meta_features_list.append(X_val[is_non_neutral])
             meta_labels_list.append(is_correct[is_non_neutral].astype(int))
             
+        # Aggregate Confusion Matrix
+        cm = confusion_matrix(all_y_val_agg, all_pred_agg, labels=[0, 1, 2])
+        print(f"\n  === Aggregate Confusion Matrix ({name.upper()} {interval}m) ===")
+        print(f"               Pred Bearish  Pred Neutral  Pred Bullish")
+        print(f"  True Bearish:  {cm[0,0]:>8}    {cm[0,1]:>8}    {cm[0,2]:>8}")
+        print(f"  True Neutral:  {cm[1,0]:>8}    {cm[1,1]:>8}    {cm[1,2]:>8}")
+        print(f"  True Bullish:  {cm[2,0]:>8}    {cm[2,1]:>8}    {cm[2,2]:>8}")
+
+        # CV Summary (None-guarded print strings)
+        stat_bal = safe_stat(primary_bal_accuracies)
+        stat_f1 = safe_stat(primary_macro_f1s)
+        stat_mcc = safe_stat(primary_mccs)
+        mean_kappa = safe_mean(primary_kappas)
+        mean_pr_auc_bear = safe_mean(primary_pr_auc_bears)
+        mean_pr_auc_bull = safe_mean(primary_pr_auc_bulls)
         mean_cv_acc = float(np.mean(primary_accuracies))
         mean_cv_mae = float(np.mean(primary_maes))
-        print(f"  Validation Out-of-Sample Accuracy (Ensemble Trend): {mean_cv_acc*100:.2f}%")
-        print(f"  Validation Out-of-Sample MAE (Ensemble Price): {mean_cv_mae:.4f}")
+
+        print(f"\n  === CV Summary ({name.upper()} {interval}m) ===")
+        print(f"  Raw Accuracy:       {mean_cv_acc*100:.2f}%")
+        if stat_bal["mean"] is not None:
+            print(f"  Balanced Accuracy:  mean={stat_bal['mean']*100:.2f}%  std={stat_bal['std']*100:.2f}%  "
+                  f"min={stat_bal['min']*100:.2f}%  max={stat_bal['max']*100:.2f}%")
+        else:
+            print(f"  Balanced Accuracy:  N/A")
+
+        if stat_f1["mean"] is not None:
+            print(f"  Macro F1:           mean={stat_f1['mean']:.4f}  std={stat_f1['std']:.4f}")
+        else:
+            print(f"  Macro F1:           N/A")
+
+        if stat_mcc["mean"] is not None:
+            print(f"  MCC:                mean={stat_mcc['mean']:.4f}  std={stat_mcc['std']:.4f}")
+        else:
+            print(f"  MCC:                N/A")
+
+        print(f"  Cohen Kappa:        {mean_kappa:.4f}" if mean_kappa is not None else "  Cohen Kappa:        N/A")
+        pr_b_str = f"{mean_pr_auc_bear:.4f}" if mean_pr_auc_bear is not None else "N/A"
+        pr_u_str = f"{mean_pr_auc_bull:.4f}" if mean_pr_auc_bull is not None else "N/A"
+        print(f"  PR-AUC (Bear/Bull): {pr_b_str} / {pr_u_str}")
+        print(f"  MAE (Price):        {mean_cv_mae:.4f}")
         
         # Meta-Classifier Dataset
         valid_dfs = [df_item for df_item in meta_features_list if not df_item.empty]
@@ -1297,6 +1474,53 @@ def train_models(interval=INTERVAL, pages=PAGES):
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+
+            # Write/update governance manifest with complete cv_metrics block
+            _pipeline_git_sha = _chal_git_sha if '_chal_git_sha' in locals() else "unknown"
+            holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
+
+            cv_metrics_block = {
+                "metrics_schema_version": 1,
+                "balanced_accuracy": safe_stat(primary_bal_accuracies),
+                "macro_f1": safe_stat(primary_macro_f1s),
+                "mcc": safe_stat(primary_mccs),
+                "mean_kappa": mean_kappa,
+                "mean_pr_auc_bear": mean_pr_auc_bear,
+                "mean_pr_auc_bull": mean_pr_auc_bull,
+                "mean_raw_accuracy": round(mean_cv_acc, 4),
+                "mean_mae": round(mean_cv_mae, 6),
+                "label_dist_bearish_pct": round(bear_pct, 2),
+                "label_dist_neutral_pct": round(neut_pct, 2),
+                "label_dist_bullish_pct": round(bull_pct, 2),
+                "n_training_samples": len(X),
+                "n_holdout_samples": len(X_holdout),
+                "confusion_matrix": {
+                    "labels": ["Bearish", "Neutral", "Bullish"],
+                    "label_ids": [0, 1, 2],
+                    "matrix": cm.tolist()
+                },
+                "holdout_accuracy": round(holdout_raw_acc, 4),
+                "holdout_balanced_accuracy": round(chal_acc, 4),
+                "holdout_brier": round(chal_brier, 4),
+                "holdout_ece": round(chal_ece, 4),
+                "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
+                "training_pipeline_version": "v7.2.0",
+                "git_sha": _pipeline_git_sha
+            }
+
+            manifest_path_t = f"{c_prefix_t}_manifest.json"
+            try:
+                manifest_data = {}
+                if os.path.exists(manifest_path_t):
+                    with open(manifest_path_t, "r") as mf:
+                        manifest_data = json.load(mf)
+                manifest_data["cv_metrics"] = cv_metrics_block
+                manifest_data["git_sha"] = _pipeline_git_sha
+                with open(manifest_path_t, "w") as mf:
+                    json.dump(manifest_data, mf, indent=2)
+            except Exception as ex_man:
+                log_event("WARNING", f"Failed to write cv_metrics to manifest: {ex_man}")
+
             print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
             model_registry.register_model(
