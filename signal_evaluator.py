@@ -212,7 +212,7 @@ class SignalEvaluator:
 
                     cal_ver = models.get("calibrator_version") or (calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default")
                     cal_ece = float(models.get("calibrator_ece") or (calibrator.get("ece", 0.035) if isinstance(calibrator, dict) else 0.035))
-                    served_version = models.get("model_version") or f"btc_{interval}m_{_regime_key}_clf:v1.0"
+                    served_version = models.get("model_version")
 
                     pred_entry = {
                         "symbol": str(symbol),

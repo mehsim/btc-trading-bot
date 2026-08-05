@@ -604,6 +604,7 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
 
     manifest_path = f"{prefix}_manifest.json"
     EMPTY_HASH = "e3b0c44298fc"
+    m_data = {}
     if os.path.exists(manifest_path):
         try:
             with open(manifest_path, "r") as mf:
@@ -615,50 +616,40 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
-    if feature_names:
-        if not os.path.exists(manifest_path):
+    if not feature_names:
+        raise RuntimeError(
+            f"[Model Governance Contract Error] Cannot verify feature contract for '{prefix}': "
+            f"feature_names is unresolved and manifest is missing/empty. Model refused loading (Fail-Closed)."
+        )
+
+    if not os.path.exists(manifest_path):
+        write_model_manifest(prefix, feature_names=feature_names)
+    else:
+        m_hash = m_data.get("feature_contract_hash")
+        m_cnt = m_data.get("feature_count", 0)
+        if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
             write_model_manifest(prefix, feature_names=feature_names)
-        else:
-            try:
-                with open(manifest_path, "r") as mf:
-                    m_data = json.load(mf)
-                    m_hash = m_data.get("feature_contract_hash")
-                    m_cnt = m_data.get("feature_count", 0)
-                    if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
-                        write_model_manifest(prefix, feature_names=feature_names)
-            except Exception as ex_ens:
-                log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
-    model_ver, feat_ver, ens_ver, git_sha, feat_count = "v7.2.0", "v3.1.0", "v3.0_stacking", "b5c5c35a", n_features
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path, "r") as mf:
-                m_data = json.load(mf)
-                model_ver = m_data.get("model_version", model_ver)
-                feat_ver = m_data.get("feature_version", feat_ver)
-                ens_ver = m_data.get("ensemble_version", ens_ver)
-                git_sha = m_data.get("git_sha", git_sha)
-                feat_count = m_data.get("feature_count", feat_count)
-                
-                # Model Governance Contract Enforcement: Feature Contract Hash & Count Check
-                manifest_hash = m_data.get("feature_contract_hash")
-                if manifest_hash and feature_names:
-                    current_hash = hashlib.sha256(",".join(feature_names).encode("utf-8")).hexdigest()[:12]
-                    if manifest_hash != current_hash:
-                        raise RuntimeError(
-                            f"[Model Governance Contract Error] Feature contract hash mismatch for '{prefix}': "
-                            f"Manifest Hash '{manifest_hash}' != Live Feature Hash '{current_hash}'. Model refused loading (Fail-Closed)."
-                        )
-                if feat_count and feature_names and len(feature_names) != feat_count:
-                    raise RuntimeError(
-                        f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
-                        f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
-                    )
-        except RuntimeError:
-            raise
-        except Exception as ex_ens:
-            log_event("WARNING", f"Ensemble notice: {ex_ens}")
+    model_ver = m_data.get("model_version", "v7.2.0")
+    feat_ver = m_data.get("feature_version", "v3.1.0")
+    ens_ver = m_data.get("ensemble_version", "v3.0_stacking")
+    git_sha = m_data.get("git_sha", "b5c5c35a")
+    feat_count = m_data.get("feature_count", n_features)
 
+    # Model Governance Contract Enforcement: Feature Contract Hash & Count Check (Unconditional)
+    manifest_hash = m_data.get("feature_contract_hash")
+    if manifest_hash:
+        current_hash = hashlib.sha256(",".join(feature_names).encode("utf-8")).hexdigest()[:12]
+        if manifest_hash != current_hash:
+            raise RuntimeError(
+                f"[Model Governance Contract Error] Feature contract hash mismatch for '{prefix}': "
+                f"Manifest Hash '{manifest_hash}' != Live Feature Hash '{current_hash}'. Model refused loading (Fail-Closed)."
+            )
+    if feat_count and len(feature_names) != feat_count:
+        raise RuntimeError(
+            f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
+            f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
+        )
     clf.model_version = model_ver
     clf.feature_version = feat_ver
     clf.ensemble_version = ens_ver
@@ -736,11 +727,13 @@ def write_model_manifest(
         _metrics = dict(metrics or {})
         _gov_policy = governance_policy or MODEL_GOVERNANCE
 
+        full_model_ver = f"{model_version}-{git_sha}" if not model_version.endswith(f"-{git_sha}") else model_version
+
         manifest = {
             "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,
             "prefix": prefix,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "model_version": model_version,
+            "model_version": full_model_ver,
             "feature_version": feature_version,
             "ensemble_version": ensemble_version,
             "git_sha": git_sha,
@@ -870,6 +863,7 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
 
     manifest_path = f"{prefix}_manifest.json"
     EMPTY_HASH = "e3b0c44298fc"
+    m_data = {}
     if os.path.exists(manifest_path):
         try:
             with open(manifest_path, "r") as mf:
@@ -881,50 +875,40 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
-    if feature_names:
-        if not os.path.exists(manifest_path):
+    if not feature_names:
+        raise RuntimeError(
+            f"[Model Governance Contract Error] Cannot verify feature contract for '{prefix}': "
+            f"feature_names is unresolved and manifest is missing/empty. Model refused loading (Fail-Closed)."
+        )
+
+    if not os.path.exists(manifest_path):
+        write_model_manifest(prefix, feature_names=feature_names)
+    else:
+        m_hash = m_data.get("feature_contract_hash")
+        m_cnt = m_data.get("feature_count", 0)
+        if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
             write_model_manifest(prefix, feature_names=feature_names)
-        else:
-            try:
-                with open(manifest_path, "r") as mf:
-                    m_data = json.load(mf)
-                    m_hash = m_data.get("feature_contract_hash")
-                    m_cnt = m_data.get("feature_count", 0)
-                    if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
-                        write_model_manifest(prefix, feature_names=feature_names)
-            except Exception as ex_ens:
-                log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
-    model_ver, feat_ver, ens_ver, git_sha, feat_count = "v7.2.0", "v3.1.0", "v3.0_stacking", "b5c5c35a", n_features
-    if os.path.exists(manifest_path):
-        try:
-            with open(manifest_path, "r") as mf:
-                m_data = json.load(mf)
-                model_ver = m_data.get("model_version", model_ver)
-                feat_ver = m_data.get("feature_version", feat_ver)
-                ens_ver = m_data.get("ensemble_version", ens_ver)
-                git_sha = m_data.get("git_sha", git_sha)
-                feat_count = m_data.get("feature_count", feat_count)
-                
-                # Model Governance Contract Enforcement: Feature Contract Hash & Count Check
-                manifest_hash = m_data.get("feature_contract_hash")
-                if manifest_hash and feature_names:
-                    current_hash = hashlib.sha256(",".join(feature_names).encode("utf-8")).hexdigest()[:12]
-                    if manifest_hash != current_hash:
-                        raise RuntimeError(
-                            f"[Model Governance Contract Error] Feature contract hash mismatch for '{prefix}': "
-                            f"Manifest Hash '{manifest_hash}' != Live Feature Hash '{current_hash}'. Model refused loading (Fail-Closed)."
-                        )
-                if feat_count and feature_names and len(feature_names) != feat_count:
-                    raise RuntimeError(
-                        f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
-                        f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
-                    )
-        except RuntimeError:
-            raise
-        except Exception as ex_ens:
-            log_event("WARNING", f"Ensemble notice: {ex_ens}")
+    model_ver = m_data.get("model_version", "v7.2.0")
+    feat_ver = m_data.get("feature_version", "v3.1.0")
+    ens_ver = m_data.get("ensemble_version", "v3.0_stacking")
+    git_sha = m_data.get("git_sha", "b5c5c35a")
+    feat_count = m_data.get("feature_count", n_features)
 
+    # Model Governance Contract Enforcement: Feature Contract Hash & Count Check (Unconditional)
+    manifest_hash = m_data.get("feature_contract_hash")
+    if manifest_hash:
+        current_hash = hashlib.sha256(",".join(feature_names).encode("utf-8")).hexdigest()[:12]
+        if manifest_hash != current_hash:
+            raise RuntimeError(
+                f"[Model Governance Contract Error] Feature contract hash mismatch for '{prefix}': "
+                f"Manifest Hash '{manifest_hash}' != Live Feature Hash '{current_hash}'. Model refused loading (Fail-Closed)."
+            )
+    if feat_count and len(feature_names) != feat_count:
+        raise RuntimeError(
+            f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
+            f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
+        )
     reg.model_version = model_ver
     reg.feature_version = feat_ver
     reg.ensemble_version = ens_ver
