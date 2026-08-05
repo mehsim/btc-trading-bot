@@ -110,6 +110,18 @@ class TestInstitutionalGovernanceV3(unittest.TestCase):
         self.assertIn("Kelly", gates)
         self.assertTrue(gates["VaR"]["pass"])
 
+    def test_no_duplicate_or_orphaned_test_files(self):
+        """Verify H-01: Assert no orphaned test_*.py files exist at tests/ root and no duplicated basenames across tiers."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # tests/
+        root_test_files = [f for f in os.listdir(base_dir) if f.startswith("test_") and f.endswith(".py")]
+        self.assertEqual(root_test_files, [], f"Found orphaned test files in root tests/: {root_test_files}")
+
+        unit_files = set(f for f in os.listdir(os.path.join(base_dir, "unit")) if f.startswith("test_") and f.endswith(".py"))
+        integration_files = set(f for f in os.listdir(os.path.join(base_dir, "integration")) if f.startswith("test_") and f.endswith(".py"))
+
+        overlap = unit_files.intersection(integration_files)
+        self.assertEqual(overlap, set(), f"Found duplicated test basenames between unit/ and integration/: {overlap}")
+
 
 if __name__ == "__main__":
     unittest.main()
