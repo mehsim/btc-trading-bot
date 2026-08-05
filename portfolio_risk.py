@@ -295,8 +295,8 @@ class PortfolioRiskEngine:
                         emp_corr = panic_df.corr().values
                         emp_corr = np.nan_to_num(emp_corr, nan=0.95)
                         stressed_corr = np.maximum(0.70, emp_corr)
-                except Exception:
-                    pass
+                except Exception as ex_corr:
+                    log_event("WARNING", f"[Stress Test] Panic correlation estimation failed: {ex_corr}")
             np.fill_diagonal(stressed_corr, 1.0)
 
             vol_vec = np.array([0.03] * n_assets)
