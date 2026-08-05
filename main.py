@@ -456,14 +456,18 @@ def get_funding_adjustment(symbol: str, direction: str, funding_rate: float) -> 
     return 0.0
 
 def get_liquidity_score(symbol: str, orderbook_depth: int = 10) -> float:
-    """Score 0-1 based on L2 orderbook depth"""
+    """Score 0-1 based on L2 orderbook depth. Returns 0.0 on empty orderbook or exception."""
     try:
         ob = get_orderbook_imbalance(symbol=symbol)
-        depth_est = ob.get("total_depth", 500000000)
+        if not ob or not isinstance(ob, dict):
+            return 0.0
+        depth_est = ob.get("total_depth", 0)
+        if not depth_est:
+            return 0.0
         score = min(float(depth_est) / 500000000.0, 1.0)
-        return max(0.1, score)
+        return max(0.0, score)
     except Exception:
-        return 1.0
+        return 0.0
 
 def send_daily_summary(chat_id=None):
     """Run at 00:00 UTC daily (or on-demand via Telegram) to summarize 24h performance & health"""

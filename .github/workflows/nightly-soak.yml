@@ -1,0 +1,44 @@
+name: Nightly Soak & Concurrency Load Gate
+
+on:
+  schedule:
+    - cron: "0 2 * * *"  # Run nightly at 02:00 UTC
+  workflow_dispatch:      # Allow manual trigger
+
+jobs:
+  soak-and-concurrency:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Micro-Switchinterval Concurrency & Race Tests
+        run: |
+          pytest tests/concurrency/ -v --timeout=300
+
+      - name: Execute 30-Day Simulated Replay Soak Test
+        run: |
+          python tools/soak_replay.py --days 30 --report soak.json
+
+      - name: Assert Performance & Memory Budgets
+        run: |
+          python tools/assert_soak_budgets.py soak.json
+
+      - name: Upload Soak Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-report
+          path: soak.json
