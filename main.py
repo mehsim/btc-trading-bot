@@ -2151,9 +2151,9 @@ def start_telegram_command_listener():
                         elif text == "/status":
                             try:
                                 import psutil
+                                instant_cpu = psutil.cpu_percent(interval=None)
                                 load1, load5, _ = os.getloadavg() if hasattr(os, 'getloadavg') else (0.1, 0.1, 0.1)
-                                cpu_load_pct = min(100.0, (load5 / 2.0) * 100.0)
-                                cpu_str = f"{cpu_load_pct:.1f}% (5m Avg Load: {load5:.2f})"
+                                cpu_str = f"{instant_cpu:.1f}% (5m Avg Load: {load5:.2f})"
                                 mem = psutil.virtual_memory()
                                 true_used_pct = (1.0 - (mem.available / mem.total)) * 100.0
                                 ram_str = f"{true_used_pct:.1f}% (Avail: {mem.available // (1024*1024)}MB / {mem.total // (1024*1024)}MB)"
