@@ -4830,6 +4830,15 @@ def load_model_weights(iv):
             print(f"Initialized identity calibrator for ranging_{iv}")
             
         print(f"Successfully loaded ensemble and meta models for interval {iv}")
+        try:
+            import gc, ctypes
+            gc.collect()
+            try:
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except (AttributeError, OSError):
+                pass
+        except (ImportError, AttributeError, OSError):
+            pass
     except Exception as e:
         print(f"Warning: Could not load ensemble models for interval {iv}: {e}")
 

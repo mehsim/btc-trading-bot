@@ -278,14 +278,17 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         return True, f"Local promotion fallback (MLflow check skipped: {e})"
 
 
+_mlflow_unreachable = False
+
 def load_production_model_from_registry(interval: str, regime: str, live_features: Optional[List[str]] = None) -> Tuple[Any, str]:
     """
     Step 3: Model serving reads from registry / system of record.
     Asserts feature_contract_hash match before serving.
     Returns: (model_object, model_version_string)
     """
+    global _mlflow_unreachable
     name = f"btc_{interval}m_{regime}_clf"
-    if MLFLOW_AVAILABLE:
+    if MLFLOW_AVAILABLE and not _mlflow_unreachable:
         try:
             from mlflow.tracking import MlflowClient
             tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
@@ -307,7 +310,8 @@ def load_production_model_from_registry(interval: str, regime: str, live_feature
                 version_str = f"{name}:{mv.version}"
                 return model, version_str
         except Exception as e:
-            print(f"[Model Governance Warning] Could not load from MLflow registry: {e}")
+            _mlflow_unreachable = True
+            print(f"[Model Governance Warning] Could not load from MLflow registry ({e}) — caching MLflow unreachable")
 
     version_str = f"{name}:v3.0_local"
     return None, version_str
