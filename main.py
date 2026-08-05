@@ -899,7 +899,23 @@ def start_telegram_command_listener():
             if not tf_preds:
                 return f"ℹ️ *No prediction history found for the {tf_disp} timeframe.*"
                 
-            candle_timestamps = [p.get("candle_timestamp") for p in tf_preds if p.get("candle_timestamp") is not None]
+            def _norm_ms(val):
+                if val is None:
+                    return 0
+                try:
+                    v = float(val)
+                    return int(v * 1000) if v < 1e11 else int(v)
+                except Exception:
+                    return 0
+
+            # Normalize timestamps in tf_preds
+            for p in tf_preds:
+                if isinstance(p, dict):
+                    raw_c_ts = p.get("candle_timestamp") or p.get("timestamp")
+                    if raw_c_ts is not None:
+                        p["candle_timestamp"] = _norm_ms(raw_c_ts)
+
+            candle_timestamps = [p.get("candle_timestamp") for p in tf_preds if p.get("candle_timestamp") and p.get("candle_timestamp") > 0]
             if not candle_timestamps:
                 return f"ℹ️ *No candle timestamp data found for the {tf_disp} timeframe.*"
                 
@@ -909,7 +925,7 @@ def start_telegram_command_listener():
             # Filter skipped trades for the latest opened/evaluated candle
             latest_skipped = [
                 p for p in tf_preds 
-                if p.get("candle_timestamp") == latest_candle_ts 
+                if _norm_ms(p.get("candle_timestamp")) == latest_candle_ts 
                 and p.get("status", "").startswith("Skipped (") 
                 and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]
             ]
@@ -922,11 +938,11 @@ def start_telegram_command_listener():
                     p for p in tf_preds 
                     if p.get("status", "").startswith("Skipped (") 
                     and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]
-                    and (latest_candle_ts - p.get("candle_timestamp", 0)) <= two_hours_ms
+                    and (latest_candle_ts - _norm_ms(p.get("candle_timestamp"))) <= two_hours_ms
                 ]
                 if recent_skipped_preds:
-                    latest_skipped_ts = max(p.get("candle_timestamp", 0) for p in recent_skipped_preds)
-                    latest_skipped = [p for p in recent_skipped_preds if p.get("candle_timestamp") == latest_skipped_ts]
+                    latest_skipped_ts = max(_norm_ms(p.get("candle_timestamp")) for p in recent_skipped_preds)
+                    latest_skipped = [p for p in recent_skipped_preds if _norm_ms(p.get("candle_timestamp")) == latest_skipped_ts]
                     candle_dt_str = datetime.fromtimestamp(latest_skipped_ts / 1000.0, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                     is_previous_candle = True
                     

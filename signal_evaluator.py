@@ -192,7 +192,12 @@ class SignalEvaluator:
                             c_ts = int(time.time() * 1000)
                             if "timestamp" in last_row:
                                 try:
-                                    c_ts = int(pd.to_datetime(last_row["timestamp"]).timestamp() * 1000)
+                                    raw_t = last_row["timestamp"]
+                                    if isinstance(raw_t, (int, float, np.integer, np.floating)):
+                                        v = float(raw_t)
+                                        c_ts = int(v * 1000) if v < 1e11 else int(v)
+                                    else:
+                                        c_ts = int(pd.to_datetime(raw_t).timestamp() * 1000)
                                 except (ValueError, TypeError, KeyError, AttributeError):
                                     pass
                             exists = any(p.get("candle_timestamp") == c_ts and p.get("interval") == str(interval) and p.get("symbol") == str(symbol) for p in history if isinstance(p, dict))
