@@ -62,15 +62,9 @@ class StatisticalValidation:
         pf_gain = pf_candidate - pf_baseline
         practical_pass = pf_gain >= self.min_pf_gain
         
-        try:
-            from statsmodels.stats.multitest import multipletests
-            p_family = [p_value] * 12
-            rejects, q_vals, _, _ = multipletests(p_family, alpha=self.fdr_alpha, method='fdr_bh')
-            fdr_q_val = float(q_vals[0])
-            statistical_pass = bool(rejects[0])
-        except Exception:
-            fdr_q_val = float(p_value * 12)
-            statistical_pass = fdr_q_val < self.fdr_alpha
+        # Family of m=12 experiments multiple-testing correction
+        fdr_q_val = min(1.0, float(p_value * 12.0))
+        statistical_pass = fdr_q_val < self.fdr_alpha
 
         gate_results = {
             "Gate 1 (Walk-Forward)": walk_forward_pass,
@@ -512,12 +506,12 @@ class StatisticalValidation:
                 "bayes_factor_bf10": bf10,
                 "bayes_factor_bf01": bf01,
                 "bayes_interpretation": bf_interp,
-                "fdr_q_value": round(fdr_q_val if 'fdr_q_val' in locals() else p_val * 1.05, 4),
+                "fdr_q_value": min(1.0, round(float(p_val * 12.0), 4)),
                 "cohen_d": round(cohen_d, 3),
                 "bootstrap_ci_95": [ci_low, ci_high],
                 "bootstrap_diagnostics": boot_diag,
                 "deflated_sharpe_ratio": round(float(np.exp(-abs(cohen_d) * 0.5)), 4),
-                "pbo_prob_backtest_overfitting": round(float(min(0.50, max(0.01, fdr_q_val if 'fdr_q_val' in locals() else p_val * 2.0))), 4),
+                "pbo_prob_backtest_overfitting": min(1.0, round(float(p_val * 12.0), 4)),
                 "mde": round(2.8 / max(1e-4, np.sqrt(n1 + n2)), 3),
                 "effect_stability_score": stability_score,
                 "sprt_diagnostics": sprt_res

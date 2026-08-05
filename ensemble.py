@@ -785,7 +785,7 @@ def write_model_manifest(
             "metrics": _metrics
         }
 
-        hmac_key = os.environ.get("MANIFEST_HMAC_SECRET", "institutional-secret-key-v2").encode("utf-8")
+        hmac_key = get_manifest_hmac_secret()
         canonical_json = json.dumps(manifest, sort_keys=True).encode("utf-8")
         manifest["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
@@ -793,6 +793,37 @@ def write_model_manifest(
             json.dump(manifest, f, indent=2)
     except Exception as e:
         print(f"[Model Governance Warning] Could not write manifest for {prefix}: {e}")
+
+
+def get_manifest_hmac_secret() -> bytes:
+    secret = os.environ.get("MANIFEST_HMAC_SECRET")
+    if not secret:
+        secret_file = ".manifest_hmac_secret"
+        if os.path.exists(secret_file):
+            with open(secret_file, "r") as f:
+                secret = f.read().strip()
+        else:
+            secret = hashlib.sha256(os.urandom(32)).hexdigest()
+            try:
+                with open(secret_file, "w") as f:
+                    f.write(secret)
+            except Exception:
+                pass
+    return secret.encode("utf-8")
+
+
+def verify_manifest_hmac_signature(manifest: dict) -> bool:
+    """Verifies manifest HMAC signature against secret key before trusting feature contract."""
+    sig = manifest.get("hmac_signature")
+    if not sig:
+        raise RuntimeError("Manifest signature missing — refusing to load")
+    manifest_copy = dict(manifest)
+    manifest_copy.pop("hmac_signature", None)
+    canonical = json.dumps(manifest_copy, sort_keys=True).encode("utf-8")
+    expected_sig = hmac.new(get_manifest_hmac_secret(), canonical, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        raise RuntimeError("Manifest signature invalid — refusing to load")
+    return True
 
 
 def is_feature_contract_compatible(
@@ -804,6 +835,11 @@ def is_feature_contract_compatible(
     and feature_names (order-sensitive) against the challenger feature list.
     Uses the RFECV-selected feature list as the challenger source of truth.
     """
+    try:
+        verify_manifest_hmac_signature(champion_manifest)
+    except Exception as ex_sig:
+        return False, f"Manifest HMAC verification failed: {ex_sig}"
+
     from config import SUPPORTED_MANIFEST_SCHEMA_VERSION
     schema_v = champion_manifest.get("manifest_schema_version", 1)
     if schema_v < 1 or schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION:

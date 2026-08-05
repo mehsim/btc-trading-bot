@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_trend_120",
-  "timestamp": "2026-08-05T20:49:39.728170+00:00",
-  "model_version": "v7.2.0-7b4a3a28-202608052049",
+  "timestamp": "2026-08-05T21:01:20.896243+00:00",
+  "model_version": "v7.2.0-2a4ca583-202608052101",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "7b4a3a28",
+  "git_sha": "2a4ca583",
   "feature_count": 46,
   "feature_names": [
     "open_interest",
@@ -107,7 +107,7 @@
   "vif_values": {},
   "feature_contract_hash": "32797452e60e",
   "feature_pipeline_hash": "c9e4a2b6bbb3",
-  "training_data_hash": "1d5dc752b3aa34d11a60499373eaf0a42917ff396ee9df59b251e6da4c838b78",
+  "training_data_hash": "e3157faec9f2e027e81b3c68f74b4e462baad5ff3a3ea0b2a84c333c8ef58db8",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "5340ce2275ab0164501dd72c6da17fdf56a02081765b5a24382e98c8910858d6",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -135,5 +135,5 @@
   },
   "promotion_metrics": {},
   "metrics": {},
-  "hmac_signature": "46ed9fb3fa19d91731f4f5d1b8af70b0434c121e6b9d79e826e9eb266384f65d"
+  "hmac_signature": "8a5dddc4d0cd10a7885cb8e08845f5655d8b618287498a296bbd37a499010142"
 }

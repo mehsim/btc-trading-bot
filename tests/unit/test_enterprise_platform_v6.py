@@ -20,7 +20,7 @@ def test_8_production_release_gates_pass():
         live_reality_check_pass=True,
         pf_baseline=1.50,
         pf_candidate=1.65,
-        p_value=0.01
+        p_value=0.003
     )
     assert res["approved_for_production"] is True
     assert res["pf_gain"] == pytest.approx(0.15, 0.001)
