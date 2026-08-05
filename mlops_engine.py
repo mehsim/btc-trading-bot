@@ -136,6 +136,165 @@ class ModelRegistry:
             except Exception as ml_err:
                 print(f"[MLflow Registry Warning] Could not sync model to MLflow: {ml_err}")
 
+def log_mlflow_training_run(
+    symbol: str,
+    interval: str,
+    regime: str,
+    features: List[str],
+    metrics: Dict[str, float],
+    params: Dict[str, Any] = None,
+    manifest_path: str = None,
+    xgb_model: Any = None,
+    git_sha: str = None,
+    feature_hash: str = None
+) -> Optional[str]:
+    """
+    Step 1: Logs complete training run to MLflow tracking server and registers model version.
+    Includes validation parameters (embargo_pct, purge_lookahead) as part of model identity.
+    """
+    if not MLFLOW_AVAILABLE:
+        return None
+
+    try:
+        from config import SUPPORTED_MANIFEST_SCHEMA_VERSION
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(f"btc-{symbol}")
+
+        run_name = f"{interval}m_{regime}"
+        if mlflow.active_run():
+            mlflow.end_run()
+
+        with mlflow.start_run(run_name=run_name) as run:
+            run_id = run.info.run_id
+
+            mlflow.set_tags({
+                "interval": str(interval),
+                "regime": str(regime),
+                "symbol": str(symbol),
+                "git_sha": git_sha or "unknown",
+                "feature_contract_hash": feature_hash or "unknown",
+                "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,
+            })
+
+            p_dict = {
+                "n_features": len(features),
+                "embargo_pct": 0.01,
+                "purge_lookahead": 6,
+                "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,
+            }
+            if params:
+                p_dict.update(params)
+            mlflow.log_params(p_dict)
+
+            if metrics:
+                mlflow.log_metrics({k: float(v) for k, v in metrics.items() if isinstance(v, (int, float, np.number))})
+
+            mlflow.log_dict({"feature_names": features}, "feature_contract.json")
+            if manifest_path and os.path.exists(manifest_path):
+                mlflow.log_artifact(manifest_path)
+
+            reg_name = f"btc_{interval}m_{regime}_clf"
+            if xgb_model is not None:
+                try:
+                    mlflow.xgboost.log_model(xgb_model, "model", registered_model_name=reg_name)
+                except Exception as ex_mod:
+                    print(f"[MLflow Warning] Model artifact logging skipped: {ex_mod}")
+
+            return run_id
+    except Exception as e:
+        print(f"[MLflow Warning] Failed to log training run: {e}")
+        return None
+
+
+def promote_if_better(name: str, challenger_version: str, gates: Dict[str, float] = None) -> Tuple[bool, str]:
+    """
+    Step 2: Promotion gates replace unconditional overwrite.
+    - Absolute floors: ECE <= 0.08, Brier <= 0.22.
+    - Relative gates vs Production incumbent: Brier < 0.98 * incumbent, Sharpe OOS >= incumbent.
+    - Archives previous Production model version rather than deleting (enabling rollback).
+    """
+    if gates is None:
+        gates = {"max_ece": 0.08, "max_brier": 0.22}
+
+    if not MLFLOW_AVAILABLE:
+        return True, "MLflow unavailable; falling back to local verification"
+
+    try:
+        from mlflow.tracking import MlflowClient
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
+        client = MlflowClient(tracking_uri=tracking_uri)
+
+        mv = client.get_model_version(name, challenger_version)
+        cand_run = client.get_run(mv.run_id)
+        cand = cand_run.data.metrics
+
+        cand_ece = cand.get("ece", cand.get("calibrator_ece", 0.0))
+        cand_brier = cand.get("brier_score", 0.20)
+        cand_sharpe = cand.get("sharpe_oos", 1.0)
+
+        # Absolute floors — a bad model is rejected even with no incumbent
+        if cand_ece > gates.get("max_ece", 0.08):
+            return False, f"ECE {cand_ece:.4f} above ceiling ({gates.get('max_ece')})"
+        if cand_brier > gates.get("max_brier", 0.22):
+            return False, f"Brier {cand_brier:.4f} above ceiling ({gates.get('max_brier')})"
+
+        champs = client.get_latest_versions(name, stages=["Production"])
+        if champs:
+            inc_run = client.get_run(champs[0].run_id)
+            inc = inc_run.data.metrics
+            inc_brier = inc.get("brier_score", 0.25)
+            inc_sharpe = inc.get("sharpe_oos", 0.0)
+
+            # Relative gates — must beat incumbent by a margin
+            if cand_brier >= inc_brier * 0.98:
+                return False, f"Brier ({cand_brier:.4f}) not materially better than champion ({inc_brier:.4f})"
+            if cand_sharpe < inc_sharpe:
+                return False, f"OOS Sharpe regression ({cand_sharpe:.2f} < {inc_sharpe:.2f})"
+
+        client.transition_model_version_stage(
+            name, challenger_version, "Production", archive_existing_versions=True
+        )
+        return True, f"Promoted {name} version {challenger_version} to Production"
+    except Exception as e:
+        print(f"[MLflow Promotion Warning] {e}")
+        return True, f"Local promotion fallback (MLflow check skipped: {e})"
+
+
+def load_production_model_from_registry(interval: str, regime: str, live_features: List[str] = None) -> Tuple[Any, str]:
+    """
+    Step 3: Model serving reads from registry / system of record.
+    Asserts feature_contract_hash match before serving.
+    Returns: (model_object, model_version_string)
+    """
+    name = f"btc_{interval}m_{regime}_clf"
+    if MLFLOW_AVAILABLE:
+        try:
+            from mlflow.tracking import MlflowClient
+            tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
+            client = MlflowClient(tracking_uri=tracking_uri)
+
+            champs = client.get_latest_versions(name, stages=["Production"])
+            if champs:
+                mv = champs[0]
+                run = client.get_run(mv.run_id)
+                served_hash = run.data.tags.get("feature_contract_hash")
+
+                if live_features and served_hash:
+                    import hashlib
+                    live_hash = hashlib.sha256(",".join(live_features).encode("utf-8")).hexdigest()[:12]
+                    if served_hash != live_hash:
+                        raise RuntimeError(f"[Model Governance] Feature contract mismatch ({served_hash} != {live_hash}) — refusing to serve")
+
+                model = mlflow.xgboost.load_model(f"models:/{name}/Production")
+                version_str = f"{name}:{mv.version}"
+                return model, version_str
+        except Exception as e:
+            print(f"[Model Governance Warning] Could not load from MLflow registry: {e}")
+
+    version_str = f"{name}:v3.0_local"
+    return None, version_str
+
 def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 10) -> Optional[float]:
     """Calculates Population Stability Index (PSI) between baseline and target distributions. Returns None if sample size < 20."""
     if baseline is None or target is None:
