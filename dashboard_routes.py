@@ -85,6 +85,11 @@ class StdoutRedirector:
         self.original_stdout = original_stdout
 
     def write(self, text):
+        if isinstance(text, bytes):
+            try:
+                text = text.decode("utf-8", errors="replace")
+            except Exception:
+                text = str(text)
         try:
             self.original_stdout.write(text)
         except Exception as ex_dashboard_routes:

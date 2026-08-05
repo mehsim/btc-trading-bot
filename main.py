@@ -9709,7 +9709,7 @@ if __name__ == "__main__":
     # Start main bot loop in background thread
     threading.Thread(target=safe_main, name="main-bot-loop", daemon=True).start()
     # Start background Telegram command listener thread
-    threading.Thread(target=start_telegram_command_listener, args=(bot_state,), name="telegram-listener", daemon=True).start()
+    threading.Thread(target=start_telegram_command_listener, name="telegram-listener", daemon=True).start()
     send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")
     # Start background news sentiment updater thread
     threading.Thread(target=run_news_sentiment_updater, name="news-sentiment", daemon=True).start()
