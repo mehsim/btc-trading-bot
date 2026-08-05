@@ -1000,15 +1000,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 f"Risk: model may collapse to all-Neutral predictions."
             )
 
-        # F-03 ML Validity: Freeze true final 15% hold-out dataset untouched during CV & tuning
+        # C-1 ML Validity: Purge & Embargo train/holdout boundary (lookahead purge + 1% embargo)
+        from config import TIMEFRAME_CONFIG
+        purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12)
+        embargo_len = max(1, int(len(X_full) * 0.01))
         split_idx = int(len(X_full) * 0.85)
-        X = X_full.iloc[:split_idx]
-        y_trend = y_trend_full.iloc[:split_idx]
-        y_price = y_price_full.iloc[:split_idx]
+
+        X = X_full.iloc[:split_idx - purge_len]
+        y_trend = y_trend_full.iloc[:split_idx - purge_len]
+        y_price = y_price_full.iloc[:split_idx - purge_len]
         
-        X_holdout = X_full.iloc[split_idx:]
-        y_holdout_trend = y_trend_full.iloc[split_idx:]
-        y_holdout_price = y_price_full.iloc[split_idx:]
+        X_holdout = X_full.iloc[split_idx + embargo_len:]
+        y_holdout_trend = y_trend_full.iloc[split_idx + embargo_len:]
+        y_holdout_price = y_price_full.iloc[split_idx + embargo_len:]
+        assert len(X) > 0 and len(X_holdout) > 0 and X.index.max() < X_holdout.index.min(), "train/holdout overlap"
 
         # Purged and Embargoed Time-Series Cross Validation
         cv = PurgedEmbargoTimeSeriesSplit(n_splits=5, interval=interval, embargo_pct=0.01)

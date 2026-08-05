@@ -1,6 +1,7 @@
 import numpy as np
 import threading
 from typing import Dict, List, Tuple, Optional
+from logger import log_event
 
 from collections import deque
 

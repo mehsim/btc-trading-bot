@@ -180,26 +180,32 @@ class SignalEvaluator:
                         prob_neutral = 0.0
                         prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
 
+                    from config import TIMEFRAME_CONFIG
+                    cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+                    tp_m = cfg.get("tp_mult_trending", 1.85)
+                    sl_m = cfg.get("sl_mult", 0.8)
+                    cost_bps = 7.0
+                    p_star = sl_m / (tp_m + sl_m)
+                    eval_threshold = round(min(0.52, max(0.35, p_star + (cost_bps / 1e4) / (tp_m + sl_m))), 4)
+
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:
-                        eval_threshold = 0.52
                         norm_bear = prob_bearish / max(1e-9, dir_total)
                         norm_bull = prob_bullish / max(1e-9, dir_total)
-                        if norm_bull >= 0.52:
+                        if norm_bull >= eval_threshold:
                             direction = "Bullish"
                             raw_conf = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
-                        elif norm_bear >= 0.52:
+                        elif norm_bear >= eval_threshold:
                             direction = "Bearish"
                             raw_conf = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
                         else:
                             direction = "Neutral"
                             raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
                     else:
-                        eval_threshold = 0.50
-                        if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= 0.50:
+                        if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= eval_threshold:
                             direction = "Bullish"
                             raw_conf = prob_bullish
-                        elif prob_bearish > max(prob_bullish, prob_neutral) and prob_bearish >= 0.50:
+                        elif prob_bearish > max(prob_bullish, prob_neutral) and prob_bearish >= eval_threshold:
                             direction = "Bearish"
                             raw_conf = prob_bearish
                         else:
