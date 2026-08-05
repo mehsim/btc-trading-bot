@@ -34,7 +34,8 @@ class MonthlyPDFReporter:
             "sharpe_ratio": 1.85,
             "sortino_ratio": 2.40,
             "max_drawdown_pct": 3.20,
-            "maker_fee_savings_usd": 12.50
+            "maker_fee_savings_usd": 12.50,
+            "slippage_model_validation": self.compare_modeled_vs_realized_slippage(trade_history)
         }
         return report_data
 
@@ -95,7 +96,7 @@ class MonthlyPDFReporter:
         Regresses modeled Almgren-Chriss market impact against realized fill slippage telemetry.
         """
         if not trade_history:
-            return {"status": "INSUFFICIENT_DATA", "num_trades": 0, "r_squared": 0.0, "gamma_calibration_error": 0.0}
+            return {"status": "INSUFFICIENT_DATA", "num_trades": 0, "r_squared": None, "gamma_calibration_error": None}
         
         modeled = []
         realized = []
@@ -105,7 +106,7 @@ class MonthlyPDFReporter:
                 realized.append(float(t["realized_slippage_bps"]))
                 
         if len(modeled) < 10:
-            return {"status": "INSUFFICIENT_TELEMETRY", "num_trades": len(modeled), "r_squared": 0.85, "gamma_calibration_error": 0.02}
+            return {"status": "INSUFFICIENT_TELEMETRY", "num_trades": len(modeled), "r_squared": None, "gamma_calibration_error": None}
             
         import numpy as np
         m_arr, r_arr = np.array(modeled), np.array(realized)

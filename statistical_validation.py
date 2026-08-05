@@ -402,7 +402,8 @@ class StatisticalValidation:
         baseline_returns: List[float],
         component_returns: List[float],
         completed_trades: int = 45,
-        module_uuid: str = "STR_STOP_15M_V4"
+        module_uuid: str = "STR_STOP_15M_V4",
+        num_trials: int = 12
     ) -> Dict[str, Any]:
         """
         Governed Statistical Validation Schema with Audit Trail integration.
@@ -508,12 +509,12 @@ class StatisticalValidation:
                 "bayes_factor_bf10": bf10,
                 "bayes_factor_bf01": bf01,
                 "bayes_interpretation": bf_interp,
-                "fdr_q_value": min(1.0, round(float(p_val * max(1, num_trials if 'num_trials' in locals() and num_trials is not None else 12)), 4)),
+                "fdr_q_value": min(1.0, round(float(p_val * max(1, num_trials)), 4)),
                 "cohen_d": round(cohen_d, 3),
                 "bootstrap_ci_95": [ci_low, ci_high],
                 "bootstrap_diagnostics": boot_diag,
-                "deflated_sharpe_ratio": round(float(np.exp(-abs(cohen_d) * 0.5 * np.sqrt(max(1, num_trials if 'num_trials' in locals() and num_trials is not None else 12) / 12.0))), 4),
-                "pbo_prob_backtest_overfitting": min(1.0, round(float(p_val * max(1, num_trials if 'num_trials' in locals() and num_trials is not None else 12)), 4)),
+                "trial_adjusted_effect_penalty": round(float(np.exp(-abs(cohen_d) * 0.5 * np.sqrt(max(1, num_trials) / 12.0))), 4),
+                "bonferroni_adjusted_p_value": min(1.0, round(float(p_val * max(1, num_trials)), 4)),
                 "mde": round(2.8 / max(1e-4, np.sqrt(n1 + n2)), 3),
                 "effect_stability_score": stability_score,
                 "sprt_diagnostics": sprt_res
