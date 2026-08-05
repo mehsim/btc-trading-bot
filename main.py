@@ -922,12 +922,20 @@ def start_telegram_command_listener():
             latest_candle_ts = max(candle_timestamps)
             candle_dt_str = datetime.fromtimestamp(latest_candle_ts / 1000.0, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             
+            def _is_skipped_trade(p):
+                st = str(p.get("status", ""))
+                dir_str = str(p.get("direction", ""))
+                if st.startswith("Skipped (") and st not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]:
+                    return True
+                if dir_str in ["Bullish", "Bearish"] and (st.startswith("Evaluated (") or st.startswith("Fallback (")) and not p.get("trade_executed", False):
+                    return True
+                return False
+
             # Filter skipped trades for the latest opened/evaluated candle
             latest_skipped = [
                 p for p in tf_preds 
                 if _norm_ms(p.get("candle_timestamp")) == latest_candle_ts 
-                and p.get("status", "").startswith("Skipped (") 
-                and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]
+                and _is_skipped_trade(p)
             ]
             
             is_previous_candle = False
@@ -936,8 +944,7 @@ def start_telegram_command_listener():
                 two_hours_ms = 2 * 3600 * 1000
                 recent_skipped_preds = [
                     p for p in tf_preds 
-                    if p.get("status", "").startswith("Skipped (") 
-                    and p.get("status") not in ["Skipped (Neutral)", "Skipped (Bot Stopped)"]
+                    if _is_skipped_trade(p)
                     and (latest_candle_ts - _norm_ms(p.get("candle_timestamp"))) <= two_hours_ms
                 ]
                 if recent_skipped_preds:
