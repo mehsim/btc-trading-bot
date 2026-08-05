@@ -151,20 +151,50 @@ class SignalEvaluator:
 
                     served_version = models.get("model_version") or f"btc_{interval}m_{_regime_key}_clf:v1.0"
 
+                    pred_entry = {
+                        "symbol": str(symbol),
+                        "direction": str(direction),
+                        "confidence": float(raw_conf),
+                        "calibrated_confidence": float(calibrated_conf),
+                        "predicted_change": float(pred_pct * float(last_row["close"])),
+                        "signal_source": "ML_ENSEMBLE",
+                        "model_version": served_version,
+                        "calibrator_version": cal_ver,
+                        "calibrator_ece": cal_ece,
+                        "is_fallback": False,
+                        "timestamp": time.time()
+                    }
                     with self.state_lock:
-                        self.bot_state[f"latest_prediction_{tf_key}"] = {
-                            "symbol": str(symbol),
-                            "direction": str(direction),
-                            "confidence": float(raw_conf),
-                            "calibrated_confidence": float(calibrated_conf),
-                            "predicted_change": float(pred_pct * float(last_row["close"])),
-                            "signal_source": "ML_ENSEMBLE",
-                            "model_version": served_version,
-                            "calibrator_version": cal_ver,
-                            "calibrator_ece": cal_ece,
-                            "is_fallback": False,
-                            "timestamp": time.time()
-                        }
+                        self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
+                        
+                        # Append to prediction_history for dashboard and telemetry
+                        history = self.bot_state.get("prediction_history", [])
+                        if isinstance(history, list):
+                            c_ts = int(time.time() * 1000)
+                            if "timestamp" in last_row:
+                                try:
+                                    c_ts = int(pd.to_datetime(last_row["timestamp"]).timestamp() * 1000)
+                                except (ValueError, TypeError, KeyError, AttributeError):
+                                    pass
+                            exists = any(p.get("candle_timestamp") == c_ts and p.get("interval") == str(interval) and p.get("symbol") == str(symbol) for p in history if isinstance(p, dict))
+                            if not exists:
+                                history.append({
+                                    "symbol": str(symbol),
+                                    "timestamp": float(time.time()),
+                                    "candle_timestamp": c_ts,
+                                    "interval": str(interval),
+                                    "direction": str(direction),
+                                    "ref_price": float(last_row["close"]),
+                                    "predicted_change": float(pred_pct * float(last_row["close"])),
+                                    "predicted_price": float(last_row["close"]) * (1.0 + pred_pct),
+                                    "status": f"Evaluated ({direction})",
+                                    "calibrated_confidence": float(calibrated_conf),
+                                    "raw_confidence": float(raw_conf),
+                                    "dynamic_threshold": 0.52,
+                                    "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
+                                })
+                                if len(history) > 200:
+                                    self.bot_state["prediction_history"] = history[-200:]
                     model_eval_success = True
                 except (NameError, AttributeError) as prog_err:
                     import traceback
@@ -203,6 +233,28 @@ class SignalEvaluator:
                         "calibrator_ece": 0.080,
                         "is_fallback": True
                     }
+                    history = self.bot_state.get("prediction_history", [])
+                    if isinstance(history, list):
+                        c_ts = int(time.time() * 1000)
+                        exists = any(p.get("candle_timestamp") == c_ts and p.get("interval") == str(interval) and p.get("symbol") == str(symbol) for p in history if isinstance(p, dict))
+                        if not exists:
+                            history.append({
+                                "symbol": str(symbol),
+                                "timestamp": float(time.time()),
+                                "candle_timestamp": c_ts,
+                                "interval": str(interval),
+                                "direction": str(direction),
+                                "ref_price": float(close_p),
+                                "predicted_change": float(change_val),
+                                "predicted_price": float(close_p + change_val),
+                                "status": f"Fallback ({direction})",
+                                "calibrated_confidence": float(conf),
+                                "raw_confidence": float(conf),
+                                "dynamic_threshold": 0.50,
+                                "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
+                            })
+                            if len(history) > 200:
+                                self.bot_state["prediction_history"] = history[-200:]
 
             # Update Confluence Results for UI
             self.update_confluence_results(tf_key, df, symbol)
