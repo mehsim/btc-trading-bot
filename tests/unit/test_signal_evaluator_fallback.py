@@ -54,5 +54,61 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
         finally:
             signal_evaluator.get_history = orig_get_history
 
+    def test_ml_ensemble_healthy_provenance_and_calibrator_telemetry(self):
+        """Verify C-01: Healthy ML model inference emits signal_source='ML_ENSEMBLE', is_fallback=False, and includes calibrator telemetry."""
+        class HealthyClassifier:
+            def predict_proba(self, X):
+                return np.array([[0.1, 0.2, 0.7]])
+
+        class HealthyRegressor:
+            def predict(self, X):
+                return np.array([0.01])
+
+        calibrator_dict = {"X": [0.5, 0.7, 0.9], "y": [0.55, 0.72, 0.93], "version": "v2.1", "ece": 0.025}
+        self.evaluator.models_by_interval = {
+            "15": {
+                "trending": {
+                    "trend": HealthyClassifier(),
+                    "price": HealthyRegressor(),
+                    "calibrator": calibrator_dict
+                },
+                "ranging": {
+                    "trend": HealthyClassifier(),
+                    "price": HealthyRegressor(),
+                    "calibrator": calibrator_dict
+                }
+            }
+        }
+
+        base_ts = 1700000000.0
+        df = pd.DataFrame({
+            "timestamp": [float(base_ts + i * 900) for i in range(60)],
+            "open": [100.0 for _ in range(60)],
+            "high": [102.0 for _ in range(60)],
+            "low": [98.0 for _ in range(60)],
+            "close": [100.0 for _ in range(60)],
+            "volume": [1000.0 for _ in range(60)],
+            "RSI": [60.0 for _ in range(60)],
+            "EMA_9": [105.0 for _ in range(60)],
+            "EMA_21": [100.0 for _ in range(60)],
+            "ADX": [30.0 for _ in range(60)]
+        })
+
+        import signal_evaluator
+        orig_get_history = signal_evaluator.get_history
+        signal_evaluator.get_history = lambda symbol, interval, limit: df
+
+        try:
+            self.evaluator.evaluate_interval("BTCUSDT", "15")
+            pred = self.bot_state.get("latest_prediction_15m") or self.bot_state.get("latest_prediction_15")
+            self.assertIsNotNone(pred)
+            self.assertEqual(pred.get("signal_source"), "ML_ENSEMBLE")
+            self.assertFalse(pred.get("is_fallback"))
+            self.assertEqual(pred.get("calibrator_version"), "v2.1")
+            self.assertEqual(pred.get("calibrator_ece"), 0.025)
+            self.assertGreater(pred.get("calibrated_confidence"), 0.70)
+        finally:
+            signal_evaluator.get_history = orig_get_history
+
 if __name__ == "__main__":
     unittest.main()

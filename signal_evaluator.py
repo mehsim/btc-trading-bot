@@ -140,6 +140,12 @@ class SignalEvaluator:
                         direction = "Bullish" if winning_class == 2 else ("Bearish" if winning_class == 0 else "Neutral")
                         raw_conf = float(probs[winning_class])
 
+                    calibrator = models.get("calibrator")
+                    if calibrator is not None and isinstance(calibrator, dict) and "X" in calibrator and "y" in calibrator and direction in ["Bullish", "Bearish"]:
+                        calibrated_conf = float(np.interp(raw_conf, calibrator["X"], calibrator["y"]))
+                    else:
+                        calibrated_conf = float(raw_conf)
+
                     cal_ver = calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default"
                     cal_ece = float(calibrator.get("ece", 0.035)) if isinstance(calibrator, dict) else 0.035
 
@@ -156,6 +162,10 @@ class SignalEvaluator:
                             "is_fallback": False
                         }
                     model_eval_success = True
+                except (NameError, AttributeError) as prog_err:
+                    import traceback
+                    print(f"[SignalEvaluator CRITICAL PROGRAMMING ERROR] {prog_err}\n{traceback.format_exc()}")
+                    raise prog_err
                 except Exception as ex_m:
                     import traceback
                     print(f"[SignalEvaluator ERROR] ML Ensemble inference failed for {symbol} {interval}m: {ex_m}\n{traceback.format_exc()}")
