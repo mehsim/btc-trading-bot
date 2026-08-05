@@ -478,6 +478,20 @@ def tune_triple_barrier_multipliers(df_coin, interval):
     best = study.best_params
     best["lookahead"] = 10
     print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
+    try:
+        _gov_path = "governance_state.json"
+        _existing = {}
+        if os.path.exists(_gov_path):
+            try:
+                with open(_gov_path, "r") as _gf:
+                    _existing = json.load(_gf)
+            except Exception:
+                pass
+        _existing["last_study_trial_count"] = len(study.trials)
+        with open(_gov_path, "w") as f:
+            json.dump(_existing, f)
+    except Exception as ex_gov:
+        print(f"Warning: Could not write governance_state.json: {ex_gov}")
     return best
 
 def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -1592,6 +1606,25 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
     train_regime_model(df_trending, "trending")
     train_regime_model(df_ranging, "ranging")
+
+    # M-3: persist total Optuna trial count so governance gate uses real search breadth.
+    # Barrier study: 5 trials; 2 regimes × 6 optimizer functions × 3 trials = 36; total = 41.
+    _TOTAL_OPTUNA_TRIALS = 5 + 2 * 6 * 3
+    try:
+        _gov_path = "governance_state.json"
+        _gov = {}
+        if os.path.exists(_gov_path):
+            try:
+                with open(_gov_path, "r") as _gf:
+                    _gov = json.load(_gf)
+            except Exception:
+                pass
+        _gov["last_study_trial_count"] = _TOTAL_OPTUNA_TRIALS
+        with open(_gov_path, "w") as f:
+            json.dump(_gov, f)
+        print(f"[Governance] Persisted last_study_trial_count={_TOTAL_OPTUNA_TRIALS} to {_gov_path}")
+    except Exception as _ex_gov:
+        print(f"[Governance] Warning: Could not update governance_state.json: {_ex_gov}")
 
 def load_live_trade_samples(interval, days=2, weight=3.0):
     """Load recent closed trades and simulated skipped predictions, re-fetch features at entry time, return as weighted DataFrame."""
