@@ -728,7 +728,8 @@ def write_model_manifest(
         _gov_policy = governance_policy or MODEL_GOVERNANCE
 
         ts_suffix = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M")
-        full_model_ver = f"{model_version}-{git_sha}-{ts_suffix}"
+        clean_ver = model_version.split(f"-{git_sha}")[0] if (git_sha and git_sha in model_version) else model_version
+        full_model_ver = f"{clean_ver}-{git_sha}-{ts_suffix}"
 
         manifest = {
             "manifest_schema_version": SUPPORTED_MANIFEST_SCHEMA_VERSION,

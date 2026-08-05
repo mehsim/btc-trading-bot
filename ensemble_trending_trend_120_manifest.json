@@ -1,11 +1,11 @@
 {
   "manifest_schema_version": 3,
   "prefix": "ensemble_trending_trend_120",
-  "timestamp": "2026-08-05T17:32:39.118823+00:00",
-  "model_version": "v7.2.0-73271ae9-73271ae9-202608051732",
+  "timestamp": "2026-08-05T17:36:01.370954+00:00",
+  "model_version": "v7.2.0-dd5824b6-202608051736",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "73271ae9",
+  "git_sha": "dd5824b6",
   "feature_count": 46,
   "feature_names": [
     "open_interest",
