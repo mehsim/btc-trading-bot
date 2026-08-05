@@ -798,7 +798,6 @@ def write_model_manifest(
 
 
 def get_manifest_hmac_secret() -> bytes:
-    import sys
     secret = os.environ.get("MANIFEST_HMAC_SECRET")
     if not secret:
         secret_file = ".manifest_hmac_secret"
@@ -806,10 +805,7 @@ def get_manifest_hmac_secret() -> bytes:
             with open(secret_file, "r") as f:
                 secret = f.read().strip()
     if not secret:
-        if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
-            secret = "institutional-secret-key-v2"
-        else:
-            raise RuntimeError("MANIFEST_HMAC_SECRET environment variable or .manifest_hmac_secret file required for manifest signing/verification")
+        raise RuntimeError("MANIFEST_HMAC_SECRET environment variable or .manifest_hmac_secret file required for manifest signing/verification")
     return secret.encode("utf-8")
 
 

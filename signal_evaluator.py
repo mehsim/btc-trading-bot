@@ -180,13 +180,13 @@ class SignalEvaluator:
                         prob_neutral = 0.0
                         prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
 
-                    from config import TIMEFRAME_CONFIG
+                    from config import TIMEFRAME_CONFIG, MIN_EVAL_THRESHOLD_FLOOR
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                     tp_m = cfg.get("tp_mult_trending", 1.85)
                     sl_m = cfg.get("sl_mult", 0.8)
                     cost_bps = 7.0
                     p_star = sl_m / (tp_m + sl_m)
-                    eval_threshold = round(min(0.52, max(0.35, p_star + (cost_bps / 1e4) / (tp_m + sl_m))), 4)
+                    eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (tp_m + sl_m))), 4)
 
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:

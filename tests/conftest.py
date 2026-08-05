@@ -20,6 +20,16 @@ except Exception:
     pass
 
 
+import os
+
+os.environ.setdefault("MANIFEST_HMAC_SECRET", "test-only-deterministic-key-v1")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _manifest_secret():
+    os.environ.setdefault("MANIFEST_HMAC_SECRET", "test-only-deterministic-key-v1")
+
+
 @pytest.fixture(autouse=True)
 def reset_deadlock_timer():
     """Resets the deadlock timer before each test run."""
