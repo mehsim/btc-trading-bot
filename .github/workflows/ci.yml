@@ -18,10 +18,10 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Core & Project Dependencies
+    - name: Install Core & Dev Dependencies (Pinned)
       run: |
         python -m pip install --upgrade pip
-        pip install pytest flake8 bandit mypy
+        pip install -r requirements-dev.txt
         pip install -r requirements.txt
 
     - name: Repository-Wide Code Quality & Syntax Check
