@@ -149,6 +149,7 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
     ambiguous_bar_pct = round((ambiguous_count / max(1, n * lookahead)) * 100.0, 4)
     s = pd.Series(labels, index=df.index)
     s.attrs["ambiguous_bar_pct"] = ambiguous_bar_pct
+    s.attrs["neutral_pct"] = round(float(np.mean(labels == 1)) * 100.0, 2)
     return s
 
 

@@ -619,6 +619,8 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         try:
             with open(manifest_path, "r") as mf:
                 m_data = json.load(mf)
+                if m_data.get("hmac_signature"):
+                    verify_manifest_hmac_signature(m_data)
                 if not feature_names:
                     feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
                 if n_features is None and feature_names:
@@ -939,6 +941,8 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
         try:
             with open(manifest_path, "r") as mf:
                 m_data = json.load(mf)
+                if m_data.get("hmac_signature"):
+                    verify_manifest_hmac_signature(m_data)
                 if not feature_names:
                     feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
                 if n_features is None and feature_names:

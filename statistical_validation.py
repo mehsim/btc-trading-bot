@@ -54,7 +54,8 @@ class StatisticalValidation:
         live_reality_check_pass: bool,
         pf_baseline: float,
         pf_candidate: float,
-        p_value: float
+        p_value: float,
+        num_trials: int = 12
     ) -> Dict[str, Any]:
         """
         Evaluates 8 Mandatory Production Release Gates including Dual-Significance.
@@ -62,8 +63,9 @@ class StatisticalValidation:
         pf_gain = pf_candidate - pf_baseline
         practical_pass = pf_gain >= self.min_pf_gain
         
-        # Family of m=12 experiments multiple-testing correction
-        fdr_q_val = min(1.0, float(p_value * 12.0))
+        # Dynamic family size multiple-testing correction (Optuna trial count or default m=12)
+        m_trials = max(1, num_trials) if 'num_trials' in locals() and num_trials is not None else 12
+        fdr_q_val = min(1.0, float(p_value * m_trials))
         statistical_pass = fdr_q_val < self.fdr_alpha
 
         gate_results = {
