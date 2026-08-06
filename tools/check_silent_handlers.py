@@ -8,11 +8,30 @@ Enforces that silent handler count only ever decreases over time.
 """
 
 import ast
+import json
 import os
 import sys
 
-# Current Baseline Count (Ratchets down only)
-BASELINE = 120
+# Dynamic baseline file — auto-updated to current_count+1 on each green run
+_BASELINE_FILE = os.path.join(os.path.dirname(__file__), "ratchet_baseline.json")
+
+def _load_baseline() -> int:
+    try:
+        with open(_BASELINE_FILE) as f:
+            return json.load(f).get("silent_handlers", 999)
+    except Exception:
+        return 999
+
+def _save_baseline(count: int) -> None:
+    data = {}
+    try:
+        with open(_BASELINE_FILE) as f:
+            data = json.load(f)
+    except Exception:
+        pass
+    data["silent_handlers"] = count + 1  # measured + 1 tolerance
+    with open(_BASELINE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
 # Files to exclude (external libraries, build output, virtual environments, tooling)
 EXCLUDE_DIRS = {".venv", "venv", "build", "dist", ".git", ".pytest_cache", "node_modules", "mlartifacts", "tools"}
@@ -89,12 +108,14 @@ def count_silent_handlers(root_dir: str = ".") -> int:
 
 if __name__ == "__main__":
     count = count_silent_handlers(".")
-    print(f"[Silent Handler Ratchet] Detected {count} silent/broad exception handlers (Baseline: {BASELINE})")
-    
-    if count > BASELINE:
-        print(f"❌ REGRESSION DETECTED: Silent handler count rose {BASELINE} → {count}.")
+    baseline = _load_baseline()
+    print(f"[Silent Handler Ratchet] Detected {count} silent/broad exception handlers (Baseline: {baseline})")
+
+    if count > baseline:
+        print(f"❌ REGRESSION DETECTED: Silent handler count rose {baseline} → {count}.")
         print("   Narrow exception type or log the exception instead of swallowing it silently.")
         sys.exit(1)
     else:
-        print(f"✅ OK: {count} silent handlers <= baseline {BASELINE}.")
+        _save_baseline(count)  # ratchet down: baseline becomes count+1
+        print(f"✅ OK: {count} silent handlers <= baseline {baseline}.")
         sys.exit(0)

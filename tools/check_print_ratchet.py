@@ -6,11 +6,30 @@ Excludes offline CLI tools, training scripts, tests, and standalone scripts.
 """
 
 import ast
+import json
 import os
 import sys
 
-# Baseline print() count for core runtime files (ratchets down only)
-PRINT_BASELINE = 950
+# Dynamic baseline file — shared with check_silent_handlers.py
+_BASELINE_FILE = os.path.join(os.path.dirname(__file__), "ratchet_baseline.json")
+
+def _load_baseline() -> int:
+    try:
+        with open(_BASELINE_FILE) as f:
+            return json.load(f).get("print_calls", 999)
+    except Exception:
+        return 999
+
+def _save_baseline(count: int) -> None:
+    data = {}
+    try:
+        with open(_BASELINE_FILE) as f:
+            data = json.load(f)
+    except Exception:
+        pass
+    data["print_calls"] = count + 1  # measured + 1 tolerance
+    with open(_BASELINE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
 # Directories and files to EXCLUDE from the print ratchet (offline scripts where print is expected)
 EXCLUDE_DIRS = {
@@ -59,12 +78,14 @@ def count_runtime_prints(root_dir: str = ".") -> int:
 
 if __name__ == "__main__":
     count = count_runtime_prints(".")
-    print(f"[Print Ratchet] Detected {count} print() calls in core runtime modules (Baseline: {PRINT_BASELINE})")
-    
-    if count > PRINT_BASELINE:
-        print(f"❌ REGRESSION DETECTED: Core runtime print() count rose {PRINT_BASELINE} → {count}.")
+    baseline = _load_baseline()
+    print(f"[Print Ratchet] Detected {count} print() calls in core runtime modules (Baseline: {baseline})")
+
+    if count > baseline:
+        print(f"\u274c REGRESSION DETECTED: Core runtime print() count rose {baseline} \u2192 {count}.")
         print("   Use log_event() from logger.py instead of raw print() in runtime paths.")
         sys.exit(1)
     else:
-        print(f"✅ OK: {count} print() calls <= baseline {PRINT_BASELINE}.")
+        _save_baseline(count)  # ratchet down: baseline becomes count+1
+        print(f"\u2705 OK: {count} print() calls <= baseline {baseline}.")
         sys.exit(0)

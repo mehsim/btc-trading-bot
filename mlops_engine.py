@@ -260,14 +260,20 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         min_mcc_floor = gates.get("min_mcc", MODEL_GOVERNANCE.get("min_mcc", 0.05))
         min_bal_acc_floor = gates.get("min_balanced_accuracy", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
 
-        cand_mcc = cand.get("mcc", cand.get("mcc_mean", 0.10))
-        cand_mcc_min = cand.get("mcc_min", 0.05)
-        cand_bal_acc = cand.get("val_accuracy", cand.get("holdout_balanced_accuracy", 0.40))
+        cand_mcc = cand.get("mcc", cand.get("mcc_mean"))
+        cand_mcc_min = cand.get("mcc_min")
+        cand_bal_acc = cand.get("val_accuracy", cand.get("holdout_balanced_accuracy"))
+
+        # Fail-closed: reject if candidate has no cv_metrics — cannot verify predictive content
+        if cand_mcc is None:
+            return False, "REJECTED: candidate has no cv_metrics — cannot verify predictive content"
+        if cand_bal_acc is None:
+            return False, "REJECTED: candidate has no balanced_accuracy metric — cannot verify predictive content"
 
         # Absolute floors — a bad or uninformative model is rejected even with no incumbent
         if cand_mcc < min_mcc_floor:
             return False, f"REJECTED: MCC {cand_mcc:.4f} below predictive floor ({min_mcc_floor})"
-        if cand_mcc_min < 0.0:
+        if cand_mcc_min is not None and cand_mcc_min < 0.0:
             return False, f"REJECTED: Anti-correlated on at least one fold (min fold MCC = {cand_mcc_min:.4f} < 0.0)"
         if cand_bal_acc < min_bal_acc_floor:
             return False, f"REJECTED: Balanced Accuracy {cand_bal_acc:.4f} below predictive floor ({min_bal_acc_floor})"
