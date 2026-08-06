@@ -940,7 +940,7 @@ def api_institutional_summary():
         win_rate >= 40.0,
         calculated_pf >= 1.10,
         dynamic_dd <= 15.0,
-        float(state_manager.get("last_ece", 3.8)) <= 5.0,
+        float(state_manager.get("last_ece", 0.04)) <= 0.08,
         float(state_manager.get("last_psi", 0.04)) <= 0.10,
         float(state_manager.get("last_api_latency_ms", 95.0)) <= 300.0,
         int(state_manager.get("last_data_quality", 98)) >= 95,
@@ -952,7 +952,7 @@ def api_institutional_summary():
     # Dynamic Scores — use real StrategyHealthEngine
     try:
         from strategy_health_engine import strategy_health_engine
-        ece_val = float(state_manager.get("last_ece", 3.8))
+        ece_val = float(state_manager.get("last_ece", 0.04))
         psi_val = float(state_manager.get("last_psi", 0.04))
         dd_for_shs = max(0.0, float(dynamic_dd))
         win_rate_var = abs(win_rate - 50.0) if total_trades_count >= 5 else 2.0
@@ -968,7 +968,7 @@ def api_institutional_summary():
         shs_val = int(round(shs_score))
     except Exception as ex_dashboard_routes:
         log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
-        ece_val = float(state_manager.get("last_ece", 3.8))
+        ece_val = float(state_manager.get("last_ece", 0.04))
         psi_val = float(state_manager.get("last_psi", 0.04))
         win_rate_var = 2.0
         api_lat = float(state_manager.get("last_api_latency_ms", 95.0))
@@ -1151,7 +1151,7 @@ def api_institutional_summary():
                 "release_gates": gates,
                 "last_walk_forward": wf_date,
                 "holdout_accuracy_pct": holdout,
-                "ece": round(float(state_manager.get("shadow_ece", state_manager.get("last_ece", 3.8)) / 100.0), 3),
+                "ece": round(float(state_manager.get("shadow_ece", state_manager.get("last_ece", 0.04))), 4),
                 "bootstrap_ci": bs_ci,
                 "effect_size": eff,
                 "expectancy_champ_vs_shadow": f"{champ_exp} / {shadow_exp}",
@@ -1559,7 +1559,7 @@ def api_strategy_health():
         lifetime_override_rate = 0.0
 
     psi_val = float(state_manager.get("last_psi", 0.04))
-    ece_val = float(state_manager.get("last_ece", 3.8))
+    ece_val = float(state_manager.get("last_ece", 0.04))
 
     return jsonify({
         "status": "ok",
@@ -1585,8 +1585,8 @@ def api_strategy_health():
         },
         "drift": {
             "psi_score": float(round(psi_val, 4)),
-            "ece_score": round(ece_val, 1),
-            "calibration_status": "Normal" if ece_val <= 5.0 else "Degraded",
+            "ece_score": round(ece_val, 4),
+            "calibration_status": "Normal" if ece_val <= 0.08 else "Degraded",
             "feature_drift_status": "Normal" if psi_val <= 0.10 else "Elevated",
             "regime_drift_status": "Normal"
         },
@@ -1633,11 +1633,11 @@ def get_model_governance():
                 
                 # Composite retrain score formula: 0.4*PSI + 0.3*Age_Weight + 0.2*ECE + 0.1*Entropy
                 psi_val = float(state_manager.get("last_psi", 0.04))
-                ece_val = float(state_manager.get("last_ece", 3.8))
+                ece_val = float(state_manager.get("last_ece", 0.04))
                 age_weight = min(1.0, age_days / 45.0)
                 entropy_val = 0.15
                 
-                retrain_score = round((0.40 * min(1.0, psi_val / 0.25)) + (0.30 * age_weight) + (0.20 * min(1.0, ece_val / 10.0)) + (0.10 * entropy_val), 3)
+                retrain_score = round((0.40 * min(1.0, psi_val / 0.25)) + (0.30 * age_weight) + (0.20 * min(1.0, ece_val / 0.08)) + (0.10 * entropy_val), 3)
                 
                 status_label = "NORMAL" if age_days < 14 and psi_val <= 0.10 else ("WARN" if age_days < 30 else "CRITICAL")
                 

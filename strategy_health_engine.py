@@ -46,9 +46,9 @@ class StrategyHealthEngine:
         score = 0.0
 
         # 1. Calibration Error (20 pts)
-        if calibration_error_pct <= 5.0: score += 20.0
-        elif calibration_error_pct <= 10.0: score += 12.0
-        elif calibration_error_pct <= 15.0: score += 5.0
+        if calibration_error_pct <= 0.08: score += 20.0
+        elif calibration_error_pct <= 0.16: score += 12.0
+        elif calibration_error_pct <= 0.25: score += 5.0
 
         # 2. Feature Drift PSI (20 pts)
         if psi_drift_score <= 0.10: score += 20.0
