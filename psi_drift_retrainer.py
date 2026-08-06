@@ -36,41 +36,47 @@ class PSIMultiDriftRetrainer:
     ) -> Tuple[float, bool, str]:
         """
         Returns (mhi_score, should_retrain, retrain_reason).
-        MHI scale: 100.0 (Perfect) to 0.0 (Severe Drift).
+        C-1/H-1: Continuous proportional penalties with per-signal trip conditions derived from config.py.
         """
-        mhi = 100.0
+        import config
+        policy = getattr(config, "MHI_POLICY", {})
+        retrain_thresh = policy.get("retrain_threshold", 60.0)
+        severe_psi = policy.get("severe_psi", 0.25)
+        max_ece = policy.get("max_ece", getattr(config, "MODEL_GOVERNANCE", {}).get("max_ece", 0.08))
+        wr_factor = policy.get("wr_drop_factor", 0.30)
+        wr_min = policy.get("wr_drop_min", 0.10)
+        wr_max = policy.get("wr_drop_max", 0.25)
 
-        # Dynamic Penalties based on baseline win rate
-        dynamic_wr_drop_high = float(max(0.10, min(0.25, baseline_win_rate * 0.30)))
-        dynamic_wr_drop_mid = float(dynamic_wr_drop_high * 0.50)
-
-        # 1. PSI Penalty (if available)
-        if psi_score is not None:
-            if psi_score >= 0.25:
-                mhi -= 40.0
-            elif psi_score >= 0.10:
-                mhi -= 20.0
-
-        # 2. Calibration ECE Penalty
-        if ece_score >= 0.10:
-            mhi -= 30.0
-        elif ece_score >= 0.05:
-            mhi -= 15.0
-
-        # 3. Dynamic Performance Drop Penalty
+        dynamic_wr_drop_high = float(max(wr_min, min(wr_max, baseline_win_rate * wr_factor)))
         win_rate_drop = max(0.0, baseline_win_rate - recent_win_rate)
-        if win_rate_drop >= dynamic_wr_drop_high:
-            mhi -= 30.0
-        elif win_rate_drop >= dynamic_wr_drop_mid:
-            mhi -= 15.0
 
-        final_mhi = max(0.0, min(100.0, mhi))
-        is_severe_psi = bool(psi_score is not None and psi_score >= 0.25)
-        should_retrain = final_mhi < 60.0 or is_severe_psi
-        psi_disp = f"{psi_score:.3f}" if psi_score is not None else "INSUFFICIENT_DATA"
-        reason = f"Severe Drift / Performance Loss (MHI={final_mhi:.1f}, PSI={psi_disp}, ECE={ece_score:.3f})" if should_retrain else "MODEL_HEALTHY"
+        # Continuous proportional penalties
+        psi_val = psi_score if psi_score is not None else 0.0
+        psi_pen = policy.get("max_psi_penalty", 40.0) * min(1.0, max(0.0, psi_val) / severe_psi) if psi_score is not None else 0.0
+        ece_pen = policy.get("max_ece_penalty", 30.0) * min(1.0, max(0.0, ece_score) / max_ece)
+        wr_pen = policy.get("max_wr_penalty", 30.0) * min(1.0, win_rate_drop / max(1e-6, dynamic_wr_drop_high))
 
-        return round(final_mhi, 1), should_retrain, reason
+        mhi = max(0.0, min(100.0, 100.0 - psi_pen - ece_pen - wr_pen))
+
+        # Per-signal trip conditions prevent single severe degradation from being outvoted
+        trip_psi = bool(psi_score is not None and psi_score >= severe_psi)
+        trip_ece = bool(ece_score > max_ece)
+        trip_wr = bool(win_rate_drop >= dynamic_wr_drop_high)
+
+        should_retrain = (mhi < retrain_thresh) or trip_psi or trip_ece or trip_wr
+
+        reasons = []
+        if mhi < retrain_thresh:
+            reasons.append(f"MHI={mhi:.1f}<{retrain_thresh}")
+        if trip_psi:
+            reasons.append(f"Severe PSI={psi_val:.3f}>={severe_psi}")
+        if trip_ece:
+            reasons.append(f"ECE={ece_score:.3f}>{max_ece}")
+        if trip_wr:
+            reasons.append(f"WR_Drop={win_rate_drop:.3f}>={dynamic_wr_drop_high:.3f}")
+
+        reason = f"Retrain Triggered: {', '.join(reasons)}" if should_retrain else "MODEL_HEALTHY"
+        return round(mhi, 1), should_retrain, reason
 
 
 psi_multi_drift_retrainer = PSIMultiDriftRetrainer()

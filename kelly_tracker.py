@@ -120,7 +120,8 @@ class KellyTracker:
             avg_loss = max(0.001, raw_avg_loss)
 
             # 95% Bootstrap lower bound on payoff ratio R for conservative estimation
-            n_boot = 200
+            import config
+            n_boot = getattr(config, "KELLY_BOOTSTRAP_SAMPLES", 1000)
             boot_r = []
             rng = np.random.RandomState(42)
             for _ in range(n_boot):

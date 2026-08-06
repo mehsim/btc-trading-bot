@@ -439,8 +439,15 @@ class ExitPolicyEngine:
         # Recommendation 8: ATR Expansion/Compression Soft Timeout Adjustment
         atr_adj = 2 if atr_ratio > 1.2 else (-2 if atr_ratio < 0.8 else 0)
         
-        # Recommendation 9: Model Health Index (MHI) Scaling
-        mhi_mult = 1.0 if mhi_status == "HEALTHY" else (0.9 if mhi_status == "WATCH" else (0.8 if mhi_status == "DEGRADED" else 0.6))
+        # Recommendation 9: Model Health Index (MHI) Scaling — Continuous formulation (H-2/M-2)
+        if isinstance(mhi_status, (int, float)):
+            mhi_num = float(mhi_status)
+        else:
+            mhi_num = 100.0 if str(mhi_status).upper() == "HEALTHY" else (80.0 if str(mhi_status).upper() == "WATCH" else (60.0 if str(mhi_status).upper() == "DEGRADED" else 40.0))
+        
+        import config
+        mhi_floor = getattr(config, "MHI_MULT_FLOOR", 0.50)
+        mhi_mult = float(np.clip(mhi_num / 100.0, mhi_floor, 1.0))
         soft_limit = max(4, int(round((base_soft + atr_adj) * mhi_mult)))
 
         is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]

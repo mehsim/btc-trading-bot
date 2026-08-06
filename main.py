@@ -412,8 +412,11 @@ def get_pkt_time():
     return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5)
 
 
-def choppiness_index(df, window=14):
+def choppiness_index(df, window=None):
     """0-100 scale. >61.8 = choppy, <38.2 = trending"""
+    if window is None:
+        import config
+        window = getattr(config, "DEFAULT_INDICATOR_WINDOW", 14)
     if df is None or len(df) < window:
         return 50.0
     high_max = df['high'].rolling(window).max()

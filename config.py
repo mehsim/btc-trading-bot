@@ -48,6 +48,29 @@ MIN_EFFECTIVE_HOLDOUT_SAMPLES: int = 80  # min independent observations N / look
 # M-4: Consistent cross-validation fold count across hyperparameter search, feature selection, and main CV
 CV_N_SPLITS: int = 5
 
+# C-1 / H-1: Model Health Index (MHI) Governance Policy & Retraining Triggers
+MHI_POLICY: dict = {
+    "retrain_threshold": 60.0,
+    "severe_psi": 0.25,
+    "max_ece": 0.08,
+    "wr_drop_factor": 0.30,
+    "wr_drop_min": 0.10,
+    "wr_drop_max": 0.25,
+    "max_psi_penalty": 40.0,
+    "max_ece_penalty": 30.0,
+    "max_wr_penalty": 30.0,
+}
+
+# H-2 / M-2: Continuous MHI Sizing Multiplier Floor
+MHI_MULT_FLOOR: float = 0.50
+
+# M-3: Kelly payoff lower bound Monte Carlo bootstrap samples
+KELLY_BOOTSTRAP_SAMPLES: int = 1000
+
+# M-1: Default indicator period window across ATR, ADX, Choppiness
+DEFAULT_INDICATOR_WINDOW: int = 14
+
+
 
 # H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).
 # Window expressed as (max_trades, lookback_days); effective window = trades within lookback_days, min 30.
