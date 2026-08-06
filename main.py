@@ -753,16 +753,25 @@ def run_manual_confluence_report(symbol, interval):
             
         # Unsupervised GMM Market Regime Classification
         regime = classify_market_regime(df_features, interval=interval)
-        if regime == "Trending":
-            active_model_price = models_tf["trending"]["price"]
-            active_model_trend = models_tf["trending"]["trend"]
-            calibrator = models_tf["trending"]["calibrator"]
-            feat_list = models_tf.get("selected_features_trending")
-        else:
-            active_model_price = models_tf["ranging"]["price"]
-            active_model_trend = models_tf["ranging"]["trend"]
-            calibrator = models_tf["ranging"]["calibrator"]
-            feat_list = models_tf.get("selected_features_ranging")
+        regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
+        m_price = models_tf.get(regime_key, {}).get("price")
+        m_trend = models_tf.get(regime_key, {}).get("trend")
+        calibrator = models_tf.get(regime_key, {}).get("calibrator")
+        feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
+
+        if m_price is None or m_trend is None or not feat_list:
+            alt_key = "ranging" if regime_key == "trending" else "trending"
+            alt_price = models_tf.get(alt_key, {}).get("price")
+            alt_trend = models_tf.get(alt_key, {}).get("trend")
+            alt_cal = models_tf.get(alt_key, {}).get("calibrator")
+            alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
+            if alt_price is not None and alt_trend is not None and alt_feats:
+                m_price, m_trend, calibrator, feat_list = alt_price, alt_trend, alt_cal, alt_feats
+            else:
+                return "❌ Models are currently not fully loaded or active."
+
+        active_model_price = m_price
+        active_model_trend = m_trend
             
         if feat_list is not None:
             X_live = latest_candle[feat_list].values.reshape(1, -1)
@@ -8535,6 +8544,7 @@ def main():
                         regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
                         m_price = models_tf.get(regime_key, {}).get("price")
                         m_trend = models_tf.get(regime_key, {}).get("trend")
+                        m_cal = models_tf.get(regime_key, {}).get("calibrator")
                         feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
                         served_regime = regime
 
@@ -8542,10 +8552,11 @@ def main():
                             alt_key = "ranging" if regime_key == "trending" else "trending"
                             alt_price = models_tf.get(alt_key, {}).get("price")
                             alt_trend = models_tf.get(alt_key, {}).get("trend")
+                            alt_cal = models_tf.get(alt_key, {}).get("calibrator")
                             alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
                             if alt_price is not None and alt_trend is not None and alt_feats:
                                 log_event("WARNING", f"[{symbol} {iv}m] {regime} model incomplete — falling back to {alt_key.title()} ensemble & feature contract")
-                                m_price, m_trend, feat_list = alt_price, alt_trend, alt_feats
+                                m_price, m_trend, m_cal, feat_list = alt_price, alt_trend, alt_cal, alt_feats
                                 served_regime = f"{alt_key.title()}_Fallback"
                             else:
                                 log_event("CRITICAL", f"[{symbol} {iv}m] {regime} model & fallback unavailable — skipping interval (Fail-Closed)")
@@ -8553,6 +8564,7 @@ def main():
 
                         active_model_price = m_price
                         active_model_trend = m_trend
+                        active_calibrator = m_cal
                         regime_name = f"{served_regime} (GMM)"
                             
                         # Session-Based Feature Weighting (Asian vs London vs NY)
@@ -8659,7 +8671,7 @@ def main():
 
                         # Apply Isotonic Regression probability calibration if available
                         calibrated_confidence = ml_confidence
-                        calibrator = models_tf["trending"]["calibrator"] if regime == "Trending" else models_tf["ranging"]["calibrator"]
+                        calibrator = active_calibrator
                         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
                             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
                             print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
