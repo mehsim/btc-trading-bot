@@ -187,6 +187,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     else:
                         print(f"[{symbol} {iv}m API ERROR] Market order placement failed: {order_res.get('retMsg')}")
 
+    min_fill_pct = getattr(config, "MIN_ACCEPTABLE_FILL_PCT", 0.60)
+    fill_ratio = (actual_qty / raw_qty) if (raw_qty > 0 and actual_qty > 0) else (1.0 if bybit_success else 0.0)
+    if bybit_success and fill_ratio < min_fill_pct:
+        print(f"[{symbol} {iv}m API WARNING] Fill ratio {fill_ratio*100:.1f}% below {min_fill_pct*100:.0f}% threshold. Reversing partial fill...")
+        if getattr(config, "RESIDUAL_ACTION", "CLOSE") == "CLOSE":
+            opp_side = "Sell" if side == "Buy" else "Buy"
+            place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+            bybit_success = False
+
     if not bybit_success and TRADE_MODE != "simulation":
         print(f"[{symbol} {iv}m API CRITICAL BLOCK] Position NOT registered in bot state because order failed on Bybit.")
         send_telegram_alert(f"⚠️ *Live Order Placement Failed* ⚠️\n• Symbol: `{symbol}`\n• Interval: `{iv}m`\n• Reason: API rejected order execution on Bybit.")

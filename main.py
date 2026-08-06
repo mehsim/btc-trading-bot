@@ -7120,6 +7120,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                 entry_price = float(fill_exec.get("execPrice", entry_price))
                             actual_qty = raw_qty
                             
+        min_fill_pct = getattr(config, "MIN_ACCEPTABLE_FILL_PCT", 0.60)
+        fill_ratio = (actual_qty / raw_qty) if (raw_qty > 0 and actual_qty > 0) else (1.0 if bybit_success else 0.0)
+        if bybit_success and fill_ratio < min_fill_pct:
+            log_event("WARNING", f"[{symbol} {iv}m API] Fill ratio {fill_ratio*100:.1f}% below {min_fill_pct*100:.0f}% threshold. Reversing partial fill...")
+            if getattr(config, "RESIDUAL_ACTION", "CLOSE") == "CLOSE":
+                opp_side = "Sell" if side == "Buy" else "Buy"
+                place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+                bybit_success = False
+
         if bybit_success:
             # 3. Timeframe-Adaptive Minimum Stop Floor & SL Target Calculation
             iv_str = str(iv)

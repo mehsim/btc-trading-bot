@@ -1337,6 +1337,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         t1_full = pd.Series(np.arange(len(y_trend)) + cv.lookahead, index=y_trend.index)
         uniqueness_full = compute_sample_uniqueness(t1_full, y_trend.index).values
+        effective_n = float(uniqueness_full.sum())
         sample_weight_full = compute_balanced_uniqueness_weights(y_trend, uniqueness=uniqueness_full, decay=decay_full)
 
         # H-1/H-2: exponential decay & uniqueness with per-class re-normalization (last train fold)
@@ -1551,6 +1552,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "label_dist_bullish_pct": round(bull_pct, 2),
                 "n_training_samples": len(X),
                 "n_holdout_samples": len(X_holdout),
+                "effective_sample_size": round(effective_n, 2) if 'effective_n' in locals() else float(len(X)),
+                "raw_sample_size": int(len(y_trend)),
+                "uniqueness_ratio": round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0,
                 "confusion_matrix": {
                     "labels": ["Bearish", "Neutral", "Bullish"],
                     "label_ids": [0, 1, 2],
