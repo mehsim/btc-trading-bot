@@ -1576,6 +1576,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     with open(manifest_path_t, "r") as mf:
                         manifest_data = json.load(mf)
                 manifest_data["cv_metrics"] = cv_metrics_block
+                if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
+                    manifest_data["metrics"] = {}
+                manifest_data["metrics"]["uniqueness_ratio"] = round((effective_n / max(1, len(y_trend))), 4)
+                manifest_data["metrics"]["effective_sample_size"] = round(effective_n, 2)
                 manifest_data["git_sha"] = _pipeline_git_sha
                 with open(manifest_path_t, "w") as mf:
                     json.dump(manifest_data, mf, indent=2)
