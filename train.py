@@ -845,7 +845,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"[Warning] Error loading protected_features.json: {e}")
 
     for pf in protected:
-        if pf not in selected_features and pf in X_prelim.columns:
+        if pf not in selected_features and pf in df.columns:
             selected_features.append(pf)
 
     # ADVERSARIAL VALIDATION DRIFT DETECTOR (Model Accuracy Upgrade)
