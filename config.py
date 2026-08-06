@@ -27,7 +27,7 @@ MODEL_GOVERNANCE = {
     "min_sharpe_delta": 0.10,
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
-    "enforce_stability_gate": False,
+    "enforce_stability_gate": True,
     "min_samples": 20,
     "min_mcc": 0.05,                   # C-1 Predictive Floor: MCC < 0.05 is at statistical chance
     "min_balanced_accuracy": 0.36      # C-1 Predictive Floor: 3-class random chance is 0.333
