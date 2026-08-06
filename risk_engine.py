@@ -110,6 +110,45 @@ def calculate_per_interval_kelly(interval: str, trade_history: Optional[list] = 
     """Computes dynamic Quarter-Kelly fraction per timeframe."""
     return global_kelly_tracker.compute_kelly_fraction(timeframe=str(interval), min_trades=30, max_kelly_cap=0.20)
 
+def compute_conservative_kelly(
+    calibrated_confidence: float,
+    tp_multiplier: float,
+    sl_multiplier: float,
+    interval: str = "15",
+    trade_history: Optional[list] = None
+) -> float:
+    """
+    Computes conservative Kelly fraction for trading loop.
+    Applies empirical Kelly tracker (Wilson CI + 95% Bootstrap lower bound) when history exists,
+    or Wilson score lower bound on win rate to discount small-sample point estimates.
+    """
+    import numpy as np
+    from kelly_tracker import global_kelly_tracker
+    
+    if trade_history and len(trade_history) >= 10:
+        emp_kelly = global_kelly_tracker.compute_kelly_fraction(
+            timeframe=str(interval),
+            min_trades=10,
+            max_kelly_cap=0.20
+        )
+        if emp_kelly > 0:
+            return float(emp_kelly)
+            
+    p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
+    b_ratio = float(tp_multiplier / sl_multiplier) if sl_multiplier > 0 else 1.5
+    
+    n = 30.0
+    z = 1.96
+    denom = 1.0 + (z**2 / n)
+    center = p_hat + (z**2 / (2.0 * n))
+    spread = z * np.sqrt((p_hat * (1.0 - p_hat) / n) + (z**2 / (4.0 * n**2)))
+    p_wilson = max(0.0, (center - spread) / denom)
+    
+    raw_kelly = max(0.0, (p_wilson * (b_ratio + 1.0) - 1.0) / b_ratio) if b_ratio > 0 else 0.0
+    scaled_kelly = 0.25 * raw_kelly
+    return float(scaled_kelly)
+
+
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:
     """Continuous Sigmoid & Exponential Drawdown Penalty: dd_penalty = exp(-5 * DD). Hard halt at 20% DD."""
     if peak_equity <= 0 or current_equity <= 0:

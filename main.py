@@ -7718,15 +7718,18 @@ def main():
                                     print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
 
                     # Scale-Out (50% partial profit taking at 1.0 * ATR)
+                    from config import TAKER_FEE_PCT, SCALE_OUT_CONFIG
+                    scale_out_mult = SCALE_OUT_CONFIG.get("atr_trigger_mult", 1.0)
+                    scale_out_portion = SCALE_OUT_CONFIG.get("position_portion", 0.50)
                     half_closed = active_trade.get("half_closed", False)
                     trigger_scale_out = False
                     if not half_closed:
                         if TRADE_MODE != "simulation":
                             trigger_scale_out = bybit_scaled_out
                         else:
-                            if direction == "Bullish" and current_price >= entry_price + 1.0 * atr_dollars:
+                            if direction == "Bullish" and current_price >= entry_price + scale_out_mult * atr_dollars:
                                 trigger_scale_out = True
-                            elif direction == "Bearish" and current_price <= entry_price - 1.0 * atr_dollars:
+                            elif direction == "Bearish" and current_price <= entry_price - scale_out_mult * atr_dollars:
                                 trigger_scale_out = True
     
                     if trigger_scale_out and not half_closed:
@@ -7735,15 +7738,15 @@ def main():
                             half_closed = True
                             active_trade["half_closed"] = True
                             
-                            # Close 50% of the position
-                            closed_size = round(position_size_usd * 0.5, 2)
+                            # Close configured portion of the position
+                            closed_size = round(position_size_usd * scale_out_portion, 2)
                             remaining_size = round(position_size_usd - closed_size, 2)
                             
-                            # Calculate profit on closed half (correct taker fee on leveraged size)
+                            # Calculate profit on closed portion (correct taker fee on leveraged size)
                             raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
                             lev = active_trade.get("leverage", 1.0)
                             gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
-                            taker_fee_cost = closed_size * lev * 0.00055  # exit side only
+                            taker_fee_cost = closed_size * lev * TAKER_FEE_PCT  # exit side only
                             from decimal import Decimal, ROUND_HALF_UP
                             def _q2(v):
                                 return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
@@ -7776,7 +7779,7 @@ def main():
                                     active_trade["stop_loss"] = target_sl
                                     active_trade["break_even_triggered"] = True
                                     active_trades_updated = True
-                                    print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                                    print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                                     update_bybit_take_profit(active_symbol, take_profit, active_trade)
                                 else:
                                     print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to entry on Bybit. SL remains at {stop_loss:.2f}")
@@ -7785,22 +7788,22 @@ def main():
                                 active_trade["stop_loss"] = target_sl
                                 active_trade["break_even_triggered"] = True
                                 active_trades_updated = True
-                                print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                                print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                             
                         elif direction == "Bearish":
                             # Scale-Out Triggered for Short
                             half_closed = True
                             active_trade["half_closed"] = True
                             
-                            # Close 50% of the position
-                            closed_size = round(position_size_usd * 0.5, 2)
+                            # Close configured portion of position
+                            closed_size = round(position_size_usd * scale_out_portion, 2)
                             remaining_size = round(position_size_usd - closed_size, 2)
                             
-                            # Calculate profit on closed half (correct taker fee on leveraged size)
+                            # Calculate profit on closed portion (correct taker fee on leveraged size)
                             raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
                             lev = active_trade.get("leverage", 1.0)
                             gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
-                            taker_fee_cost = closed_size * lev * 0.00055  # exit side only
+                            taker_fee_cost = closed_size * lev * TAKER_FEE_PCT  # exit side only
                             pnl_usd = round(gross_pnl - taker_fee_cost, 2)
                             if pnl_usd < -closed_size:
                                 pnl_usd = -closed_size
@@ -7831,7 +7834,7 @@ def main():
                                     active_trade["stop_loss"] = target_sl
                                     active_trade["break_even_triggered"] = True
                                     active_trades_updated = True
-                                    print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
+                                    print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
                                     update_bybit_take_profit(active_symbol, take_profit, active_trade)
                                 else:
                                     print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to fee-adjusted entry on Bybit. SL remains at {stop_loss:.2f}")
@@ -7840,7 +7843,7 @@ def main():
                                 active_trade["stop_loss"] = target_sl
                                 active_trade["break_even_triggered"] = True
                                 active_trades_updated = True
-                                print(f"[{active_symbol} {iv}m Scale-Out] 50% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
+                                print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
     
                     remaining_seconds = max(0, int(end_time - current_time))
                     mins, secs = divmod(remaining_seconds, 60)
@@ -9337,16 +9340,21 @@ def main():
                                             current_bal = real_bal
                                     cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
                                     
-                                    # Base size dynamic calculation using Quarter-Kelly Criterion
-                                    kelly_p = float(calibrated_confidence)
-                                    kelly_b = float(tp_multiplier_adjusted / sl_multiplier) if sl_multiplier > 0 else 1.5
-                                    raw_kelly = max(0.0, (kelly_p * (kelly_b + 1) - 1) / kelly_b) if kelly_b > 0 else 0.0
+                                    # Base size dynamic calculation using Risk Engine Conservative Kelly (Wilson CI / Bootstrap)
+                                    from config import (
+                                        MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC,
+                                        CVAR_TAIL_PERCENTILE, CVAR_FALLBACK, DAILY_LOSS_BUDGET_FRAC
+                                    )
+                                    scaled_kelly = risk_engine.compute_conservative_kelly(
+                                        calibrated_confidence=calibrated_confidence,
+                                        tp_multiplier=tp_multiplier_adjusted,
+                                        sl_multiplier=sl_multiplier,
+                                        interval=str(iv),
+                                        trade_history=bot_state.get("trade_history", [])
+                                    )
                                     
-                                    # Quarter-Kelly scaling for safety and drawdown control
-                                    scaled_kelly = 0.25 * raw_kelly
-                                    
-                                    # Enforce bounds on balance fraction (Min 2%, Max 15% per trade)
-                                    f_clamped = max(0.02, min(0.15, scaled_kelly))
+                                    # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)
+                                    f_clamped = max(MIN_POSITION_BALANCE_FRAC, min(MAX_POSITION_BALANCE_FRAC, scaled_kelly))
                                     
                                     # Sizing before leverage
                                     position_size_usd = current_bal * f_clamped
@@ -9365,12 +9373,12 @@ def main():
                                         if len(hist_close) > 30:
                                             returns_pct = (hist_close[1:] - hist_close[:-1]) / hist_close[:-1]
                                             returns_sorted = np.sort(returns_pct)
-                                            alpha_idx = max(1, int(len(returns_sorted) * 0.05))
+                                            alpha_idx = max(1, int(len(returns_sorted) * CVAR_TAIL_PERCENTILE))
                                             tail_losses = returns_sorted[:alpha_idx]
-                                            cvar_95 = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else 0.03
+                                            cvar_95 = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else CVAR_FALLBACK
                                         else:
-                                            cvar_95 = 0.03
-                                        daily_loss_budget = current_bal * 0.05
+                                            cvar_95 = CVAR_FALLBACK
+                                        daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
                                         max_cvar_size = daily_loss_budget / (cvar_95 + 1e-8)
                                         print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Risk Size Allowed: ${max_cvar_size:.2f}")
                                         position_size_usd = min(position_size_usd, max_cvar_size)

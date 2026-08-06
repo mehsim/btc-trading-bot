@@ -332,4 +332,28 @@ STRUCTURE_LOOKBACK_CONFIG = {
     "default": 20,
 }
 
+# Fee Constants
+TAKER_FEE_PCT = 0.00055
+MAKER_FEE_PCT = 0.00020
+
+# Scale-Out Configuration
+SCALE_OUT_CONFIG = {
+    "atr_trigger_mult": 1.0,
+    "position_portion": 0.50,
+}
+
+# Fibonacci Step-Lock Levels
+FIBONACCI_STEP_LOCKS = {
+    "levels": [0.382, 0.50, 0.618],
+    "locks": [0.25, 0.40, 0.55]
+}
+
+# Sizing Bounds and CVaR Risk Limits
+MIN_POSITION_BALANCE_FRAC = 0.02
+MAX_POSITION_BALANCE_FRAC = 0.15
+CVAR_TAIL_PERCENTILE = 0.05
+CVAR_FALLBACK = 0.03
+DAILY_LOSS_BUDGET_FRAC = 0.05
+
+
 
