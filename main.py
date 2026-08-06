@@ -8314,17 +8314,26 @@ def main():
             if len(trades) < 2:
                 return False, 0
                 
-            # Sort by exit_time descending to get latest trades
-            sorted_trades = sorted(trades, key=lambda x: x.get("exit_time", 0.0), reverse=True)
+            sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0) or 0.0), reverse=True)
             
             latest_trade = sorted_trades[0]
             second_latest = sorted_trades[1]
             
-            is_latest_loss = (latest_trade.get("success") is False) or (latest_trade.get("pnl_usd", 0.0) < 0.0)
-            is_second_loss = (second_latest.get("success") is False) or (second_latest.get("pnl_usd", 0.0) < 0.0)
+            def _is_loss(t):
+                succ = str(t.get("success", "")).lower()
+                if succ in ["false", "0", "no"]:
+                    return True
+                try:
+                    pnl = float(t.get("pnl_usd", 0.0) or 0.0)
+                    return pnl < 0.0
+                except Exception:
+                    return False
+
+            is_latest_loss = _is_loss(latest_trade)
+            is_second_loss = _is_loss(second_latest)
             
             if is_latest_loss and is_second_loss:
-                exit_time = latest_trade.get("exit_time", 0.0)
+                exit_time = float(latest_trade.get("exit_time", 0.0) or 0.0)
                 cooldown_duration = 6 * 3600  # 6 hours
                 time_elapsed = time.time() - exit_time
                 if time_elapsed < cooldown_duration:
