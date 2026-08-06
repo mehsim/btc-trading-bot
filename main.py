@@ -746,9 +746,8 @@ def run_manual_confluence_report(symbol, interval):
         df_features = add_features(df_raw)
         latest_candle = df_features.iloc[-1]
         
-        iv = str(interval)
         models_tf = models_by_interval.get(iv)
-        if not models_tf or not models_tf["trending"]["price"]:
+        if not models_tf or not (models_tf.get("trending", {}).get("price") or models_tf.get("ranging", {}).get("price")):
             return "❌ Models are currently not fully loaded or active."
             
         # Unsupervised GMM Market Regime Classification
@@ -8545,6 +8544,7 @@ def main():
                         m_price = models_tf.get(regime_key, {}).get("price")
                         m_trend = models_tf.get(regime_key, {}).get("trend")
                         m_cal = models_tf.get(regime_key, {}).get("calibrator")
+                        m_meta = models_tf.get(regime_key, {}).get("meta")
                         feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
                         served_regime = regime
 
@@ -8553,10 +8553,11 @@ def main():
                             alt_price = models_tf.get(alt_key, {}).get("price")
                             alt_trend = models_tf.get(alt_key, {}).get("trend")
                             alt_cal = models_tf.get(alt_key, {}).get("calibrator")
+                            alt_meta = models_tf.get(alt_key, {}).get("meta")
                             alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
                             if alt_price is not None and alt_trend is not None and alt_feats:
                                 log_event("WARNING", f"[{symbol} {iv}m] {regime} model incomplete — falling back to {alt_key.title()} ensemble & feature contract")
-                                m_price, m_trend, m_cal, feat_list = alt_price, alt_trend, alt_cal, alt_feats
+                                m_price, m_trend, m_cal, m_meta, feat_list = alt_price, alt_trend, alt_cal, alt_meta, alt_feats
                                 served_regime = f"{alt_key.title()}_Fallback"
                             else:
                                 log_event("CRITICAL", f"[{symbol} {iv}m] {regime} model & fallback unavailable — skipping interval (Fail-Closed)")
@@ -8565,6 +8566,7 @@ def main():
                         active_model_price = m_price
                         active_model_trend = m_trend
                         active_calibrator = m_cal
+                        active_meta_model = m_meta
                         regime_name = f"{served_regime} (GMM)"
                             
                         # Session-Based Feature Weighting (Asian vs London vs NY)
@@ -8810,22 +8812,20 @@ def main():
 
                         # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
                         meta_adjustment = 0.0
-                        if ml_trend in ["Bullish", "Bearish"]:
-                            active_meta_model = models_tf["trending"]["meta"] if adx_regime >= 20.0 else models_tf["ranging"]["meta"]
-                            if active_meta_model is not None:
-                                try:
-                                    X_meta_live = latest_candle_weighted[features].to_frame().T if isinstance(latest_candle_weighted[features], pd.Series) else latest_candle_weighted[features]
-                                    X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
-                                    meta_pred = int(active_meta_model.predict(X_meta_input)[0])
-                                    if meta_pred == 1:
-                                        meta_adjustment = -0.05  # Lowers required gate threshold by 5%
-                                        print(f"[{iv}m] Meta-Classifier: PASS (required gate threshold lowered by -5%)")
-                                    else:
-                                        meta_adjustment = +0.07  # Raises required gate threshold by 7%
-                                        print(f"[{iv}m] Meta-Classifier: FAIL (required gate threshold raised by +7%)")
-                                    dynamic_conf_threshold = min(0.85, max(0.50, dynamic_conf_threshold + meta_adjustment))
-                                except Exception as meta_err:
-                                    print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
+                        if ml_trend in ["Bullish", "Bearish"] and active_meta_model is not None:
+                            try:
+                                X_meta_live = latest_candle_weighted[features].to_frame().T if isinstance(latest_candle_weighted[features], pd.Series) else latest_candle_weighted[features]
+                                X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
+                                meta_pred = int(active_meta_model.predict(X_meta_input)[0])
+                                if meta_pred == 1:
+                                    meta_adjustment = -0.05  # Lowers required gate threshold by 5%
+                                    print(f"[{iv}m] Meta-Classifier: PASS (required gate threshold lowered by -5%)")
+                                else:
+                                    meta_adjustment = +0.07  # Raises required gate threshold by 7%
+                                    print(f"[{iv}m] Meta-Classifier: FAIL (required gate threshold raised by +7%)")
+                                dynamic_conf_threshold = min(0.85, max(0.50, dynamic_conf_threshold + meta_adjustment))
+                            except Exception as meta_err:
+                                print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
 
                         # Candlestick Pattern Alignment Overlay Boost (-4% Threshold Gate Lowering)
                         bull_patterns = ["cdl_hammer", "cdl_bullish_engulfing", "cdl_morning_star", "cdl_three_white_soldiers", "cdl_three_inside_up", "cdl_abandoned_baby_bull", "cdl_piercing_line", "cdl_tweezer_bottom", "cdl_marubozu_bull"]
