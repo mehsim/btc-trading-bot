@@ -77,9 +77,9 @@ def test_portfolio_heat_upstream_budget_reduction():
 
 def test_mhi_governance_kelly_capping():
     """Verify MHI score governs max Kelly fraction (CRITICAL halts trading)."""
-    assert joint_risk_budget_allocator.get_mhi_max_kelly(85.0) == 0.25
-    assert joint_risk_budget_allocator.get_mhi_max_kelly(70.0) == 0.20
-    assert joint_risk_budget_allocator.get_mhi_max_kelly(55.0) == 0.10
+    assert pytest.approx(joint_risk_budget_allocator.get_mhi_max_kelly(85.0), 0.001) == 0.25
+    assert pytest.approx(joint_risk_budget_allocator.get_mhi_max_kelly(70.0), 0.001) == 0.142857
+    assert pytest.approx(joint_risk_budget_allocator.get_mhi_max_kelly(55.0), 0.001) == 0.035714
     assert joint_risk_budget_allocator.get_mhi_max_kelly(45.0) == 0.00
 
     alloc_critical = joint_risk_budget_allocator.allocate_risk_budget(

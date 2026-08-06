@@ -270,4 +270,52 @@ MIN_EXIT_QUALITY_SCORE = 75.0
 MIN_VOLATILITY_ATR_NORM = 0.0035  # 0.35% minimum ATR volatility gate
 MIN_STRATEGY_HEALTH_SCORE = 50.0  # Halt threshold below 50 SHS
 
+# C-1: Model Health Index (MHI) Continuous Kelly Policy with Hysteresis
+MHI_KELLY_POLICY = {
+    "halt_below": 50.0,
+    "resume_above": 53.0,
+    "full_at": 85.0,
+    "max_kelly": 0.25,
+}
+
+# H-1 & H-2: Volatility Sizing Profile Continuous Interpolation across all timeframes
+VOLATILITY_SIZING_PROFILE = {
+    "15":  [(0.000, 0.5), (0.003, 0.5), (0.005, 1.0), (0.012, 1.0), (0.015, 0.7), (0.020, 0.5)],
+    "30":  [(0.000, 0.5), (0.003, 0.5), (0.005, 1.0), (0.012, 1.0), (0.015, 0.7), (0.020, 0.5)],
+    "60":  [(0.000, 0.5), (0.004, 0.5), (0.007, 1.0), (0.015, 1.0), (0.020, 0.7), (0.025, 0.5)],
+    "120": [(0.000, 0.5), (0.005, 0.5), (0.008, 1.0), (0.018, 1.0), (0.025, 0.7), (0.030, 0.5)],
+    "240": [(0.000, 0.5), (0.006, 0.5), (0.010, 1.0), (0.020, 1.0), (0.030, 0.7), (0.035, 0.5)],
+    "default": [(0.000, 0.5), (0.004, 0.5), (0.007, 1.0), (0.015, 1.0), (0.020, 0.7), (0.025, 0.5)],
+}
+
+# M-1: Dynamic Margin Utilization Policy
+MARGIN_UTILIZATION_POLICY = {
+    "warning_pct": 50.0,
+    "halt_pct": 70.0,
+    "emergency_pct": 85.0,
+    "hard_cap_pct": 90.0,
+}
+
+# M-2: Pre-Trade Risk Checklist Policy
+PRE_TRADE_POLICY = {
+    "max_leverage": 25.0,
+    "min_leverage": 1.0,
+    "min_position_usd": 0.20,
+    "min_notional_usd": 1.0,
+    "max_var_pct": 5.0,
+    "max_heat_pct": 300.0,
+    "max_stress_loss_pct": 25.0,
+    "max_correlation": 0.70,
+}
+
+# M-3: Portfolio Correlation Lookback Window by Timeframe
+CORRELATION_WINDOW_CONFIG = {
+    "15": 20,
+    "30": 20,
+    "60": 24,
+    "120": 30,
+    "240": 40,
+    "default": 20,
+}
+
 

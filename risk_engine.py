@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple, Union
+import config
 from kelly_tracker import global_kelly_tracker
 from portfolio_risk import portfolio_risk_engine
 from pain_feedback import pain_feedback
@@ -143,16 +144,21 @@ def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr
     effective_lev = base_leverage * np.sqrt(target_atr / max(1e-9, current_atr))
     return float(np.clip(effective_lev, min_lev, max_limit))
 
-def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict) -> float:
+def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict, interval: str = "60") -> float:
     if not open_positions or symbol not in df_dict or not isinstance(df_dict[symbol], pd.DataFrame):
         return 0.0
-    if "close" not in df_dict[symbol].columns or len(df_dict[symbol]) < 20:
+    corr_cfg = getattr(config, "CORRELATION_WINDOW_CONFIG", {})
+    lookback = corr_cfg.get(str(interval)) or corr_cfg.get("default", 20)
+    
+    if "close" not in df_dict[symbol].columns or len(df_dict[symbol]) < lookback:
         return 0.0
     
     target_df = df_dict[symbol].copy()
     if "timestamp" in target_df.columns:
-        first_ts = float(target_df["timestamp"].iloc[0]) if len(target_df) > 0 else 0
-        target_df["dt"] = pd.to_datetime(target_df["timestamp"], unit="ms" if first_ts > 1e11 else "s", errors="coerce")
+        target_ts_series = pd.to_numeric(target_df["timestamp"], errors="coerce")
+        first_ts = float(target_ts_series.dropna().iloc[0]) if len(target_ts_series.dropna()) > 0 else 0
+        unit_val = "ms" if first_ts > 1e11 else "s"
+        target_df["dt"] = pd.to_datetime(target_ts_series, unit=unit_val, errors="coerce")
         target_df.set_index("dt", inplace=True)
     target_s = target_df["close"].pct_change().fillna(0.0).dropna().tail(100)
     max_corr = 0.0
@@ -162,14 +168,16 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
             pos_symbol = pos.get("symbol")
             if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
                 pos_df = df_dict[pos_symbol].copy()
-                if "close" in pos_df.columns and len(pos_df) >= 20:
+                if "close" in pos_df.columns and len(pos_df) >= lookback:
                     if "timestamp" in pos_df.columns:
-                        pos_first_ts = float(pos_df["timestamp"].iloc[0]) if len(pos_df) > 0 else 0
-                        pos_df["dt"] = pd.to_datetime(pos_df["timestamp"], unit="ms" if pos_first_ts > 1e11 else "s", errors="coerce")
+                        pos_ts_series = pd.to_numeric(pos_df["timestamp"], errors="coerce")
+                        pos_first_ts = float(pos_ts_series.dropna().iloc[0]) if len(pos_ts_series.dropna()) > 0 else 0
+                        pos_unit = "ms" if pos_first_ts > 1e11 else "s"
+                        pos_df["dt"] = pd.to_datetime(pos_ts_series, unit=pos_unit, errors="coerce")
                         pos_df.set_index("dt", inplace=True)
                     other_s = pos_df["close"].pct_change().fillna(0.0).dropna().tail(100)
                     combined = pd.concat([target_s, other_s], axis=1, join="inner").dropna()
-                    if len(combined) >= 20:
+                    if len(combined) >= lookback:
                         corr_matrix = combined.corr()
                         if corr_matrix.shape == (2, 2):
                             corr_val = corr_matrix.iloc[0, 1]
@@ -222,24 +230,39 @@ def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candid
     return is_safe, heat_pct
 
 def check_margin_utilization(used_margin: float, total_equity: float, max_leverage: float = 10.0) -> str:
-    """Rule 17: Dynamic Margin Utilization Warnings scaled by Leverage Tier."""
+    """Dynamic Margin Utilization Warnings driven by MARGIN_UTILIZATION_POLICY."""
     if total_equity <= 0 or max_leverage <= 0:
         return "NORMAL"
+    policy = getattr(config, "MARGIN_UTILIZATION_POLICY", {})
+    warn_p = policy.get("warning_pct", 50.0)
+    halt_p = policy.get("halt_pct", 70.0)
+    emerg_p = policy.get("emergency_pct", 85.0)
+
     utilization_pct = (used_margin / total_equity) * 100.0
     emergency_thresh = (1.0 / (max_leverage * 1.05)) * 100.0
     halt_thresh = (1.0 / (max_leverage * 1.20)) * 100.0
     warning_thresh = (1.0 / (max_leverage * 1.50)) * 100.0
 
-    if utilization_pct >= max(85.0, emergency_thresh):
+    if utilization_pct >= max(emerg_p, emergency_thresh):
         return "EMERGENCY_CLOSE"
-    elif utilization_pct >= max(70.0, halt_thresh):
+    elif utilization_pct >= max(halt_p, halt_thresh):
         return "HALT_ENTRIES"
-    elif utilization_pct >= max(50.0, warning_thresh):
+    elif utilization_pct >= max(warn_p, warning_thresh):
         return "WARNING_ALERT"
     return "NORMAL"
 
 def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish", journal: Any = None) -> tuple:
     try:
+        policy = getattr(config, "PRE_TRADE_POLICY", {})
+        max_lev = policy.get("max_leverage", 25.0)
+        min_lev = policy.get("min_leverage", 1.0)
+        min_pos = policy.get("min_position_usd", 0.20)
+        min_notional = policy.get("min_notional_usd", 1.0)
+        max_var = policy.get("max_var_pct", 5.0)
+        max_heat = policy.get("max_heat_pct", 300.0)
+        max_stress = policy.get("max_stress_loss_pct", 25.0)
+        max_corr = policy.get("max_correlation", 0.70)
+
         if not isinstance(bot_state, dict):
             bot_state = {}
         if not isinstance(active_trades, list):
@@ -247,8 +270,8 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if not isinstance(df_dict, dict):
             df_dict = {}
 
-        if leverage_val > 25.0 or leverage_val < 1.0:
-            return False, f"REJECTED: Leverage ({leverage_val}x) exceeds maximum allowable limit (25x)", 0.0, 0.0
+        if leverage_val > max_lev or leverage_val < min_lev:
+            return False, f"REJECTED: Leverage ({leverage_val}x) outside allowable limit ({min_lev}x-{max_lev}x)", 0.0, 0.0
 
         if bot_state.get("circuit_breaker_active", False):
             return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
@@ -265,7 +288,7 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         capped_size = check_interval_position_limit(interval, position_size_usd, equity)
         capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
         leveraged_notional = capped_size * max(1.0, leverage_val)
-        if capped_size < 0.20 or leveraged_notional < 1.0: # Below minimum viable trade margin/notional
+        if capped_size < min_pos or leveraged_notional < min_notional: # Below minimum viable trade margin/notional
             return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0, 0.0
 
         # 1. Continuous Sigmoid Drawdown scaling check
@@ -280,15 +303,15 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if journal:
             journal.gate("var", (var_pct * 100.0) if var_pct is not None else None, var_ok)
 
-        if not var_ok:
-            return False, f"REJECTED: Parametric VaR ({var_pct*100.0:.2f}%) exceeds maximum 5% capital cap", dd_mult, 0.0
+        if not var_ok or (var_pct is not None and (var_pct * 100.0) > max_var):
+            return False, f"REJECTED: Parametric VaR ({(var_pct*100.0) if var_pct else 0:.2f}%) exceeds maximum {max_var}% capital cap", dd_mult, 0.0
 
         heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df)
         if journal:
             journal.gate("heat", heat_pct, heat_safe)
 
-        if not heat_safe:
-            return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit", dd_mult, 0.0
+        if not heat_safe or heat_pct > max_heat:
+            return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit ({max_heat}%)", dd_mult, 0.0
 
         # 2.5 Monte Carlo -30% Stress Test Check
         mc_approved, mc_scale_factor, mc_loss_pct, mc_summary = portfolio_risk_engine.check_candidate_stress_budget(
@@ -299,7 +322,7 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
             open_positions=active_trades,
             returns_df=returns_df,
             total_equity=equity,
-            max_stress_loss_pct=0.25,
+            max_stress_loss_pct=max_stress / 100.0,
             shock_pct=-0.30
         )
         if journal:
@@ -312,40 +335,34 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
                 journal.simulation_seed = mc_seed
 
         if not mc_approved:
-            return False, f"REJECTED: Monte Carlo -30% Stress Test projected loss ({mc_loss_pct*100.0:.1f}%) exceeds max 25% equity budget", dd_mult, 0.0
+            return False, f"REJECTED: Monte Carlo -30% Stress Test projected loss ({mc_loss_pct*100.0:.1f}%) exceeds max {max_stress}% equity budget", dd_mult, 0.0
 
         if mc_scale_factor < 1.0:
             capped_size = round(capped_size * mc_scale_factor, 2)
         
         # 3. Correlation check
-        corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict)
-        corr_ok = corr_val <= 0.7
+        corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict, interval=interval)
+        corr_ok = corr_val <= max_corr
         if journal:
             journal.gate("corr", corr_val, corr_ok)
 
         if not corr_ok:
-            return False, f"REJECTED: High correlation ({corr_val:.2f} > 0.70) with open positions", dd_mult, 0.0
+            return False, f"REJECTED: High correlation ({corr_val:.2f} > {max_corr:.2f}) with open positions", dd_mult, 0.0
             
         return True, f"APPROVED: Risk checklist passed (Size: ${capped_size:.2f}, Sigmoid DD Mult: {dd_mult:.2f}, Heat: {heat_pct:.1f}%, Stress Loss: {mc_loss_pct*100.0:.1f}%, Max Corr: {corr_val:.2f})", dd_mult, capped_size
     except Exception as e:
         print(f"[risk_engine ERROR] Exception in evaluate_pre_trade_checklist for {symbol}: {e}")
         return False, f"REJECTED: Risk engine exception (Fail-Closed): {e}", 0.0, 0.0
 
-
 def get_volatility_regime_multiplier(atr_norm: float, interval: str) -> float:
-    """Rule 16: Dynamic Inverse ATR Percentile Sizing bounded strictly to [0.5, 1.0]."""
-    raw_m = 1.0
-    if str(interval) in ["15", "30"]:
-        if atr_norm > 0.02:           # Extreme volatility (>2% per candle)
-            raw_m = 0.5               # Cut size in half for safety
-        elif atr_norm > 0.015:        # High volatility
-            raw_m = 0.7
-        elif 0.005 <= atr_norm <= 0.012: # Sweet spot for 15M/30M trend efficiency
-            raw_m = 1.0               # Max 1.0x cap
-        elif atr_norm < 0.003:        # Flat chop / dead market
-            raw_m = 0.5               # 0.5 floor
+    """Dynamic Inverse ATR Sizing with continuous linear interpolation across all timeframes."""
+    profiles = getattr(config, "VOLATILITY_SIZING_PROFILE", {})
+    prof = profiles.get(str(interval)) or profiles.get("default", [
+        (0.000, 0.5), (0.003, 0.5), (0.005, 1.0), (0.012, 1.0), (0.015, 0.7), (0.020, 0.5)
+    ])
+    xs, ys = zip(*prof)
+    raw_m = float(np.interp(atr_norm, xs, ys))
     return float(np.clip(raw_m, 0.5, 1.0))
-
 
 class JointRiskBudgetAllocator:
     """
@@ -360,20 +377,37 @@ class JointRiskBudgetAllocator:
 
     def get_mhi_max_kelly(self, mhi_score: float) -> float:
         """
-        Governance-tied Kelly fraction based on Model Health Index (MHI):
-        - MHI >= 80 (HEALTHY): Max 0.25x Kelly
-        - 65 <= MHI < 80 (WATCH): Max 0.20x Kelly
-        - 50 <= MHI < 65 (DEGRADED): Max 0.10x Kelly
-        - MHI < 50 (CRITICAL): 0.00x Kelly (Trading Halted)
+        Governance-tied Kelly fraction based on Model Health Index (MHI) continuous ramp with hysteresis:
+        - MHI < 50.0 (CRITICAL): 0.00x Kelly (Trading Halted until score recovers > 53.0)
+        - 50.0 <= MHI <= 85.0: Continuous linear ramp from 0.0x to 0.25x Kelly
+        - MHI > 85.0 (HEALTHY): Max 0.25x Kelly
         """
-        if mhi_score >= 80.0:
-            return 0.25
-        elif mhi_score >= 65.0:
-            return 0.20
-        elif mhi_score >= 50.0:
-            return 0.10
-        else:
-            return 0.00
+        policy = getattr(config, "MHI_KELLY_POLICY", {
+            "halt_below": 50.0,
+            "resume_above": 53.0,
+            "full_at": 85.0,
+            "max_kelly": 0.25,
+        })
+        halt_below = float(policy.get("halt_below", 50.0))
+        resume_above = float(policy.get("resume_above", 53.0))
+        full_at = float(policy.get("full_at", 85.0))
+        max_kelly = float(policy.get("max_kelly", 0.25))
+
+        if not hasattr(self, "_mhi_halted"):
+            self._mhi_halted = False
+
+        if self._mhi_halted:
+            if mhi_score >= resume_above:
+                self._mhi_halted = False
+            else:
+                return 0.0
+        elif mhi_score < halt_below:
+            self._mhi_halted = True
+            return 0.0
+
+        span = max(1e-9, full_at - halt_below)
+        frac = (mhi_score - halt_below) / span
+        return float(np.clip(frac, 0.0, 1.0) * max_kelly)
 
     def allocate_risk_budget(
         self,
@@ -475,8 +509,8 @@ class JointRiskBudgetAllocator:
         stress_val = float(round(var_val * 1.5, 4))
         heat_limit = 0.20
         heat_val = float(round(portfolio_heat, 4))
-        kelly_limit = float(round(max_kelly_frac, 4))
-        kelly_val = float(round(effective_kelly, 4))
+        kelly_limit = float(max_kelly_frac)
+        kelly_val = float(min(effective_kelly, max_kelly_frac))
 
         risk_gate_results = {
             "VaR": {"value": var_val, "limit": var_limit, "pass": bool(var_val <= var_limit)},
@@ -494,7 +528,7 @@ class JointRiskBudgetAllocator:
             "expected_edge": round(expected_edge, 6),
             "expected_utility": round(expected_utility, 4),
             "capital_at_risk": round(capital_at_risk, 2),
-            "kelly_fraction": round(effective_kelly, 4),
+            "kelly_fraction": effective_kelly,
             "portfolio_heat": round(portfolio_heat, 4),
             "risk_gate_results": risk_gate_results,
             "liquidity_cap_applied": liquidity_cap_applied,
