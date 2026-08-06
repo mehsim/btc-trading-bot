@@ -461,16 +461,10 @@ def get_funding_adjustment(symbol: str, direction: str, funding_rate: float) -> 
     return 0.0
 
 def get_liquidity_score(symbol: str, orderbook_depth: int = 10) -> float:
-    """Score 0-1 based on L2 orderbook depth. Returns 0.0 on empty orderbook or exception."""
+    """Delegate to trade_calculators.get_liquidity_score (dynamic per-symbol benchmark)."""
     try:
-        ob = get_orderbook_imbalance(symbol=symbol)
-        if not ob or not isinstance(ob, dict):
-            return 0.0
-        depth_est = ob.get("total_depth", 0)
-        if not depth_est:
-            return 0.0
-        score = min(float(depth_est) / 500000000.0, 1.0)
-        return max(0.0, score)
+        from trade_calculators import get_liquidity_score as _tc_liq
+        return _tc_liq(symbol)
     except Exception:
         return 0.0
 
