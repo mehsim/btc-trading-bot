@@ -11,7 +11,7 @@ def test_3state_feature_flags_and_weights():
 
 def test_strategy_health_score_healthy():
     score, multiplier, rec = strategy_health_engine.evaluate_health(
-        calibration_error_pct=3.0,
+        calibration_error_pct=0.03,
         psi_drift_score=0.05,
         rolling_profit_factor=1.90,
         current_drawdown_pct=3.0,
@@ -26,7 +26,7 @@ def test_strategy_health_score_degraded():
     engine = StrategyHealthEngine()
     # High drawdown (12%), high drift (0.22), low PF (1.15)
     score, multiplier, rec = engine.evaluate_health(
-        calibration_error_pct=12.0,
+        calibration_error_pct=0.12,
         psi_drift_score=0.22,
         rolling_profit_factor=1.15,
         current_drawdown_pct=12.0,

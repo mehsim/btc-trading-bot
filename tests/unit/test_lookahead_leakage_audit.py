@@ -12,7 +12,7 @@ def test_feature_timestamp_strictly_causal():
     the feature vector calculated at index t.
     """
     np.random.seed(42)
-    n_candles = 80
+    n_candles = 260
     dates = pd.date_range(end=pd.Timestamp.now(), periods=n_candles, freq="15min")
     
     base_prices = np.linspace(50000, 52000, n_candles) + np.random.randn(n_candles) * 20
@@ -26,17 +26,17 @@ def test_feature_timestamp_strictly_causal():
     })
     
     df1_feat = add_features(df1.copy())
-    row_t_orig = df1_feat.iloc[50].copy()
+    row_t_orig = df1_feat.iloc[220].copy()
     
-    # Mutate FUTURE rows (indices 51 to 79) heavily
+    # Mutate FUTURE rows (indices 221 to 259) heavily
     df2 = df1.copy()
-    df2.loc[51:, "close"] = df2.loc[51:, "close"] * 5.0
-    df2.loc[51:, "high"] = df2.loc[51:, "high"] * 5.0
+    df2.loc[221:, "close"] = df2.loc[221:, "close"] * 5.0
+    df2.loc[221:, "high"] = df2.loc[221:, "high"] * 5.0
     
     df2_feat = add_features(df2.copy())
-    row_t_mutated = df2_feat.iloc[50].copy()
+    row_t_mutated = df2_feat.iloc[220].copy()
 
-    # Features at index 50 must be completely identical regardless of future price spikes
+    # Features at index 220 must be completely identical regardless of future price spikes
     numeric_cols = df1_feat.select_dtypes(include=[np.number]).columns
     ignored_cols = ["target_trend", "target_price_change"]
     feature_cols = [c for c in numeric_cols if c not in ignored_cols]

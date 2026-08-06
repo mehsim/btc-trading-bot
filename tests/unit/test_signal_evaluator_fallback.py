@@ -22,20 +22,20 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
             }
         }
 
-        # Create dummy candle dataframe with >50 rows
+        # Create dummy candle dataframe with >215 rows
         np.random.seed(42)
         base_ts = 1700000000.0
         df = pd.DataFrame({
-            "timestamp": [float(base_ts + i * 900) for i in range(60)],
-            "open": [100.0 + i * 0.1 for i in range(60)],
-            "high": [102.0 + i * 0.1 for i in range(60)],
-            "low": [98.0 + i * 0.1 for i in range(60)],
-            "close": [100.0 + i * 0.1 for i in range(60)],
-            "volume": [1000.0 for _ in range(60)],
-            "RSI": [60.0 for _ in range(60)],
-            "EMA_9": [105.0 for _ in range(60)],
-            "EMA_21": [100.0 for _ in range(60)],
-            "ADX": [25.0 for _ in range(60)]
+            "timestamp": [float(base_ts + i * 900) for i in range(260)],
+            "open": [100.0 + i * 0.1 for i in range(260)],
+            "high": [102.0 + i * 0.1 for i in range(260)],
+            "low": [98.0 + i * 0.1 for i in range(260)],
+            "close": [100.0 + i * 0.1 for i in range(260)],
+            "volume": [1000.0 for _ in range(260)],
+            "RSI": [60.0 for _ in range(260)],
+            "EMA_9": [105.0 for _ in range(260)],
+            "EMA_21": [100.0 for _ in range(260)],
+            "ADX": [25.0 for _ in range(260)]
         })
 
         # Mock get_history to return dummy df
@@ -82,16 +82,16 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
 
         base_ts = 1700000000.0
         df = pd.DataFrame({
-            "timestamp": [float(base_ts + i * 900) for i in range(60)],
-            "open": [100.0 for _ in range(60)],
-            "high": [102.0 for _ in range(60)],
-            "low": [98.0 for _ in range(60)],
-            "close": [100.0 for _ in range(60)],
-            "volume": [1000.0 for _ in range(60)],
-            "RSI": [60.0 for _ in range(60)],
-            "EMA_9": [105.0 for _ in range(60)],
-            "EMA_21": [100.0 for _ in range(60)],
-            "ADX": [30.0 for _ in range(60)]
+            "timestamp": [float(base_ts + i * 900) for i in range(260)],
+            "open": [100.0 for _ in range(260)],
+            "high": [102.0 for _ in range(260)],
+            "low": [98.0 for _ in range(260)],
+            "close": [100.0 for _ in range(260)],
+            "volume": [1000.0 for _ in range(260)],
+            "RSI": [60.0 for _ in range(260)],
+            "EMA_9": [105.0 for _ in range(260)],
+            "EMA_21": [100.0 for _ in range(260)],
+            "ADX": [30.0 for _ in range(260)]
         })
 
         import signal_evaluator
