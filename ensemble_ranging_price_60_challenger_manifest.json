@@ -194,5 +194,7 @@
     "training_pipeline_version": "v7.2.0",
     "git_sha": "8afe9fc7"
   },
-  "hmac_signature": "310748378226f859de9f40f3b15d706c61d441768518dcec91fcf38e789df163"
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-06T22:15:58.347689+00:00",
+  "hmac_signature": "f733a94a77b28e437a0dd41c37a856dcef98b623160b21d1db6bdf3b4854b185"
 }

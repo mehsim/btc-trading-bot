@@ -1,7 +1,7 @@
 {
   "manifest_schema_version": 3,
   "governance_version": 2,
-  "prefix": "ensemble_ranging_price_60",
+  "prefix": "ensemble_ranging_trend_60",
   "timestamp": "2026-08-06T22:15:58.347689+00:00",
   "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
@@ -83,12 +83,12 @@
   "vif_values": {},
   "feature_contract_hash": "385dc46c98e7",
   "feature_pipeline_hash": "a4068d4eae16",
-  "training_data_hash": "43608ca18e1faea0bcceec9574fec1e2fdadca23cf02a62a6c7de9f778a4bc28",
+  "training_data_hash": "8d611840b16b85c71daa926c2e30f7e214bde11fc0bfa3d6d535c228e752b340",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
-  "parent_model_hash": "9025162cc1bb5da4a6642073d79ae518e60e550eb146f6b6d68a34b2514f756f",
+  "parent_model_hash": "d8436d29410ba603aa8c56826993be02dc9f215df1a6582a20fed182e3dde575",
   "promotion_reason": "Initial deployment / benchmark promotion",
-  "replaced_model_hash": "9025162cc1bb5da4a6642073d79ae518e60e550eb146f6b6d68a34b2514f756f",
-  "rollback_reference": "ensemble_ranging_price_60_backup",
+  "replaced_model_hash": "d8436d29410ba603aa8c56826993be02dc9f215df1a6582a20fed182e3dde575",
+  "rollback_reference": "ensemble_ranging_trend_60_backup",
   "governance_policy": {
     "version": "v2.4",
     "max_ece": 0.08,
@@ -194,5 +194,7 @@
     "training_pipeline_version": "v7.2.0",
     "git_sha": "8afe9fc7"
   },
-  "hmac_signature": "310748378226f859de9f40f3b15d706c61d441768518dcec91fcf38e789df163"
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-06T22:15:58.347689+00:00",
+  "hmac_signature": "6a98433b558f66789fd0850e061614ad886cae99b15b9168fe47bf3ada7b7ff3"
 }
