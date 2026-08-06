@@ -695,23 +695,27 @@ def record_trade_feature_store(trade_record: dict) -> dict:
 
 def estimate_expected_r_multiple(context_dict: Optional[dict] = None) -> dict:
     """
-    Trade Outcome Meta-Model: Estimates expected R-multiple regression target E[R | Context].
+    Closed-Form Heuristic: Estimates expected R-multiple heuristic target E[R | Context].
+    Note: Coefficients are empirical heuristics (NOT a fitted regression model).
     """
-    if not context_dict:
-        context_dict = {"total_uncertainty_u": 0.0609, "symbol_alpha_score": 85.0, "calibrated_conf": 0.81}
+    if not context_dict or any(v is None for v in [context_dict.get("total_uncertainty_u"), context_dict.get("symbol_alpha_score"), context_dict.get("calibrated_conf")]):
+        return {"status": "INSUFFICIENT_CONTEXT"}
 
-    u = float(context_dict.get("total_uncertainty_u", 0.0609))
-    alpha = float(context_dict.get("symbol_alpha_score", 85.0)) / 100.0
-    conf = float(context_dict.get("calibrated_conf", 0.81))
+    u = float(context_dict["total_uncertainty_u"])
+    alpha = float(context_dict["symbol_alpha_score"]) / 100.0
+    conf = float(context_dict["calibrated_conf"])
+    position_size_usd = float(context_dict.get("position_size_usd", 1000.0))
 
-    # Regression model estimate E[R]
+    # Heuristic expectation model E[R]
     expected_r = round(float((conf * 1.20 + alpha * 0.40) * (1.0 - u * 1.5)), 2)
     win_probability = round(float(min(0.95, max(0.35, 0.50 + (expected_r * 0.25)))), 3)
+    expected_val_usd = round(expected_r * position_size_usd * 0.01, 2)
 
     return {
+        "status": "HEALTHY",
         "expected_r_multiple": expected_r,
         "win_probability": win_probability,
-        "expected_value_usd": round(expected_r * 15.0, 2),
+        "expected_value_usd": expected_val_usd,
         "trade_recommendation": "EXECUTE" if expected_r >= 0.25 else "SKIP (LOW EXPECTED R)"
     }
 

@@ -1192,7 +1192,12 @@ def api_institutional_summary():
         "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(164, 98, 114))(),
         "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=float(state_manager.get("last_brier_score", 0.214))))(),
         "uncertainty_execution_policy": (lambda: exit_policy_engine.calculate_uncertainty_execution_policy(0.0609))(),
-        "expected_r_meta_model": (lambda: mlops_engine.estimate_expected_r_multiple())()
+        "expected_r_meta_model": (lambda: mlops_engine.estimate_expected_r_multiple({
+            "total_uncertainty_u": state_manager.get("last_uncertainty"),
+            "symbol_alpha_score": state_manager.get("alpha_score"),
+            "calibrated_conf": state_manager.get("last_calibrated_conf"),
+            "position_size_usd": state_manager.get("position_size_usd", 1000.0)
+        }))()
     }
     return jsonify(data)
 
