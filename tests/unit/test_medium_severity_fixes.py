@@ -40,3 +40,34 @@ def test_immutable_audit_trail(tmp_path):
     assert "hmac_signature" in entry
     assert os.path.exists(log_file)
     assert os.path.getsize(log_file) > 0
+
+
+def test_live_order_execution_path_resolves_config():
+    """M-01: Verify mocked live order execution path resolves config without NameError."""
+    import main
+    assert hasattr(main, "config")
+    
+    from unittest.mock import patch
+    with patch("main.get_all_bybit_positions", return_value=[]), \
+         patch("main.set_bybit_leverage", return_value=True), \
+         patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_123"}}), \
+         patch("main.get_bybit_order_details", return_value={"orderStatus": "Filled", "avgPrice": 50000.0, "cumExecQty": 0.02}), \
+         patch("main.send_telegram_alert"), \
+         patch("main.sync_active_positions_from_bybit"):
+        
+        import pandas as pd
+        df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
+        main._execute_bybit_trade_async_inner(
+            symbol="BTCUSDT", iv="15", tf="15m", ml_trend="Bullish", leverage_val=10.0,
+            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49000.0,
+            take_profit_price=52000.0, position_size_usd=1000.0, kelly_fraction=0.1,
+            calibrated_confidence=0.8, ml_confidence=0.8, dynamic_conf_threshold=0.6,
+            latest_completed_ts=1700000000, latest_candle={"close": 50000.0, "ATR_norm": 0.005},
+            pred_change=0.01, predicted_price=50500.0, atr_dollars=250.0,
+            tp_multiplier_adjusted=2.0, sl_multiplier_adjusted=1.0, df_completed=df_mock,
+            trade_uuid="mock_uuid_12345", duration_seconds=900, active_trade_key="active_trades"
+        )
+        
+        # Verify active_trades in bot_state received the executed trade
+        active_trades = main.bot_state.get("active_trades", [])
+        assert any(t.get("trade_id") == "BTCUSDT_mock_uuid_12345" for t in active_trades)
