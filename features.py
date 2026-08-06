@@ -501,5 +501,8 @@ def add_candlestick_patterns(df):
     # Set initial 5 rows to 0 due to rolling
     pattern_df = pd.DataFrame(res, index=df.index)
     pattern_df.iloc[:5] = 0
-    return pd.concat([df, pattern_df], axis=1)
+    df_out = pd.concat([df, pattern_df], axis=1)
+    if df_out.columns.duplicated().any():
+        df_out = df_out.loc[:, ~df_out.columns.duplicated()].copy()
+    return df_out
 

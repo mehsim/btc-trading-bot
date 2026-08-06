@@ -156,6 +156,10 @@ class SignalEvaluator:
                     _regime_key = "trending" if is_trending else "ranging"
                     _feat_list = models.get("selected_features") or features
 
+                    # Ensure df has no duplicate columns
+                    if df.columns.duplicated().any():
+                        df = df.loc[:, ~df.columns.duplicated()].copy()
+
                     # Ensure all required features are present in df
                     for f_col in _feat_list:
                         if f_col not in df.columns:
