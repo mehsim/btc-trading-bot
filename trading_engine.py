@@ -13,6 +13,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
+import config
+
 from bybit_client import (
     TRADE_MODE,
     set_bybit_leverage,
@@ -23,7 +25,8 @@ from bybit_client import (
     get_bybit_order_details,
     get_all_bybit_positions,
     get_bybit_bid_ask,
-    get_bybit_last_execution
+    get_bybit_last_execution,
+    format_bybit_qty
 )
 from websocket_client import (
     _ws_filled_orders,

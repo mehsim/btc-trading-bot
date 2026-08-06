@@ -1372,6 +1372,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
         champion_t = None
         champion_p = None
 
+        try:
+            import subprocess as _sp
+            _chal_git_sha = _sp.check_output(["git", "rev-parse", "HEAD"]).decode().strip()[:8]
+        except Exception as ex_train:
+            log_event("WARNING", f"train notice: {ex_train}")
+            _chal_git_sha = "unknown"
+
         # challenger_feature_names: use RFECV-selected list, NOT X_holdout.columns
         # (DataFrame column order is not guaranteed to match training order)
         challenger_feature_names = list(X_holdout.columns) if not hasattr(features_module, 'selected_features') else features
@@ -1404,13 +1411,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     f"              : {challenger_feature_names}\n"
                     f"    Champion comparison skipped. New model automatically promoted."
                 )
-                # Compute challenger's current git SHA for lineage
-                try:
-                    import subprocess as _sp
-                    _chal_git_sha = _sp.check_output(["git", "rev-parse", "HEAD"]).decode().strip()[:8]
-                except Exception as ex_train:
-                    log_event("WARNING", f"train notice: {ex_train}")
-                    _chal_git_sha = "unknown"
                 _emit_governance_event({
                     "event":                  "MODEL_CONTRACT_CHANGED",
                     "interval":               interval,
@@ -1431,9 +1431,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     "new_ensemble_version":   "v3.0_stacking",
                     # Data lineage
                     "old_training_hash":      champ_manifest.get("training_data_hash"),
-                    "new_training_hash":      None,  # set by caller if available
+                    "new_training_hash":      None,
                     "old_preprocessing_hash": champ_manifest.get("preprocessing_hash"),
-                    "new_preprocessing_hash": None,  # set by caller if available
+                    "new_preprocessing_hash": None,
                     # Decision
                     "action":                 "ChampionSkipped",
                     "reason":                 reason,
@@ -1518,7 +1518,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 features=regime_features,
                 metrics={"holdout_accuracy": chal_acc, "brier_score": chal_brier, "ece": chal_ece, "val_mae": chal_mae},
                 manifest_path=f"{c_prefix_t}_manifest.json",
-                git_sha=_chal_git_sha if '_chal_git_sha' in locals() else "unknown"
+                git_sha=_chal_git_sha
             )
 
             # Step 3: Evaluate MLflow Model Registry Promotion Gate with actual integer version
@@ -1534,7 +1534,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
 
             # Write/update governance manifest with complete cv_metrics block
-            _pipeline_git_sha = _chal_git_sha if '_chal_git_sha' in locals() else "unknown"
+            _pipeline_git_sha = _chal_git_sha
             holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
 
             cv_metrics_block = {
@@ -1552,9 +1552,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "label_dist_bullish_pct": round(bull_pct, 2),
                 "n_training_samples": len(X),
                 "n_holdout_samples": len(X_holdout),
-                "effective_sample_size": round(effective_n, 2) if 'effective_n' in locals() else float(len(X)),
+                "effective_sample_size": round(effective_n, 2),
                 "raw_sample_size": int(len(y_trend)),
-                "uniqueness_ratio": round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0,
+                "uniqueness_ratio": round((effective_n / max(1, len(y_trend))), 4),
                 "confusion_matrix": {
                     "labels": ["Bearish", "Neutral", "Bullish"],
                     "label_ids": [0, 1, 2],

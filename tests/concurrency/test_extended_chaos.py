@@ -60,7 +60,7 @@ class TestExtendedChaos(unittest.TestCase):
 
     def test_empty_orderbook_returns_zero_liquidity(self):
         """2. Empty orderbook response: get_liquidity_score returns 0.0, NOT 1.0."""
-        with patch("main.get_orderbook_imbalance", return_value={}):
+        with patch("data.get_orderbook_imbalance", return_value={}):
             score = get_liquidity_score("BTCUSDT")
             self.assertEqual(score, 0.0, f"Empty orderbook returned {score} instead of 0.0!")
 

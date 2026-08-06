@@ -31,6 +31,7 @@ db_lock = threading.Lock()
 
 def get_db_connection():
     for attempt in range(3):
+        conn = None
         try:
             conn = sqlite3.connect(DB_FILE, timeout=60.0)
             conn.execute("PRAGMA busy_timeout = 60000;")
@@ -44,7 +45,7 @@ def get_db_connection():
         except sqlite3.DatabaseError as e:
             print(f"[Database Auto-Recovery] Detected corruption/lock ({e}). Rebuilding DB file {DB_FILE}...")
             try:
-                if 'conn' in locals() and conn:
+                if conn is not None:
                     conn.close()
             except Exception as ex_database:
                 log_event("WARNING", f"database notice: {ex_database}")

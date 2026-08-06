@@ -27,6 +27,15 @@ from trade_similarity_search import trade_similarity_search
 
 class TestContinuousLearningEngine(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        import database
+        from experience_db import init_experience_db
+        from calibration_tracker import init_calibration_db
+        database.init_db()
+        init_experience_db()
+        init_calibration_db()
+
     def test_01_experience_db_save_and_fetch(self):
         trade_id = f"TEST_TRADE_{int(time.time())}"
         snap = build_decision_snapshot(symbol="BTCUSDT", direction="LONG", confidence=0.88)

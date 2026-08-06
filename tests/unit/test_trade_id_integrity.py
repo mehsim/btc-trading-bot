@@ -5,6 +5,11 @@ import sqlite3
 import database
 
 class TestTradeIDIntegrity(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        database.init_db()
+
     def test_full_uuid_and_integrity_error_handling(self):
         """Verify F-16: Completed trades use full UUIDs and INSERT + IntegrityError handling prevents history overwrites."""
         test_trade_1 = {
@@ -57,6 +62,11 @@ class TestTradeIDIntegrity(unittest.TestCase):
                 conn.close()
             except Exception:
                 pass
+
+    def test_fill_guard_resolves_config(self):
+        """Verify C-1: main has module-scope config import for live order fill guard."""
+        import main
+        self.assertTrue(hasattr(main, "config"), "config must be module-scope for the fill guard")
 
 if __name__ == "__main__":
     unittest.main()

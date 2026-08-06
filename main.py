@@ -366,6 +366,7 @@ BALANCE_UPDATE_INTERVAL_SECS = int(os.environ.get("BALANCE_UPDATE_INTERVAL_SECS"
 POSITION_SYNC_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_INTERVAL_SECS", "30.0"))
 POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTERVAL_SECS", "120.0"))
 
+import config
 from config import TIMEFRAME_CONFIG
 
 
@@ -6992,6 +6993,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     bybit_order_id = None
     bybit_scale_out_order_id = None
     actual_qty = raw_qty
+    order_res = {}
     
     # 1. Live Exchange Position Guard
     try:
@@ -7318,8 +7320,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         print(f"  • Current Dashboard SL: {stop_loss_price:.6f}")
         print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.6f} (SL: {stop_loss_price:.6f}, TP: {take_profit_price:.6f}, SL Source: {sl_source}, Planned R:R: {init_planned_rr:.2f})")
     else:
-        err_msg = order_res.get('retMsg') if 'order_res' in locals() else "Execution failed"
-        err_code = order_res.get('retCode') if 'order_res' in locals() else "N/A"
+        err_msg = order_res.get('retMsg', "Execution failed")
+        err_code = order_res.get('retCode', "N/A")
         send_telegram_alert(
             f"🔴 *BYBIT API ORDER ERROR* 🔴\n"
             f"• *Asset*: {symbol}\n"
@@ -8860,6 +8862,8 @@ def main():
                         confluence_blocked = False
                         htf_trend = "Neutral"
                         macro_tf = ""
+                        htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
+                        macro_iv = htf_mapping.get(str(iv), "")
                         htf_meta = {
                             "trend": "Neutral",
                             "trend_source": "NONE",
@@ -8874,12 +8878,10 @@ def main():
                             "sma50": 0.0,
                             "consensus_score": "LOW",
                             "decision_timestamp": datetime.now(timezone.utc).isoformat(),
-                            "model_version": f"{locals()['macro_iv']}_v1" if 'macro_iv' in locals() else "default"
+                            "model_version": f"{macro_iv}_v1" if macro_iv else "default"
                         }
 
-                        htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
                         if str(iv) in htf_mapping:
-                            macro_iv = htf_mapping[str(iv)]
                             macro_tf = tf_map.get(str(macro_iv))
                             learned_threshold = get_learned_confidence_threshold(symbol, macro_iv, regime)
 
@@ -9581,7 +9583,7 @@ def main():
                                                 with active_execution_lock:
                                                     active_execution_symbols.add(symbol)
                                                 if bybit_success:
-                                                    actual_qty = raw_qty if 'raw_qty' in locals() and raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
+                                                    actual_qty = raw_qty if raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
                                                     actual_notional_val = float(actual_qty * entry_price)
                                                     actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
                                                     threading.Thread(
