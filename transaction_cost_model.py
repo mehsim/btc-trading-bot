@@ -1,8 +1,18 @@
 """
-transaction_cost_model.py
+transaction_cost_model.py — CANONICAL TCM (authoritative, migrate callers here)
 ----------------------------
 Institutional TCM with Almgren-Chriss volatility-adjusted market impact:
-  Slippage_bps = Half_Spread + gamma * sigma * sqrt(Order_Size / Volume_24h) * 10000
+  impact_bp = gamma * sigma * sqrt(Order_Size / Orderbook_Depth) * 10000
+
+Uses live realized volatility (GARCH sigma) and orderbook depth rather than ADV,
+making it more responsive to market microstructure than the simplified version in
+trade_calculators.TransactionCostModel (which should be retired).
+
+ASSUMPTION: gamma=0.42 is an empirical starting point, not fitted to execution
+telemetry. Calibrate against compare_modeled_vs_realized_slippage() output.
+GAMMA_SET_DATE = "2026-08-06"  # date assumption was recorded, not calibration date
+
+Currently unused — all live callers import from trade_calculators. Migrate them here.
 """
 
 import numpy as np

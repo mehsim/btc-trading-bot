@@ -185,11 +185,14 @@ class SignalEvaluator:
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                     tp_m = cfg.get("tp_mult_trending", 1.85)
                     sl_m = cfg.get("sl_mult", 0.8)
-                    # H-4: compute round-trip cost from the TCM instead of hardcoding 7.0 bps.
-                    # ADV defaulted to BTC-equivalent; per-symbol ADV can be injected when available.
+                    # H-4: compute round-trip cost from TCM using per-symbol ADV from df.
+                    # df loaded at line 125; tail(96) × 15m bars ≈ 24h volume.
+                    _bars_per_day = max(1, round(1440 / max(1, int(interval))))
+                    _adv_se = float(df["volume"].tail(_bars_per_day).sum() * df["close"].iloc[-1]) if ("volume" in df.columns and "close" in df.columns and len(df) >= _bars_per_day) else 50_000_000.0
+                    _order_se = float(self.bot_state.get("position_size_usd", 1000.0)) if hasattr(self, "bot_state") and isinstance(self.bot_state, dict) else 1000.0
                     _tcm = transaction_cost_model.estimate_transaction_cost(
-                        order_size_usd=1000.0,
-                        volume_24h_usd=50_000_000.0,
+                        order_size_usd=_order_se,
+                        volume_24h_usd=_adv_se,
                         is_maker=True,
                     )
                     cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip

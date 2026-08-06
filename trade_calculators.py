@@ -976,17 +976,24 @@ class TransactionCostModel:
              rather than a hardcoded 0.5 constant — cost now grows with order size.
     C-2 fix: volume_24h_usd has no default so callers must pass the symbol's real ADV;
              a missing value raises TypeError instead of silently using BTC's liquidity.
-    gamma = 2.5 bps (calibrated baseline; update from execution telemetry monthly).
+
+    ASSUMPTION (not calibrated): gamma_bps = 2.5 is an order-of-magnitude starting point.
+    Fit against compare_modeled_vs_realized_slippage() output before relying on this number.
+
+    NOTE — duplicate model: transaction_cost_model.py contains a volatility-scaled,
+    orderbook-depth-aware implementation (gamma=0.42, σ·√(Q/depth)·10000) that is
+    arguably more correct. That file is the intended canonical model. This class should
+    be retired once all callers are migrated. Do not add new call sites here.
     """
-    GAMMA_BPS: float = 2.5  # Almgren-Chriss impact coefficient — calibrate against telemetry
-    GAMMA_CALIBRATION_DATE: str = "2026-08-06"
+    GAMMA_BPS: float = 2.5           # ASSUMPTION — not fitted to telemetry
+    GAMMA_SET_DATE: str = "2026-08-06"  # date assumption was recorded, not calibration date
 
     @staticmethod
     def estimate_transaction_cost(
         order_size_usd: float,
         volume_24h_usd: float,  # C-2: required — no default; must be per-symbol live ADV
         is_maker: bool = True,
-        gamma_bps: float = 2.5,  # C-1: Almgren-Chriss impact coefficient
+        gamma_bps: float = 2.5,  # ASSUMPTION — calibrate against execution telemetry
     ) -> Dict[str, float]:
         adv = max(1.0, volume_24h_usd)
         fee_bps = 2.0 if is_maker else 5.5
