@@ -368,6 +368,8 @@ POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTE
 
 import config
 from config import TIMEFRAME_CONFIG
+import trading_engine
+from strategy_health_engine import strategy_health_engine
 
 
 print("[System Debug] Importing websocket...")
