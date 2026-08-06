@@ -1042,7 +1042,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_holdout_price = y_price_full.iloc[split_idx + embargo_len:]
         assert len(X) > 0 and len(X_holdout) > 0 and X.index.max() < X_holdout.index.min(), "train/holdout overlap"
         eff_holdout = len(y_holdout_trend) / max(1, purge_len)
-        assert eff_holdout >= 10.0, f"Holdout effective sample count ({eff_holdout:.1f}) too low"
+        assert eff_holdout >= MIN_EFFECTIVE_HOLDOUT_SAMPLES, f"Holdout effective sample count ({eff_holdout:.1f}) below {MIN_EFFECTIVE_HOLDOUT_SAMPLES}"
 
         # Purged and Embargoed Time-Series Cross Validation
         cv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)

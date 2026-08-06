@@ -10,6 +10,8 @@ import numpy as np
 from typing import Dict, Any, Tuple, List, Optional
 import config
 
+BENCHMARK_OPTUNA_TRIALS: float = 12.0  # Reference baseline study length for trial-adjusted effect penalty scaling
+
 class StatisticalValidation:
     """
     Evaluates Statistical & Practical Significance for Model Promotion.
@@ -414,7 +416,7 @@ class StatisticalValidation:
                 "governance": {"decision": "NEED_MORE_DATA", "reasons": ["Insufficient completed trade observations (N < 5)"]},
                 "statistics": {"p_value": 1.0, "bayes_factor_bf10": 1.0, "bayes_factor_bf01": 1.0, "bayes_interpretation": "Anecdotal Evidence for H0 (Null)", "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "bootstrap_diagnostics": {}, "mde": 0.20, "effect_stability_score": 0.0, "sprt_diagnostics": {}},
                 "performance": {"delta_pf_raw": 0.0, "delta_pf_winsorized": 0.0, "delta_sharpe": 0.0, "delta_expectancy": 0.0},
-                "multiple_testing": {"experiment_family": "15m_strategy_experiments", "num_tests": 12, "fdr_method": "Benjamini-Hochberg", "alpha": 0.05, "q_value": 1.0}
+                "multiple_testing": {"experiment_family": "15m_strategy_experiments", "num_tests": max(1, num_trials), "fdr_method": "Bonferroni", "alpha": 0.05, "q_value": 1.0}
             }
 
         arr_base = np.array(baseline_returns)
@@ -513,7 +515,7 @@ class StatisticalValidation:
                 "cohen_d": round(cohen_d, 3),
                 "bootstrap_ci_95": [ci_low, ci_high],
                 "bootstrap_diagnostics": boot_diag,
-                "trial_adjusted_effect_penalty": round(float(np.exp(-abs(cohen_d) * 0.5 * np.sqrt(max(1, num_trials) / 12.0))), 4),
+                "trial_adjusted_effect_penalty": round(float(np.exp(-abs(cohen_d) * 0.5 * np.sqrt(max(1, num_trials) / BENCHMARK_OPTUNA_TRIALS))), 4),
                 "bonferroni_adjusted_p_value": min(1.0, round(float(p_val * max(1, num_trials)), 4)),
                 "mde": round(2.8 / max(1e-4, np.sqrt(n1 + n2)), 3),
                 "effect_stability_score": stability_score,
