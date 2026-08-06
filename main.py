@@ -8431,7 +8431,8 @@ def main():
                     df_btc_val = btc_hist_cache.get(interval_val)
                     if df_btc_val is not None and len(df_btc_val) > 0:
                         df_btc_sub_val = df_btc_val[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-                        df_target_val = pd.merge(df_target_val, df_btc_sub_val, on="timestamp", how="inner")
+                        df_target_val = pd.merge(df_target_val, df_btc_sub_val, on="timestamp", how="left")
+                        df_target_val["close_btc"] = df_target_val["close_btc"].ffill().bfill().fillna(df_target_val["close"])
                     else:
                         df_target_val["close_btc"] = df_target_val["close"]
                 else:
