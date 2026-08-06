@@ -94,6 +94,20 @@ UNCERTAINTY_POLICY: dict = {
     "disagreement_cutoff": 0.15,
 }
 
+# H-1: Exit Quality Score Policy & Continuous Ramp Scaling
+EXIT_SCORE_POLICY: dict = {
+    "norm_r_weight": 0.30,
+    "regime_weight": 0.20,
+    "volatility_weight": 0.20,
+    "decay_weight": 0.15,
+    "opportunity_weight": 0.15,
+    "opp_hurdle": 1.5,
+}
+
+# H-2: ATR Timeout Soft Adjustment Bounds & Sensitivity
+ATR_TIMEOUT_SENSITIVITY: float = 5.0
+ATR_TIMEOUT_MAX_ADJ: float = 2.0
+
 
 
 # H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).

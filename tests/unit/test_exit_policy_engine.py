@@ -111,3 +111,36 @@ def test_evaluate_exit_trace():
     assert "policy_hash" in trace
     assert "exit_efficiency" in trace
     assert trace["policy_id"] == engine.active_champion_id
+
+
+def test_mhi_scaling_soft_limit_differs():
+    engine = ExitPolicyEngine()
+    eval_healthy = engine.evaluate_10_level_exit_hierarchy(
+        symbol="BTCUSDT", interval="15", current_price=64000.0, entry_price=64000.0,
+        stop_loss=63000.0, take_profit=66000.0, direction="Bullish", candles_elapsed=5,
+        mhi_status=100.0
+    )
+    eval_degraded = engine.evaluate_10_level_exit_hierarchy(
+        symbol="BTCUSDT", interval="15", current_price=64000.0, entry_price=64000.0,
+        stop_loss=63000.0, take_profit=66000.0, direction="Bullish", candles_elapsed=5,
+        mhi_status=40.0
+    )
+    assert eval_healthy["soft_limit"] > eval_degraded["soft_limit"]
+    assert eval_degraded["soft_limit"] == 8  # 15 * 0.50 floor round
+
+
+def test_continuous_atr_adj_and_exit_scoring():
+    engine = ExitPolicyEngine()
+    eval_vol_low = engine.evaluate_10_level_exit_hierarchy(
+        symbol="BTCUSDT", interval="15", current_price=64000.0, entry_price=64000.0,
+        stop_loss=63000.0, take_profit=66000.0, direction="Bullish", candles_elapsed=5,
+        garch_vol=0.005, rolling_vol_20th_pct=0.010, atr_ratio=0.9
+    )
+    eval_vol_high = engine.evaluate_10_level_exit_hierarchy(
+        symbol="BTCUSDT", interval="15", current_price=64000.0, entry_price=64000.0,
+        stop_loss=63000.0, take_profit=66000.0, direction="Bullish", candles_elapsed=5,
+        garch_vol=0.015, rolling_vol_20th_pct=0.010, atr_ratio=1.1
+    )
+    assert eval_vol_high["exit_score"] > eval_vol_low["exit_score"]
+    assert eval_vol_high["soft_limit"] >= eval_vol_low["soft_limit"]
+

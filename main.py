@@ -7877,7 +7877,8 @@ def main():
                         expected_r=float(active_trade.get("initial_planned_rr", 1.4)),
                         mfe_r=mfe_r,
                         entry_regime=str(active_trade.get("entry_regime", curr_regime)),
-                        current_regime=str(curr_regime)
+                        current_regime=str(curr_regime),
+                        mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 100.0))) if "bot_state" in globals() and isinstance(bot_state, dict) else 100.0
                     )
                     
                     if hierarchy_eval.get("should_exit"):

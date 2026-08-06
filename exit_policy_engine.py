@@ -410,7 +410,7 @@ class ExitPolicyEngine:
         garch_vol: float = 0.015,
         rolling_vol_20th_pct: float = 0.010,
         atr_ratio: float = 1.0,
-        mhi_status: str = "HEALTHY",
+        mhi_status: float = 100.0,
         incoming_signal_expected_r: Optional[float] = None,
         portfolio_heat_full: bool = False
     ) -> Dict[str, Any]:
@@ -436,16 +436,14 @@ class ExitPolicyEngine:
         }
         base_soft, hard_limit = timeout_config.get(tf_clean, (10, 18))
 
-        # Recommendation 8: ATR Expansion/Compression Soft Timeout Adjustment
-        atr_adj = 2 if atr_ratio > 1.2 else (-2 if atr_ratio < 0.8 else 0)
-        
-        # Recommendation 9: Model Health Index (MHI) Scaling — Continuous formulation (H-2/M-2)
-        if isinstance(mhi_status, (int, float)):
-            mhi_num = float(mhi_status)
-        else:
-            mhi_num = 100.0 if str(mhi_status).upper() == "HEALTHY" else (80.0 if str(mhi_status).upper() == "WATCH" else (60.0 if str(mhi_status).upper() == "DEGRADED" else 40.0))
-        
         import config
+        # H-2: Continuous ATR Expansion/Compression Soft Timeout Adjustment
+        sens = getattr(config, "ATR_TIMEOUT_SENSITIVITY", 5.0)
+        max_adj = getattr(config, "ATR_TIMEOUT_MAX_ADJ", 2.0)
+        atr_adj = float(np.clip((float(atr_ratio) - 1.0) * sens, -max_adj, max_adj))
+        
+        # C-1: Model Health Index (MHI) Continuous Patience Scaling
+        mhi_num = float(mhi_status) if isinstance(mhi_status, (int, float)) else 100.0
         mhi_floor = getattr(config, "MHI_MULT_FLOOR", 0.50)
         mhi_mult = float(np.clip(mhi_num / 100.0, mhi_floor, 1.0))
         soft_limit = max(4, int(round((base_soft + atr_adj) * mhi_mult)))
@@ -463,18 +461,31 @@ class ExitPolicyEngine:
         decay_factor = max(0.20, 1.0 - decay_rate * max(0.0, age_ratio - 1.0))
         decayed_expected_r = round(expected_r * decay_factor, 3)
 
-        # Recommendation 10: Unified Exit Score Calculation
+        # H-1: Unified Exit Score Policy & Continuous Ramping
+        exit_policy = getattr(config, "EXIT_SCORE_POLICY", {})
+        w_norm_r = exit_policy.get("norm_r_weight", 0.30)
+        w_regime = exit_policy.get("regime_weight", 0.20)
+        w_vol = exit_policy.get("volatility_weight", 0.20)
+        w_decay = exit_policy.get("decay_weight", 0.15)
+        w_opp = exit_policy.get("opportunity_weight", 0.15)
+        opp_hurdle = exit_policy.get("opp_hurdle", 1.5)
+
         norm_r = min(1.0, max(0.0, decayed_expected_r / 2.0))
         regime_intact = 1.0 if entry_regime.upper() == current_regime.upper() else 0.0
-        vol_pct_score = 1.0 if garch_vol >= rolling_vol_20th_pct else 0.0
-        opp_score = 1.0 if not (portfolio_heat_full and incoming_signal_expected_r and incoming_signal_expected_r > (expected_r * 1.5)) else 0.0
+        vol_pct_score = float(np.clip(float(garch_vol) / max(1e-9, float(rolling_vol_20th_pct)), 0.0, 1.0))
+        
+        incoming_r = float(incoming_signal_expected_r) if incoming_signal_expected_r is not None else 0.0
+        if portfolio_heat_full and incoming_r > 0:
+            opp_score = float(np.clip(1.0 - (incoming_r / max(1e-9, expected_r * opp_hurdle)), 0.0, 1.0))
+        else:
+            opp_score = 1.0
         
         exit_score = round(
-            0.30 * norm_r +
-            0.20 * regime_intact +
-            0.20 * vol_pct_score +
-            0.15 * decay_factor +
-            0.15 * opp_score, 3
+            w_norm_r * norm_r +
+            w_regime * regime_intact +
+            w_vol * vol_pct_score +
+            w_decay * decay_factor +
+            w_opp * opp_score, 3
         )
 
         # LEVEL 1: Take Profit
