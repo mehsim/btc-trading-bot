@@ -1643,14 +1643,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
             except Exception as ex_man:
                 log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
 
-            print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
+        print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
-            model_registry.register_model(
-                run_id=f"train_{interval}m_{name}_{int(time.time())}",
-                model_name=f"ensemble_{name}_{interval}",
-                metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
-                stage="Production"
-            )
+        model_registry.register_model(
+            run_id=f"train_{interval}m_{name}_{int(time.time())}",
+            model_name=f"ensemble_{name}_{interval}",
+            metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
+            stage="Production"
+        )
+
+        if should_save:
             _tg_alert(
                 f"✅ *Model Trained & Promoted*\n"
                 f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
