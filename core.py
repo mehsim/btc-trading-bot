@@ -31,12 +31,12 @@ for lag in [1, 2]:
 def add_features(df, fetch_calendar_callback=None):
     return features_module.add_features(df, fetch_calendar_callback=fetch_calendar_callback)
 
-def calibrate_confidence(raw_conf, p95=0.55, max_conf=0.75):
+def calibrate_confidence(raw_conf, eps=1e-3):
     """
     Preserves true calibrated probability output from ensemble classifier
-    without ad-hoc piecewise linear stretching (Fix B12).
+    clipped away from 0.0 and 1.0 saturation boundary (EPS = 1e-3).
     """
-    return float(np.clip(raw_conf, 0.0, 1.0))
+    return float(np.clip(raw_conf, eps, 1.0 - eps))
 
 def calculate_historical_thresholds(model_trend, interval):
     if model_trend is None:

@@ -7,6 +7,7 @@ import os
 import time
 import json
 import re
+from logger import log_event
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -6208,12 +6209,12 @@ def calculate_historical_thresholds(model_trend, interval):
     
     return 0.55, 0.75
 
-def calibrate_confidence(raw_conf, p95=0.55, max_conf=0.75):
+def calibrate_confidence(raw_conf, eps=1e-3):
     """
     Preserves true calibrated probability output from ensemble classifier
-    without ad-hoc piecewise linear stretching (Fix B12).
+    clipped away from 0.0 and 1.0 saturation boundary (EPS = 1e-3).
     """
-    return float(np.clip(raw_conf, 0.0, 1.0))
+    return float(np.clip(raw_conf, eps, 1.0 - eps))
 
 def get_funding_rate(symbol=SYMBOL):
     try:
@@ -8531,20 +8532,28 @@ def main():
 
                     if iv in models_by_interval:
                         models_tf = models_by_interval[iv]
-                        if regime == "Trending":
-                            active_model_price = models_tf["trending"]["price"] or models_tf["ranging"]["price"]
-                            active_model_trend = models_tf["trending"]["trend"] or models_tf["ranging"]["trend"]
-                            regime_name = "Trending (GMM)"
-                            feat_list = models_tf.get("selected_features_trending") or models_tf.get("selected_features")
-                        else:
-                            active_model_price = models_tf["ranging"]["price"] or models_tf["trending"]["price"]
-                            active_model_trend = models_tf["ranging"]["trend"] or models_tf["trending"]["trend"]
-                            regime_name = "Ranging (GMM)"
-                            feat_list = models_tf.get("selected_features_ranging") or models_tf.get("selected_features")
-                            
-                        if active_model_price is None or active_model_trend is None:
-                            print(f"[{symbol} {iv}m Warning] Models are not loaded (None). Skipping signal evaluation.")
-                            continue
+                        regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
+                        m_price = models_tf.get(regime_key, {}).get("price")
+                        m_trend = models_tf.get(regime_key, {}).get("trend")
+                        feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
+                        served_regime = regime
+
+                        if m_price is None or m_trend is None or not feat_list:
+                            alt_key = "ranging" if regime_key == "trending" else "trending"
+                            alt_price = models_tf.get(alt_key, {}).get("price")
+                            alt_trend = models_tf.get(alt_key, {}).get("trend")
+                            alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
+                            if alt_price is not None and alt_trend is not None and alt_feats:
+                                log_event("WARNING", f"[{symbol} {iv}m] {regime} model incomplete — falling back to {alt_key.title()} ensemble & feature contract")
+                                m_price, m_trend, feat_list = alt_price, alt_trend, alt_feats
+                                served_regime = f"{alt_key.title()}_Fallback"
+                            else:
+                                log_event("CRITICAL", f"[{symbol} {iv}m] {regime} model & fallback unavailable — skipping interval (Fail-Closed)")
+                                continue
+
+                        active_model_price = m_price
+                        active_model_trend = m_trend
+                        regime_name = f"{served_regime} (GMM)"
                             
                         # Session-Based Feature Weighting (Asian vs London vs NY)
                         utc_hour_sess = datetime.now(timezone.utc).hour
@@ -8656,6 +8665,17 @@ def main():
                             print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
                         else:
                             calibrated_confidence = ml_confidence
+
+                        # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
+                        calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
+
+                        # 🟠 Sign Conflict Check: Classifier direction vs Regressor predicted change
+                        if ml_trend == "Bullish" and pred_change < 0:
+                            log_event("WARNING", f"[{symbol} {iv}m Sign Conflict] Classifier=Bullish but Regressor pred_change={pred_change:+.2f} < 0. Invalidating signal to Neutral.")
+                            ml_trend = "Neutral"
+                        elif ml_trend == "Bearish" and pred_change > 0:
+                            log_event("WARNING", f"[{symbol} {iv}m Sign Conflict] Classifier=Bearish but Regressor pred_change={pred_change:+.2f} > 0. Invalidating signal to Neutral.")
+                            ml_trend = "Neutral"
                             
                         # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
                         htf_decay_threshold_penalty = 0.0
