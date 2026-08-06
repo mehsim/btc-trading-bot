@@ -3,60 +3,60 @@
     "existing_count": 22,
     "rederived_count": 22,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "ranging_15": {
     "existing_count": 22,
     "rederived_count": 22,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "trending_30": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 25,
+    "rederived_count": 25,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "ranging_30": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 25,
+    "rederived_count": 25,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "trending_60": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 34,
+    "rederived_count": 34,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "ranging_60": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 34,
+    "rederived_count": 34,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "trending_120": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 46,
+    "rederived_count": 46,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "ranging_120": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 46,
+    "rederived_count": 46,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "trending_240": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 26,
+    "rederived_count": 26,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   },
   "ranging_240": {
-    "existing_count": 0,
-    "rederived_count": 0,
+    "existing_count": 26,
+    "rederived_count": 26,
     "delta": 0,
-    "status": "PURGED_VALIDATED"
+    "status": "VALIDATED"
   }
 }
