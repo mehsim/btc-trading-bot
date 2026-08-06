@@ -566,9 +566,10 @@ def get_instrument_specs(symbol: str) -> Dict[str, Any]:
                     _instrument_specs_cache[symbol] = specs
                 return specs
     except Exception as e:
-        print(f"[Instrument Specs Warning] Failed to fetch instrument info for {symbol}: {e}")
-
-    return default_specs
+        log_event("WARNING", f"[Instrument Specs Warning] Failed to fetch instrument info for {symbol}: {e}")
+        with _instrument_specs_lock:
+            _instrument_specs_cache[symbol] = default_specs
+        return default_specs
 
 def quantize_bybit_price(symbol: str, price: float) -> str:
     specs = get_instrument_specs(symbol)

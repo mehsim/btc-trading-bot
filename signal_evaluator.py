@@ -185,17 +185,13 @@ class SignalEvaluator:
                         prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
 
                     from config import TIMEFRAME_CONFIG, MIN_EVAL_THRESHOLD_FLOOR
-                    from trade_calculators import transaction_cost_model
+                    from trade_calculators import transaction_cost_model, UnifiedTargetGenerator
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                     tp_m = cfg.get("tp_mult_trending", 1.85)
                     sl_m = cfg.get("sl_mult", 0.8)
                     close_price = float(df["close"].iloc[-1]) if ("close" in df.columns and len(df) > 0) else 100.0
                     atr_val = float(df["ATR"].iloc[-1]) if ("ATR" in df.columns and len(df) > 0 and pd.notna(df["ATR"].iloc[-1])) else float(close_price * 0.01)
-                    min_tp_d = max(0.75 * atr_val, close_price * 0.0020)
-                    actual_tp_m = max(min_tp_d / max(1e-6, atr_val), tp_m)
-                    lookahead = cfg.get("lookahead", 10)
-                    max_reach_m = float(np.sqrt(lookahead)) * 1.5
-                    actual_tp_m = min(actual_tp_m, max_reach_m)
+                    actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(interval, close_price, atr_val, tp_m)
 
                     # H-4: compute round-trip cost from TCM using per-symbol ADV from df.
                     # df loaded at line 125; tail(96) × 15m bars ≈ 24h volume.

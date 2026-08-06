@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Any, Union
 import database
+import config
 
 def safe_float(val, default=0.0):
     if val is None or val == "MT":
@@ -985,27 +986,28 @@ class TransactionCostModel:
     arguably more correct. That file is the intended canonical model. This class should
     be retired once all callers are migrated. Do not add new call sites here.
     """
-    GAMMA_BPS: float = 2.5           # ASSUMPTION — not fitted to telemetry
-    GAMMA_SET_DATE: str = "2026-08-06"  # date assumption was recorded, not calibration date
+    GAMMA_BPS: float = getattr(config, "CONFIGURED_GAMMA_BPS", 2.5)  # M-06: Configurable gamma
+    GAMMA_SET_DATE: str = "2026-08-06"
 
     @staticmethod
     def estimate_transaction_cost(
         order_size_usd: float,
         volume_24h_usd: float,  # C-2: required — no default; must be per-symbol live ADV
         is_maker: bool = True,
-        gamma_bps: float = 2.5,  # ASSUMPTION — calibrate against execution telemetry
+        gamma_bps: float = 2.5,
     ) -> Dict[str, float]:
-        adv = max(1.0, volume_24h_usd)
-        fee_bps = 2.0 if is_maker else 5.5
-        slippage_bps = max(0.5, 3.5 * (order_size_usd / adv) ** 0.5)
-        # C-1: dynamic impact — grows as sqrt(participation rate)
-        market_impact_bps = gamma_bps * (order_size_usd / adv) ** 0.5
-        total_cost_bps = round(fee_bps + slippage_bps + market_impact_bps, 2)
+        import transaction_cost_model as canonical_tcm
+        tcm = canonical_tcm.TransactionCostModel(gamma=0.42)
+        res = tcm.estimate_transaction_cost(
+            order_size_usd=order_size_usd,
+            volume_24h_usd=volume_24h_usd,
+            is_maker=is_maker
+        )
         return {
-            "fee_bps": fee_bps,
-            "slippage_bps": round(slippage_bps, 4),
-            "market_impact_bps": round(market_impact_bps, 4),
-            "total_cost_bps": total_cost_bps,
+            "fee_bps": float(res.get("fee_bp", 1.0 if is_maker else 6.0)),
+            "slippage_bps": float(res.get("slippage_bp", 0.75)),
+            "market_impact_bps": float(res.get("market_impact_bp", 0.35)),
+            "total_cost_bps": float(res.get("total_cost_bps", 2.1)),
         }
 
 
@@ -1107,6 +1109,18 @@ class UnifiedTargetGenerator:
     Translates continuous policy control vectors into exact price bounds,
     enforcing learnable policy-driven hysteresis and structural capping.
     """
+    @staticmethod
+    def resolve_tp_multiplier(interval: str, entry_price: float, atr_dollars: float, base_tp_m: float) -> float:
+        import config
+        from config import TIMEFRAME_CONFIG
+        import numpy as np
+        cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+        min_tp_d = max(0.75 * atr_dollars, entry_price * 0.0020)
+        actual_tp_m = max(min_tp_d / max(1e-6, atr_dollars), base_tp_m)
+        lookahead = cfg.get("lookahead", 10)
+        max_reach_m = float(np.sqrt(lookahead)) * 1.5
+        return float(min(actual_tp_m, max_reach_m))
+
     @staticmethod
     def compute_targets(
         policy_vector: dict,
