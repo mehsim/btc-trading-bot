@@ -8569,22 +8569,11 @@ def main():
                         active_meta_model = m_meta
                         regime_name = f"{served_regime} (GMM)"
                             
-                        # Session-Based Feature Weighting (Asian vs London vs NY)
-                        utc_hour_sess = datetime.now(timezone.utc).hour
-                        session_name = "asian" if 0 <= utc_hour_sess < 8 else ("london" if 8 <= utc_hour_sess < 16 else "ny")
-                        session_weights = {
-                            "asian": {"vwap_deviation": 1.3, "ATR_norm": 1.2, "volume_ratio": 1.2, "RSI": 0.8, "MACD_diff": 0.8},
-                            "london": {"EMA9_to_EMA21": 1.3, "ADX": 1.2, "BB_pct": 0.7},
-                            "ny": {"return_5m_lag1": 1.3, "return_5m_lag2": 1.2, "close_to_Kalman": 0.8}
-                        }.get(session_name, {})
-                        
+                        # C-1: Preserve strict train/serve feature distribution consistency
+                        # Remove ad-hoc inference-time feature multiplier scaling
                         latest_candle_weighted = latest_candle.copy()
-                        for feat_name, w_mult in session_weights.items():
-                            if feat_name in latest_candle_weighted:
-                                try:
-                                    latest_candle_weighted[feat_name] = float(latest_candle_weighted[feat_name]) * w_mult
-                                except Exception:
-                                    pass
+                        if hasattr(latest_candle_weighted.index, "duplicated") and latest_candle_weighted.index.duplicated().any():
+                            latest_candle_weighted = latest_candle_weighted[~latest_candle_weighted.index.duplicated(keep="first")]
 
                         from ensemble import get_model_feature_names
                         _exp_names = get_model_feature_names(active_model_trend)

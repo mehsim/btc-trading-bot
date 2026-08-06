@@ -70,6 +70,30 @@ KELLY_BOOTSTRAP_SAMPLES: int = 1000
 # M-1: Default indicator period window across ATR, ADX, Choppiness
 DEFAULT_INDICATOR_WINDOW: int = 14
 
+# H-1: Confluence Scoring Governance Policy & Continuous Ramp Scaling
+CONFLUENCE_POLICY: dict = {
+    "strong_move_pct": 0.015,
+    "max_spread_pct": 0.0010,
+    "max_funding_rate": 0.0003,
+    "min_atr_norm": 0.0035,
+    "structure_weight": 20.0,
+    "liquidity_weight": 15.0,
+    "move_weight": 20.0,
+    "spread_weight": 15.0,
+    "funding_weight": 10.0,
+    "volatility_weight": 10.0,
+    "regime_weight": 10.0,
+}
+
+# H-2: Ensemble Uncertainty Governance Policy & Cutoffs
+UNCERTAINTY_POLICY: dict = {
+    "disagreement_weight": 0.7,
+    "margin_weight": 0.3,
+    "margin_reference": 0.25,
+    "margin_cutoff": 0.08,
+    "disagreement_cutoff": 0.15,
+}
+
 
 
 # H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).

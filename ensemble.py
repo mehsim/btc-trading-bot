@@ -432,11 +432,19 @@ class EnsembleClassifier:
         margins = (sorted_p[:, -1] - sorted_p[:, -2]) if sorted_p.shape[1] >= 2 else np.ones(len(probs))
         margin = float(np.nan_to_num(margins[0] if len(margins) == 1 else margins.mean(), nan=0.10, posinf=1.0, neginf=0.0))
         
-        # Conformal uncertainty score
-        uncertainty_score = float(np.nan_to_num(disagreement * 0.7 + max(0.0, 0.25 - margin) * 0.3, nan=0.0, posinf=1.0, neginf=0.0))
-        is_uncertain = (disagreement > uncertainty_threshold) or (margin < 0.08)
+        # Heuristic Uncertainty Score calculation (H-2) derived from config.UNCERTAINTY_POLICY
+        import config
+        policy = getattr(config, "UNCERTAINTY_POLICY", {})
+        w_disag = policy.get("disagreement_weight", 0.7)
+        w_margin = policy.get("margin_weight", 0.3)
+        margin_ref = policy.get("margin_reference", 0.25)
+        margin_cut = policy.get("margin_cutoff", 0.08)
+        disag_cut = policy.get("disagreement_cutoff", uncertainty_threshold)
+
+        heuristic_uncertainty_score = float(np.nan_to_num(disagreement * w_disag + max(0.0, margin_ref - margin) * w_margin, nan=0.0, posinf=1.0, neginf=0.0))
+        is_uncertain = bool((disagreement > disag_cut) or (margin < margin_cut))
         
-        return probs, uncertainty_score, is_uncertain
+        return probs, heuristic_uncertainty_score, is_uncertain
 
 class EnsembleRegressor:
     """

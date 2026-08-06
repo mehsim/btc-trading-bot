@@ -43,23 +43,46 @@ def calculate_exit_quality_score(
     Component 5: Exit Quality Score (EQS 0 - 100)
     Evaluates Structure (20), Liquidity (15), Expected Move (20), Spread (15), Funding (10), Volatility (10), Regime (10).
     """
-    score = 0.0
-    if structure_pass: score += 20.0
-    if liquidity_pass: score += 15.0
-    if float(expected_move_pct) >= 0.015: score += 20.0
-    elif float(expected_move_pct) >= 0.008: score += 12.0
-    
-    if float(spread_pct) <= 0.0005: score += 15.0
-    elif float(spread_pct) <= 0.0010: score += 8.0
-    
-    if abs(float(funding_rate)) <= 0.0003: score += 10.0
-    if float(atr_norm) >= 0.0035: score += 10.0
-    
-    reg_u = regime.upper()
-    if "STRONG" in reg_u or "MODERATE" in reg_u: score += 10.0
-    elif "RANGING" in reg_u: score += 5.0
+    import config
+    policy = getattr(config, "CONFLUENCE_POLICY", {})
+    w_struct = policy.get("structure_weight", 20.0)
+    w_liq = policy.get("liquidity_weight", 15.0)
+    w_move = policy.get("move_weight", 20.0)
+    w_spread = policy.get("spread_weight", 15.0)
+    w_fund = policy.get("funding_weight", 10.0)
+    w_vol = policy.get("volatility_weight", 10.0)
+    w_reg = policy.get("regime_weight", 10.0)
 
-    return score
+    target_move = policy.get("strong_move_pct", 0.015)
+    max_spread = policy.get("max_spread_pct", 0.0010)
+    max_fund = policy.get("max_funding_rate", 0.0003)
+    min_atr = policy.get("min_atr_norm", 0.0035)
+
+    score = 0.0
+    if structure_pass:
+        score += w_struct
+    if liquidity_pass:
+        score += w_liq
+
+    # Continuous proportional move score
+    score += w_move * float(np.clip(float(expected_move_pct) / max(1e-6, target_move), 0.0, 1.0))
+
+    # Continuous proportional spread score (lower spread = higher score)
+    score += w_spread * float(np.clip(1.0 - (float(spread_pct) / max(1e-6, max_spread)), 0.0, 1.0))
+
+    # Continuous proportional funding score
+    score += w_fund * float(np.clip(1.0 - (abs(float(funding_rate)) / max(1e-6, max_fund)), 0.0, 1.0))
+
+    # Continuous volatility score
+    score += w_vol * float(np.clip(float(atr_norm) / max(1e-6, min_atr), 0.0, 1.0))
+
+    reg_u = regime.upper()
+    if "STRONG" in reg_u or "MODERATE" in reg_u:
+        score += w_reg
+    elif "RANGING" in reg_u:
+        score += w_reg * 0.5
+
+    return round(score, 1)
 
 
 def evaluate_expectancy_gate(historical_win_rate: float, avg_win_pct: float, avg_loss_pct: float) -> Tuple[bool, float]:
