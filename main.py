@@ -9057,7 +9057,8 @@ def main():
                             # Refinements 2, 8, 9, 10: 15m Institutional Hardening Filters
                             if str(iv) == "15":
                                 # Refinement 2: Liquidity & Volatility Compression Filter
-                                vol_20th = float(df["volume"].quantile(0.20)) if (df is not None and "volume" in df.columns and len(df) >= 20) else 0.0
+                                vol_series = pd.to_numeric(df["volume"], errors="coerce") if (df is not None and "volume" in df.columns) else None
+                                vol_20th = float(vol_series.quantile(0.20)) if (vol_series is not None and len(vol_series.dropna()) >= 20) else 0.0
                                 curr_vol = float(latest_candle.get("volume", 0.0))
                                 mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
                                 current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
@@ -9160,11 +9161,12 @@ def main():
                                         tp_multiplier_adjusted = cfg.get("tp_mult_ranging", 1.5)
 
                                     # 1. Volatility (ATR Percentile) Adjustment (±5%)
-                                    atr_series = df_completed["ATR"].tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
+                                    atr_series = pd.to_numeric(df_completed["ATR"], errors="coerce").tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
                                     vol_adj = 1.00
-                                    if atr_series is not None and len(atr_series) > 10:
+                                    if atr_series is not None and len(atr_series.dropna()) > 10:
                                         curr_atr = float(latest_candle.get("ATR", atr_dollars))
-                                        atr_percentile = float((atr_series < curr_atr).mean() * 100.0)
+                                        clean_atr = atr_series.dropna()
+                                        atr_percentile = float((clean_atr < curr_atr).mean() * 100.0) if len(clean_atr) > 0 else 50.0
                                         if atr_percentile > 90.0:
                                             vol_adj = 0.95  # Extreme volatility: tighten target before exhaustion reversal
                                         elif atr_percentile < 20.0:
