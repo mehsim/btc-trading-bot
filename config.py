@@ -222,7 +222,7 @@ TIMEFRAME_CONFIG = {
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_30M_SL_MULT", 0.80),
+        "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.20),
         "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.45),
         "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 1.75)
     },
