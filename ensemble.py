@@ -752,6 +752,20 @@ def write_model_manifest(
         _metrics = dict(metrics or {})
         _gov_policy = governance_policy or MODEL_GOVERNANCE
 
+        manifest_path = f"{prefix}_manifest.json"
+        existing_manifest = {}
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r") as mf:
+                    existing_manifest = json.load(mf)
+            except Exception as ex_ens:
+                log_event("WARNING", f"Ensemble notice reading existing manifest: {ex_ens}")
+
+        if isinstance(existing_manifest.get("metrics"), dict):
+            merged_metrics = dict(existing_manifest["metrics"])
+            merged_metrics.update(_metrics)
+            _metrics = merged_metrics
+
         ts_suffix = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M")
         clean_ver = model_version.split(f"-{git_sha}")[0] if (git_sha and git_sha in model_version) else model_version
         full_model_ver = f"{clean_ver}-{git_sha}-{ts_suffix}"
@@ -798,6 +812,8 @@ def write_model_manifest(
             "promotion_metrics": promotion_metrics or _metrics,
             "metrics": _metrics
         }
+        if "cv_metrics" in existing_manifest:
+            manifest["cv_metrics"] = existing_manifest["cv_metrics"]
 
         def _json_safe(o):
             if isinstance(o, (np.integer,)): return int(o)
