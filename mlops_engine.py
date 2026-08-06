@@ -257,7 +257,20 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
         cand_std = cand.get("cv_bal_acc_std", 0.0)
         cand_range = cand.get("cv_bal_acc_range", 0.0)
 
-        # Absolute floors — a bad model is rejected even with no incumbent
+        min_mcc_floor = gates.get("min_mcc", MODEL_GOVERNANCE.get("min_mcc", 0.05))
+        min_bal_acc_floor = gates.get("min_balanced_accuracy", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
+
+        cand_mcc = cand.get("mcc", cand.get("mcc_mean", 0.10))
+        cand_mcc_min = cand.get("mcc_min", 0.05)
+        cand_bal_acc = cand.get("val_accuracy", cand.get("holdout_balanced_accuracy", 0.40))
+
+        # Absolute floors — a bad or uninformative model is rejected even with no incumbent
+        if cand_mcc < min_mcc_floor:
+            return False, f"REJECTED: MCC {cand_mcc:.4f} below predictive floor ({min_mcc_floor})"
+        if cand_mcc_min < 0.0:
+            return False, f"REJECTED: Anti-correlated on at least one fold (min fold MCC = {cand_mcc_min:.4f} < 0.0)"
+        if cand_bal_acc < min_bal_acc_floor:
+            return False, f"REJECTED: Balanced Accuracy {cand_bal_acc:.4f} below predictive floor ({min_bal_acc_floor})"
         if cand_ece > max_ece_ceiling:
             return False, f"ECE {cand_ece:.4f} above ceiling ({max_ece_ceiling})"
         if cand_brier > max_brier_ceiling:

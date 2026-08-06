@@ -46,6 +46,10 @@ class SignalEvaluator:
         model_ver_str = None
         git_sha_str = None
 
+        manifest_mcc = None
+        manifest_mcc_min = None
+        manifest_bal_acc = None
+
         if os.path.exists(manifest_path):
             try:
                 with open(manifest_path, "r") as mf:
@@ -54,6 +58,12 @@ class SignalEvaluator:
                     m_ver = m_data.get("model_version", "v7.2.0")
                     git_sha_str = m_data.get("git_sha", "unknown")
                     model_ver_str = f"btc_{interval}m_{regime_key}_clf:{m_ver}"
+
+                    cv_m = m_data.get("cv_metrics", {})
+                    m_m = m_data.get("metrics", {})
+                    manifest_mcc = cv_m.get("mcc") if isinstance(cv_m.get("mcc"), (int, float)) else (m_m.get("mcc") if isinstance(m_m.get("mcc"), (int, float)) else (cv_m.get("mcc", {}).get("mean") if isinstance(cv_m.get("mcc"), dict) else None))
+                    manifest_mcc_min = cv_m.get("mcc", {}).get("min") if isinstance(cv_m.get("mcc"), dict) else m_m.get("mcc_min")
+                    manifest_bal_acc = cv_m.get("balanced_accuracy") if isinstance(cv_m.get("balanced_accuracy"), (int, float)) else (m_m.get("balanced_accuracy") if isinstance(m_m.get("balanced_accuracy"), (int, float)) else (cv_m.get("balanced_accuracy", {}).get("mean") if isinstance(cv_m.get("balanced_accuracy"), dict) else None))
             except Exception as ex_m:
                 log_event("WARNING", f"[SignalEvaluator Warning] Failed reading manifest {manifest_path}: {ex_m}")
 
@@ -107,7 +117,10 @@ class SignalEvaluator:
                 "git_sha": git_sha_str,
                 "calibrator": calibrator_data,
                 "calibrator_version": cal_ver_str,
-                "calibrator_ece": cal_ece_val
+                "calibrator_ece": cal_ece_val,
+                "manifest_mcc": manifest_mcc,
+                "manifest_mcc_min": manifest_mcc_min,
+                "manifest_bal_acc": manifest_bal_acc
             }
             with self.state_lock:
                 while len(self.models_by_interval) >= self.max_cache_size:
@@ -152,8 +165,33 @@ class SignalEvaluator:
             model_eval_success = False
             models = self.get_models(interval, is_trending)
             if models is not None:
+                _regime_key = "trending" if is_trending else "ranging"
+                
+                # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
+                from config import MODEL_GOVERNANCE
+                min_mcc_floor = MODEL_GOVERNANCE.get("min_mcc", 0.05)
+                min_bal_acc_floor = MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)
+
+                mcc_val = models.get("manifest_mcc")
+                mcc_min_val = models.get("manifest_mcc_min")
+                bal_acc_val = models.get("manifest_bal_acc")
+
+                if mcc_val is not None and mcc_val < min_mcc_floor:
+                    _mmsg = f"[SignalEvaluator Gate] Refusing signal for {interval}m ({_regime_key}): Model MCC ({mcc_val:.4f}) is below predictive floor ({min_mcc_floor}). ABSTAIN."
+                    log_event("WARNING", _mmsg)
+                    return "Neutral", 0.0, f"Model predictive content below governance floor (MCC {mcc_val:.4f} < {min_mcc_floor})"
+
+                if mcc_min_val is not None and mcc_min_val < 0.0:
+                    _mmsg = f"[SignalEvaluator Gate] Refusing signal for {interval}m ({_regime_key}): Model anti-correlated on CV fold (min fold MCC = {mcc_min_val:.4f} < 0.0). ABSTAIN."
+                    log_event("WARNING", _mmsg)
+                    return "Neutral", 0.0, f"Model anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < 0.0)"
+
+                if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
+                    _mmsg = f"[SignalEvaluator Gate] Refusing signal for {interval}m ({_regime_key}): Model Balanced Accuracy ({bal_acc_val:.4f}) is below predictive floor ({min_bal_acc_floor}). ABSTAIN."
+                    log_event("WARNING", _mmsg)
+                    return "Neutral", 0.0, f"Model balanced accuracy below governance floor ({bal_acc_val:.4f} < {min_bal_acc_floor})"
+
                 try:
-                    _regime_key = "trending" if is_trending else "ranging"
                     _feat_list = models.get("selected_features") or features
 
                     # Ensure df has no duplicate columns

@@ -20,7 +20,7 @@ MAX_LOG_ENTRIES_MEMORY = 200
 SUPPORTED_MANIFEST_SCHEMA_VERSION = 3
 MODEL_GOVERNANCE_VERSION = 2
 MODEL_GOVERNANCE = {
-    "version": "v2.4",
+    "version": "v2.5",
     "max_ece": 0.08,
     "max_brier": 0.50,
     "min_oos_sharpe": 0.50,
@@ -28,7 +28,9 @@ MODEL_GOVERNANCE = {
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
     "enforce_stability_gate": False,
-    "min_samples": 20
+    "min_samples": 20,
+    "min_mcc": 0.05,                   # C-1 Predictive Floor: MCC < 0.05 is at statistical chance
+    "min_balanced_accuracy": 0.36      # C-1 Predictive Floor: 3-class random chance is 0.333
 }
 
 CVAR_PARAMETRIC_FALLBACK_RATIO = 1.25

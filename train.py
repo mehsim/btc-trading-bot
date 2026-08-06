@@ -1497,6 +1497,26 @@ def train_models(interval=INTERVAL, pages=PAGES):
         else:
             print(f"  [Champion-Challenger] No existing champion (or contract updated) for {name.upper()}. Promoting challenger.")
 
+        # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < 0.05 or min fold MCC < 0.0 or BalAcc < 0.36)
+        from config import MODEL_GOVERNANCE
+        min_mcc_floor = MODEL_GOVERNANCE.get("min_mcc", 0.05)
+        min_bal_acc_floor = MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)
+
+        chal_mcc_mean = float(stat_mcc.get("mean", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("mean") is not None) else 0.0
+        chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
+        chal_bal_acc_mean = float(stat_bal.get("mean", 0.0)) if ('stat_bal' in locals() and isinstance(stat_bal, dict) and stat_bal.get("mean") is not None) else 0.0
+
+        if should_save:
+            if chal_mcc_mean < min_mcc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) below predictive floor ({min_mcc_floor})")
+                should_save = False
+            elif chal_mcc_min < 0.0:
+                print(f"  [Predictive Floor Gate] REJECTED: Challenger anti-correlated on at least one CV fold (min fold MCC = {chal_mcc_min:.4f} < 0.0)")
+                should_save = False
+            elif chal_bal_acc_mean < min_bal_acc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")
+                should_save = False
+
         if should_save:
             from mlops_engine import log_mlflow_training_run, promote_if_better
             reg_name = f"btc_{interval}m_{name}_clf"
