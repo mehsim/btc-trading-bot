@@ -4857,6 +4857,17 @@ def load_model_weights(iv):
             meta_clf = XGBClassifier()
             meta_clf.load_model(prefixes["ranging_meta"])
             models_by_interval[iv]["ranging"]["meta"] = meta_clf
+
+        # Fallback to trending model if ranging model files do not exist on disk
+        if models_by_interval[iv]["ranging"]["trend"] is None:
+            models_by_interval[iv]["ranging"]["trend"] = models_by_interval[iv]["trending"]["trend"]
+            models_by_interval[iv]["ranging"]["model_version"] = models_by_interval[iv]["trending"].get("model_version", f"btc_{iv}m_trending_clf:v1.0")
+            print(f"[Model Load Fallback] Ranging trend model missing for {iv}m; using trending model fallback.")
+        if models_by_interval[iv]["ranging"]["price"] is None:
+            models_by_interval[iv]["ranging"]["price"] = models_by_interval[iv]["trending"]["price"]
+            print(f"[Model Load Fallback] Ranging price model missing for {iv}m; using trending model fallback.")
+        if models_by_interval[iv]["ranging"]["meta"] is None:
+            models_by_interval[iv]["ranging"]["meta"] = models_by_interval[iv]["trending"].get("meta")
             
         # Load calibrators if they exist, or default to identity mapping
         trending_cal_file = f"calibrator_trending_{iv}.json"
@@ -8518,15 +8529,15 @@ def main():
                     if iv in models_by_interval:
                         models_tf = models_by_interval[iv]
                         if regime == "Trending":
-                            active_model_price = models_tf["trending"]["price"]
-                            active_model_trend = models_tf["trending"]["trend"]
+                            active_model_price = models_tf["trending"]["price"] or models_tf["ranging"]["price"]
+                            active_model_trend = models_tf["trending"]["trend"] or models_tf["ranging"]["trend"]
                             regime_name = "Trending (GMM)"
-                            feat_list = models_tf.get("selected_features_trending")
+                            feat_list = models_tf.get("selected_features_trending") or models_tf.get("selected_features")
                         else:
-                            active_model_price = models_tf["ranging"]["price"]
-                            active_model_trend = models_tf["ranging"]["trend"]
+                            active_model_price = models_tf["ranging"]["price"] or models_tf["trending"]["price"]
+                            active_model_trend = models_tf["ranging"]["trend"] or models_tf["trending"]["trend"]
                             regime_name = "Ranging (GMM)"
-                            feat_list = models_tf.get("selected_features_ranging")
+                            feat_list = models_tf.get("selected_features_ranging") or models_tf.get("selected_features")
                             
                         if active_model_price is None or active_model_trend is None:
                             print(f"[{symbol} {iv}m Warning] Models are not loaded (None). Skipping signal evaluation.")
