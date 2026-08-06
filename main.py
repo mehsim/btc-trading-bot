@@ -8560,7 +8560,16 @@ def main():
                                 except Exception:
                                     pass
 
-                        _features_to_use = feat_list if feat_list is not None else features
+                        from ensemble import get_model_feature_names
+                        _exp_names = get_model_feature_names(active_model_trend)
+                        if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
+                            _features_to_use = [f for f in _exp_names if f in latest_candle_weighted.index]
+                        elif feat_list is not None:
+                            _features_to_use = feat_list
+                        else:
+                            from core import features as master_features
+                            _features_to_use = master_features
+
                         X_live_full = latest_candle_weighted[_features_to_use].to_frame().T if isinstance(latest_candle_weighted[_features_to_use], pd.Series) else latest_candle_weighted[_features_to_use]
                         X_live = _slice_model_input(active_model_trend, X_live_full)
 
