@@ -78,7 +78,7 @@ class BackgroundMLTester:
             from data import get_history, merge_derivatives_sentiment_features
             from core import add_features, features
 
-            df = get_history(symbol=symbol, interval=interval, limit=120)
+            df = get_history(symbol=symbol, interval=interval, limit=350)
             if df is not None and len(df) >= 30:
                 df = merge_derivatives_sentiment_features(df, symbol=symbol, interval=interval)
                 df = add_features(df)

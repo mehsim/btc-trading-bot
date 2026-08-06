@@ -129,7 +129,11 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
     df["hours_to_news"] = hours_to_news_list
     return df
 
+MIN_FEATURE_HISTORY = 200 + 14 + 1
+
 def add_features(df, fetch_calendar_callback=None):
+    if df is not None and len(df) < MIN_FEATURE_HISTORY:
+        raise ValueError(f"add_features requires >= {MIN_FEATURE_HISTORY} bars, got {len(df)}")
     df = df.copy()
     
     # Ensure source derivative & sentiment columns exist with proper defaults if not merged
