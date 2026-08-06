@@ -1,0 +1,79 @@
+{
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.5079,
+      "median": 0.5124,
+      "std": 0.0316,
+      "min": 0.4502,
+      "max": 0.5379
+    },
+    "macro_f1": {
+      "mean": 0.3032,
+      "median": 0.3014,
+      "std": 0.0284,
+      "min": 0.2682,
+      "max": 0.3506
+    },
+    "mcc": {
+      "mean": 0.113,
+      "median": 0.1168,
+      "std": 0.0116,
+      "min": 0.0936,
+      "max": 0.1239
+    },
+    "mean_kappa": 0.06427743073851466,
+    "mean_pr_auc_bear": 0.13793456147052344,
+    "mean_pr_auc_bull": 0.07300247503283072,
+    "mean_raw_accuracy": 0.4813,
+    "mean_mae": 0.048291,
+    "label_dist_bearish_pct": 4.32,
+    "label_dist_neutral_pct": 91.66,
+    "label_dist_bullish_pct": 4.01,
+    "n_training_samples": 27143,
+    "n_holdout_samples": 4790,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          591,
+          235,
+          158
+        ],
+        [
+          5315,
+          9893,
+          5526
+        ],
+        [
+          172,
+          324,
+          401
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.9169,
+    "holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.1499,
+    "holdout_ece": 0.0187,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "660402b3"
+  },
+  "git_sha": "660402b3"
+}

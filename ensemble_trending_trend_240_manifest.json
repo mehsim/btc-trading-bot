@@ -6,7 +6,7 @@
   "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "f2b1393a",
+  "git_sha": "c2ab2509",
   "feature_count": 26,
   "feature_names": [
     "open_interest",
@@ -95,5 +95,84 @@
   },
   "promotion_metrics": {},
   "metrics": {},
-  "hmac_signature": "96d976d203eaa3fa68d82a5e9a9ddcd7b6752519ffeb2ce1ebc7873ce3e0680e"
+  "hmac_signature": "96d976d203eaa3fa68d82a5e9a9ddcd7b6752519ffeb2ce1ebc7873ce3e0680e",
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.3886,
+      "median": 0.3842,
+      "std": 0.0704,
+      "min": 0.2892,
+      "max": 0.5054
+    },
+    "macro_f1": {
+      "mean": 0.3387,
+      "median": 0.329,
+      "std": 0.0293,
+      "min": 0.3011,
+      "max": 0.383
+    },
+    "mcc": {
+      "mean": 0.0419,
+      "median": 0.048,
+      "std": 0.0459,
+      "min": -0.0393,
+      "max": 0.0924
+    },
+    "mean_kappa": 0.033613203286512607,
+    "mean_pr_auc_bear": 0.07043876074707482,
+    "mean_pr_auc_bull": 0.025947214397774542,
+    "mean_raw_accuracy": 0.8305,
+    "mean_mae": 0.048605,
+    "label_dist_bearish_pct": 1.93,
+    "label_dist_neutral_pct": 96.13,
+    "label_dist_bullish_pct": 1.94,
+    "n_training_samples": 10591,
+    "n_holdout_samples": 1746,
+    "effective_sample_size": 815.15,
+    "raw_sample_size": 10591,
+    "uniqueness_ratio": 0.077,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          39,
+          108,
+          13
+        ],
+        [
+          785,
+          7279,
+          427
+        ],
+        [
+          10,
+          153,
+          11
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.9633,
+    "holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.0712,
+    "holdout_ece": 0.0084,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "c2ab2509"
+  }
 }

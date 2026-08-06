@@ -6,7 +6,7 @@
   "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "f2b1393a",
+  "git_sha": "d4f022fd",
   "feature_count": 22,
   "feature_names": [
     "open_interest",
@@ -86,6 +86,88 @@
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
-  "metrics": {},
-  "hmac_signature": "7364b8523af4e1439406906135b7e7a83c8a7ee6b6de67c63e2440f86c685517"
+  "metrics": {
+    "uniqueness_ratio": 0.0769,
+    "effective_sample_size": 3619.08
+  },
+  "hmac_signature": "7364b8523af4e1439406906135b7e7a83c8a7ee6b6de67c63e2440f86c685517",
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.4228,
+      "median": 0.4213,
+      "std": 0.0083,
+      "min": 0.4117,
+      "max": 0.4347
+    },
+    "macro_f1": {
+      "mean": 0.4139,
+      "median": 0.4095,
+      "std": 0.0082,
+      "min": 0.4064,
+      "max": 0.4266
+    },
+    "mcc": {
+      "mean": 0.1542,
+      "median": 0.1522,
+      "std": 0.0134,
+      "min": 0.135,
+      "max": 0.1704
+    },
+    "mean_kappa": 0.15229409469117594,
+    "mean_pr_auc_bear": 0.3134463186267953,
+    "mean_pr_auc_bull": 0.33414448784832934,
+    "mean_raw_accuracy": 0.4552,
+    "mean_mae": 0.006601,
+    "label_dist_bearish_pct": 28.52,
+    "label_dist_neutral_pct": 45.76,
+    "label_dist_bullish_pct": 25.72,
+    "n_training_samples": 47042,
+    "n_holdout_samples": 7750,
+    "effective_sample_size": 3619.08,
+    "raw_sample_size": 47042,
+    "uniqueness_ratio": 0.0769,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          2701,
+          3933,
+          4479
+        ],
+        [
+          3376,
+          10945,
+          3713
+        ],
+        [
+          2429,
+          3425,
+          4199
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.4835,
+    "holdout_balanced_accuracy": 0.4316,
+    "holdout_brier": 0.6148,
+    "holdout_ece": 0.0074,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "d4f022fd"
+  }
 }

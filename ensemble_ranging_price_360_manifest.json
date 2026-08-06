@@ -1,0 +1,30 @@
+{
+  "manifest_schema_version": 3,
+  "prefix": "ensemble_ranging_price_360",
+  "timestamp": "2026-08-05T18:54:55.288204+00:00",
+  "model_version": "v7.2.0-660402b3-202608051854",
+  "feature_version": "v3.1.0",
+  "ensemble_version": "v3.0_stacking",
+  "git_sha": "660402b3",
+  "feature_count": 0,
+  "feature_names": [],
+  "surviving_features": [],
+  "vif_values": {},
+  "feature_contract_hash": "e3b0c44298fc",
+  "feature_pipeline_hash": "205b80ae1fe5",
+  "training_data_hash": null,
+  "preprocessing_hash": null,
+  "parent_model_hash": null,
+  "promotion_reason": "Initial deployment / benchmark promotion",
+  "replaced_model_hash": null,
+  "rollback_reference": "ensemble_ranging_price_360_backup",
+  "governance_policy": {
+    "version": "v2.4",
+    "max_ece": 0.08,
+    "max_brier": 0.22,
+    "min_sharpe_delta": 0.1,
+    "min_samples": 20
+  },
+  "promotion_metrics": {},
+  "metrics": {}
+}

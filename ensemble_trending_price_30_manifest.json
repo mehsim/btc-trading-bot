@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_30",
-  "timestamp": "2026-08-06T10:21:44.619875+00:00",
-  "model_version": "v7.2.0-f2b1393a-202608061021",
+  "timestamp": "2026-08-06T16:55:54.478189+00:00",
+  "model_version": "v7.2.0-852a007b-202608061655",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "f2b1393a",
+  "git_sha": "852a007b",
   "feature_count": 25,
   "feature_names": [
     "open_interest",
@@ -65,7 +65,7 @@
   "vif_values": {},
   "feature_contract_hash": "2d999eedc6df",
   "feature_pipeline_hash": "4712b43d3155",
-  "training_data_hash": "3a871946049475c4de998d3ad74df7a7edd76911e0b042888da0161330d0f7c4",
+  "training_data_hash": "bfa41335793289f3b21c2bd18e05bf4ac0885584363137b53cf029a13219caeb",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "3ff4081f4c11c75ec25a141ba80f35c36060f0cae053210c65dec6571d0594df",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -83,15 +83,15 @@
     "min_samples": 20
   },
   "dependencies": {
-    "python": "3.14.6",
+    "python": "3.14.4",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.4.6",
+    "numpy": "2.5.1",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
   "metrics": {},
-  "hmac_signature": "e48f78ca3b35b1f82f8b613bb255e69493b860200d0b866bf203c45509a03974"
+  "hmac_signature": "e031a5e748c6a378005c4cd4b3a1fe6058d4c0ebb9ca527e934ba98d5fcf24e2"
 }

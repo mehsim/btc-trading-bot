@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_240",
-  "timestamp": "2026-08-06T10:21:44.808232+00:00",
-  "model_version": "v7.2.0-f2b1393a-202608061021",
+  "timestamp": "2026-08-06T17:38:46.742505+00:00",
+  "model_version": "v7.2.0-d4f022fd-202608061738",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "f2b1393a",
+  "git_sha": "d4f022fd",
   "feature_count": 26,
   "feature_names": [
     "open_interest",
@@ -67,7 +67,7 @@
   "vif_values": {},
   "feature_contract_hash": "29d018979028",
   "feature_pipeline_hash": "499fdd9b615f",
-  "training_data_hash": "48e98d2585567aebbc50b26a7cd31fe8180774765174311aaf06cf2319739c6e",
+  "training_data_hash": "c86fc2bce9b2bab66bff3e2a105314e75c69e9c27bf80bea060face9c05e3370",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "c1d8d1f56169d501a49ba7e6fb87bcd0de0856aa8d2e0e1c70df48a097ec6f5e",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -85,15 +85,15 @@
     "min_samples": 20
   },
   "dependencies": {
-    "python": "3.14.6",
+    "python": "3.14.4",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.4.6",
+    "numpy": "2.5.1",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
   "metrics": {},
-  "hmac_signature": "7d4c8c4cf457379af87fffefe3b8400e5e274d709d5b4067177225194454137a"
+  "hmac_signature": "5515a52e3878eb4599ac6ed03939f45456ae7423b21773b2a6ebd3785b440e6e"
 }
