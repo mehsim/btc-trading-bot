@@ -9388,16 +9388,16 @@ def main():
                                     if is_golden_hour:
                                         # Golden Hour: Double the target slot allocation size
                                         position_size_usd = position_size_usd * 2.0
-                                        print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {raw_kelly:.4f} -> Scaled: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Golden Target: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                        print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Golden Target: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                     else:
-                                        print(f"[{iv}m Kelly Sizing] Kelly Fraction: {raw_kelly:.4f} -> Scaled: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Final Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                        print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Final Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                         
                                     # Clip to minimum Bybit order requirement (e.g. $2.0)
                                     position_size_usd = max(2.0, position_size_usd)
                                     print(f"[{iv}m Trade Size Boundary Check] Final size before leverage (CVaR constrained): ${position_size_usd:.2f}")
 
                                     # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
-                                    kelly_fraction = raw_kelly
+                                    kelly_fraction = scaled_kelly
 
                                     # Ensure total size of active trades does not exceed the wallet balance
                                     min_bal_limit = 2.0
@@ -9734,7 +9734,6 @@ def main():
                                                 bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
                                             
                                             print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
-                                            print(f"[{iv}m Kelly Sizing] Confidence: {kelly_p*100:.2f}% | R:R ratio: {kelly_b:.2f} | Size: ${position_size_usd:.2f} | Leverage: {leverage_val}x (New Balance: ${bot_state['simulated_balance']:.2f})\n")
                                 else:
                                     status_msg = "Skipped (Confluence Failed)"
                                     failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
