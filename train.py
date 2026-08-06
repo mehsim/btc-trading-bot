@@ -1569,22 +1569,44 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "git_sha": _pipeline_git_sha
             }
 
-            manifest_path_t = f"{c_prefix_t}_manifest.json"
-            try:
-                manifest_data = {}
-                if os.path.exists(manifest_path_t):
-                    with open(manifest_path_t, "r") as mf:
-                        manifest_data = json.load(mf)
-                manifest_data["cv_metrics"] = cv_metrics_block
-                if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
-                    manifest_data["metrics"] = {}
-                manifest_data["metrics"]["uniqueness_ratio"] = round((effective_n / max(1, len(y_trend))), 4)
-                manifest_data["metrics"]["effective_sample_size"] = round(effective_n, 2)
-                manifest_data["git_sha"] = _pipeline_git_sha
-                with open(manifest_path_t, "w") as mf:
-                    json.dump(manifest_data, mf, indent=2)
-            except Exception as ex_man:
-                log_event("WARNING", f"Failed to write cv_metrics to manifest: {ex_man}")
+            from ensemble import get_manifest_hmac_secret
+            import hmac
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            eff_n_val = round(effective_n, 2) if 'effective_n' in locals() else float(len(X))
+            uniq_ratio_val = round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0
+            raw_n_val = int(len(y_trend))
+
+            for m_prefix in [c_prefix_t, c_prefix_p]:
+                manifest_path = f"{m_prefix}_manifest.json"
+                try:
+                    manifest_data = {}
+                    if os.path.exists(manifest_path):
+                        with open(manifest_path, "r") as mf:
+                            manifest_data = json.load(mf)
+                    manifest_data["cv_metrics"] = cv_metrics_block
+                    manifest_data["git_sha"] = _pipeline_git_sha
+                    manifest_data["timestamp"] = now_iso
+                    if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
+                        manifest_data["metrics"] = {}
+                    manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
+                    manifest_data["metrics"]["effective_sample_size"] = eff_n_val
+                    manifest_data["metrics"]["raw_sample_size"] = raw_n_val
+
+                    def _json_safe(o):
+                        if isinstance(o, (np.integer,)): return int(o)
+                        if isinstance(o, (np.floating,)): return float(o)
+                        if isinstance(o, np.ndarray): return o.tolist()
+                        raise TypeError(f"Unserialisable: {type(o)}")
+
+                    hmac_key = get_manifest_hmac_secret()
+                    manifest_data.pop("hmac_signature", None)
+                    canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
+                    manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
+
+                    with open(manifest_path, "w") as mf:
+                        json.dump(manifest_data, mf, indent=2, default=_json_safe)
+                except Exception as ex_man:
+                    log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
 
             print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 

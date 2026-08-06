@@ -88,9 +88,9 @@
   "promotion_metrics": {},
   "metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 3619.08
+    "effective_sample_size": 3619.08,
+    "raw_sample_size": 47042
   },
-  "hmac_signature": "7364b8523af4e1439406906135b7e7a83c8a7ee6b6de67c63e2440f86c685517",
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
@@ -169,5 +169,6 @@
     },
     "training_pipeline_version": "v7.2.0",
     "git_sha": "d4f022fd"
-  }
+  },
+  "hmac_signature": "88d1d8329b1d2e4520779b9585e5180e061022725c1e6642dba073f5810e1e33"
 }

@@ -134,6 +134,10 @@
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
-  "metrics": {},
-  "hmac_signature": "ab1f4e7d8c7abc3fd4fef8211794afdb1e68730470e64de1eca9ae5956541238"
+  "metrics": {
+    "uniqueness_ratio": 0.0833,
+    "effective_sample_size": 416.67,
+    "raw_sample_size": 5000
+  },
+  "hmac_signature": "b24a3068f3eb065678244748dc73c39d6d9dddd29d2fafe549084867d5ffdb87"
 }
