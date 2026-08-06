@@ -1030,7 +1030,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         embargo_len = max(1, int(len(X_full) * 0.01))
         
         # M-1: Dynamic holdout size ensuring minimum effective independent holdout samples
-        required_holdout_rows = max(int(len(X_full) * HOLDOUT_FRACTION), int(MIN_EFFECTIVE_HOLDOUT_SAMPLES * purge_len))
+        required_holdout_rows = max(int(len(X_full) * HOLDOUT_FRACTION), int(MIN_EFFECTIVE_HOLDOUT_SAMPLES * purge_len) + embargo_len)
         split_idx = max(purge_len + 10, len(X_full) - required_holdout_rows)
 
         X = X_full.iloc[:split_idx - purge_len]
