@@ -8515,7 +8515,7 @@ def main():
                 for fut in future_to_pair:
                     sym, iv = future_to_pair[fut]
                     try:
-                        _, _, df_raw_val, df_feat_val = fut.result(timeout=12)  # Fail fast — HTTP timeout is 10s
+                        _, _, df_raw_val, df_feat_val = fut.result(timeout=25)  # HTTP timeout is 10s per request
                         if df_raw_val is not None:
                             fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
                     except Exception as e:
