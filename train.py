@@ -1324,22 +1324,49 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_cat_p = create_model(CatBoostRegressor, best_params_cat_p)
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
-        # H-2: exponential decay (full regime dataset)
+        # H-1/H-2: exponential decay & uniqueness with per-class re-normalization (full regime dataset)
+        from core import compute_sample_uniqueness
         from config import DECAY_HALF_LIFE_CONFIG, DECAY_HALF_LIFE_DEFAULT
         _hl_days_f = DECAY_HALF_LIFE_CONFIG.get(str(interval), DECAY_HALF_LIFE_DEFAULT)
         _hl_bars_f = _hl_days_f * 1440.0 / max(1, int(interval))
         _n_f = len(y_trend)
         _age_f = np.arange(_n_f - 1, -1, -1, dtype=float)
         decay_full = 0.5 ** (_age_f / max(1.0, _hl_bars_f))
-        sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
-        sample_weight_full = sample_weight_full * decay_full
 
-        sample_weight_train_last = compute_sample_weight(class_weight='balanced', y=y_train_t)
-        # H-2: exponential decay (last train fold)
+        t1_full = pd.Series(np.arange(len(y_trend)) + cv.lookahead, index=y_trend.index)
+        uniqueness_full = compute_sample_uniqueness(t1_full, y_trend.index).values
+        base_full = uniqueness_full * decay_full
+
+        w_full = base_full.copy()
+        classes_full = np.unique(y_trend)
+        for c in classes_full:
+            m = (y_trend.values == c)
+            s = base_full[m].sum()
+            if s > 0:
+                w_full[m] *= (_n_f / (len(classes_full) * s))
+        sample_weight_full = w_full
+        totals_full = [w_full[y_trend.values == c].sum() for c in classes_full]
+        assert max(totals_full) / min(totals_full) < 1.05, f"class balance broken (full fit): {totals_full}"
+
+        # H-1/H-2: exponential decay & uniqueness with per-class re-normalization (last train fold)
         _n_tl = len(y_train_t)
         _age_tl = np.arange(_n_tl - 1, -1, -1, dtype=float)
         decay_train_last = 0.5 ** (_age_tl / max(1.0, _hl_bars_f))
-        sample_weight_train_last = sample_weight_train_last * decay_train_last
+
+        t1_last = pd.Series(np.arange(len(y_train_t)) + cv.lookahead, index=y_train_t.index)
+        uniqueness_last = compute_sample_uniqueness(t1_last, y_train_t.index).values
+        base_last = uniqueness_last * decay_train_last
+
+        w_last = base_last.copy()
+        classes_last = np.unique(y_train_t)
+        for c in classes_last:
+            m = (y_train_t.values == c)
+            s = base_last[m].sum()
+            if s > 0:
+                w_last[m] *= (_n_tl / (len(classes_last) * s))
+        sample_weight_train_last = w_last
+        totals_last = [w_last[y_train_t.values == c].sum() for c in classes_last]
+        assert max(totals_last) / min(totals_last) < 1.05, f"class balance broken (last fold fit): {totals_last}"
         
         final_ensemble_t.fit(
             X, y_trend, sample_weight=sample_weight_full, 
