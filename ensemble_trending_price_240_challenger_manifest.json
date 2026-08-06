@@ -2,35 +2,87 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_240",
-  "timestamp": "2026-08-06T21:53:33.366978+00:00",
-  "model_version": "v7.2.0-2e59f81b-202608062153",
+  "timestamp": "2026-08-06T22:21:13.543484+00:00",
+  "model_version": "v7.2.0-d4f022fd-202608061738",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "2e59f81b",
-  "feature_count": 0,
-  "feature_names": [],
-  "surviving_features": [],
+  "git_sha": "4fde1099",
+  "feature_count": 26,
+  "feature_names": [
+    "open_interest",
+    "funding_rate",
+    "fear_greed",
+    "oi_change_1h",
+    "oi_change_4h",
+    "RSI",
+    "MACD_diff",
+    "EMA_9",
+    "EMA_21",
+    "EMA_50",
+    "EMA_200",
+    "BB_high",
+    "BB_low",
+    "BB_mid",
+    "MFI",
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct",
+    "BB_width",
+    "return_5m",
+    "volatility_10m",
+    "volume_ratio"
+  ],
+  "surviving_features": [
+    "open_interest",
+    "funding_rate",
+    "fear_greed",
+    "oi_change_1h",
+    "oi_change_4h",
+    "RSI",
+    "MACD_diff",
+    "EMA_9",
+    "EMA_21",
+    "EMA_50",
+    "EMA_200",
+    "BB_high",
+    "BB_low",
+    "BB_mid",
+    "MFI",
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct",
+    "BB_width",
+    "return_5m",
+    "volatility_10m",
+    "volume_ratio"
+  ],
   "vif_values": {},
-  "feature_contract_hash": "e3b0c44298fc",
-  "feature_pipeline_hash": "205b80ae1fe5",
-  "training_data_hash": "cf68c1b8c67db15138e04b95afdf77a26307706c05b4858a38dcaf3d49b6bdce",
+  "feature_contract_hash": "29d018979028",
+  "feature_pipeline_hash": "499fdd9b615f",
+  "training_data_hash": "c86fc2bce9b2bab66bff3e2a105314e75c69e9c27bf80bea060face9c05e3370",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "c1d8d1f56169d501a49ba7e6fb87bcd0de0856aa8d2e0e1c70df48a097ec6f5e",
   "promotion_reason": "Initial deployment / benchmark promotion",
   "replaced_model_hash": "c1d8d1f56169d501a49ba7e6fb87bcd0de0856aa8d2e0e1c70df48a097ec6f5e",
   "rollback_reference": "ensemble_trending_price_240_backup",
   "governance_policy": {
-    "version": "v2.5",
+    "version": "v2.4",
     "max_ece": 0.08,
     "max_brier": 0.5,
     "min_oos_sharpe": 0.5,
     "min_sharpe_delta": 0.1,
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
-    "enforce_stability_gate": true,
-    "min_samples": 20,
-    "min_mcc": 0.05,
-    "min_balanced_accuracy": 0.36
+    "enforce_stability_gate": false,
+    "min_samples": 20
   },
   "dependencies": {
     "python": "3.14.4",
@@ -50,31 +102,31 @@
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.4107,
-      "median": 0.4175,
-      "std": 0.0472,
-      "min": 0.3379,
-      "max": 0.4621
+      "mean": 0.3856,
+      "median": 0.3899,
+      "std": 0.0243,
+      "min": 0.34,
+      "max": 0.4115
     },
     "macro_f1": {
-      "mean": 0.3275,
-      "median": 0.3207,
-      "std": 0.0199,
-      "min": 0.3084,
-      "max": 0.3634
+      "mean": 0.3428,
+      "median": 0.336,
+      "std": 0.0211,
+      "min": 0.3173,
+      "max": 0.3762
     },
     "mcc": {
-      "mean": 0.05,
-      "median": 0.0763,
-      "std": 0.0347,
-      "min": 0.0008,
-      "max": 0.0813
+      "mean": 0.044,
+      "median": 0.047,
+      "std": 0.021,
+      "min": 0.0093,
+      "max": 0.0741
     },
-    "mean_kappa": 0.03279283672872799,
-    "mean_pr_auc_bear": 0.05703807819347266,
-    "mean_pr_auc_bull": 0.032853334614423496,
-    "mean_raw_accuracy": 0.7511,
-    "mean_mae": 0.047852,
+    "mean_kappa": 0.03652962253378127,
+    "mean_pr_auc_bear": 0.053889318146205886,
+    "mean_pr_auc_bull": 0.032897345916187634,
+    "mean_raw_accuracy": 0.8454,
+    "mean_mae": 0.048218,
     "label_dist_bearish_pct": 2.11,
     "label_dist_neutral_pct": 95.72,
     "label_dist_bullish_pct": 2.17,
@@ -96,26 +148,26 @@
       ],
       "matrix": [
         [
-          111,
-          184,
-          28
+          73,
+          232,
+          18
         ],
         [
-          2056,
-          10967,
-          1142
+          1222,
+          12422,
+          521
         ],
         [
-          30,
-          244,
-          38
+          16,
+          279,
+          17
         ]
       ]
     },
     "holdout_accuracy": 0.9699,
     "holdout_balanced_accuracy": 0.3333,
-    "holdout_brier": 0.059,
-    "holdout_ece": 0.0099,
+    "holdout_brier": 0.0592,
+    "holdout_ece": 0.0121,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -124,9 +176,9 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "2e59f81b"
+    "git_sha": "4fde1099"
   },
-  "promoted": true,
-  "evaluation_timestamp": "2026-08-06T21:53:33.366978+00:00",
-  "hmac_signature": "30f0df938ee5a3aee99dacbf0f5b9c6e00e43e238dfbe0f7c4d0f7581cb34782"
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-06T22:21:13.543484+00:00",
+  "hmac_signature": "067754b62356e94eb7895691c9fb71e626ab3bf8551ff1e9853e5cb4861463b2"
 }
