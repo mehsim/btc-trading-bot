@@ -125,8 +125,8 @@ def test_mhi_scaling_soft_limit_differs():
         stop_loss=63000.0, take_profit=66000.0, direction="Bullish", candles_elapsed=5,
         mhi_status=40.0
     )
-    assert eval_healthy["soft_limit"] > eval_degraded["soft_limit"]
-    assert eval_degraded["soft_limit"] == 8  # 15 * 0.50 floor round
+    assert eval_healthy["soft_limit_candles"] > eval_degraded["soft_limit_candles"]
+    assert eval_degraded["soft_limit_candles"] == 8  # 15 * 0.50 floor round
 
 
 def test_continuous_atr_adj_and_exit_scoring():
@@ -142,5 +142,5 @@ def test_continuous_atr_adj_and_exit_scoring():
         garch_vol=0.015, rolling_vol_20th_pct=0.010, atr_ratio=1.1
     )
     assert eval_vol_high["exit_score"] > eval_vol_low["exit_score"]
-    assert eval_vol_high["soft_limit"] >= eval_vol_low["soft_limit"]
+    assert eval_vol_high["soft_limit_candles"] >= eval_vol_low["soft_limit_candles"]
 
