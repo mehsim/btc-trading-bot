@@ -8096,7 +8096,7 @@ def main():
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
                             "fill_pct": float(active_trade.get("fill_pct", 100.0)),
                             "modeled_slippage_bps": float(active_trade.get("modeled_slippage_bps")) if active_trade.get("modeled_slippage_bps") is not None else None,
-                            "realized_slippage_bps": float(active_trade.get("realized_slippage_bps")) if active_trade.get("realized_slippage_bps") is not None else (round(abs(current_price - float(active_trade.get("stop_loss", current_price))) / max(1e-4, float(active_trade.get("stop_loss", current_price))) * 1e4, 2) if exit_reason in ["SL", "STOP_LOSS"] and active_trade.get("stop_loss") else None),
+                            "realized_slippage_bps": float(active_trade.get("realized_slippage_bps")) if active_trade.get("realized_slippage_bps") is not None else None,
                             "bybit_order_id": active_trade.get("bybit_order_id"),
                             "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
                         })

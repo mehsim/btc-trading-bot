@@ -191,8 +191,8 @@ def add_features(df, fetch_calendar_callback=None):
 
     # Rolling z-score normalization for RSI and ADX (200-candle window)
     for col in ["RSI", "ADX"]:
-        rolling_mean = df[col].rolling(200, min_periods=20).mean()
-        rolling_std = df[col].rolling(200, min_periods=20).std().replace(0, 1)
+        rolling_mean = df[col].rolling(200, min_periods=200).mean()
+        rolling_std = df[col].rolling(200, min_periods=200).std().replace(0, 1)
         df[f"{col}_z"] = (df[col] - rolling_mean) / rolling_std
 
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0

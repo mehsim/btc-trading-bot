@@ -122,7 +122,7 @@ class SignalEvaluator:
     def evaluate_interval(self, symbol="BTCUSDT", interval="15"):
         tf_key = TF_MAP.get(interval, f"{interval}m")
         try:
-            df = get_history(symbol=symbol, interval=interval, limit=200)
+            df = get_history(symbol=symbol, interval=interval, limit=350)
             if df is None or len(df) < 50:
                 return
 
