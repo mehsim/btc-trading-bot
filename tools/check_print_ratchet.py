@@ -10,7 +10,7 @@ import os
 import sys
 
 # Baseline print() count for core runtime files (ratchets down only)
-PRINT_BASELINE = 948
+PRINT_BASELINE = 942
 
 # Directories and files to EXCLUDE from the print ratchet (offline scripts where print is expected)
 EXCLUDE_DIRS = {

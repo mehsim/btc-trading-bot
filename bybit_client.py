@@ -537,9 +537,12 @@ _instrument_specs_cache = {}
 _instrument_specs_lock = threading.Lock()
 
 def get_instrument_specs(symbol: str) -> Dict[str, Any]:
+    now = time.time()
     with _instrument_specs_lock:
         if symbol in _instrument_specs_cache:
-            return _instrument_specs_cache[symbol]
+            cached_specs, exp_ts = _instrument_specs_cache[symbol]
+            if now < exp_ts:
+                return cached_specs
 
     default_specs = {
         "tickSize": "0.01" if symbol in ["BTCUSDT", "ETHUSDT"] else "0.0001",
@@ -563,13 +566,14 @@ def get_instrument_specs(symbol: str) -> Dict[str, Any]:
                     "minNotionalValue": lot_filter.get("minNotionalValue", default_specs["minNotionalValue"])
                 }
                 with _instrument_specs_lock:
-                    _instrument_specs_cache[symbol] = specs
+                    _instrument_specs_cache[symbol] = (specs, now + 86400.0)  # 24h success TTL
                 return specs
     except Exception as e:
         log_event("WARNING", f"[Instrument Specs Warning] Failed to fetch instrument info for {symbol}: {e}")
-        with _instrument_specs_lock:
-            _instrument_specs_cache[symbol] = default_specs
-        return default_specs
+
+    with _instrument_specs_lock:
+        _instrument_specs_cache[symbol] = (default_specs, now + 60.0)  # 60s fallback TTL
+    return default_specs
 
 def quantize_bybit_price(symbol: str, price: float) -> str:
     specs = get_instrument_specs(symbol)

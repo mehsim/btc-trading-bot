@@ -26,7 +26,7 @@ def validate_price(price: float, default_price: float = 0.0, max_price: float = 
             return float(default_price)
 
         return val
-    except Exception:
+    except (ValueError, TypeError):
         return float(default_price)
 
 def validate_quantity(qty: float, min_qty: float = 0.0001) -> float:
@@ -36,5 +36,5 @@ def validate_quantity(qty: float, min_qty: float = 0.0001) -> float:
         if val <= 0.0 or np.isnan(val) or np.isinf(val):
             return float(min_qty)
         return val
-    except Exception:
+    except (ValueError, TypeError):
         return float(min_qty)

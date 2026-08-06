@@ -12,6 +12,7 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional, Any, Union
 import database
 import config
+from logger import log_event
 
 def safe_float(val, default=0.0):
     if val is None or val == "MT":
@@ -580,7 +581,7 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: Op
         clamped_multiplier = max(MIN_LIQUIDITY_MULTIPLIER, min(1.0, float(final_score)))
         return round(float(clamped_multiplier), 4)
     except Exception as e:
-        print(f"[Liquidity Guard Warning] Dynamic orderbook score error for {symbol}: {e}")
+        log_event("WARNING", f"[Liquidity Guard Warning] Dynamic orderbook score error for {symbol}: {e}")
         return 0.0
 
 
@@ -630,7 +631,7 @@ def calibrate_almgren_chriss_gamma(execution_telemetry: list, current_gamma: flo
         with open(audit_file, "w") as f:
             json.dump(history[-100:], f, indent=2)
     except Exception as ex:
-        print(f"[Almgren-Chriss Audit Warning] Failed to write calibration record: {ex}")
+        log_event("WARNING", f"[Almgren-Chriss Audit Warning] Failed to write calibration record: {ex}")
 
     return record
 
