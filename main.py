@@ -2203,7 +2203,7 @@ def start_telegram_command_listener():
                                 instant_cpu = psutil.cpu_percent(interval=0.2)
                                 cpu_count = os.cpu_count() or 1
                                 load1, load5, _ = os.getloadavg() if hasattr(os, 'getloadavg') else (0.1, 0.1, 0.1)
-                                if instant_cpu <= 0.0:
+                                if instant_cpu <= 0.0 and load1 > 0:
                                     instant_cpu = min(100.0, (load1 / cpu_count) * 100.0)
                                 cpu_str = f"{instant_cpu:.1f}% (5m Load: {load5:.2f})"
                                 mem = psutil.virtual_memory()
