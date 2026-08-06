@@ -30,24 +30,33 @@ class TestTradeIDIntegrity(unittest.TestCase):
             "fill_pct": 100.0
         }
 
-        # Save trade 1
-        database.save_completed_trade(test_trade_1)
+        try:
+            # Save trade 1
+            database.save_completed_trade(test_trade_1)
 
-        # Create trade 2 with the SAME trade_id
-        test_trade_2 = dict(test_trade_1)
-        test_trade_2["reason"] = "TAKE PROFIT 2 (DIFFERENT TRADE)"
+            # Create trade 2 with the SAME trade_id
+            test_trade_2 = dict(test_trade_1)
+            test_trade_2["reason"] = "TAKE PROFIT 2 (DIFFERENT TRADE)"
 
-        # Save trade 2 -> should catch IntegrityError and regenerate fresh unique trade_id
-        database.save_completed_trade(test_trade_2)
+            # Save trade 2 -> should catch IntegrityError and regenerate fresh unique trade_id
+            database.save_completed_trade(test_trade_2)
 
-        # Query database to confirm BOTH trades exist (neither was overwritten!)
-        conn = database.get_db_connection()
-        rows = conn.execute("SELECT trade_id, reason FROM completed_trades WHERE symbol = 'BTCUSDT' AND entry_price = 50000.0;").fetchall()
-        conn.close()
+            # Query database to confirm BOTH trades exist (neither was overwritten!)
+            conn = database.get_db_connection()
+            rows = conn.execute("SELECT trade_id, reason FROM completed_trades WHERE symbol = 'BTCUSDT' AND entry_price = 50000.0;").fetchall()
+            conn.close()
 
-        self.assertGreaterEqual(len(rows), 2)
-        # Assert full UUID string length is > 20 chars
-        self.assertGreater(len(test_trade_2["trade_id"]), 20)
+            self.assertGreaterEqual(len(rows), 2)
+            # Assert full UUID string length is > 20 chars
+            self.assertGreater(len(test_trade_2["trade_id"]), 20)
+        finally:
+            try:
+                conn = database.get_db_connection()
+                conn.execute("DELETE FROM completed_trades WHERE entry_price = 50000.0 AND pnl_usd = 20.0;")
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     unittest.main()
