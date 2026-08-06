@@ -3432,8 +3432,8 @@
             let totalProfit = 0;
             let totalInvested = 0;
             allTrades.forEach(t => {
-                totalProfit += t.pnl_usd || 0;
-                totalInvested += t.position_size_usd || 0;
+                totalProfit += parseFloat(t.pnl_usd) || 0;
+                totalInvested += parseFloat(t.position_size_usd) || 0;
             });
 
             const valueElem = document.getElementById("daily-pnl-value");
@@ -3468,7 +3468,7 @@
             const dailyGroups = {};
             allTrades.forEach(t => {
                 const dateStr = getPktDateStr(t.exit_time);
-                dailyGroups[dateStr] = (dailyGroups[dateStr] || 0) + (t.pnl_usd || 0);
+                dailyGroups[dateStr] = (dailyGroups[dateStr] || 0) + (parseFloat(t.pnl_usd) || 0);
             });
 
             // Sort dates descending
