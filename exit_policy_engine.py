@@ -453,12 +453,16 @@ class ExitPolicyEngine:
         risk_dist = abs(entry_price - stop_loss) if abs(entry_price - stop_loss) > 1e-6 else 1.0
         current_r = round(pnl_dist / risk_dist, 2)
 
-        # Recommendation 5: Regime-Adaptive Time Decay Rate
-        decay_rate = 0.10 if "TRENDING" in current_regime.upper() else (0.25 if "RANGING" in current_regime.upper() else 0.40)
+        # M-1: Timeframe & Regime-Adaptive Time Decay Rate
+        decay_policy = getattr(config, "TIME_DECAY_POLICY", {})
+        regime_key = "trending" if "TRENDING" in current_regime.upper() else ("ranging" if "RANGING" in current_regime.upper() else "unknown")
+        tf_map = decay_policy.get(regime_key, {})
+        decay_rate = float(tf_map.get(tf_clean, tf_map.get("default", 0.10)))
         age_ratio = float(candles_elapsed) / max(1, soft_limit)
         
-        # Recommendation 2: Time decay affects Expected R only
-        decay_factor = max(0.20, 1.0 - decay_rate * max(0.0, age_ratio - 1.0))
+        # M-2: Time Decay Floor Governance Policy (decay floor falls to 0.0 once hard limit exceeded)
+        decay_floor = float(getattr(config, "TIME_DECAY_FLOOR_EXCEEDED", 0.00)) if candles_elapsed > hard_limit else float(getattr(config, "TIME_DECAY_FLOOR", 0.20))
+        decay_factor = max(decay_floor, 1.0 - decay_rate * max(0.0, age_ratio - 1.0))
         decayed_expected_r = round(expected_r * decay_factor, 3)
 
         # H-1: Unified Exit Score Policy & Continuous Ramping
@@ -609,11 +613,18 @@ class PortfolioUtilityOptimizer:
         scale_out_list = []
         prioritize_list = []
 
+        import config
+        util_policy = getattr(config, "PORTFOLIO_UTILITY_POLICY", {})
+        loss_cutoff = util_policy.get("loss_utility_cutoff", -2.0)
+        min_util = util_policy.get("min_utility_threshold", 0.20)
+        max_stag = util_policy.get("max_stagnant_candles", 15)
+        scaleout_util = util_policy.get("scaleout_utility_threshold", 0.50)
+
         total_trades = len(ranked_trades)
         for idx, (t_id, util, t_data) in enumerate(ranked_trades):
-            if util < -2.0 or (util < 0.2 and t_data.get("candles_elapsed", 0) > 15):
+            if util < loss_cutoff or (util < min_util and t_data.get("candles_elapsed", 0) > max_stag):
                 close_list.append(t_id)
-            elif idx >= total_trades // 2 and util < 0.5 and not t_data.get("half_closed", False):
+            elif idx >= total_trades // 2 and util < scaleout_util and not t_data.get("half_closed", False):
                 scale_out_list.append(t_id)
             else:
                 prioritize_list.append(t_id)

@@ -108,6 +108,27 @@ EXIT_SCORE_POLICY: dict = {
 ATR_TIMEOUT_SENSITIVITY: float = 5.0
 ATR_TIMEOUT_MAX_ADJ: float = 2.0
 
+# M-1: Timeframe & Regime-Adaptive Time Decay Policy
+TIME_DECAY_POLICY: dict = {
+    "trending": {"15": 0.15, "30": 0.12, "60": 0.10, "120": 0.08, "240": 0.05, "default": 0.10},
+    "ranging":  {"15": 0.30, "30": 0.28, "60": 0.25, "120": 0.20, "240": 0.15, "default": 0.25},
+    "unknown":  {"15": 0.45, "30": 0.42, "60": 0.40, "120": 0.35, "240": 0.30, "default": 0.40},
+}
+
+# M-2: Time Decay Floor Governance Policy
+TIME_DECAY_FLOOR: float = 0.20
+TIME_DECAY_FLOOR_EXCEEDED: float = 0.00
+
+# M-3: Portfolio Utility Capital Allocation Policy
+PORTFOLIO_UTILITY_POLICY: dict = {
+    "min_utility_threshold": 0.20,
+    "max_stagnant_candles": 15,
+    "scaleout_utility_threshold": 0.50,
+    "loss_utility_cutoff": -2.0,
+    "portfolio_heat_max": 0.80,
+    "runner_boost_multiplier": 1.20,
+}
+
 
 
 # H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).
