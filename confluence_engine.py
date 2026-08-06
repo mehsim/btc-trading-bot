@@ -303,8 +303,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         c1 = df_1h.iloc[-1]
         c2 = df_1h.iloc[-2]
         c3 = df_1h.iloc[-3]
-        is_red = [c1["close"] < c1["open"], c2["close"] < c2["open"], c3["close"] < c3["open"]]
-        is_green = [c1["close"] > c1["open"], c2["close"] > c2["open"], c3["close"] > c3["open"]]
+        c1_c, c1_o = float(c1["close"]), float(c1["open"])
+        c2_c, c2_o = float(c2["close"]), float(c2["open"])
+        c3_c, c3_o = float(c3["close"]), float(c3["open"])
+        is_red = [c1_c < c1_o, c2_c < c2_o, c3_c < c3_o]
+        is_green = [c1_c > c1_o, c2_c > c2_o, c3_c > c3_o]
         is_bullish = ml_trend in ["Bullish", "BUY", "LONG", "UP"]
         is_bearish = ml_trend in ["Bearish", "SELL", "SHORT", "DOWN"]
         if is_bullish:

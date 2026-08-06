@@ -384,7 +384,9 @@ class SignalEvaluator:
         with self.state_lock:
             pred_info = dict(self.bot_state.get(f"latest_prediction_{tf_key}", {}))
             ofi = self.bot_state.get("latest_ofi")
-            sentiment = self.bot_state.get("latest_sentiment_score") or (last_row["fear_greed"] if "fear_greed" in last_row and not np.isnan(last_row["fear_greed"]) else None)
+            fg_raw = last_row.get("fear_greed")
+            fg_val = float(fg_raw) if (fg_raw is not None and not pd.isna(pd.to_numeric(fg_raw, errors="coerce"))) else None
+            sentiment = self.bot_state.get("latest_sentiment_score") or fg_val
             pred_15 = self.bot_state.get("latest_prediction_15m", {}).get("direction")
             pred_1h = self.bot_state.get("latest_prediction_1h", {}).get("direction")
 
