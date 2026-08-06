@@ -1192,10 +1192,10 @@
                 </div>
                 <div style="display: flex; gap: 12px; font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">
                     <div>Conf: <strong id="ai-decision-conf" style="color: var(--accent-blue);">82.5%</strong></div>
-                    <div>Regime: <strong id="ai-decision-regime" style="color: var(--accent-purple);">Trending (ADX 32.4)</strong></div>
+                    <div>Regime: <strong id="ai-decision-regime" style="color: var(--accent-purple);">—</strong></div>
                 </div>
                 <div id="shadow-note-line" style="font-size: 11px; color: var(--accent-orange); margin-bottom: 8px;">
-                    Shadow Model: <strong id="shadow-note-val" style="color: var(--accent-orange);">BEARISH (83.1% Conf - 0% Real Capital)</strong>
+                    Shadow Model: <strong id="shadow-note-val" style="color: var(--accent-orange);">—</strong>
                 </div>
                 <div id="ai-decision-rationale" style="font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px; line-height: 1.4;">
                     Champion Model: Hold (Net Utility E[U] <= 0) | Shadow Candidate: BEARISH Signal (0% Allocation)
@@ -1213,15 +1213,15 @@
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
                     <div>
                         <div style="color: var(--text-secondary); font-size: 11px;">Portfolio VaR (99%)</div>
-                        <div id="risk-var-val" style="font-size: 16px; font-weight: 800; color: var(--accent-orange); margin-top: 2px;">$420.50 (1.69%)</div>
+                        <div id="risk-var-val" style="font-size: 16px; font-weight: 800; color: var(--accent-orange); margin-top: 2px;">—</div>
                     </div>
                     <div>
                         <div style="color: var(--text-secondary); font-size: 11px;">Portfolio Heat</div>
-                        <div id="risk-heat-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green); margin-top: 2px;">0.24 / 0.80</div>
+                        <div id="risk-heat-val" style="font-size: 16px; font-weight: 800; color: var(--accent-green); margin-top: 2px;">—</div>
                     </div>
                     <div>
                         <div style="color: var(--text-secondary); font-size: 11px;">Gross Exposure</div>
-                        <div id="risk-exposure-val" style="font-size: 16px; font-weight: 800; color: var(--accent-blue); margin-top: 2px;">$24,850.40 USD</div>
+                        <div id="risk-exposure-val" style="font-size: 16px; font-weight: 800; color: var(--accent-blue); margin-top: 2px;">—</div>
                     </div>
                     <div>
                         <div style="color: var(--text-secondary); font-size: 11px;">Max Intraday DD</div>
@@ -1437,13 +1437,13 @@
                                 <span>Live Reality Gap</span>
                                 <span id="reality-gap-status-badge" style="font-size: 9px; font-weight: 700; color: var(--accent-blue); background: rgba(59,130,246,0.15); padding: 3px 8px; border-radius: 6px;">MONITORING</span>
                             </div>
-                            <div class="card-value color-bullish" id="reality-gap-pct-val" style="font-size: 26px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">2.4%</div>
+                            <div class="card-value" id="reality-gap-pct-val" style="font-size: 26px; margin-top: 4px; font-weight: 800; font-family: 'Outfit', sans-serif;">—</div>
                         </div>
                         <div style="margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
-                            <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">3.5 bps</strong></div>
-                            <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">48 ms</strong></div>
-                            <div>Fill: <strong id="reality-fill-val" style="color: var(--accent-green);">98.2%</strong></div>
-                            <div>Exp/Act: <strong id="reality-pf-val" style="color: var(--text-primary);">1.38 / 1.31</strong></div>
+                            <div>Slippage: <strong id="reality-slippage-val" style="color: var(--text-primary);">—</strong></div>
+                            <div>Latency: <strong id="reality-latency-val" style="color: var(--text-primary);">—</strong></div>
+                            <div>Fill: <strong id="reality-fill-val" style="color: var(--accent-green);">—</strong></div>
+                            <div>Exp/Act: <strong id="reality-pf-val" style="color: var(--text-primary);">—</strong></div>
                         </div>
                     </div>
                 </div>
@@ -1457,49 +1457,49 @@
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Profit Factor</div>
-                                <div id="lp-pf-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">1.38</div>
+                                <div id="lp-pf-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Expectancy</div>
-                                <div id="lp-exp-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">+0.42R</div>
+                                <div id="lp-exp-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Sharpe Ratio</div>
-                                <div id="lp-sharpe-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.45</div>
+                                <div id="lp-sharpe-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Sortino Ratio</div>
-                                <div id="lp-sortino-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">1.88</div>
+                                <div id="lp-sortino-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-purple);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Calmar Ratio</div>
-                                <div id="lp-calmar-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">42.5</div>
+                                <div id="lp-calmar-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Recovery Factor</div>
-                                <div id="lp-recovery-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">9.20</div>
+                                <div id="lp-recovery-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-blue);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Win Rate</div>
-                                <div id="lp-wr-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">49.5%</div>
+                                <div id="lp-wr-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-green);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Risk Reward</div>
-                                <div id="lp-rr-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">1.61</div>
+                                <div id="lp-rr-mid" style="font-size: 18px; font-weight: 800; color: var(--accent-orange);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Avg Winner</div>
-                                <div id="lp-avgwin-mid" style="font-size: 17px; font-weight: 800; color: var(--accent-green);">+$1.85</div>
+                                <div id="lp-avgwin-mid" style="font-size: 17px; font-weight: 800; color: var(--accent-green);">—</div>
                             </div>
                             <div class="stat-tile">
                                 <div class="stat-tile-label">Avg Loser</div>
-                                <div id="lp-avgloss-mid" style="font-size: 17px; font-weight: 800; color: var(--accent-red);">-$1.15</div>
+                                <div id="lp-avgloss-mid" style="font-size: 17px; font-weight: 800; color: var(--accent-red);">—</div>
                             </div>
                         </div>
                     </div>
                     <div style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary);">
                         <span>Trades (Today/Wk/Mo):</span>
-                        <strong id="lp-trades-mid" style="color: var(--accent-purple);">6 / 28 / 112</strong>
+                        <strong id="lp-trades-mid" style="color: var(--accent-purple);">—</strong>
                     </div>
                 </div>
             </div>
@@ -1726,15 +1726,15 @@
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;">
                         <div class="stat-tile">
                             <div class="stat-tile-label">Profit Factor</div>
-                            <div id="lp-pf" class="stat-tile-val" style="color: var(--accent-green);">1.38</div>
+                            <div id="lp-pf" class="stat-tile-val" style="color: var(--accent-green);">—</div>
                         </div>
                         <div class="stat-tile">
                             <div class="stat-tile-label">Expectancy</div>
-                            <div id="lp-exp" class="stat-tile-val" style="color: var(--accent-blue);">+0.42R</div>
+                            <div id="lp-exp" class="stat-tile-val" style="color: var(--accent-blue);">—</div>
                         </div>
                         <div class="stat-tile">
                             <div class="stat-tile-label">Sharpe Ratio</div>
-                            <div id="lp-sharpe" class="stat-tile-val" style="color: var(--accent-purple);">1.45</div>
+                            <div id="lp-sharpe" class="stat-tile-val" style="color: var(--accent-purple);">—</div>
                         </div>
                         <div class="stat-tile">
                             <div class="stat-tile-label">Sortino Ratio</div>
@@ -2874,8 +2874,8 @@
 
                         if (aiAct) aiAct.innerText = champ.action || "ABSTAIN / HOLD (Capital Preserved)";
                         if (aiConf) aiConf.innerText = `${champ.confidence_pct || 0.0}%`;
-                        if (aiRegime) aiRegime.innerText = champ.regime || "Trending (ADX 32.4)";
-                        if (shadowVal) shadowVal.innerText = `${shadow.direction || 'BEARISH'} (${shadow.confidence_pct || 83.1}% Conf - 0% Real Capital)`;
+                        if (aiRegime) aiRegime.innerText = champ.regime || '—';
+                        if (shadowVal) shadowVal.innerText = shadow.direction ? `${shadow.direction} (${shadow.confidence_pct}% Conf - 0% Real Capital)` : '—';
                         if (aiRationale) aiRationale.innerText = champ.rationale || "Net Expected Utility E[U] <= 0 -> Real Capital Preserved";
                     }
 
@@ -2885,10 +2885,10 @@
                         const riskHeat = document.getElementById("risk-heat-val");
                         const riskExp = document.getElementById("risk-exposure-val");
                         const riskMdd = document.getElementById("risk-mdd-val");
-                        if (riskVar) riskVar.innerText = `$${data.risk_summary.portfolio_var_99_usd || '420.50'} (${data.risk_summary.portfolio_var_99_pct || '1.69'}%)`;
-                        if (riskHeat) riskHeat.innerText = `${data.risk_summary.portfolio_heat_ratio || '0.24'} / ${data.risk_summary.portfolio_heat_max || '0.80'}`;
-                        if (riskExp) riskExp.innerText = `$${(data.risk_summary.gross_exposure_usd || 24850.40).toLocaleString()} USD`;
-                        if (riskMdd) riskMdd.innerText = `${data.risk_summary.max_drawdown_pct || '-1.2'}%`;
+                        if (riskVar) riskVar.innerText = data.risk_summary.portfolio_var_99_usd != null ? `$${data.risk_summary.portfolio_var_99_usd} (${data.risk_summary.portfolio_var_99_pct}%)` : '—';
+                        if (riskHeat) riskHeat.innerText = data.risk_summary.portfolio_heat_ratio != null ? `${data.risk_summary.portfolio_heat_ratio} / ${data.risk_summary.portfolio_heat_max}` : '—';
+                        if (riskExp) riskExp.innerText = data.risk_summary.gross_exposure_usd != null ? `$${parseFloat(data.risk_summary.gross_exposure_usd).toLocaleString()} USD` : '—';
+                        if (riskMdd) riskMdd.innerText = data.risk_summary.max_drawdown_pct != null ? `${data.risk_summary.max_drawdown_pct}%` : '—';
                     }
 
                     // Dynamically update Recent Alerts Card
@@ -3823,17 +3823,17 @@
                             const ex = shData.execution || {};
                             const rk = shData.risk || {};
 
-                            if (document.getElementById("sh-champ")) document.getElementById("sh-champ").innerText = gov.champion_policy || "policy_v3.0.0";
-                            if (document.getElementById("sh-shadow")) document.getElementById("sh-shadow").innerText = gov.shadow_policy || "policy_v4.0.0";
-                            if (document.getElementById("sh-rollback")) document.getElementById("sh-rollback").innerText = gov.rollback_target || "policy_v2.0.0";
-                            if (document.getElementById("sh-engine")) document.getElementById("sh-engine").innerText = gov.engine_version || "3.0.0";
-                            if (document.getElementById("sh-gate")) document.getElementById("sh-gate").innerText = gov.release_gate_status || "PASSED (8/8)";
+                            if (document.getElementById("sh-champ")) document.getElementById("sh-champ").innerText = gov.champion_policy || '—';
+                            if (document.getElementById("sh-shadow")) document.getElementById("sh-shadow").innerText = gov.shadow_policy || '—';
+                            if (document.getElementById("sh-rollback")) document.getElementById("sh-rollback").innerText = gov.rollback_target || '—';
+                            if (document.getElementById("sh-engine")) document.getElementById("sh-engine").innerText = gov.engine_version || '—';
+                            if (document.getElementById("sh-gate")) document.getElementById("sh-gate").innerText = gov.release_gate_status || '—';
 
-                            if (document.getElementById("sh-pf30")) document.getElementById("sh-pf30").innerText = stat.rolling_pf_30 || "1.84";
-                            if (document.getElementById("sh-exp")) document.getElementById("sh-exp").innerText = stat.rolling_expectancy_r || "+0.36R";
-                            if (document.getElementById("sh-sqn")) document.getElementById("sh-sqn").innerText = stat.sqn || "5.42";
-                            if (document.getElementById("sh-mar")) document.getElementById("sh-mar").innerText = stat.mar_ratio || "4.85";
-                            if (document.getElementById("sh-ulcer")) document.getElementById("sh-ulcer").innerText = stat.ulcer_index || "1.12";
+                            if (document.getElementById("sh-pf30")) document.getElementById("sh-pf30").innerText = stat.rolling_pf_30 || '—';
+                            if (document.getElementById("sh-exp")) document.getElementById("sh-exp").innerText = stat.rolling_expectancy_r || '—';
+                            if (document.getElementById("sh-sqn")) document.getElementById("sh-sqn").innerText = stat.sqn || '—';
+                            if (document.getElementById("sh-mar")) document.getElementById("sh-mar").innerText = stat.mar_ratio || '—';
+                            if (document.getElementById("sh-ulcer")) document.getElementById("sh-ulcer").innerText = stat.ulcer_index || '—';
 
                             if (document.getElementById("sh-psi")) document.getElementById("sh-psi").innerText = dr.psi_score || "0.04";
                             if (document.getElementById("sh-ece")) { let ev = dr.ece_score !== undefined ? dr.ece_score : "3.8"; document.getElementById("sh-ece").innerText = String(ev).includes('%') ? ev : `${ev}%`; }
@@ -3841,18 +3841,18 @@
                             if (document.getElementById("sh-fdrift")) document.getElementById("sh-fdrift").innerText = dr.feature_drift_status || "Normal";
                             if (document.getElementById("sh-rdrift")) document.getElementById("sh-rdrift").innerText = dr.regime_drift_status || "Normal";
 
-                            if (document.getElementById("sh-exeff")) document.getElementById("sh-exeff").innerText = ex.exit_efficiency_pct || "74.2%";
-                            if (document.getElementById("sh-opploss")) document.getElementById("sh-opploss").innerText = ex.opportunity_loss_r || "0.41R";
-                            if (document.getElementById("sh-mfemae")) document.getElementById("sh-mfemae").innerText = `${ex.avg_mfe_r || '2.41R'} / ${ex.avg_mae_r || '0.88R'}`;
-                            if (document.getElementById("sh-slippage")) document.getElementById("sh-slippage").innerText = ex.fill_slippage_pct || "0.04%";
-                            if (document.getElementById("sh-makertaker")) document.getElementById("sh-makertaker").innerText = ex.maker_taker_ratio || "0.82";
-                            if (document.getElementById("mk-atr-override")) document.getElementById("mk-atr-override").innerText = ex.atr_override_rate_r30 || "0.0%";
+                            if (document.getElementById("sh-exeff")) document.getElementById("sh-exeff").innerText = ex.exit_efficiency_pct || '—';
+                            if (document.getElementById("sh-opploss")) document.getElementById("sh-opploss").innerText = ex.opportunity_loss_r || '—';
+                            if (document.getElementById("sh-mfemae")) document.getElementById("sh-mfemae").innerText = (ex.avg_mfe_r && ex.avg_mae_r) ? `${ex.avg_mfe_r} / ${ex.avg_mae_r}` : '—';
+                            if (document.getElementById("sh-slippage")) document.getElementById("sh-slippage").innerText = ex.fill_slippage_pct || '—';
+                            if (document.getElementById("sh-makertaker")) document.getElementById("sh-makertaker").innerText = ex.maker_taker_ratio || '—';
+                            if (document.getElementById("mk-atr-override")) document.getElementById("mk-atr-override").innerText = ex.atr_override_rate_r30 || '—';
 
-                            if (document.getElementById("sh-cdd")) document.getElementById("sh-cdd").innerText = rk.current_drawdown_pct || "2.4%";
-                            if (document.getElementById("sh-ddd")) document.getElementById("sh-ddd").innerText = rk.daily_drawdown_pct || "0.8%";
-                            if (document.getElementById("sh-expo")) document.getElementById("sh-expo").innerText = rk.portfolio_exposure_pct || "15.0%";
-                            if (document.getElementById("sh-orisk")) document.getElementById("sh-orisk").innerText = rk.open_risk_pct || "0.85%";
-                            if (document.getElementById("sh-corr")) document.getElementById("sh-corr").innerText = rk.correlation_exposure || "Low";
+                            if (document.getElementById("sh-cdd")) document.getElementById("sh-cdd").innerText = rk.current_drawdown_pct || '—';
+                            if (document.getElementById("sh-ddd")) document.getElementById("sh-ddd").innerText = rk.daily_drawdown_pct || '—';
+                            if (document.getElementById("sh-expo")) document.getElementById("sh-expo").innerText = rk.portfolio_exposure_pct || '—';
+                            if (document.getElementById("sh-orisk")) document.getElementById("sh-orisk").innerText = rk.open_risk_pct || '—';
+                            if (document.getElementById("sh-corr")) document.getElementById("sh-corr").innerText = rk.correlation_exposure || '—';
                         }
                     }).catch(e => {});
 
