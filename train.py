@@ -1532,81 +1532,83 @@ def train_models(interval=INTERVAL, pages=PAGES):
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+        else:
+            print(f"  [Champion-Challenger] Champion retained. Updating manifest with latest evaluation metrics...")
 
-            # Write/update governance manifest with complete cv_metrics block
-            _pipeline_git_sha = _chal_git_sha
-            holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
+        # Write/update governance manifest with complete cv_metrics block and sample uniqueness metrics
+        _pipeline_git_sha = _chal_git_sha
+        holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
 
-            cv_metrics_block = {
-                "metrics_schema_version": 1,
-                "balanced_accuracy": safe_stat(primary_bal_accuracies),
-                "macro_f1": safe_stat(primary_macro_f1s),
-                "mcc": safe_stat(primary_mccs),
-                "mean_kappa": mean_kappa,
-                "mean_pr_auc_bear": mean_pr_auc_bear,
-                "mean_pr_auc_bull": mean_pr_auc_bull,
-                "mean_raw_accuracy": round(mean_cv_acc, 4),
-                "mean_mae": round(mean_cv_mae, 6),
-                "label_dist_bearish_pct": round(bear_pct, 2),
-                "label_dist_neutral_pct": round(neut_pct, 2),
-                "label_dist_bullish_pct": round(bull_pct, 2),
-                "n_training_samples": len(X),
-                "n_holdout_samples": len(X_holdout),
-                "effective_sample_size": round(effective_n, 2),
-                "raw_sample_size": int(len(y_trend)),
-                "uniqueness_ratio": round((effective_n / max(1, len(y_trend))), 4),
-                "confusion_matrix": {
-                    "labels": ["Bearish", "Neutral", "Bullish"],
-                    "label_ids": [0, 1, 2],
-                    "matrix": cm.tolist()
-                },
-                "holdout_accuracy": round(holdout_raw_acc, 4),
-                "holdout_balanced_accuracy": round(chal_acc, 4),
-                "holdout_brier": round(chal_brier, 4),
-                "holdout_ece": round(chal_ece, 4),
-                "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
-                "training_pipeline_version": "v7.2.0",
-                "git_sha": _pipeline_git_sha
-            }
+        cv_metrics_block = {
+            "metrics_schema_version": 1,
+            "balanced_accuracy": safe_stat(primary_bal_accuracies),
+            "macro_f1": safe_stat(primary_macro_f1s),
+            "mcc": safe_stat(primary_mccs),
+            "mean_kappa": mean_kappa,
+            "mean_pr_auc_bear": mean_pr_auc_bear,
+            "mean_pr_auc_bull": mean_pr_auc_bull,
+            "mean_raw_accuracy": round(mean_cv_acc, 4),
+            "mean_mae": round(mean_cv_mae, 6),
+            "label_dist_bearish_pct": round(bear_pct, 2),
+            "label_dist_neutral_pct": round(neut_pct, 2),
+            "label_dist_bullish_pct": round(bull_pct, 2),
+            "n_training_samples": len(X),
+            "n_holdout_samples": len(X_holdout),
+            "effective_sample_size": round(effective_n, 2),
+            "raw_sample_size": int(len(y_trend)),
+            "uniqueness_ratio": round((effective_n / max(1, len(y_trend))), 4),
+            "confusion_matrix": {
+                "labels": ["Bearish", "Neutral", "Bullish"],
+                "label_ids": [0, 1, 2],
+                "matrix": cm.tolist()
+            },
+            "holdout_accuracy": round(holdout_raw_acc, 4),
+            "holdout_balanced_accuracy": round(chal_acc, 4),
+            "holdout_brier": round(chal_brier, 4),
+            "holdout_ece": round(chal_ece, 4),
+            "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
+            "training_pipeline_version": "v7.2.0",
+            "git_sha": _pipeline_git_sha
+        }
 
-            from ensemble import get_manifest_hmac_secret
-            import hmac
-            now_iso = datetime.now(timezone.utc).isoformat()
-            eff_n_val = round(effective_n, 2) if 'effective_n' in locals() else float(len(X))
-            uniq_ratio_val = round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0
-            raw_n_val = int(len(y_trend))
+        from ensemble import get_manifest_hmac_secret
+        import hmac
+        now_iso = datetime.now(timezone.utc).isoformat()
+        eff_n_val = round(effective_n, 2) if 'effective_n' in locals() else float(len(X))
+        uniq_ratio_val = round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0
+        raw_n_val = int(len(y_trend))
 
-            for m_prefix in [c_prefix_t, c_prefix_p]:
-                manifest_path = f"{m_prefix}_manifest.json"
-                try:
-                    manifest_data = {}
-                    if os.path.exists(manifest_path):
-                        with open(manifest_path, "r") as mf:
-                            manifest_data = json.load(mf)
-                    manifest_data["cv_metrics"] = cv_metrics_block
-                    manifest_data["git_sha"] = _pipeline_git_sha
-                    manifest_data["timestamp"] = now_iso
-                    if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
-                        manifest_data["metrics"] = {}
-                    manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
-                    manifest_data["metrics"]["effective_sample_size"] = eff_n_val
-                    manifest_data["metrics"]["raw_sample_size"] = raw_n_val
+        for m_prefix in [c_prefix_t, c_prefix_p]:
+            manifest_path = f"{m_prefix}_manifest.json"
+            try:
+                manifest_data = {}
+                if os.path.exists(manifest_path):
+                    with open(manifest_path, "r") as mf:
+                        manifest_data = json.load(mf)
+                manifest_data["cv_metrics"] = cv_metrics_block
+                manifest_data["git_sha"] = _pipeline_git_sha
+                manifest_data["timestamp"] = now_iso
+                if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
+                    manifest_data["metrics"] = {}
+                manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
+                manifest_data["metrics"]["effective_sample_size"] = eff_n_val
+                manifest_data["metrics"]["raw_sample_size"] = raw_n_val
 
-                    def _json_safe(o):
-                        if isinstance(o, (np.integer,)): return int(o)
-                        if isinstance(o, (np.floating,)): return float(o)
-                        if isinstance(o, np.ndarray): return o.tolist()
-                        raise TypeError(f"Unserialisable: {type(o)}")
+                def _json_safe(o):
+                    if isinstance(o, (np.integer,)): return int(o)
+                    if isinstance(o, (np.floating,)): return float(o)
+                    if isinstance(o, np.ndarray): return o.tolist()
+                    raise TypeError(f"Unserialisable: {type(o)}")
 
-                    hmac_key = get_manifest_hmac_secret()
-                    manifest_data.pop("hmac_signature", None)
-                    canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
-                    manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
+                hmac_key = get_manifest_hmac_secret()
+                manifest_data.pop("hmac_signature", None)
+                canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
+                manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                    with open(manifest_path, "w") as mf:
-                        json.dump(manifest_data, mf, indent=2, default=_json_safe)
-                except Exception as ex_man:
-                    log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
+                with open(manifest_path, "w") as mf:
+                    json.dump(manifest_data, mf, indent=2, default=_json_safe)
+            except Exception as ex_man:
+                log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
 
             print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
