@@ -6981,18 +6981,7 @@ def recover_missed_closed_trades():
             print(f"[Crash Recovery Scan Error] for {symbol}: {err}")
 
 def execute_bybit_trade_async(*args, **kwargs):
-    symbol = args[0] if args else "Unknown"
-    try:
-        _execute_bybit_trade_async_inner(*args, **kwargs)
-    except Exception as e:
-        import traceback
-        err_msg = str(e)
-        print(f"[CRITICAL EXECUTION ERROR] Async trade execution failed for {symbol}: {err_msg}")
-        traceback.print_exc()
-        send_telegram_alert(f"🚨 *Async Trade Execution Error* 🚨\n• Symbol: `{symbol}`\n• Error: `{err_msg}`")
-    finally:
-        with active_execution_lock:
-            active_execution_symbols.discard(symbol)
+    return trading_engine.execute_bybit_trade_async(*args, **kwargs)
 
 def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False):
 

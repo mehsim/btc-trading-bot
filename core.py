@@ -89,10 +89,10 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
     - Label 0 (Bearish Win): TP hit before SL for Short
     - Label 1 (Neutral): Neither barrier hit or SL hit before TP
     """
-    cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10, "sl_mult": 1.5, "tp_mult_ranging": 1.5, "tp_mult_trending": 2.5})
+    cfg = TIMEFRAME_CONFIG.get(str(interval), TIMEFRAME_CONFIG.get("default", {}))
     lookahead = cfg.get("lookahead", 10)
-    sl_mult = cfg.get("sl_mult", 1.5)
-    tp_mult = cfg.get("tp_mult_trending", 2.5)
+    sl_mult = cfg.get("sl_mult", 1.0)
+    tp_mult = cfg.get("tp_mult_trending", 2.0)
 
     n = len(df)
     prices = df["close"].values

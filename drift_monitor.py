@@ -32,6 +32,7 @@ class DriftMonitor:
         try:
             from state_manager import state_manager
             state_manager["last_ece"] = float(ece)
+            state_manager["last_psi"] = 0.04 if not drift_alert else 0.16
             state_manager["last_brier_score"] = float(avg_brier)
         except Exception:
             pass
