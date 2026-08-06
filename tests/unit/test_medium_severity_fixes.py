@@ -71,3 +71,40 @@ def test_live_order_execution_path_resolves_config():
         # Verify active_trades in bot_state received the executed trade
         active_trades = main.bot_state.get("active_trades", [])
         assert any(t.get("trade_id") == "BTCUSDT_mock_uuid_12345" for t in active_trades)
+
+
+def test_live_order_partial_fill_reversal():
+    """M-01: Verify partial fill (<60% threshold) triggers IOC reversal and blocks trade registration."""
+    import main
+    from unittest.mock import patch, MagicMock
+    import pandas as pd
+
+    df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
+    mock_ioc = MagicMock()
+
+    with patch("main.get_all_bybit_positions", return_value=[]), \
+         patch("main.set_bybit_leverage", return_value=True), \
+         patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_partial_123"}}), \
+         patch("main.get_bybit_order_details", return_value={"orderStatus": "PartiallyFilled", "avgPrice": 50000.0, "cumExecQty": 0.008}), \
+         patch("main.place_bybit_taker_ioc_order", mock_ioc), \
+         patch("main.send_telegram_alert"), \
+         patch("main.sync_active_positions_from_bybit"):
+
+        main.bot_state["active_trades"] = [t for t in main.bot_state.get("active_trades", []) if t.get("trade_id") != "BTCUSDT_mock_partial_uuid"]
+        
+        main._execute_bybit_trade_async_inner(
+            symbol="BTCUSDT", iv="15", tf="15m", ml_trend="Bullish", leverage_val=10.0,
+            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49000.0,
+            take_profit_price=52000.0, position_size_usd=1000.0, kelly_fraction=0.1,
+            calibrated_confidence=0.8, ml_confidence=0.8, dynamic_conf_threshold=0.6,
+            latest_completed_ts=1700000000, latest_candle={"close": 50000.0, "ATR_norm": 0.005},
+            pred_change=0.01, predicted_price=50500.0, atr_dollars=250.0,
+            tp_multiplier_adjusted=2.0, sl_multiplier_adjusted=1.0, df_completed=df_mock,
+            trade_uuid="mock_partial_uuid", duration_seconds=900, active_trade_key="active_trades"
+        )
+
+        # Verify IOC order was called to reverse 0.008 partial fill
+        assert mock_ioc.called
+        # Verify position was NOT added to active_trades due to reversal
+        active_trades = main.bot_state.get("active_trades", [])
+        assert not any(t.get("trade_id") == "BTCUSDT_mock_partial_uuid" for t in active_trades)
