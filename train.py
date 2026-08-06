@@ -1068,7 +1068,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             from core import compute_sample_uniqueness
             t1_sub = pd.Series(np.arange(len(y_train_t)) + cv.lookahead, index=y_train_t.index)
             uniqueness_train = compute_sample_uniqueness(t1_sub, y_train_t.index).values
-            decay_weights = np.linspace(0.3, 1.0, len(y_train_t))
+            # H-2: exponential decay by half-life from config (not linear ramp)
+            from config import DECAY_HALF_LIFE_CONFIG, DECAY_HALF_LIFE_DEFAULT
+            _hl_days = DECAY_HALF_LIFE_CONFIG.get(str(interval), DECAY_HALF_LIFE_DEFAULT)
+            _hl_bars = _hl_days * 1440.0 / max(1, int(interval))
+            _n = len(y_train_t)
+            _age_bars = np.arange(_n - 1, -1, -1, dtype=float)  # oldest=largest
+            decay_weights = 0.5 ** (_age_bars / max(1.0, _hl_bars))
             base_w = uniqueness_train * decay_weights
             
             w_train = base_w.copy()
@@ -1318,12 +1324,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_cat_p = create_model(CatBoostRegressor, best_params_cat_p)
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
-        sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
-        decay_full = np.linspace(0.3, 1.0, len(y_trend))
+        # H-2: exponential decay (full regime dataset)
+        from config import DECAY_HALF_LIFE_CONFIG, DECAY_HALF_LIFE_DEFAULT
+        _hl_days_f = DECAY_HALF_LIFE_CONFIG.get(str(interval), DECAY_HALF_LIFE_DEFAULT)
+        _hl_bars_f = _hl_days_f * 1440.0 / max(1, int(interval))
+        _n_f = len(y_trend)
+        _age_f = np.arange(_n_f - 1, -1, -1, dtype=float)
+        decay_full = 0.5 ** (_age_f / max(1.0, _hl_bars_f))
         sample_weight_full = sample_weight_full * decay_full
-        
+
         sample_weight_train_last = compute_sample_weight(class_weight='balanced', y=y_train_t)
-        decay_train_last = np.linspace(0.3, 1.0, len(y_train_t))
+        # H-2: exponential decay (last train fold)
+        _n_tl = len(y_train_t)
+        _age_tl = np.arange(_n_tl - 1, -1, -1, dtype=float)
+        decay_train_last = 0.5 ** (_age_tl / max(1.0, _hl_bars_f))
         sample_weight_train_last = sample_weight_train_last * decay_train_last
         
         final_ensemble_t.fit(

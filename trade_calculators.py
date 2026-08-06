@@ -971,26 +971,39 @@ class TransactionCostModel:
     """
     Transaction Cost Model (TCM).
     Estimates total execution cost in basis points (fees + slippage + market impact).
+
+    C-1 fix: market_impact_bps uses Almgren-Chriss sqrt-law (gamma * sqrt(Q/ADV))
+             rather than a hardcoded 0.5 constant — cost now grows with order size.
+    C-2 fix: volume_24h_usd has no default so callers must pass the symbol's real ADV;
+             a missing value raises TypeError instead of silently using BTC's liquidity.
+    gamma = 2.5 bps (calibrated baseline; update from execution telemetry monthly).
     """
+    GAMMA_BPS: float = 2.5  # Almgren-Chriss impact coefficient — calibrate against telemetry
+    GAMMA_CALIBRATION_DATE: str = "2026-08-06"
+
     @staticmethod
     def estimate_transaction_cost(
-        order_size_usd: float = 1000.0,
-        volume_24h_usd: float = 50_000_000.0,
-        is_maker: bool = True
+        order_size_usd: float,
+        volume_24h_usd: float,  # C-2: required — no default; must be per-symbol live ADV
+        is_maker: bool = True,
+        gamma_bps: float = 2.5,  # C-1: Almgren-Chriss impact coefficient
     ) -> Dict[str, float]:
+        adv = max(1.0, volume_24h_usd)
         fee_bps = 2.0 if is_maker else 5.5
-        slippage_bps = max(0.5, 3.5 * (order_size_usd / max(1.0, volume_24h_usd))**0.5)
-        market_impact_bps = 0.5
+        slippage_bps = max(0.5, 3.5 * (order_size_usd / adv) ** 0.5)
+        # C-1: dynamic impact — grows as sqrt(participation rate)
+        market_impact_bps = gamma_bps * (order_size_usd / adv) ** 0.5
         total_cost_bps = round(fee_bps + slippage_bps + market_impact_bps, 2)
         return {
             "fee_bps": fee_bps,
-            "slippage_bps": round(slippage_bps, 2),
-            "market_impact_bps": market_impact_bps,
-            "total_cost_bps": total_cost_bps
+            "slippage_bps": round(slippage_bps, 4),
+            "market_impact_bps": round(market_impact_bps, 4),
+            "total_cost_bps": total_cost_bps,
         }
 
 
 transaction_cost_model = TransactionCostModel()
+
 
 
 def calculate_break_even_stop(

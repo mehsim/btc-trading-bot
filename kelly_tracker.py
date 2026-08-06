@@ -36,14 +36,18 @@ class KellyTracker:
             except Exception as e:
                 print(f"[KellyTracker Error] Failed to save trade history: {e}")
 
-    def log_trade(self, symbol: str, timeframe: str, pnl_usd: float, return_pct: float):
-        """Logs a completed trade outcome."""
+    def log_trade(self, symbol: str, timeframe: str, pnl_usd: float, return_pct: float,
+                  slippage_pct: float = 0.0005, timestamp: Optional[str] = None):
+        """Logs a completed trade outcome with timestamp for calendar-time windowing."""
+        import datetime as _dt
         with self.lock:
             self.history.append({
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "pnl_usd": float(pnl_usd),
-                "return_pct": float(return_pct)
+                "return_pct": float(return_pct),
+                "slippage_pct": float(slippage_pct),
+                "timestamp": timestamp or _dt.datetime.now(_dt.timezone.utc).isoformat(),
             })
             try:
                 with open(self.data_file, "w") as f:
@@ -53,13 +57,13 @@ class KellyTracker:
 
     def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25) -> float:
         """
-        Computes dynamic Quarter-Kelly fraction per timeframe:
-        Kelly = (W * R - (1 - W)) / R
-        Where W = Win Rate, R = Avg Win / Avg Loss ratio.
-        Requires at least min_trades (30) and min_losses (3) to prevent zero-loss distortion.
-        Capped at max_kelly_cap (default 0.25 / Quarter-Kelly).
-        Returns 0.0 on zero or negative edge (proven losing strategy) or insufficient data.
+        Computes dynamic Quarter-Kelly fraction per timeframe.
+        H-1: Rolling window is calendar-time based (lookback_days) with a per-timeframe
+             max-trade cap, so slow timeframes see regime-appropriate history.
+        H-3: Minimum trade gate scales per timeframe so sizing isn't blocked for months
+             on slow intervals; falls back to MIN_KELLY_SAMPLE_SIZE floor.
         """
+        import datetime as _dt
         with self.lock:
             if timeframe:
                 norm_target = _normalize_tf(timeframe)
@@ -67,13 +71,32 @@ class KellyTracker:
             else:
                 filtered = self.history
 
-            from config import MIN_KELLY_SAMPLE_SIZE
-            effective_min_trades = max(min_trades, MIN_KELLY_SAMPLE_SIZE)
-            if len(filtered) < effective_min_trades:
+            # H-1 & H-3: per-timeframe window and minimum gate from config
+            from config import MIN_KELLY_SAMPLE_SIZE, KELLY_WINDOW_CONFIG, KELLY_WINDOW_DEFAULT
+            tf_key = _normalize_tf(timeframe) if timeframe else None
+            win_cfg = KELLY_WINDOW_CONFIG.get(tf_key, KELLY_WINDOW_DEFAULT) if tf_key else KELLY_WINDOW_DEFAULT
+            max_trades = win_cfg["max_trades"]
+            lookback_days = win_cfg["lookback_days"]
+
+            # H-3: per-timeframe minimum; never go below MIN_KELLY_SAMPLE_SIZE floor
+            tf_min_map = {"15": 30, "30": 25, "60": 20, "120": 15, "240": 10, "360": 8}
+            tf_min = tf_min_map.get(tf_key, 30) if tf_key else 30
+            effective_min_trades = max(tf_min, min_trades, MIN_KELLY_SAMPLE_SIZE)
+
+            # H-1: filter to calendar lookback window first, then cap at max_trades
+            cutoff_dt = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)
+            cutoff_iso = cutoff_dt.isoformat()
+            windowed = [t for t in filtered if t.get("timestamp", "2000-01-01") >= cutoff_iso]
+            # If timestamp is missing on old records, fall back to tail of filtered list
+            if not windowed:
+                windowed = filtered
+            windowed = windowed[-max_trades:]
+
+            if len(windowed) < effective_min_trades:
                 return 0.0
 
-            returns = [t["return_pct"] for t in filtered[-100:]]
-            slippages = [abs(t.get("slippage_pct", 0.0005)) for t in filtered[-100:]]
+            returns = [t["return_pct"] for t in windowed]
+            slippages = [abs(t.get("slippage_pct", 0.0005)) for t in windowed]
             wins = [r for r in returns if r > 0]
             losses = [abs(r) for r in returns if r < 0]
 

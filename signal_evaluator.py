@@ -181,10 +181,18 @@ class SignalEvaluator:
                         prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
 
                     from config import TIMEFRAME_CONFIG, MIN_EVAL_THRESHOLD_FLOOR
+                    from trade_calculators import transaction_cost_model
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                     tp_m = cfg.get("tp_mult_trending", 1.85)
                     sl_m = cfg.get("sl_mult", 0.8)
-                    cost_bps = 7.0
+                    # H-4: compute round-trip cost from the TCM instead of hardcoding 7.0 bps.
+                    # ADV defaulted to BTC-equivalent; per-symbol ADV can be injected when available.
+                    _tcm = transaction_cost_model.estimate_transaction_cost(
+                        order_size_usd=1000.0,
+                        volume_24h_usd=50_000_000.0,
+                        is_maker=True,
+                    )
+                    cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
                     p_star = sl_m / (tp_m + sl_m)
                     eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (tp_m + sl_m))), 4)
 

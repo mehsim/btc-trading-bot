@@ -41,6 +41,30 @@ HISTORICAL_STRESS_QUANTILE = 0.001
 MIN_STRESS_HISTORICAL_BARS = 5000
 MIN_KELLY_SAMPLE_SIZE = 30
 
+# H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).
+# Window expressed as (max_trades, lookback_days); effective window = trades within lookback_days, min 30.
+KELLY_WINDOW_CONFIG: dict = {
+    "15":  {"max_trades": 100, "lookback_days": 7},
+    "30":  {"max_trades": 100, "lookback_days": 14},
+    "60":  {"max_trades": 80,  "lookback_days": 30},
+    "120": {"max_trades": 60,  "lookback_days": 60},
+    "240": {"max_trades": 40,  "lookback_days": 90},
+    "360": {"max_trades": 30,  "lookback_days": 120},
+}
+KELLY_WINDOW_DEFAULT = {"max_trades": 100, "lookback_days": 30}
+
+# H-2: Per-timeframe exponential decay half-life (days) for sample weighting.
+# w_i = 0.5 ** (age_days / HALF_LIFE_DAYS)
+DECAY_HALF_LIFE_CONFIG: dict = {
+    "15":  7,
+    "30":  14,
+    "60":  30,
+    "120": 45,
+    "240": 90,
+    "360": 120,
+}
+DECAY_HALF_LIFE_DEFAULT = 30
+
 # Optuna Barrier-Tuning Objective Weights
 # score = w_bal*BalAcc + w_f1*MacroF1 - w_ece*ECE - w_imb*ImbalancePenalty
 MODEL_SELECTION = {

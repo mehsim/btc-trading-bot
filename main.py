@@ -3480,8 +3480,14 @@ def get_statistical_validation():
     sample_rets, base_rets, n_completed_db = decision_outcome_db.get_completed_returns()
     n_completed = max(n_completed_db, len(bot_state.get("trade_history", [])) if "bot_state" in globals() and isinstance(bot_state, dict) else 45)
     
-    gov_state = globals().get("governance_state", {})
-    study_trial_count = gov_state.get("last_study_trial_count", 12) if isinstance(gov_state, dict) else 12
+    study_trial_count = 12
+    if os.path.exists("governance_state.json"):
+        try:
+            with open("governance_state.json", "r") as f:
+                gdata = json.load(f)
+                study_trial_count = int(gdata.get("last_study_trial_count", 12))
+        except Exception as ex_gov:
+            sys.stderr.write(f"Warning: Could not load governance_state.json: {ex_gov}\n")
     governed_res = statistical_validation.calculate_governed_validation_matrix(
         component_name="15m Structural Swing Stop & Dynamic Leverage",
         baseline_returns=base_rets,
@@ -9007,7 +9013,10 @@ def main():
                                 u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
                                 exp_r_val = abs(float(expected_pct_change)) / max(1e-4, atr_norm_val)
 
-                                tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=1000.0, volume_24h_usd=50_000_000.0, is_maker=True).get("total_cost_bps", 5.0)
+                                # C-2: estimate per-symbol 24h ADV from candle volume * price
+                                _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
+                                _order_usd = float(bot_state.get("position_size_usd", 1000.0)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1000.0
+                                tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
                                 exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
 
                                 if curr_vol < vol_20th and vol_20th > 0:
