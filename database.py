@@ -252,6 +252,19 @@ def init_db():
             conn.close()
 
 
+def get_completed_trades(limit: int = 100) -> List[Dict[str, Any]]:
+    """Retrieve recent completed trades from SQLite database."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM completed_trades ORDER BY exit_time DESC LIMIT ?;", (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        log_event("WARNING", f"database get_completed_trades failed: {ex}")
+        return []
+
 
 def save_prediction(pred) -> bool:
     p_id = pred.get("prediction_id") or f"{pred.get('symbol')}_{int(pred.get('timestamp', 0))}"
