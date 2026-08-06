@@ -61,8 +61,9 @@ MHI_POLICY: dict = {
     "max_wr_penalty": 30.0,
 }
 
-# H-2 / M-2: Continuous MHI Sizing Multiplier Floor
+# H-2 / M-2: Continuous MHI Sizing Multiplier Floor & Circuit Breaker Hysteresis
 MHI_MULT_FLOOR: float = 0.50
+CIRCUIT_BREAKER_RESUME_RATIO: float = 0.75
 
 # M-3: Kelly payoff lower bound Monte Carlo bootstrap samples
 KELLY_BOOTSTRAP_SAMPLES: int = 1000

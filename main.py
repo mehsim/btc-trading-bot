@@ -8292,7 +8292,14 @@ def main():
                 bot_state["circuit_breaker_active"] = True
                 print(f"[Circuit Breaker] TRIGGERED - Daily drawdown is {daily_dd_pct:.2f}% (>= {dynamic_halt_pct:.2f}% GARCH limit). Trading halted.")
             else:
-                bot_state["circuit_breaker_active"] = False
+                from config import CIRCUIT_BREAKER_RESUME_RATIO
+                resume_pct = dynamic_halt_pct * CIRCUIT_BREAKER_RESUME_RATIO
+                if daily_dd_pct < resume_pct:
+                    if bot_state.get("circuit_breaker_active", False):
+                        log_event("INFO", f"[Circuit Breaker] Released at {daily_dd_pct:.2f}% (< {resume_pct:.2f}%)")
+                        send_telegram_alert(f"✅ *DYNAMIC CIRCUIT BREAKER RELEASED* ✅\n• Daily Drawdown: *{daily_dd_pct:.2f}%* (< {resume_pct:.2f}% recovery limit)\n• *Trading Resumed*.")
+                        print(f"[Circuit Breaker] RELEASED - Daily drawdown {daily_dd_pct:.2f}% < {resume_pct:.2f}% limit. Trading resumed.")
+                    bot_state["circuit_breaker_active"] = False
 
             # Rule 4: Rolling 5.0% Equity Target (replaces static $1000)
             rolling_equity_goal = max(100.0, curr_bal * 0.05)
@@ -9210,7 +9217,13 @@ def main():
                                     tp_multiplier_adjusted *= session_factor
 
                                     # 3. Walk-Forward Optimal Rounding (0.05 precision)
-                                    tp_multiplier_adjusted = round(tp_multiplier_adjusted * 20.0) / 20.0
+                                    from trade_calculators import UnifiedTargetGenerator
+                                    tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+                                        interval=iv, atr_dollars=atr_dollars,
+                                        entry_price=latest_candle["close"], tp_mult=tp_multiplier_adjusted
+                                    )
+                                    # Take-Profit resolved via UnifiedTargetGenerator above
+                                    tp_change = tp_m * atr_dollars
 
                                     print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted:.2f}x (Vol: {vol_adj:.2f}x, Session: {session_factor:.2f}x)")
                                     
@@ -9219,9 +9232,7 @@ def main():
                                     raw_entry_price = float(latest_candle["close"])
                                     entry_price = raw_entry_price
 
-                                    # Enforce a minimum TP of 0.5%
-                                    min_tp_change = entry_price * 0.005
-                                    tp_change = max(min_tp_change, abs(pred_change))
+                                    # Take-Profit distance tp_change resolved via UnifiedTargetGenerator above
                                     
                                     # Dynamically adjust Stop Loss multiplier based on prediction confidence
                                     sl_multiplier_adjusted = sl_multiplier
