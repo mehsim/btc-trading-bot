@@ -11,7 +11,7 @@ import database
 
 FUNDING_ARB_THRESHOLD = 0.001  # 0.1% — above this, shorts earn funding income
 FUNDING_ARB_SIZE_USD = 20.0    # Fixed notional size per arbitrage position
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT"]
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 JOURNAL_PATH = "trade_journal.csv"
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 

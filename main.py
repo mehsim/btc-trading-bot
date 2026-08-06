@@ -4720,7 +4720,7 @@ def run_flask():
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]  # Limited to 3 symbols to fit 1GB RAM on 1-vCPU EC2
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
