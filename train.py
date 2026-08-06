@@ -2,6 +2,8 @@ from logger import log_event
 import os
 import json
 import time
+import hashlib
+import hmac
 import pandas as pd
 import numpy as np
 import joblib
@@ -1592,14 +1594,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
         }
 
         from ensemble import get_manifest_hmac_secret
-        import hmac
         now_iso = datetime.now(timezone.utc).isoformat()
         eff_n_val = round(effective_n, 2) if 'effective_n' in locals() else float(len(X))
         uniq_ratio_val = round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0
         raw_n_val = int(len(y_trend))
 
+        def _json_safe(o):
+            if isinstance(o, (np.integer,)): return int(o)
+            if isinstance(o, (np.floating,)): return float(o)
+            if isinstance(o, np.ndarray): return o.tolist()
+            raise TypeError(f"Unserialisable: {type(o)}")
+
+        hmac_key = get_manifest_hmac_secret()
+
         for m_prefix in [c_prefix_t, c_prefix_p]:
             manifest_path = f"{m_prefix}_manifest.json"
+            challenger_manifest_path = f"{m_prefix}_challenger_manifest.json"
             try:
                 manifest_data = {}
                 if os.path.exists(manifest_path):
@@ -1614,19 +1624,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
 
-                def _json_safe(o):
-                    if isinstance(o, (np.integer,)): return int(o)
-                    if isinstance(o, (np.floating,)): return float(o)
-                    if isinstance(o, np.ndarray): return o.tolist()
-                    raise TypeError(f"Unserialisable: {type(o)}")
-
-                hmac_key = get_manifest_hmac_secret()
                 manifest_data.pop("hmac_signature", None)
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
                 with open(manifest_path, "w") as mf:
                     json.dump(manifest_data, mf, indent=2, default=_json_safe)
+
+                # H-2 MLOps sidecar: record challenger evaluation metrics regardless of promotion status
+                chal_manifest = dict(manifest_data)
+                chal_manifest["promoted"] = bool(should_save)
+                chal_manifest["evaluation_timestamp"] = now_iso
+                chal_manifest.pop("hmac_signature", None)
+                chal_canonical = json.dumps(chal_manifest, sort_keys=True, default=_json_safe).encode("utf-8")
+                chal_manifest["hmac_signature"] = hmac.new(hmac_key, chal_canonical, hashlib.sha256).hexdigest()
+                with open(challenger_manifest_path, "w") as cmf:
+                    json.dump(chal_manifest, cmf, indent=2, default=_json_safe)
             except Exception as ex_man:
                 log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
 
