@@ -94,13 +94,16 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
     sl_mult = cfg.get("sl_mult", 1.5)
     tp_mult = cfg.get("tp_mult_trending", 2.5)
 
-    labels = np.full(len(df), 1, dtype=int)
+    n = len(df)
     prices = df["close"].values
     highs = df["high"].values if "high" in df.columns else prices
     lows = df["low"].values if "low" in df.columns else prices
     atrs = (df["ATR_norm"] * df["close"]).values if "ATR_norm" in df.columns else (df["close"] * 0.015).values
+    
+    labels = np.zeros(n, dtype=int)
+    outcomes = np.full(n, "none", dtype=object)
+    ambiguous_count = 0
 
-    n = len(df)
     for i in range(n - lookahead):
         p_entry = prices[i]
         atr_d = atrs[i]
@@ -113,16 +116,18 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
         
         long_won = False
         short_won = False
+        long_stopped = False
+        short_stopped = False
 
-        ambiguous_count = 0
         for k in range(1, lookahead + 1):
             h_k = highs[i + k]
             l_k = lows[i + k]
             if (h_k >= long_tp and l_k <= long_sl) or (l_k <= short_tp and h_k >= short_sl):
                 ambiguous_count += 1
 
-            if not long_won:
+            if not long_won and not long_stopped:
                 if l_k <= long_sl:
+                    long_stopped = True
                     break
                 if h_k >= long_tp:
                     long_won = True
@@ -132,8 +137,9 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
             h_k = highs[i + k]
             l_k = lows[i + k]
 
-            if not short_won:
+            if not short_won and not short_stopped:
                 if h_k >= short_sl:
+                    short_stopped = True
                     break
                 if l_k <= short_tp:
                     short_won = True
@@ -141,20 +147,27 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
 
         if long_won and not short_won:
             labels[i] = 2
+            outcomes[i] = "long_win"
         elif short_won and not long_won:
             labels[i] = 0
+            outcomes[i] = "short_win"
+        elif long_stopped or short_stopped:
+            labels[i] = 1
+            outcomes[i] = "stopped"
         else:
             labels[i] = 1
+            outcomes[i] = "timed_out"
 
     ambiguous_bar_pct = round((ambiguous_count / max(1, n * lookahead)) * 100.0, 4)
     s = pd.Series(labels, index=df.index)
     s.attrs["ambiguous_bar_pct"] = ambiguous_bar_pct
     s.attrs["neutral_pct"] = round(float(np.mean(labels == 1)) * 100.0, 2)
+    valid_n = max(1, n - lookahead)
     s.attrs["outcome_breakdown"] = {
-        "long_win_pct": round(float(np.mean(labels == 2)) * 100.0, 2),
-        "short_win_pct": round(float(np.mean(labels == 0)) * 100.0, 2),
-        "timed_out_pct": round(float(np.mean(labels == 1)) * 100.0, 2),
-        "stopped_out_pct": round(float((ambiguous_count / max(1, n * lookahead)) * 100.0), 2)
+        "long_win_pct": round(float(np.sum(outcomes == "long_win") / valid_n) * 100.0, 2),
+        "short_win_pct": round(float(np.sum(outcomes == "short_win") / valid_n) * 100.0, 2),
+        "timed_out_pct": round(float(np.sum(outcomes == "timed_out") / valid_n) * 100.0, 2),
+        "stopped_out_pct": round(float(np.sum(outcomes == "stopped") / valid_n) * 100.0, 2)
     }
     return s
 
@@ -184,3 +197,39 @@ def compute_sample_uniqueness(t1: pd.Series, close_idx: pd.Index) -> pd.Series:
             except Exception:
                 uniqueness[start] = 1.0
     return pd.Series(uniqueness, index=t1.index).reindex(close_idx).fillna(1.0)
+
+
+def compute_balanced_uniqueness_weights(
+    y: pd.Series,
+    uniqueness: pd.Series | np.ndarray | None = None,
+    decay: pd.Series | np.ndarray | None = None
+) -> np.ndarray:
+    """
+    Composes sample uniqueness, recency decay, and per-class balance weighting (AFML Ch. 4).
+    Re-normalizes weights per class so that total weight per class is equal,
+    preventing decay/uniqueness multiplication from destroying class equality (H-1).
+    Asserts max(class_totals) / min(class_totals) < 1.05.
+    """
+    y_arr = np.asarray(y)
+    n = len(y_arr)
+    base = np.ones(n, dtype=float)
+    if uniqueness is not None:
+        base *= np.asarray(uniqueness, dtype=float)
+    if decay is not None:
+        base *= np.asarray(decay, dtype=float)
+
+    w = base.copy()
+    classes = np.unique(y_arr)
+    n_classes = len(classes)
+    for c in classes:
+        mask = (y_arr == c)
+        c_sum = base[mask].sum()
+        if c_sum > 0:
+            w[mask] *= (n / (n_classes * c_sum))
+
+    class_totals = [w[y_arr == c].sum() for c in classes]
+    if len(class_totals) > 1 and min(class_totals) > 0:
+        ratio = max(class_totals) / min(class_totals)
+        assert ratio < 1.05, f"Class balance assertion broken: totals={class_totals}, ratio={ratio:.4f}"
+    return w
+

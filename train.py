@@ -440,13 +440,21 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         y = labels
         scores = []
         optuna_fold_scores = []
-        from sklearn.utils.class_weight import compute_sample_weight
+        from core import compute_sample_uniqueness, compute_balanced_uniqueness_weights
+        from config import DECAY_HALF_LIFE_CONFIG, DECAY_HALF_LIFE_DEFAULT
         try:
             for train_idx, val_idx in cv.split(X, y):
                 if len(train_idx) < 10 or len(val_idx) < 10:
                     continue
                 model = XGBClassifier(n_estimators=30, max_depth=3, learning_rate=0.1, random_state=42, n_jobs=1)
-                sw = compute_sample_weight('balanced', y[train_idx])
+                t1_fold = pd.Series(np.arange(len(train_idx)) + cv.lookahead, index=pd.RangeIndex(len(train_idx)))
+                uniq_fold = compute_sample_uniqueness(t1_fold, t1_fold.index).values
+                _hl_days = DECAY_HALF_LIFE_CONFIG.get(str(interval), DECAY_HALF_LIFE_DEFAULT)
+                _hl_bars = _hl_days * 1440.0 / max(1, int(interval))
+                _n_fold = len(train_idx)
+                _age_fold = np.arange(_n_fold - 1, -1, -1, dtype=float)
+                decay_fold = 0.5 ** (_age_fold / max(1.0, _hl_bars))
+                sw = compute_balanced_uniqueness_weights(y[train_idx], uniqueness=uniq_fold, decay=decay_fold)
                 model.fit(X[train_idx], y[train_idx], sample_weight=sw)
                 preds = model.predict(X[val_idx])
                 proba = model.predict_proba(X[val_idx])
@@ -1065,7 +1073,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             X_train, y_train_t, y_train_p = X.iloc[train_idx], y_trend.iloc[train_idx], y_price.iloc[train_idx]
             X_val, y_val_t, y_val_p = X.iloc[val_idx], y_trend.iloc[val_idx], y_price.iloc[val_idx]
             
-            from core import compute_sample_uniqueness
+            from core import compute_sample_uniqueness, compute_balanced_uniqueness_weights
             t1_sub = pd.Series(np.arange(len(y_train_t)) + cv.lookahead, index=y_train_t.index)
             uniqueness_train = compute_sample_uniqueness(t1_sub, y_train_t.index).values
             # H-2: exponential decay by half-life from config (not linear ramp)
@@ -1075,20 +1083,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             _n = len(y_train_t)
             _age_bars = np.arange(_n - 1, -1, -1, dtype=float)  # oldest=largest
             decay_weights = 0.5 ** (_age_bars / max(1.0, _hl_bars))
-            base_w = uniqueness_train * decay_weights
-            
-            w_train = base_w.copy()
-            classes = np.unique(y_train_t)
-            n_samples = len(y_train_t)
-            for c in classes:
-                mask = (y_train_t.values == c)
-                c_sum = base_w[mask].sum()
-                if c_sum > 0:
-                    w_train[mask] *= (n_samples / (len(classes) * c_sum))
-            
-            sample_weight_train = w_train
-            class_totals = [w_train[y_train_t.values == c].sum() for c in classes]
-            assert max(class_totals) / min(class_totals) < 1.05, f"class balance broken: {class_totals}"
+            sample_weight_train = compute_balanced_uniqueness_weights(y_train_t, uniqueness=uniqueness_train, decay=decay_weights)
             
             if first_fold:
                 print("  Optimizing hyperparameters on first fold...")
@@ -1325,7 +1320,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_ensemble_p = EnsembleRegressor(final_xgb_p, final_lgb_p, final_cat_p)
         
         # H-1/H-2: exponential decay & uniqueness with per-class re-normalization (full regime dataset)
-        from core import compute_sample_uniqueness
+        from core import compute_sample_uniqueness, compute_balanced_uniqueness_weights
         from config import DECAY_HALF_LIFE_CONFIG, DECAY_HALF_LIFE_DEFAULT
         _hl_days_f = DECAY_HALF_LIFE_CONFIG.get(str(interval), DECAY_HALF_LIFE_DEFAULT)
         _hl_bars_f = _hl_days_f * 1440.0 / max(1, int(interval))
@@ -1335,18 +1330,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         t1_full = pd.Series(np.arange(len(y_trend)) + cv.lookahead, index=y_trend.index)
         uniqueness_full = compute_sample_uniqueness(t1_full, y_trend.index).values
-        base_full = uniqueness_full * decay_full
-
-        w_full = base_full.copy()
-        classes_full = np.unique(y_trend)
-        for c in classes_full:
-            m = (y_trend.values == c)
-            s = base_full[m].sum()
-            if s > 0:
-                w_full[m] *= (_n_f / (len(classes_full) * s))
-        sample_weight_full = w_full
-        totals_full = [w_full[y_trend.values == c].sum() for c in classes_full]
-        assert max(totals_full) / min(totals_full) < 1.05, f"class balance broken (full fit): {totals_full}"
+        sample_weight_full = compute_balanced_uniqueness_weights(y_trend, uniqueness=uniqueness_full, decay=decay_full)
 
         # H-1/H-2: exponential decay & uniqueness with per-class re-normalization (last train fold)
         _n_tl = len(y_train_t)
@@ -1355,18 +1339,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         t1_last = pd.Series(np.arange(len(y_train_t)) + cv.lookahead, index=y_train_t.index)
         uniqueness_last = compute_sample_uniqueness(t1_last, y_train_t.index).values
-        base_last = uniqueness_last * decay_train_last
-
-        w_last = base_last.copy()
-        classes_last = np.unique(y_train_t)
-        for c in classes_last:
-            m = (y_train_t.values == c)
-            s = base_last[m].sum()
-            if s > 0:
-                w_last[m] *= (_n_tl / (len(classes_last) * s))
-        sample_weight_train_last = w_last
-        totals_last = [w_last[y_train_t.values == c].sum() for c in classes_last]
-        assert max(totals_last) / min(totals_last) < 1.05, f"class balance broken (last fold fit): {totals_last}"
+        sample_weight_train_last = compute_balanced_uniqueness_weights(y_train_t, uniqueness=uniqueness_last, decay=decay_train_last)
         
         final_ensemble_t.fit(
             X, y_trend, sample_weight=sample_weight_full, 
