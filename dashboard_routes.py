@@ -504,7 +504,11 @@ def api_status():
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
         status_data["real_balance"] = real_bal
         status_data["real_bybit_balance"] = real_bal
-        status_data["trade_history"] = state_manager.get("trade_history", [])[-50:]
+        trades_hist = state_manager.get("trade_history", [])
+        if not trades_hist:
+            import database
+            trades_hist = database.get_completed_trades(limit=100)
+        status_data["trade_history"] = trades_hist[-50:]
         status_data["prediction_history"] = state_manager.get("prediction_history", [])[-30:]
         status_data["uptime_seconds"] = int(time.time() - startup_time)
         

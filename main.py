@@ -4500,6 +4500,11 @@ def log_trade_journal(trade: dict):
             })
     except Exception as e:
         print(f"[Journal] Failed to write journal: {e}")
+    try:
+        import database
+        database.save_completed_trade(trade)
+    except Exception as db_err:
+        print(f"[Journal DB Sync Warning] {db_err}")
 
 def send_daily_journal_digest():
     """Send a Telegram daily summary of yesterday's closed trades."""

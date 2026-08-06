@@ -204,50 +204,88 @@ def init_db():
             count = cursor.fetchone()[0]
             
             legacy_file = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
+            csv_journal = "/data/trade_journal.csv" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trade_journal.csv"
             
-            if count == 0 and os.path.exists(legacy_file):
-                print("[Database] Migrating legacy JSON history into SQLite database...")
-                try:
-                    with open(legacy_file, "r") as f:
-                        data = json.load(f)
-                        
-                        # Migrate completed trades
-                        for t in data.get("trade_history", []):
-                            t_id = t.get("trade_id") or f"{t.get('symbol')}_{int(t.get('exit_time', 0))}"
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO completed_trades (
-                                    trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                                    change_pct, success, reason, position_size_usd, original_size, pnl_usd,
-                                    balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                            """, (
-                                t_id, t.get("symbol"), t.get("exit_time"), t.get("interval", "60"), t.get("direction"),
-                                t.get("entry_price"), t.get("exit_price"), t.get("change_pct"), 1 if t.get("success") else 0,
-                                t.get("reason"), t.get("position_size_usd"), t.get("original_size"), t.get("pnl_usd"),
-                                t.get("balance"), t.get("leverage"), t.get("confidence"), t.get("take_profit"),
-                                t.get("stop_loss"), t.get("atr_dollars"), t.get("fill_pct"), json.dumps(t)
-                            ))
+            if count == 0:
+                if os.path.exists(legacy_file):
+                    print("[Database] Migrating legacy JSON history into SQLite database...")
+                    try:
+                        with open(legacy_file, "r") as f:
+                            data = json.load(f)
                             
-                        # Migrate prediction history
-                        for p in data.get("prediction_history", []):
-                            p_id = p.get("prediction_id") or f"{p.get('symbol')}_{int(p.get('timestamp', 0))}"
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO predictions (id, timestamp, symbol, interval, direction, confidence, raw_data)
-                                VALUES (?, ?, ?, ?, ?, ?, ?);
-                            """, (
-                                p_id, p.get("timestamp"), p.get("symbol"), p.get("interval", "60"),
-                                p.get("direction"), p.get("confidence"), json.dumps(p)
-                            ))
+                            # Migrate completed trades
+                            for t in data.get("trade_history", []):
+                                t_id = t.get("trade_id") or f"{t.get('symbol')}_{int(t.get('exit_time', 0))}"
+                                cursor.execute("""
+                                    INSERT OR IGNORE INTO completed_trades (
+                                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                                """, (
+                                    t_id, t.get("symbol"), t.get("exit_time"), t.get("interval", "60"), t.get("direction"),
+                                    t.get("entry_price"), t.get("exit_price"), t.get("change_pct"), 1 if t.get("success") else 0,
+                                    t.get("reason"), t.get("position_size_usd"), t.get("original_size"), t.get("pnl_usd"),
+                                    t.get("balance"), t.get("leverage"), t.get("confidence"), t.get("take_profit"),
+                                    t.get("stop_loss"), t.get("atr_dollars"), t.get("fill_pct"), json.dumps(t)
+                                ))
+                                
+                            # Migrate prediction history
+                            for p in data.get("prediction_history", []):
+                                p_id = p.get("prediction_id") or f"{p.get('symbol')}_{int(p.get('timestamp', 0))}"
+                                cursor.execute("""
+                                    INSERT OR IGNORE INTO predictions (id, timestamp, symbol, interval, direction, confidence, raw_data)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                                """, (
+                                    p_id, p.get("timestamp"), p.get("symbol"), p.get("interval", "60"),
+                                    p.get("direction"), p.get("confidence"), json.dumps(p)
+                                ))
+                                
+                            # Migrate settings
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("simulated_balance", str(data.get("simulated_balance", 80.0))))
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("bot_running", str(data.get("bot_running", True))))
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("fresh_reset_v3", str(data.get("fresh_reset_v3", False))))
                             
-                        # Migrate settings
-                        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("simulated_balance", str(data.get("simulated_balance", 80.0))))
-                        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("bot_running", str(data.get("bot_running", True))))
-                        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);", ("fresh_reset_v3", str(data.get("fresh_reset_v3", False))))
-                        
-                        conn.commit()
-                        print("[Database] Legacy JSON migration completed successfully.")
-                except Exception as migrate_err:
-                    print(f"[Database Error] Exception during JSON migration: {migrate_err}")
+                            conn.commit()
+                            print("[Database] Legacy JSON migration completed successfully.")
+                    except Exception as migrate_err:
+                        print(f"[Database Error] Exception during JSON migration: {migrate_err}")
+
+                if os.path.exists(csv_journal):
+                    print("[Database] Migrating trade_journal.csv into SQLite completed_trades table...")
+                    try:
+                        import csv
+                        from datetime import datetime, timezone
+                        with open(csv_journal, "r", encoding="utf-8") as f:
+                            reader = csv.DictReader(f)
+                            inserted_cnt = 0
+                            for row in reader:
+                                ts_str = row.get("timestamp", "")
+                                try:
+                                    exit_time = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                                except Exception:
+                                    exit_time = time.time()
+                                t_id = f"journal_{row.get('symbol', 'BTCUSDT')}_{int(exit_time)}_{inserted_cnt}"
+                                success_val = 1 if str(row.get("success", "")).lower() in ["true", "1", "yes"] else 0
+                                cursor.execute("""
+                                    INSERT OR IGNORE INTO completed_trades (
+                                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                                        balance, leverage, confidence, raw_data
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                                """, (
+                                    t_id, row.get("symbol"), exit_time, str(row.get("interval", "60")), row.get("direction"),
+                                    float(row.get("entry_price", 0.0) or 0.0), float(row.get("exit_price", 0.0) or 0.0),
+                                    float(row.get("change_pct", 0.0) or 0.0), success_val, row.get("reason"),
+                                    20.0, 20.0, float(row.get("pnl_usd", 0.0) or 0.0),
+                                    float(row.get("balance", 0.0) or 0.0), float(row.get("leverage", 1.0) or 1.0),
+                                    float(row.get("confidence", 0.0) or 0.0), json.dumps(row)
+                                ))
+                                inserted_cnt += 1
+                            conn.commit()
+                            print(f"[Database] Successfully migrated {inserted_cnt} trades from trade_journal.csv into SQLite completed_trades table.")
+                    except Exception as csv_err:
+                        print(f"[Database Error] Exception during trade_journal.csv migration: {csv_err}")
         finally:
             conn.close()
 
