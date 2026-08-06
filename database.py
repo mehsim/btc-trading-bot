@@ -267,6 +267,12 @@ def init_db():
                                     exit_time = time.time()
                                 t_id = f"journal_{row.get('symbol', 'BTCUSDT')}_{int(exit_time)}_{inserted_cnt}"
                                 success_val = 1 if str(row.get("success", "")).lower() in ["true", "1", "yes"] else 0
+                                def _sf(v, default=0.0):
+                                    try:
+                                        return float(v)
+                                    except Exception:
+                                        return default
+
                                 cursor.execute("""
                                     INSERT OR IGNORE INTO completed_trades (
                                         trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
@@ -275,11 +281,11 @@ def init_db():
                                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                                 """, (
                                     t_id, row.get("symbol"), exit_time, str(row.get("interval", "60")), row.get("direction"),
-                                    float(row.get("entry_price", 0.0) or 0.0), float(row.get("exit_price", 0.0) or 0.0),
-                                    float(row.get("change_pct", 0.0) or 0.0), success_val, row.get("reason"),
-                                    20.0, 20.0, float(row.get("pnl_usd", 0.0) or 0.0),
-                                    float(row.get("balance", 0.0) or 0.0), float(row.get("leverage", 1.0) or 1.0),
-                                    float(row.get("confidence", 0.0) or 0.0), json.dumps(row)
+                                    _sf(row.get("entry_price")), _sf(row.get("exit_price")),
+                                    _sf(row.get("change_pct")), success_val, row.get("reason"),
+                                    20.0, 20.0, _sf(row.get("pnl_usd")),
+                                    _sf(row.get("balance")), _sf(row.get("leverage"), 1.0),
+                                    _sf(row.get("confidence"), 0.50), json.dumps(row)
                                 ))
                                 inserted_cnt += 1
                             conn.commit()
