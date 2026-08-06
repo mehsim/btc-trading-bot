@@ -485,8 +485,8 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             try:
                 with open(_gov_path, "r") as _gf:
                     _existing = json.load(_gf)
-            except Exception:
-                pass
+            except Exception as _ex_rd:
+                log_event("WARNING", f"[Governance] Could not read {_gov_path}: {_ex_rd}")
         _existing["last_study_trial_count"] = len(study.trials)
         with open(_gov_path, "w") as f:
             json.dump(_existing, f)
@@ -1331,6 +1331,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         _n_f = len(y_trend)
         _age_f = np.arange(_n_f - 1, -1, -1, dtype=float)
         decay_full = 0.5 ** (_age_f / max(1.0, _hl_bars_f))
+        sample_weight_full = compute_sample_weight(class_weight='balanced', y=y_trend)
         sample_weight_full = sample_weight_full * decay_full
 
         sample_weight_train_last = compute_sample_weight(class_weight='balanced', y=y_train_t)
@@ -1631,8 +1632,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             try:
                 with open(_gov_path, "r") as _gf:
                     _gov = json.load(_gf)
-            except Exception:
-                pass
+            except Exception as _ex_rd2:
+                log_event("WARNING", f"[Governance] Could not read {_gov_path}: {_ex_rd2}")
         _gov["last_study_trial_count"] = _TOTAL_OPTUNA_TRIALS
         with open(_gov_path, "w") as f:
             json.dump(_gov, f)
