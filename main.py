@@ -8837,21 +8837,7 @@ def main():
                             adjustments_applied.append(("asian_session", 0.05))
                             print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
                                 
-                        # Enforce explicit interval-specific confidence floors
-                        interval_conf_floors = {
-                            "5": 0.52,
-                            "15": 0.55,
-                            "30": 0.58,
-                            "60": 0.60,
-                            "120": 0.62
-                        }
-                        floor_val = interval_conf_floors.get(str(iv), 0.52)
-                        if dynamic_conf_threshold < floor_val:
-                            floor_delta = round(floor_val - dynamic_conf_threshold, 4)
-                            dynamic_conf_threshold = floor_val
-                            adjustments_applied.append(("interval_floor", floor_delta))
-
-                        # Adaptive Confidence Threshold Matrix for 15m/30m
+                        # Adaptive Confidence Threshold Matrix for 15m
                         if str(iv) == "15":
                             drift_p = bot_state.get("drift_p_val", 0.50) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.50
                             u_tot = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
@@ -8866,10 +8852,6 @@ def main():
                                 adapt_delta = round(adaptive_val - dynamic_conf_threshold, 4)
                                 dynamic_conf_threshold = adaptive_val
                                 adjustments_applied.append(("adaptive_15m_matrix", adapt_delta))
-                        elif str(iv) == "30":
-                            if dynamic_conf_threshold < 0.58:
-                                adjustments_applied.append(("30m_floor", round(0.58 - dynamic_conf_threshold, 4)))
-                                dynamic_conf_threshold = 0.58
 
                         # Bayesian Cold-Start Adjustment (Trades 3-9)
                         bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))

@@ -754,7 +754,7 @@ def write_model_manifest(
         clean_ver = model_version.split(f"-{git_sha}")[0] if (git_sha and git_sha in model_version) else model_version
         full_model_ver = f"{clean_ver}-{git_sha}-{ts_suffix}"
 
-        import platform, sklearn, pandas, numpy, xgboost, lightgbm, catboost
+        import platform, sklearn, pandas, numpy, xgboost, lightgbm, catboost, json, os, subprocess, datetime, hashlib, hmac
         deps = {
             "python": platform.python_version(),
             "scikit-learn": getattr(sklearn, "__version__", "1.9.0"),
