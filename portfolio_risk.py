@@ -195,7 +195,7 @@ class PortfolioRiskEngine:
         5. Uses deterministic RNG seeding for auditability & reproducibility.
         """
         # M-3: Learn shock magnitude dynamically from empirical return tail quantile (0.1%)
-        if returns_df is not None and not returns_df.empty:
+        if returns_df is not None and len(returns_df) >= 500:
             try:
                 mkt_rets = returns_df.mean(axis=1) if isinstance(returns_df, pd.DataFrame) else returns_df
                 q_val = float(np.percentile(mkt_rets, 0.1))
