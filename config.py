@@ -41,6 +41,14 @@ HISTORICAL_STRESS_QUANTILE = 0.001
 MIN_STRESS_HISTORICAL_BARS = 5000
 MIN_KELLY_SAMPLE_SIZE = 30
 
+# M-1: Train/Holdout ratio & minimum effective independent holdout sample assertion
+HOLDOUT_FRACTION: float = 0.15
+MIN_EFFECTIVE_HOLDOUT_SAMPLES: int = 80  # min independent observations N / lookahead
+
+# M-4: Consistent cross-validation fold count across hyperparameter search, feature selection, and main CV
+CV_N_SPLITS: int = 5
+
+
 # H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).
 # Window expressed as (max_trades, lookback_days); effective window = trades within lookback_days, min 30.
 KELLY_WINDOW_CONFIG: dict = {

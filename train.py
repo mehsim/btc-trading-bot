@@ -394,7 +394,8 @@ def tune_triple_barrier_multipliers(df_coin, interval):
     if len(df_clean) < 100:
         return {}
     X = df_clean[selected_feats].values
-    cv = PurgedEmbargoTimeSeriesSplit(n_splits=3, interval=interval, embargo_pct=0.01)
+    from config import CV_N_SPLITS
+    cv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
     
     def objective(trial):
         tp_m_ranging = trial.suggest_float("tp_mult_ranging", 1.0, 3.0)
@@ -814,8 +815,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         X_prelim = df_sub[features]
         y_prelim = df_sub["target_trend"]
         
-        # Use a small estimator and 3-fold Purged CV for rapid feature elimination
-        cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=3, interval=interval, embargo_pct=0.01)
+        from config import CV_N_SPLITS
+        cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
         estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
         
         selector = RFECV(
@@ -945,7 +946,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 tree_method="hist",
                 n_jobs=1
             )
-            cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=3, interval=interval, embargo_pct=0.01)
+            from config import CV_N_SPLITS
+            cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
             selector = RFECV(
                 estimator=estimator,
                 step=2,
@@ -1023,10 +1025,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             )
 
         # C-1 ML Validity: Purge & Embargo train/holdout boundary (lookahead purge + 1% embargo)
-        from config import TIMEFRAME_CONFIG
+        from config import TIMEFRAME_CONFIG, HOLDOUT_FRACTION, MIN_EFFECTIVE_HOLDOUT_SAMPLES, CV_N_SPLITS
         purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12)
         embargo_len = max(1, int(len(X_full) * 0.01))
-        split_idx = int(len(X_full) * 0.85)
+        
+        # M-1: Dynamic holdout size ensuring minimum effective independent holdout samples
+        required_holdout_rows = max(int(len(X_full) * HOLDOUT_FRACTION), int(MIN_EFFECTIVE_HOLDOUT_SAMPLES * purge_len))
+        split_idx = max(purge_len + 10, len(X_full) - required_holdout_rows)
 
         X = X_full.iloc[:split_idx - purge_len]
         y_trend = y_trend_full.iloc[:split_idx - purge_len]
@@ -1036,9 +1041,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
         y_holdout_trend = y_trend_full.iloc[split_idx + embargo_len:]
         y_holdout_price = y_price_full.iloc[split_idx + embargo_len:]
         assert len(X) > 0 and len(X_holdout) > 0 and X.index.max() < X_holdout.index.min(), "train/holdout overlap"
+        eff_holdout = len(y_holdout_trend) / max(1, purge_len)
+        assert eff_holdout >= 10.0, f"Holdout effective sample count ({eff_holdout:.1f}) too low"
 
         # Purged and Embargoed Time-Series Cross Validation
-        cv = PurgedEmbargoTimeSeriesSplit(n_splits=5, interval=interval, embargo_pct=0.01)
+        cv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
         
         meta_features_list = []
         meta_labels_list = []

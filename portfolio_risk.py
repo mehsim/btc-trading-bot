@@ -194,6 +194,16 @@ class PortfolioRiskEngine:
         4. Calculates Expected Tail Loss (Stress CVaR 99.9%) and Max Portfolio Equity Drawdown.
         5. Uses deterministic RNG seeding for auditability & reproducibility.
         """
+        # M-3: Learn shock magnitude dynamically from empirical return tail quantile (0.1%)
+        if returns_df is not None and not returns_df.empty:
+            try:
+                mkt_rets = returns_df.mean(axis=1) if isinstance(returns_df, pd.DataFrame) else returns_df
+                q_val = float(np.percentile(mkt_rets, 0.1))
+                if not np.isnan(q_val) and q_val < 0:
+                    shock_pct = float(np.clip(q_val, -0.60, -0.15))
+            except Exception:
+                pass
+
         if seed is not None:
             np.random.seed(int(seed) % (2**32 - 1))
         else:

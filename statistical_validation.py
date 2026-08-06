@@ -527,10 +527,10 @@ class StatisticalValidation:
             },
             "multiple_testing": {
                 "experiment_family": "15m_strategy_experiments",
-                "num_tests": 12,
+                "num_tests": max(1, num_trials),
                 "fdr_method": "Bonferroni",
                 "alpha": 0.05,
-                "q_value": min(1.0, round(float(p_val * 12.0), 4))
+                "q_value": min(1.0, round(float(p_val * max(1, num_trials)), 4))
             }
         }
 

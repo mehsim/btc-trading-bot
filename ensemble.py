@@ -491,11 +491,14 @@ class EnsembleRegressor:
                 val_decay_weights = np.exp(-0.02 * np.arange(N_val)[::-1])
                 val_decay_weights = val_decay_weights / np.sum(val_decay_weights) * N_val
                 
-                meta_reg = Ridge(alpha=1.0, random_state=42)
+                from sklearn.linear_model import RidgeCV
+                
+                meta_reg = RidgeCV(alphas=np.logspace(-3, 3, 13))
                 meta_reg.fit(X_meta, y_val, sample_weight=val_decay_weights)
                 self.meta_coef_ = meta_reg.coef_.tolist()
                 self.meta_intercept_ = float(meta_reg.intercept_)
-                print(f"[Ensemble Stacking] Regressor Meta-Learner calibrated successfully with time-decay weights.")
+                best_alpha = float(getattr(meta_reg, "alpha_", 1.0))
+                print(f"[Ensemble Stacking] Regressor Meta-Learner calibrated via RidgeCV (chosen alpha={best_alpha:.4f}).")
             except Exception as e:
                 print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
                 
