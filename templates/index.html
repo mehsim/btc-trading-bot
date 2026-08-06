@@ -3238,7 +3238,10 @@
 
         // Run immediately, then poll every 10 seconds (adaptive visibility-throttled)
         updateDashboard();
+        updateRealityGap();
+        updateInstitutionalSummary();
         let updateInterval = setInterval(updateDashboard, 10000);
+        setInterval(updateInstitutionalSummary, 30000);
 
         document.addEventListener("visibilitychange", () => {
             clearInterval(updateInterval);
