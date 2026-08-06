@@ -134,11 +134,7 @@
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
-  "metrics": {
-    "uniqueness_ratio": 0.0833,
-    "effective_sample_size": 597.83,
-    "raw_sample_size": 7174
-  },
+  "metrics": {},
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
@@ -172,9 +168,6 @@
     "label_dist_bullish_pct": 2.73,
     "n_training_samples": 7174,
     "n_holdout_samples": 1184,
-    "effective_sample_size": 597.83,
-    "raw_sample_size": 7174,
-    "uniqueness_ratio": 0.0833,
     "confusion_matrix": {
       "labels": [
         "Bearish",
@@ -218,5 +211,5 @@
     "training_pipeline_version": "v7.2.0",
     "git_sha": "1d32800d"
   },
-  "hmac_signature": "1a98291d9d544a0567042dfc51d762f72fcede7fa75603f2c8190387a2cf7371"
+  "hmac_signature": "c2d52a8a3ccad926b2c72ddc3cf909598f672236c71ef7130ecd043bdb24c534"
 }

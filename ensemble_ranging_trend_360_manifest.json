@@ -73,17 +73,10 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "660402b3",
-    "uniqueness_ratio": 0.0833,
-    "effective_sample_size": 2261.92,
-    "raw_sample_size": 27143
+    "git_sha": "660402b3"
   },
   "git_sha": "660402b3",
   "timestamp": "2026-08-06T20:00:28.108974+00:00",
-  "metrics": {
-    "uniqueness_ratio": 0.0833,
-    "effective_sample_size": 2261.92,
-    "raw_sample_size": 27143
-  },
-  "hmac_signature": "e037f9767e3035d927888ca1ecacb7fcf81b722cc5e766a180b7fcee0c8d1916"
+  "metrics": {},
+  "hmac_signature": "4bbf5325f07038aa9c0086ccfa0234383b57da9652faa4bffe3fb14313223fed"
 }

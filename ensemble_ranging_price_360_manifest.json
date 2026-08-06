@@ -26,10 +26,6 @@
     "min_samples": 20
   },
   "promotion_metrics": {},
-  "metrics": {
-    "uniqueness_ratio": 0.0833,
-    "effective_sample_size": 416.67,
-    "raw_sample_size": 5000
-  },
-  "hmac_signature": "1a60e931891690be4450a2a0c4db43d031be877cd2110ac49edc0add47a81eab"
+  "metrics": {},
+  "hmac_signature": "fdbed3e1663d8b217b63bf6017ef4ae33e84ebaeaa040285699f264889df51e7"
 }
