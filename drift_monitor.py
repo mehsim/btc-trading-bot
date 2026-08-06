@@ -29,6 +29,13 @@ class DriftMonitor:
         drift_alert = (ece > 0.15 or avg_brier > 0.40)
         psi_status = "ALERT" if drift_alert else ("MONITOR" if (ece > 0.08 or avg_brier > 0.25) else "STABLE")
         
+        try:
+            from state_manager import state_manager
+            state_manager["last_ece"] = float(ece)
+            state_manager["last_brier_score"] = float(avg_brier)
+        except Exception:
+            pass
+
         return {
             "ece": ece,
             "rolling_brier_50": avg_brier,

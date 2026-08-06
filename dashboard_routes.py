@@ -985,7 +985,7 @@ def api_institutional_summary():
             "system_health": "HEALTHY" if shs_val >= 70 else ("DEGRADED" if shs_val >= 50 else "CRITICAL"),
             "shs_score": f"{shs_val}/100",
             "pf": calculated_pf,
-            "ece": round(float(state_manager.get("last_ece", 3.8)) / 100.0, 3),
+            "ece": round(float(state_manager["last_ece"]), 4) if state_manager.get("last_ece") is not None else 0.04,
             "drift": state_manager.get("last_drift_status", "Normal"),
             "data_quality": int(state_manager.get("last_data_quality", 98)),
             "release_gates": release_gates_str,
@@ -1021,7 +1021,7 @@ def api_institutional_summary():
             "total_score": shs_val,
             "max_score": 100,
             "components": [
-                {"name": "Calibration",       "score": 20 if ece_val<=5 else (12 if ece_val<=10 else 5),  "max": 20, "status": "EXCELLENT" if ece_val<=5 else "DEGRADED"},
+                {"name": "Calibration",       "score": 20 if (state_manager.get("last_ece") is not None and float(state_manager["last_ece"])<=0.08) else (12 if (state_manager.get("last_ece") is not None and float(state_manager["last_ece"])<=0.16) else (0 if state_manager.get("last_ece") is None else 5)), "max": 20, "status": "EXCELLENT" if (state_manager.get("last_ece") is not None and float(state_manager["last_ece"])<=0.08) else ("DEGRADED" if state_manager.get("last_ece") is not None else "NO_DATA")},
                 {"name": "Drift",             "score": 20 if psi_val<=0.10 else (12 if psi_val<=0.20 else 5), "max": 20, "status": "PERFECT" if psi_val<=0.10 else "ELEVATED"},
                 {"name": "Live Profit Factor","score": 20 if calculated_pf>=1.80 else (14 if calculated_pf>=1.40 else (8 if calculated_pf>=1.10 else 0)), "max": 20, "status": "EXCELLENT" if calculated_pf>=1.80 else ("GOOD" if calculated_pf>=1.10 else "POOR")},
                 {"name": "Drawdown Safety",  "score": 15 if dynamic_dd<=5 else (9 if dynamic_dd<=10 else (4 if dynamic_dd<=15 else 0)),  "max": 15, "status": "PERFECT" if dynamic_dd<=5 else ("ELEVATED" if dynamic_dd<=15 else "CRITICAL")},
@@ -1072,20 +1072,21 @@ def api_institutional_summary():
         "signal_decision_tree": (lambda: (
             lambda pred=(state_manager.get("latest_prediction_15m") or state_manager.get("latest_prediction_30m") or {}),
                    conf_pct=round(float((state_manager.get("latest_prediction_15m") or {}).get("raw_confidence", 0.0)) * 100, 1),
-                   cal_pct=round(float((state_manager.get("latest_prediction_15m") or {}).get("calibrated_confidence", 0.0)) * 100, 1): {
+                   cal_pct=round(float((state_manager.get("latest_prediction_15m") or {}).get("calibrated_confidence", 0.0)) * 100, 1),
+                   has_trade=bool(isinstance(state_manager.get("positions"), list) and len(state_manager.get("positions")) > 0): {
                 "status": "PASS" if exp_r_val >= 0 else "FAIL",
                 "pipeline": [
-                    {"step": "Signal Generated", "value": "Triggered", "status": "PASS"},
-                    {"step": "Prediction",  "value": f"{conf_pct}%", "status": "PASS"},
-                    {"step": "Calibration", "value": f"{cal_pct}%", "status": "PASS"},
+                    {"step": "Signal Generated", "value": "Triggered" if (pred.get("direction") in ["Bullish", "Bearish"]) else "Standby", "status": "PASS" if (pred.get("direction") in ["Bullish", "Bearish"]) else "UNKNOWN"},
+                    {"step": "Prediction",  "value": f"{conf_pct}%", "status": "PASS" if conf_pct >= 50.0 else "WARN"},
+                    {"step": "Calibration", "value": f"{cal_pct}%", "status": "PASS" if (cal_pct / 100.0) >= (pred.get("dynamic_threshold", 0.58) if pred else 0.58) else "FAIL"},
                     {"step": "MQS Check",   "value": f"{mqs_val} / 100", "status": "PASS" if mqs_val>=70 else "WARN"},
-                    {"step": "4H Trend Alignment", "value": state_manager.get("regime_4h", state_manager.get("regime_1h", "Unknown")), "status": "PASS"},
-                    {"step": "RSI Volatility Guard", "value": f"ADX {state_manager.get('adx_15m', state_manager.get('adx_30m', 0.0)):.1f}", "status": "PASS"},
-                    {"step": "Regime Engine", "value": state_manager.get("regime_15m") or state_manager.get("regime_30m") or "Unknown", "status": "PASS"},
+                    {"step": "4H Trend Alignment", "value": state_manager.get("regime_4h", state_manager.get("regime_1h", "Unknown")), "status": "PASS" if state_manager.get("regime_4h", "Unknown") not in ["Unknown", "Ranging"] else "WARN"},
+                    {"step": "RSI Volatility Guard", "value": f"ADX {state_manager.get('adx_15m', state_manager.get('adx_30m', 0.0)):.1f}", "status": "PASS" if float(state_manager.get('adx_15m', state_manager.get('adx_30m', 0.0)) or 0.0) >= 15.0 else "WARN"},
+                    {"step": "Regime Engine", "value": state_manager.get("regime_15m") or state_manager.get("regime_30m") or "Unknown", "status": "PASS" if (state_manager.get("regime_15m") or state_manager.get("regime_30m")) not in [None, "Unknown"] else "UNKNOWN"},
                     {"step": "Exit Quality (EQS)", "value": f"{eqs_val} / 100", "status": "PASS" if eqs_val>=70 else "WARN"},
                     {"step": "Expectancy Gate", "value": dynamic_exp_r, "status": "PASS" if exp_r_val>=0 else "FAIL"},
                     {"step": "Portfolio Risk Cap", "value": f"{round(portfolio_exposure_pct,1)}% < 20%", "status": "PASS" if portfolio_exposure_pct<20 else "FAIL"},
-                    {"step": "Final Order Executed", "value": "LIVE ORDER", "status": "EXECUTED"}
+                    {"step": "Final Order Executed", "value": "LIVE ORDER" if has_trade else "STANDBY", "status": "EXECUTED" if has_trade else "STANDBY"}
                 ],
                 "recent_rejection": state_manager.get("last_rejection", {"symbol": "N/A", "reason": "None"})
             }
@@ -1094,7 +1095,7 @@ def api_institutional_summary():
             "feature_drift": state_manager.get("last_drift_status", "Normal"),
             "psi": round(float(state_manager.get("last_psi", 0.04)), 4),
             "cusum": round(float(state_manager.get("last_cusum", 0.82)), 3),
-            "ece": round(float(state_manager.get("last_ece", 3.8)) / 100.0, 3),
+            "ece": round(float(state_manager["last_ece"]), 4) if state_manager.get("last_ece") is not None else 0.04,
             "brier_score": round(float(state_manager.get("last_brier_score", 0.214)), 3),
             "data_quality": int(state_manager.get("last_data_quality", 97)),
             "api_latency_ms": round(float(state_manager.get("last_api_latency_ms", 18)), 1),
