@@ -37,6 +37,12 @@ class StrategyHealthEngine:
         Calculates Strategy Health Score (0 - 100) and position size multiplier.
         Returns: (shs_score, position_size_multiplier, action_recommendation)
         """
+        calibration_error_pct = float(calibration_error_pct)
+        psi_drift_score = float(psi_drift_score)
+        rolling_profit_factor = float(rolling_profit_factor)
+        current_drawdown_pct = float(current_drawdown_pct)
+        win_rate_variance_pct = float(win_rate_variance_pct)
+        order_latency_ms = float(order_latency_ms)
         score = 0.0
 
         # 1. Calibration Error (20 pts)
