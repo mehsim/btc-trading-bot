@@ -1571,7 +1571,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
             from ensemble import get_manifest_hmac_secret
             import hmac
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            now_iso = datetime.now(timezone.utc).isoformat()
             eff_n_val = round(effective_n, 2) if 'effective_n' in locals() else float(len(X))
             uniq_ratio_val = round((effective_n / max(1, len(y_trend))), 4) if 'effective_n' in locals() else 1.0
             raw_n_val = int(len(y_trend))
