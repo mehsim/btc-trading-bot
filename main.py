@@ -8755,26 +8755,51 @@ def main():
 
                         print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
-                        # Determine dynamic confidence threshold based on regime and volatility
+                        # Determine dynamic confidence threshold based on trade economics (p* break-even payoff) + bounded modifiers
                         atr_norm_val = latest_candle["ATR_norm"]
                         
-                        # Item B: Stricter Ranging Market Thresholds (Prevent false breakouts in chop)
-                        if str(iv) == "15":
-                            dynamic_conf_threshold = 0.58 if "Ranging" in regime_name else 0.55
-                        elif str(iv) == "30":
-                            dynamic_conf_threshold = 0.60 if "Ranging" in regime_name else 0.55
-                        else:
-                            dynamic_conf_threshold = 0.58 if "Ranging" in regime_name else 0.65
+                        # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
+                        from config import TIMEFRAME_CONFIG
+                        from trade_calculators import transaction_cost_model, UnifiedTargetGenerator
+                        cfg = TIMEFRAME_CONFIG.get(str(iv), {})
+                        base_tp_m = cfg.get("tp_mult_trending", 1.85)
+                        base_sl_m = cfg.get("sl_mult", 0.8)
+                        atr_dollars = float(latest_candle.get("ATR", latest_candle["close"] * 0.01))
+                        entry_close = float(latest_candle["close"])
+                        actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+                            interval=str(iv), entry_price=entry_close,
+                            atr_dollars=atr_dollars, base_tp_m=base_tp_m
+                        )
+                        _bars_per_day = max(1, round(1440 / max(1, int(iv))))
+                        _adv_usd = float(df_completed["volume"].tail(_bars_per_day).sum() * entry_close) if ("volume" in df_completed.columns and len(df_completed) >= _bars_per_day) else 50_000_000.0
+                        _order_usd = float(bot_state.get("position_size_usd", 1000.0))
+                        _tcm = transaction_cost_model.estimate_transaction_cost(
+                            order_size_usd=_order_usd,
+                            volume_24h_usd=_adv_usd,
+                            is_maker=True,
+                        )
+                        cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
+                        p_star = base_sl_m / (actual_tp_m + base_sl_m)
+                        economic_base_threshold = float(round(p_star + (cost_bps / 1e4) / (actual_tp_m + base_sl_m), 4))
+                        
+                        dynamic_conf_threshold = economic_base_threshold
+                        adjustments_applied = [("economic_base", economic_base_threshold)]
+
+                        # 2. Bounded Regime & Volatility Adjustments
+                        if "Ranging" in regime_name:
+                            regime_delta = 0.03 if str(iv) in ["15", "30"] else 0.05
+                            dynamic_conf_threshold += regime_delta
+                            adjustments_applied.append(("regime_ranging", regime_delta))
                             
                         # High Volatility Adjustment (ATR > 0.015)
                         if atr_norm_val > 0.015:
-                            if str(iv) in ["15", "30"]:
-                                dynamic_conf_threshold = min(0.62, dynamic_conf_threshold + 0.05)
-                            else:
-                                dynamic_conf_threshold = 0.70
+                            vol_delta = 0.05
+                            dynamic_conf_threshold += vol_delta
+                            adjustments_applied.append(("high_volatility", vol_delta))
                                 
                         if htf_decay_threshold_penalty > 0:
                             dynamic_conf_threshold += htf_decay_threshold_penalty
+                            adjustments_applied.append(("htf_decay_penalty", htf_decay_threshold_penalty))
                             
                         # Recent 50-Trade Performance Decay Filter
                         recent_trades = bot_state.get("trade_history", [])[-50:]
@@ -8782,7 +8807,9 @@ def main():
                             win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
                             recent_win_rate = (win_count / len(recent_trades)) * 100.0
                             if recent_win_rate < 45.0:
-                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.10)
+                                perf_delta = 0.10
+                                dynamic_conf_threshold += perf_delta
+                                adjustments_applied.append(("performance_decay", perf_delta))
                                 print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
                             
                         # Sentiment-Adaptive Adjustment
@@ -8790,19 +8817,24 @@ def main():
                             current_sentiment = cached_news_sentiment
                         if current_sentiment == "Bullish":
                             if ml_trend == "Bullish":
-                                dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.03)
+                                dynamic_conf_threshold -= 0.03
+                                adjustments_applied.append(("sentiment_align_bull", -0.03))
                             elif ml_trend == "Bearish":
-                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold += 0.05
+                                adjustments_applied.append(("sentiment_oppose_bear", 0.05))
                         elif current_sentiment == "Bearish":
                             if ml_trend == "Bearish":
-                                dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.03)
+                                dynamic_conf_threshold -= 0.03
+                                adjustments_applied.append(("sentiment_align_bear", -0.03))
                             elif ml_trend == "Bullish":
-                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold += 0.05
+                                adjustments_applied.append(("sentiment_oppose_bull", 0.05))
 
-                        # Item E: Asian Market Session Awareness (00:00 - 08:00 UTC)
+                        # Asian Market Session Awareness (00:00 - 08:00 UTC)
                         utc_hour_now = datetime.now(timezone.utc).hour
                         if 0 <= utc_hour_now < 8:
                             dynamic_conf_threshold += 0.05
+                            adjustments_applied.append(("asian_session", 0.05))
                             print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
                                 
                         # Enforce explicit interval-specific confidence floors
@@ -8813,30 +8845,41 @@ def main():
                             "60": 0.60,
                             "120": 0.62
                         }
-                        floor_val = interval_conf_floors.get(str(iv), 0.55)
-                        dynamic_conf_threshold = max(floor_val, dynamic_conf_threshold)
+                        floor_val = interval_conf_floors.get(str(iv), 0.52)
+                        if dynamic_conf_threshold < floor_val:
+                            floor_delta = round(floor_val - dynamic_conf_threshold, 4)
+                            dynamic_conf_threshold = floor_val
+                            adjustments_applied.append(("interval_floor", floor_delta))
 
-                        # Refinement 1: Adaptive Confidence Threshold Matrix for 15m Timeframe
+                        # Adaptive Confidence Threshold Matrix for 15m/30m
                         if str(iv) == "15":
                             drift_p = bot_state.get("drift_p_val", 0.50) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.50
                             u_tot = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
                             sym_sharpe = float(bot_state.get("symbol_sharpe", 1.2)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1.2
-                            dynamic_conf_threshold = trade_calculators.calculate_adaptive_15m_threshold(
+                            adaptive_val = trade_calculators.calculate_adaptive_15m_threshold(
                                 regime=regime_name,
                                 drift_p_val=drift_p,
                                 u_total=u_tot,
                                 symbol_sharpe=sym_sharpe
                             )
+                            if adaptive_val > dynamic_conf_threshold:
+                                adapt_delta = round(adaptive_val - dynamic_conf_threshold, 4)
+                                dynamic_conf_threshold = adaptive_val
+                                adjustments_applied.append(("adaptive_15m_matrix", adapt_delta))
                         elif str(iv) == "30":
-                            dynamic_conf_threshold = min(0.60, max(0.58, dynamic_conf_threshold))
+                            if dynamic_conf_threshold < 0.58:
+                                adjustments_applied.append(("30m_floor", round(0.58 - dynamic_conf_threshold, 4)))
+                                dynamic_conf_threshold = 0.58
 
                         # Bayesian Cold-Start Adjustment (Trades 3-9)
                         bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))
                         if bayesian_res.get("confidence_boost", 0) > 0:
-                            dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + bayesian_res["confidence_boost"])
+                            b_boost = bayesian_res["confidence_boost"]
+                            dynamic_conf_threshold += b_boost
+                            adjustments_applied.append(("bayesian_cold_start", b_boost))
                             print(f"[{symbol} {iv}m] {bayesian_res['note']} -> Threshold: {dynamic_conf_threshold*100:.2f}%")
 
-                        print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
+                        print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Economic Base: {economic_base_threshold*100:.2f}%, Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
 
                         # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
                         meta_adjustment = 0.0
@@ -8851,7 +8894,8 @@ def main():
                                 else:
                                     meta_adjustment = +0.07  # Raises required gate threshold by 7%
                                     print(f"[{iv}m] Meta-Classifier: FAIL (required gate threshold raised by +7%)")
-                                dynamic_conf_threshold = min(0.85, max(0.50, dynamic_conf_threshold + meta_adjustment))
+                                dynamic_conf_threshold += meta_adjustment
+                                adjustments_applied.append(("meta_classifier", meta_adjustment))
                             except Exception as meta_err:
                                 print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
 
@@ -8865,7 +8909,9 @@ def main():
                             pattern_boost = True
 
                         if pattern_boost:
-                            dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.04)
+                            candlestick_delta = -0.04
+                            dynamic_conf_threshold += candlestick_delta
+                            adjustments_applied.append(("candlestick_pattern", candlestick_delta))
                             print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (required threshold lowered -4.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
                         # Determine tracking status
@@ -8990,21 +9036,25 @@ def main():
 
                                 if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
                                     if ml_trend == htf_trend:
-                                        dynamic_conf_threshold = max(0.50, dynamic_conf_threshold - 0.08)
+                                        dynamic_conf_threshold -= 0.08
+                                        adjustments_applied.append(("macro_alignment", -0.08))
                                         print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
                                     else:
-                                        dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.10)
+                                        dynamic_conf_threshold += 0.10
                                         confluence_blocked = True
+                                        adjustments_applied.append(("macro_opposition", 0.10))
                                         print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
                         # Funding Rate Carry Overlay
                         funding_rate = get_funding_rate(symbol)
                         funding_blocked = False
                         if funding_rate > 0.0005 and ml_trend == "Bullish":
-                            dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                            dynamic_conf_threshold += 0.05
+                            adjustments_applied.append(("funding_carry_long", 0.05))
                             print(f"[{symbol} {iv}m] Funding Carry Adjustment: Positive funding rate ({funding_rate*100:.3f}%) raised Long threshold to {dynamic_conf_threshold*100:.1f}%")
                         elif funding_rate < -0.0005 and ml_trend == "Bearish":
-                            dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                            dynamic_conf_threshold += 0.05
+                            adjustments_applied.append(("funding_carry_short", 0.05))
                             print(f"[{symbol} {iv}m] Funding Carry Adjustment: Negative funding rate ({funding_rate*100:.3f}%) raised Short threshold to {dynamic_conf_threshold*100:.1f}%")
 
                         if ml_trend == "Bullish" and funding_rate > 0.001:
@@ -9016,10 +9066,21 @@ def main():
                         try:
                             oi_delta = df.iloc[-1].get("open_interest_pct_change", 0.0) * 100.0
                             if oi_delta < 0.5:
-                                dynamic_conf_threshold = min(0.85, dynamic_conf_threshold + 0.05)
+                                dynamic_conf_threshold += 0.05
+                                adjustments_applied.append(("oi_momentum_guard", 0.05))
                                 print(f"[{symbol} {iv}m] OI Momentum Guard: Low Open Interest Delta ({oi_delta:+.2f}%) raised threshold to {dynamic_conf_threshold*100:.1f}%")
                         except Exception as e:
                             print(f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
+
+                        # Bound final threshold relative to economic base
+                        max_allowed_threshold = min(0.85, max(0.65, economic_base_threshold * 2.0))
+                        dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(0.40, dynamic_conf_threshold)), 4))
+
+                        # Log threshold lineage to prediction state
+                        if f"latest_prediction_{tf}" in bot_state and isinstance(bot_state[f"latest_prediction_{tf}"], dict):
+                            bot_state[f"latest_prediction_{tf}"]["threshold_base"] = economic_base_threshold
+                            bot_state[f"latest_prediction_{tf}"]["threshold_adjustments"] = adjustments_applied
+                            bot_state[f"latest_prediction_{tf}"]["dynamic_threshold"] = dynamic_conf_threshold
                         
                         status_msg = "Pending"
                         active_trade_key = f"active_trade_{tf}"
@@ -9219,10 +9280,9 @@ def main():
                                     # 3. Walk-Forward Optimal Rounding (0.05 precision)
                                     from trade_calculators import UnifiedTargetGenerator
                                     tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
-                                        interval=iv, atr_dollars=atr_dollars,
-                                        entry_price=latest_candle["close"], tp_mult=tp_multiplier_adjusted
+                                        interval=str(iv), entry_price=float(latest_candle["close"]),
+                                        atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
                                     )
-                                    # Take-Profit resolved via UnifiedTargetGenerator above
                                     tp_change = tp_m * atr_dollars
 
                                     print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted:.2f}x (Vol: {vol_adj:.2f}x, Session: {session_factor:.2f}x)")
@@ -9711,6 +9771,8 @@ def main():
                                 "calibrated_confidence": float(calibrated_confidence),
                                 "raw_confidence": float(ml_confidence),
                                 "dynamic_threshold": float(dynamic_conf_threshold),
+                                "threshold_base": float(economic_base_threshold) if 'economic_base_threshold' in locals() else None,
+                                "threshold_adjustments": adjustments_applied if 'adjustments_applied' in locals() else [],
                                 "evaluation": {
                                     "evaluated": False,
                                     "exit_price": None,
