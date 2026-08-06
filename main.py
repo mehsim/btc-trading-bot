@@ -979,7 +979,8 @@ def start_telegram_command_listener():
             for p in latest_skipped:
                 symbol = p.get("symbol", "N/A")
                 direction = p.get("direction", "N/A")
-                status = p.get("status", "").replace("Skipped (", "").replace(")", "")
+                raw_status = str(p.get("status", ""))
+                status = raw_status.replace("Skipped (", "").replace("Evaluated (", "").rstrip(")").strip()
                 conf = p.get("calibrated_confidence", 0.0)
                 ref_p = p.get("ref_price", 0.0)
                 thresh = p.get("dynamic_threshold", 0.60)
