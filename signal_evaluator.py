@@ -176,19 +176,21 @@ class SignalEvaluator:
                 mcc_min_val = models.get("manifest_mcc_min")
                 bal_acc_val = models.get("manifest_bal_acc")
 
-                if mcc_val is not None and mcc_val < min_mcc_floor:
-                    _mmsg = f"[SignalEvaluator Gate] Refusing signal for {interval}m ({_regime_key}): Model MCC ({mcc_val:.4f}) is below predictive floor ({min_mcc_floor}). ABSTAIN."
-                    log_event("WARNING", _mmsg)
+                # Fail-closed: unmeasured models (no cv_metrics) must not trade
+                if mcc_val is None:
+                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): no CV metrics recorded — quality unverified. ABSTAIN.")
+                    return "Neutral", 0.0, "Model predictive content unverified (no cv_metrics)"
+
+                if mcc_val < min_mcc_floor:
+                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): MCC ({mcc_val:.4f}) below predictive floor ({min_mcc_floor}). ABSTAIN.")
                     return "Neutral", 0.0, f"Model predictive content below governance floor (MCC {mcc_val:.4f} < {min_mcc_floor})"
 
                 if mcc_min_val is not None and mcc_min_val < 0.0:
-                    _mmsg = f"[SignalEvaluator Gate] Refusing signal for {interval}m ({_regime_key}): Model anti-correlated on CV fold (min fold MCC = {mcc_min_val:.4f} < 0.0). ABSTAIN."
-                    log_event("WARNING", _mmsg)
+                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < 0.0). ABSTAIN.")
                     return "Neutral", 0.0, f"Model anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < 0.0)"
 
                 if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
-                    _mmsg = f"[SignalEvaluator Gate] Refusing signal for {interval}m ({_regime_key}): Model Balanced Accuracy ({bal_acc_val:.4f}) is below predictive floor ({min_bal_acc_floor}). ABSTAIN."
-                    log_event("WARNING", _mmsg)
+                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): BalAcc ({bal_acc_val:.4f}) below floor ({min_bal_acc_floor}). ABSTAIN.")
                     return "Neutral", 0.0, f"Model balanced accuracy below governance floor ({bal_acc_val:.4f} < {min_bal_acc_floor})"
 
                 try:
