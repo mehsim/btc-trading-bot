@@ -189,6 +189,14 @@ class SignalEvaluator:
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                     tp_m = cfg.get("tp_mult_trending", 1.85)
                     sl_m = cfg.get("sl_mult", 0.8)
+                    close_price = float(df["close"].iloc[-1]) if ("close" in df.columns and len(df) > 0) else 100.0
+                    atr_val = float(df["ATR"].iloc[-1]) if ("ATR" in df.columns and len(df) > 0 and pd.notna(df["ATR"].iloc[-1])) else float(close_price * 0.01)
+                    min_tp_d = max(0.75 * atr_val, close_price * 0.0020)
+                    actual_tp_m = max(min_tp_d / max(1e-6, atr_val), tp_m)
+                    lookahead = cfg.get("lookahead", 10)
+                    max_reach_m = float(np.sqrt(lookahead)) * 1.5
+                    actual_tp_m = min(actual_tp_m, max_reach_m)
+
                     # H-4: compute round-trip cost from TCM using per-symbol ADV from df.
                     # df loaded at line 125; tail(96) × 15m bars ≈ 24h volume.
                     _bars_per_day = max(1, round(1440 / max(1, int(interval))))
@@ -200,8 +208,8 @@ class SignalEvaluator:
                         is_maker=True,
                     )
                     cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
-                    p_star = sl_m / (tp_m + sl_m)
-                    eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (tp_m + sl_m))), 4)
+                    p_star = sl_m / (actual_tp_m + sl_m)
+                    eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (actual_tp_m + sl_m))), 4)
 
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:

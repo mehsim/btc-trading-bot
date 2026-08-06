@@ -318,4 +318,14 @@ CORRELATION_WINDOW_CONFIG = {
     "default": 20,
 }
 
+# H-1: Timeframe-Adaptive Structural Resistance Lookback
+STRUCTURE_LOOKBACK_CONFIG = {
+    "15": 16,
+    "30": 20,
+    "60": 24,
+    "120": 30,
+    "240": 40,
+    "default": 20,
+}
+
 

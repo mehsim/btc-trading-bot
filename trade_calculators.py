@@ -1115,30 +1115,40 @@ class UnifiedTargetGenerator:
         direction: str,
         atr_dollars: float,
         symbol: str,
-        df_history: Any = None
+        df_history: Any = None,
+        interval: str = "60"
     ) -> dict:
+        import config
+        from config import TIMEFRAME_CONFIG
         target_mult = float(policy_vector.get("target_multiplier", 1.5))
         partial_split = policy_vector.get("partial_split", [0.20, 0.30, 0.50])
         
         is_long = str(direction).upper() in ["BUY", "LONG", "BULLISH"]
         dir_sign = 1 if is_long else -1
 
-        # Volatility & policy multiplier target
-        raw_dist = target_mult * atr_dollars
-        min_tp_dist = entry_price * 0.015
-        calc_dist = max(min_tp_dist, raw_dist)
+        # C-1: Microstructure & ATR-aligned TP floor (0.75x ATR floor, clears spread + fees)
+        min_tp_dist = max(0.75 * atr_dollars, entry_price * 0.0020)
+        calc_dist = max(min_tp_dist, target_mult * atr_dollars)
+
+        # C-1: Reachability Bound (TP must not exceed max range supported by prediction lookahead)
+        lookahead = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
+        max_reach_dist = atr_dollars * float(np.sqrt(lookahead)) * 1.5
+        calc_dist = min(calc_dist, max_reach_dist)
 
         raw_tp = entry_price + (dir_sign * calc_dist)
 
-        # Structural Capping against swing high/low
+        # H-1: Structural Capping against swing high/low with timeframe-adaptive lookback
+        lookback_cfg = getattr(config, "STRUCTURE_LOOKBACK_CONFIG", {})
+        lookback = lookback_cfg.get(str(interval)) or lookback_cfg.get("default", 20)
+
         capped_tp = raw_tp
         if df_history is not None and hasattr(df_history, "empty") and not df_history.empty:
             if is_long and "high" in df_history.columns:
-                recent_res = float(df_history["high"].tail(20).max())
+                recent_res = float(df_history["high"].tail(lookback).max())
                 if recent_res > entry_price and raw_tp > recent_res:
                     capped_tp = max(entry_price + min_tp_dist, recent_res - (0.05 * atr_dollars))
             elif not is_long and "low" in df_history.columns:
-                recent_supp = float(df_history["low"].tail(20).min())
+                recent_supp = float(df_history["low"].tail(lookback).min())
                 if recent_supp < entry_price and raw_tp < recent_supp:
                     capped_tp = min(entry_price - min_tp_dist, recent_supp + (0.05 * atr_dollars))
 
