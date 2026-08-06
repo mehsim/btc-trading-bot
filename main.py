@@ -2200,14 +2200,23 @@ def start_telegram_command_listener():
                         elif text == "/status":
                             try:
                                 import psutil
-                                instant_cpu = psutil.cpu_percent(interval=None)
+                                instant_cpu = psutil.cpu_percent(interval=0.2)
+                                cpu_count = os.cpu_count() or 1
                                 load1, load5, _ = os.getloadavg() if hasattr(os, 'getloadavg') else (0.1, 0.1, 0.1)
-                                cpu_str = f"{instant_cpu:.1f}% (5m Avg Load: {load5:.2f})"
+                                if instant_cpu <= 0.0:
+                                    instant_cpu = min(100.0, (load1 / cpu_count) * 100.0)
+                                cpu_str = f"{instant_cpu:.1f}% (5m Load: {load5:.2f})"
                                 mem = psutil.virtual_memory()
                                 true_used_pct = (1.0 - (mem.available / mem.total)) * 100.0
                                 ram_str = f"{true_used_pct:.1f}% (Avail: {mem.available // (1024*1024)}MB / {mem.total // (1024*1024)}MB)"
                             except Exception:
-                                cpu_str = "Idle (< 5%)"
+                                if hasattr(os, 'getloadavg'):
+                                    load1, load5, _ = os.getloadavg()
+                                    cpu_count = os.cpu_count() or 1
+                                    est_cpu = min(100.0, (load1 / cpu_count) * 100.0)
+                                    cpu_str = f"{est_cpu:.1f}% (5m Load: {load5:.2f})"
+                                else:
+                                    cpu_str = "Active"
                                 ram_str = "Active"
 
                             active_cnt = 0
