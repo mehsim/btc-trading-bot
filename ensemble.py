@@ -735,6 +735,8 @@ def write_model_manifest(
     promotion_metrics: Optional[dict] = None
 ):
     try:
+        import hashlib, hmac, os, json, subprocess, datetime, platform
+        import sklearn, pandas, numpy, xgboost, lightgbm, catboost
         from config import MODEL_GOVERNANCE, SUPPORTED_MANIFEST_SCHEMA_VERSION
         git_sha = "b5c5c35a"
         try:
@@ -754,7 +756,6 @@ def write_model_manifest(
         clean_ver = model_version.split(f"-{git_sha}")[0] if (git_sha and git_sha in model_version) else model_version
         full_model_ver = f"{clean_ver}-{git_sha}-{ts_suffix}"
 
-        import platform, sklearn, pandas, numpy, xgboost, lightgbm, catboost, json, os, subprocess, datetime, hashlib, hmac
         deps = {
             "python": platform.python_version(),
             "scikit-learn": getattr(sklearn, "__version__", "1.9.0"),
