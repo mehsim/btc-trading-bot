@@ -108,3 +108,13 @@ def test_live_order_partial_fill_reversal():
         # Verify position was NOT added to active_trades due to reversal
         active_trades = main.bot_state.get("active_trades", [])
         assert not any(t.get("trade_id") == "BTCUSDT_mock_partial_uuid" for t in active_trades)
+
+
+def test_trade_execution_signature_match():
+    """Assert live Thread call site supplies all required parameters to execution inner."""
+    import inspect
+    import main
+    sig = inspect.signature(main._execute_bybit_trade_async_inner)
+    required = [p for p in sig.parameters.values() if p.default is inspect._empty]
+    # main.py Thread call site passes exactly 27 positional arguments
+    assert len(required) <= 27, f"Execution inner expects {len(required)} required params, Thread passes 27"
