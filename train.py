@@ -413,15 +413,16 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             return 0.0
         
         atr_vals = (df_clean["ATR_norm"] * df_clean["close"]).values
-        closes = df_clean["close"].values
+        prices = df_clean["close"].values
         highs = df_clean["high"].values
         lows = df_clean["low"].values
         adxs = df_clean["ADX"].values
         n_samples = len(df_clean)
         labels = np.ones(n_samples, dtype=int) * 1
+        terminal_drift = np.zeros(n_samples, dtype=float)
         
         for i in range(n_samples):
-            p_t = closes[i]
+            p_t = prices[i]
             atr_t = atr_vals[i]
             adx_t = adxs[i]
             if atr_t <= 0: atr_t = p_t * 0.001
@@ -433,6 +434,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             upper_s = p_t + sl_m * atr_t
             lower_s = p_t - sl_m * atr_t
             
+            hit = False
             for step in range(1, _look + 1):
                 if i + step >= n_samples: break
                 h, l = highs[i + step], lows[i + step]
@@ -440,16 +442,23 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 hit_bear = l <= lower_b and h < upper_s
                 if hit_bull and not hit_bear:
                     labels[i] = 2
+                    hit = True
                     break
                 elif hit_bear and not hit_bull:
                     labels[i] = 0
+                    hit = True
                     break
                 elif l <= lower_s:
                     labels[i] = 0
+                    hit = True
                     break
                 elif h >= upper_s:
                     labels[i] = 2
+                    hit = True
                     break
+            if not hit:
+                end_idx = min(i + _look, n_samples - 1)
+                terminal_drift[i] = ((prices[end_idx] - p_t) / (p_t + 1e-8)) * 100.0
         y = labels
         scores = []
         optuna_fold_scores = []
@@ -549,7 +558,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=3)
+    study.optimize(objective, n_trials=20)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -584,7 +593,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=3)
+    study.optimize(objective, n_trials=20)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -613,7 +622,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=3)
+    study.optimize(objective, n_trials=20)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -643,7 +652,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=3)
+    study.optimize(objective, n_trials=20)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -673,7 +682,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=3)
+    study.optimize(objective, n_trials=20)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -698,7 +707,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=3)
+    study.optimize(objective, n_trials=20)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):

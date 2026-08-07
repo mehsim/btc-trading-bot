@@ -130,10 +130,24 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
     return df
 
 MIN_FEATURE_HISTORY = 200 + 14 + 1
+_FEATURES_CACHE = {}
 
 def add_features(df, fetch_calendar_callback=None):
     if df is not None and len(df) < MIN_FEATURE_HISTORY:
         raise ValueError(f"add_features requires >= {MIN_FEATURE_HISTORY} bars, got {len(df)}")
+        
+    cache_key = None
+    if df is not None and len(df) > 0 and "timestamp" in df.columns and "close" in df.columns:
+        try:
+            sym_val = str(df["symbol"].iloc[-1]) if "symbol" in df.columns else "BTCUSDT"
+            last_ts = float(df["timestamp"].iloc[-1])
+            last_close = float(df["close"].iloc[-1])
+            cache_key = (sym_val, len(df), last_ts, last_close)
+            if cache_key in _FEATURES_CACHE:
+                return _FEATURES_CACHE[cache_key].copy()
+        except Exception:
+            cache_key = None
+
     df = df.copy()
     
     # Ensure source derivative & sentiment columns exist with proper defaults if not merged
@@ -431,6 +445,10 @@ def add_features(df, fetch_calendar_callback=None):
     except Exception as e:
         print(f"[Features Warning] Failed computing high alpha features: {e}")
     df = df.bfill().ffill().fillna(0.0)
+    if cache_key is not None:
+        if len(_FEATURES_CACHE) > 50:
+            _FEATURES_CACHE.clear()
+        _FEATURES_CACHE[cache_key] = df.copy()
     return df
 
 def add_candlestick_patterns(df):

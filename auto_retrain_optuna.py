@@ -85,7 +85,7 @@ class OptunaModelRetrainer:
                 return total_return / max(1.0, max_dd)
 
             study = optuna.create_study(direction="maximize")
-            study.optimize(objective, n_trials=5)
+            study.optimize(objective, n_trials=25)
 
             best_thresholds = {
                 "STRONG_TREND_ADX_ENTER": float(np.round(study.best_params.get("STRONG_TREND_ADX_ENTER", 32.0), 1)),
