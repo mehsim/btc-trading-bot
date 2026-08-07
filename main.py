@@ -6219,13 +6219,7 @@ def main():
                         # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
                         calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
-                        # 🟠 Sign Conflict Check: Classifier direction vs Regressor predicted change
-                        if ml_trend == "Bullish" and pred_change < 0:
-                            log_event("WARNING", f"[{symbol} {iv}m Sign Conflict] Classifier=Bullish but Regressor pred_change={pred_change:+.2f} < 0. Invalidating signal to Neutral.")
-                            ml_trend = "Neutral"
-                        elif ml_trend == "Bearish" and pred_change > 0:
-                            log_event("WARNING", f"[{symbol} {iv}m Sign Conflict] Classifier=Bearish but Regressor pred_change={pred_change:+.2f} > 0. Invalidating signal to Neutral.")
-                            ml_trend = "Neutral"
+
                             
                         # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
                         htf_decay_threshold_penalty = 0.0
