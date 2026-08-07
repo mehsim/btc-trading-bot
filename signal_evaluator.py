@@ -159,7 +159,7 @@ class SignalEvaluator:
             last_row = df.iloc[-1]
             adx_val = float(last_row.get("ADX", 20.0)) if "ADX" in last_row and not np.isnan(last_row["ADX"]) else 20.0
             
-            prev_regime = self.bot_state.get(f"regime_{tf_key}", "")
+            prev_regime = self.bot_state.get(f"regime_{symbol}_{tf_key}", "")
             was_trending = "Trending" in prev_regime
             adx_enter = REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)
             adx_exit = REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)
@@ -176,8 +176,6 @@ class SignalEvaluator:
             with self.state_lock:
                 self.bot_state[f"regime_{symbol}_{tf_key}"] = regime_str
                 self.bot_state[f"adx_{symbol}_{tf_key}"] = adx_val
-                self.bot_state[f"regime_{tf_key}"] = regime_str
-                self.bot_state[f"adx_{tf_key}"] = adx_val
 
             # Lazy model evaluation
             model_eval_success = False
@@ -322,7 +320,6 @@ class SignalEvaluator:
                     }
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
-                        self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
                         
                         # Append to prediction_history for dashboard and telemetry
                         history = self.bot_state.get("prediction_history", [])
@@ -401,7 +398,6 @@ class SignalEvaluator:
                         "is_fallback": True
                     }
                     self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = fallback_dict
-                    self.bot_state[f"latest_prediction_{tf_key}"] = fallback_dict
                     history = self.bot_state.get("prediction_history", [])
                     if isinstance(history, list):
                         c_ts = int(time.time() * 1000)
@@ -428,7 +424,7 @@ class SignalEvaluator:
             # Update Confluence Results for UI
             self.update_confluence_results(tf_key, df, symbol)
             with self.state_lock:
-                sig_src = (self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}") or self.bot_state.get(f"latest_prediction_{tf_key}", {})).get("signal_source", "UNKNOWN")
+                sig_src = self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}", {}).get("signal_source", "UNKNOWN")
             print(f"[SignalEvaluator] Evaluated {interval}m ({symbol}): Regime={regime_str}, Direction={direction}, Source={sig_src}, ADX={adx_val:.1f}")
 
         except Exception as e:
@@ -455,13 +451,13 @@ class SignalEvaluator:
         
         # Pred info & external data lookup
         with self.state_lock:
-            pred_info = dict(self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}") or self.bot_state.get(f"latest_prediction_{tf_key}", {}))
+            pred_info = dict(self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}", {}))
             ofi = self.bot_state.get("latest_ofi")
             fg_raw = last_row.get("fear_greed")
             fg_val = float(fg_raw) if (fg_raw is not None and not pd.isna(pd.to_numeric(fg_raw, errors="coerce"))) else None
             sentiment = self.bot_state.get("latest_sentiment_score") or fg_val
-            pred_15 = (self.bot_state.get(f"latest_prediction_{symbol}_15m") or self.bot_state.get("latest_prediction_15m", {})).get("direction")
-            pred_1h = (self.bot_state.get(f"latest_prediction_{symbol}_1h") or self.bot_state.get("latest_prediction_1h", {})).get("direction")
+            pred_15 = self.bot_state.get(f"latest_prediction_{symbol}_15m", {}).get("direction")
+            pred_1h = self.bot_state.get(f"latest_prediction_{symbol}_1h", {}).get("direction")
 
         pred_change = abs(float(pred_info.get("predicted_change", 0.0)))
         fee_hurdle = close * 0.0012
@@ -557,7 +553,6 @@ class SignalEvaluator:
                 }
             }
             self.bot_state[f"confluence_results_{symbol}_{tf_key}"] = confl_dict
-            self.bot_state[f"confluence_results_{tf_key}"] = confl_dict
 
 
 def verify_manifest_health():

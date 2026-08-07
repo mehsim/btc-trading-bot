@@ -47,18 +47,19 @@ def test_symbol_prediction_state_isolation():
     from signal_evaluator import SignalEvaluator
 
     bot_state = {}
-    evaluator = SignalEvaluator(bot_state=bot_state)
+    ev = SignalEvaluator(bot_state=bot_state)
 
     # Mock state writes for two distinct symbols evaluated sequentially
-    evaluator.bot_state["latest_prediction_BTCUSDT_15m"] = {"symbol": "BTCUSDT", "direction": "Bullish", "confidence": 0.82}
-    evaluator.bot_state["latest_prediction_ETHUSDT_15m"] = {"symbol": "ETHUSDT", "direction": "Bearish", "confidence": 0.65}
+    ev.bot_state["latest_prediction_BTCUSDT_15m"] = {"symbol": "BTCUSDT", "direction": "Bullish", "confidence": 0.82}
+    ev.bot_state["latest_prediction_ETHUSDT_15m"] = {"symbol": "ETHUSDT", "direction": "Bearish", "confidence": 0.65}
 
-    btc_pred = evaluator.bot_state.get("latest_prediction_BTCUSDT_15m")
-    eth_pred = evaluator.bot_state.get("latest_prediction_ETHUSDT_15m")
+    btc_pred = ev.bot_state.get("latest_prediction_BTCUSDT_15m")
+    eth_pred = ev.bot_state.get("latest_prediction_ETHUSDT_15m")
 
     assert btc_pred["direction"] == "Bullish" and btc_pred["confidence"] == 0.82
     assert eth_pred["direction"] == "Bearish" and eth_pred["confidence"] == 0.65
     assert btc_pred["direction"] != eth_pred["direction"]
+    assert "latest_prediction_15m" not in ev.bot_state  # Shared key must not exist!
 
 
 if __name__ == "__main__":
