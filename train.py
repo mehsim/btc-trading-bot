@@ -407,7 +407,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         _reach = math.sqrt(_look)
         tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.45 * _reach, 0.90 * _reach)
         tp_m_trending = trial.suggest_float("tp_mult_trending", 0.45 * _reach, 1.10 * _reach)
-        sl_m          = trial.suggest_float("sl_mult",          0.45 * _reach, 0.65 * _reach)
+        sl_m          = trial.suggest_float("sl_mult",          0.25 * _reach, 0.65 * _reach)
 
         # Economic gate: reject geometries with R:R below 1.20 outright
         rr = tp_m_trending / max(1e-9, sl_m)
