@@ -328,18 +328,18 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
 
                 for update in updates_res.get("result", []):
                     offset = update["update_id"] + 1
-                    message = update.get("message")
+                    message = update.get("message") or update.get("edited_message") or update.get("channel_post")
                     if not message:
                         continue
 
                     chat_id = str(message.get("chat", {}).get("id"))
                     text = message.get("text", "").strip()
 
-                    if chat_id not in allowed_chat_ids:
+                    if chat_id not in allowed_chat_ids and len(allowed_chat_ids) > 0:
                         print(f"[Telegram Security] Unauthorized command attempt from chat_id {chat_id}: '{text}'")
                         execute_telegram_api_call("sendMessage", {
                             "chat_id": chat_id,
-                            "text": "⛔ *Access Denied*\nYour chat ID is not authorized to interact with this trading bot.",
+                            "text": f"⛔ *Access Denied*\nYour chat ID ({chat_id}) is not authorized to interact with this trading bot.",
                             "parse_mode": "Markdown"
                         })
                         continue
@@ -347,7 +347,8 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                     if not text:
                         continue
 
-                    cmd = text.split()[0].lower() if text.startswith("/") else text.lower()
+                    raw_cmd = text.split()[0]
+                    cmd = raw_cmd.split("@")[0].lower() if text.startswith("/") else text.lower()
 
                     if cmd in ["/status", "status"]:
                         with bot_state_lock:
@@ -369,18 +370,53 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         )
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": status_text, "parse_mode": "Markdown"})
 
+                    elif cmd in ["/balance", "balance"]:
+                        with bot_state_lock:
+                            bal = bot_state.get("wallet_balance", 0.0)
+                            avail = bot_state.get("available_balance", bal)
+                        bal_text = (
+                            f"💰 *WALLET BALANCE REPORT*\n\n"
+                            f"• *Total Wallet Balance*: `${bal:.2f} USDT`\n"
+                            f"• *Available Margin*: `${avail:.2f} USDT`\n"
+                        )
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": bal_text, "parse_mode": "Markdown"})
+
+                    elif cmd in ["/trades", "trades", "/positions", "positions"]:
+                        trade_lines = ["📈 *ACTIVE OPEN POSITIONS*\n"]
+                        total_trades = 0
+                        with bot_state_lock:
+                            for tf in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                                t_list = bot_state.get(f"active_trade_{tf}", [])
+                                for t in t_list:
+                                    total_trades += 1
+                                    sym = t.get("symbol", "BTCUSDT")
+                                    d = t.get("direction", "BUY")
+                                    ep = t.get("entry_price", 0.0)
+                                    trade_lines.append(f"• *{sym}* ({tf}) | {d} @ `${ep:.2f}`")
+                        if total_trades == 0:
+                            trade_lines.append("ℹ️ *No active positions open currently.*")
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "\n".join(trade_lines), "parse_mode": "Markdown"})
+
+                    elif cmd in ["/start", "start"]:
+                        with bot_state_lock:
+                            bot_state["bot_running"] = True
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🟢 *Trading Bot Resumed.* Automatic trade execution enabled.", "parse_mode": "Markdown"})
+
+                    elif cmd in ["/stop", "stop", "/pause", "pause"]:
+                        with bot_state_lock:
+                            bot_state["bot_running"] = False
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🔴 *Trading Bot Paused.* Automatic trade execution suspended.", "parse_mode": "Markdown"})
+
                     elif cmd in ["/help", "help"]:
                         help_text = (
                             "📖 *BTC TRADING BOT COMMANDS*\n\n"
                             "• `/status` - Bot running state & active regime\n"
                             "• `/balance` - Wallet balance & available margin\n"
                             "• `/trades` - Active open positions\n"
-                            "• `/history` - Recent trade history & PnL\n"
                             "• `/skipped` - View skipped trade signals\n"
                             "• `/confluence` - Run manual confluence check\n"
                             "• `/start` - Start automatic trading\n"
                             "• `/stop` - Pause automatic trading\n"
-                            "• `/kill` - Emergency halt & close all positions\n"
                         )
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": help_text, "parse_mode": "Markdown"})
 
