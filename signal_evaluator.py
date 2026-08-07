@@ -346,7 +346,7 @@ class SignalEvaluator:
                                     "ref_price": float(last_row["close"]),
                                     "predicted_change": float(pred_pct * float(last_row["close"])),
                                     "predicted_price": float(last_row["close"]) * (1.0 + pred_pct),
-                                    "status": f"Evaluated ({direction})",
+                                    "status": f"Pending Gate Checks ({direction})",
                                     "calibrated_confidence": float(calibrated_conf),
                                     "raw_confidence": float(raw_conf),
                                     "dynamic_threshold": float(eval_threshold),

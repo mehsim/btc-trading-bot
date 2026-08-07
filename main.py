@@ -7254,13 +7254,32 @@ def main():
                         
 
 
-                        # Prevent duplicate predictions for the same candle timestamp
-                        exists = any(p.get("candle_timestamp") == int(latest_completed_ts) and p.get("interval") == iv and p.get("symbol") == symbol for p in bot_state["prediction_history"])
-                        if not exists:
+                        # Update existing prediction from SignalEvaluator or append new entry with final live gate status
+                        matched_pred = None
+                        c_ts_target = int(latest_completed_ts * 1000) if latest_completed_ts < 1e11 else int(latest_completed_ts)
+                        for p in bot_state.get("prediction_history", []):
+                            p_c_ts = p.get("candle_timestamp", 0)
+                            p_c_ts_conv = int(p_c_ts * 1000) if p_c_ts < 1e11 else int(p_c_ts)
+                            if p_c_ts_conv == c_ts_target and str(p.get("interval")) == str(iv) and str(p.get("symbol")) == str(symbol):
+                                matched_pred = p
+                                break
+
+                        if matched_pred is not None:
+                            matched_pred["status"] = str(status_msg)
+                            matched_pred["direction"] = str(ml_trend)
+                            matched_pred["ref_price"] = float(latest_candle["close"])
+                            matched_pred["predicted_change"] = float(pred_change)
+                            matched_pred["predicted_price"] = float(predicted_price)
+                            matched_pred["calibrated_confidence"] = float(calibrated_confidence)
+                            matched_pred["raw_confidence"] = float(ml_confidence)
+                            matched_pred["dynamic_threshold"] = float(dynamic_conf_threshold)
+                            matched_pred["threshold_base"] = float(economic_base_threshold) if 'economic_base_threshold' in locals() else None
+                            matched_pred["threshold_adjustments"] = adjustments_applied if 'adjustments_applied' in locals() else []
+                        else:
                             bot_state["prediction_history"].append({
                                 "symbol": symbol,
                                 "timestamp": float(time.time()),
-                                "candle_timestamp": int(latest_completed_ts),
+                                "candle_timestamp": c_ts_target,
                                 "interval": str(iv),
                                 "direction": str(ml_trend),
                                 "ref_price": float(latest_candle["close"]),
@@ -7283,8 +7302,6 @@ def main():
                             
                             if len(bot_state["prediction_history"]) > 200:
                                 bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
-                        else:
-                            print(f"[{symbol} {iv}m] Prediction for candle timestamp {get_local_time_str(latest_completed_ts/1000)} already exists in history. Skipping duplicate append.")
                         
                         evaluate_predictions(df_completed, iv, symbol)
                         save_history()
