@@ -1,1 +1,24 @@
-["RSI", "MACD_diff", "MFI", "close_to_EMA9", "close_to_EMA21", "close_to_EMA50", "close_to_EMA200", "EMA9_to_EMA21", "BB_pct", "BB_width", "volatility_10m", "volume_ratio", "high_low_ratio", "MACD_diff_diff", "ROC_10", "ADX", "ADX_pos", "ADX_neg", "close_to_VWAP", "btc_return_5m_lag2", "btc_return_5m_lag3", "RSI_24"]
+[
+  "open_interest",
+  "funding_rate",
+  "fear_greed",
+  "oi_change_1h",
+  "oi_change_4h",
+  "RSI",
+  "MACD_diff",
+  "EMA_9",
+  "EMA_21",
+  "EMA_50",
+  "EMA_200",
+  "BB_high",
+  "BB_low",
+  "BB_mid",
+  "MFI",
+  "ATR_norm",
+  "close_to_EMA9",
+  "close_to_EMA21",
+  "close_to_EMA50",
+  "close_to_EMA200",
+  "EMA9_to_EMA21",
+  "BB_pct"
+]
