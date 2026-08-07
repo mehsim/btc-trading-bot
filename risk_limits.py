@@ -63,5 +63,20 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
             f"exceeds hard safety cap ({HARD_MAX_SYMBOL_EXPOSURE_PCT*100:.1f}%)."
         )
 
+    # M-2 Startup Assertion: Verify shared constants between train.py and config.py match
+    try:
+        import config as cfg
+        import train as tr
+        for key in ["STRONG_TREND_ADX_ENTER", "STRONG_TREND_ADX_EXIT"]:
+            cfg_val = getattr(cfg, key, None)
+            tr_val = getattr(tr, key, None)
+            if cfg_val is not None and tr_val is not None and cfg_val != tr_val:
+                raise PermissionError(
+                    f"[Constant Divergence Error] Shared constant '{key}' mismatch: "
+                    f"config.py={cfg_val} != train.py={tr_val}."
+                )
+    except (ImportError, AttributeError):
+        pass
+
     print("🛡️ [Risk Governance] Startup assertion passed: all active parameters comply with hard safety limits.")
     return True

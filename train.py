@@ -407,7 +407,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         _reach = math.sqrt(_look)
         tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.45 * _reach, 0.90 * _reach)
         tp_m_trending = trial.suggest_float("tp_mult_trending", 0.45 * _reach, 1.10 * _reach)
-        sl_m          = trial.suggest_float("sl_mult",          0.25 * _reach, 0.65 * _reach)
+        sl_m          = trial.suggest_float("sl_mult",          0.45 * _reach, 0.65 * _reach)
 
         # Economic gate: reject geometries with R:R below 1.20 outright
         rr = tp_m_trending / max(1e-9, sl_m)
@@ -1573,8 +1573,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
             # Step 3: Evaluate MLflow Model Registry Promotion Gate with actual integer version
             promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver)
-            if not promoted:
-                print(f"  [Model Governance Gate] Promotion REJECTED: {p_reason}")
+            # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
+            from oos_validation import validate_out_of_sample_performance
+            oos_passed, oos_reason = validate_out_of_sample_performance(interval=str(interval), challenger_mcc=chal_mcc_mean)
+            if not oos_passed:
+                print(f"  [OOS Validation Gate] Promotion REJECTED: {oos_reason}")
                 should_save = False
 
         if should_save:
