@@ -682,15 +682,20 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
     from config import TIMEFRAME_CONFIG as _TFC
     _saved_barriers = m_data.get("barrier_config")
     if _saved_barriers:
-        _live_barriers = {k: _TFC.get(str(interval), {}).get(k) for k in _saved_barriers if _TFC.get(str(interval), {}).get(k) is not None}
-        _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
-        if _mismatched:
-            raise RuntimeError(
-                f"[Barrier Contract Error] Mismatch for '{prefix}' ({interval}m): "
-                f"trained {{{', '.join(f'{k}={_saved_barriers[k]}' for k in _mismatched)}}}, "
-                f"serving {{{', '.join(f'{k}={_live_barriers[k]}' for k in _mismatched)}}}. "
-                f"Model refused loading (Fail-Closed). Retrain required."
-            )
+        # extract interval from prefix, e.g. "ensemble_trending_trend_60" → "60"
+        _pfx_parts = prefix.rsplit("_", 1)
+        _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
+        if _pfx_interval:
+            _live_cfg = _TFC.get(_pfx_interval, {})
+            _live_barriers = {k: _live_cfg[k] for k in _saved_barriers if k in _live_cfg}
+            _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
+            if _mismatched:
+                raise RuntimeError(
+                    f"[Barrier Contract Error] Mismatch for '{prefix}' ({_pfx_interval}m): "
+                    f"trained {{{', '.join(f'{k}={_saved_barriers[k]}' for k in _mismatched)}}}, "
+                    f"serving {{{', '.join(f'{k}={_live_barriers[k]}' for k in _mismatched)}}}. "
+                    f"Model refused loading (Fail-Closed). Retrain required."
+                )
     else:
         log_event("WARNING", f"[Barrier Contract] {prefix}: no barrier_config in manifest — pre-contract model, load permitted until retrained")
 
