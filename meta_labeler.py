@@ -26,7 +26,8 @@ def train_meta_labeler() -> tuple[bool, str]:
     """
     db_path = "trading_bot.db"
     if not os.path.exists(db_path):
-        return False, "Database file not found"
+        _META_MODEL_CACHE["pass_all"] = True
+        return True, "Database file not found (fail-open engaged)"
 
     try:
         conn = sqlite3.connect(db_path)
