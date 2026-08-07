@@ -174,6 +174,8 @@ class SignalEvaluator:
             regime_str = f"Trending (ADX {adx_val:.1f})" if is_trending else f"Ranging (ADX {adx_val:.1f})"
             
             with self.state_lock:
+                self.bot_state[f"regime_{symbol}_{tf_key}"] = regime_str
+                self.bot_state[f"adx_{symbol}_{tf_key}"] = adx_val
                 self.bot_state[f"regime_{tf_key}"] = regime_str
                 self.bot_state[f"adx_{tf_key}"] = adx_val
 
@@ -319,6 +321,7 @@ class SignalEvaluator:
                         "timestamp": time.time()
                     }
                     with self.state_lock:
+                        self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
                         self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
                         
                         # Append to prediction_history for dashboard and telemetry
@@ -386,7 +389,7 @@ class SignalEvaluator:
                     change_val = -close_p * 0.003
 
                 with self.state_lock:
-                    self.bot_state[f"latest_prediction_{tf_key}"] = {
+                    fallback_dict = {
                         "symbol": str(symbol),
                         "direction": str(direction),
                         "confidence": float(conf),
@@ -397,6 +400,8 @@ class SignalEvaluator:
                         "calibrator_ece": 0.080,
                         "is_fallback": True
                     }
+                    self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = fallback_dict
+                    self.bot_state[f"latest_prediction_{tf_key}"] = fallback_dict
                     history = self.bot_state.get("prediction_history", [])
                     if isinstance(history, list):
                         c_ts = int(time.time() * 1000)
@@ -423,12 +428,12 @@ class SignalEvaluator:
             # Update Confluence Results for UI
             self.update_confluence_results(tf_key, df, symbol)
             with self.state_lock:
-                sig_src = self.bot_state.get(f"latest_prediction_{tf_key}", {}).get("signal_source", "UNKNOWN")
-            print(f"[SignalEvaluator] Evaluated {interval}m: Regime={regime_str}, Direction={direction}, Source={sig_src}, ADX={adx_val:.1f}")
+                sig_src = (self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}") or self.bot_state.get(f"latest_prediction_{tf_key}", {})).get("signal_source", "UNKNOWN")
+            print(f"[SignalEvaluator] Evaluated {interval}m ({symbol}): Regime={regime_str}, Direction={direction}, Source={sig_src}, ADX={adx_val:.1f}")
 
         except Exception as e:
             import traceback
-            print(f"[SignalEvaluator Error] Exception evaluating {interval}m: {e}\n{traceback.format_exc()}")
+            print(f"[SignalEvaluator Error] Exception evaluating {interval}m ({symbol}): {e}\n{traceback.format_exc()}")
 
     def update_confluence_results(self, tf_key, df, symbol):
         if df is None or len(df) == 0:
@@ -450,13 +455,13 @@ class SignalEvaluator:
         
         # Pred info & external data lookup
         with self.state_lock:
-            pred_info = dict(self.bot_state.get(f"latest_prediction_{tf_key}", {}))
+            pred_info = dict(self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}") or self.bot_state.get(f"latest_prediction_{tf_key}", {}))
             ofi = self.bot_state.get("latest_ofi")
             fg_raw = last_row.get("fear_greed")
             fg_val = float(fg_raw) if (fg_raw is not None and not pd.isna(pd.to_numeric(fg_raw, errors="coerce"))) else None
             sentiment = self.bot_state.get("latest_sentiment_score") or fg_val
-            pred_15 = self.bot_state.get("latest_prediction_15m", {}).get("direction")
-            pred_1h = self.bot_state.get("latest_prediction_1h", {}).get("direction")
+            pred_15 = (self.bot_state.get(f"latest_prediction_{symbol}_15m") or self.bot_state.get("latest_prediction_15m", {})).get("direction")
+            pred_1h = (self.bot_state.get(f"latest_prediction_{symbol}_1h") or self.bot_state.get("latest_prediction_1h", {})).get("direction")
 
         pred_change = abs(float(pred_info.get("predicted_change", 0.0)))
         fee_hurdle = close * 0.0012
@@ -532,7 +537,7 @@ class SignalEvaluator:
             detail_oi = "Not Evaluated (No Live OI Feed)"
 
         with self.state_lock:
-            self.bot_state[f"confluence_results_{tf_key}"] = {
+            confl_dict = {
                 "checks": {
                     "1d_Trend": {"pass": pass_1d, "detail": detail_1d},
                     "4h_Trend": {"pass": bool(ema9 >= ema21), "detail": f"EMA9 ({ema9:.2f}) vs EMA21 ({ema21:.2f})"},
@@ -551,6 +556,8 @@ class SignalEvaluator:
                     "Open_Interest_Delta": {"pass": pass_oi, "detail": detail_oi}
                 }
             }
+            self.bot_state[f"confluence_results_{symbol}_{tf_key}"] = confl_dict
+            self.bot_state[f"confluence_results_{tf_key}"] = confl_dict
 
 
 def verify_manifest_health():

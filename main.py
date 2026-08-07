@@ -6224,8 +6224,8 @@ def main():
                         # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
                         htf_decay_threshold_penalty = 0.0
                         if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
-                            pred_30m_dict = bot_state.get("latest_prediction_30m") or {}
-                            pred_60m_dict = bot_state.get("latest_prediction_1h") or {}
+                            pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get("latest_prediction_30m") or {}
+                            pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get("latest_prediction_1h") or {}
                             
                             now_time_sec = time.time()
                             for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
@@ -6243,9 +6243,7 @@ def main():
                         expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
                         # Update global state prediction metrics for this timeframe
-                        bot_state[f"regime_{tf}"] = regime_name
-                        bot_state[f"adx_{tf}"] = adx_regime
-                        bot_state[f"latest_prediction_{tf}"] = {
+                        pred_entry_dict = {
                             "predicted_change": pred_change,
                             "predicted_price": predicted_price,
                             "direction": ml_trend,
@@ -6254,6 +6252,12 @@ def main():
                             "signal_source": "ML_ENSEMBLE",
                             "is_fallback": False
                         }
+                        bot_state[f"regime_{symbol}_{tf}"] = regime_name
+                        bot_state[f"adx_{symbol}_{tf}"] = adx_regime
+                        bot_state[f"regime_{tf}"] = regime_name
+                        bot_state[f"adx_{tf}"] = adx_regime
+                        bot_state[f"latest_prediction_{symbol}_{tf}"] = pred_entry_dict
+                        bot_state[f"latest_prediction_{tf}"] = pred_entry_dict
 
                         print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
@@ -6436,7 +6440,7 @@ def main():
                             learned_threshold = get_learned_confidence_threshold(symbol, macro_iv, regime)
 
                             if macro_tf:
-                                macro_pred = bot_state.get(f"latest_prediction_{macro_tf}")
+                                macro_pred = bot_state.get(f"latest_prediction_{symbol}_{macro_tf}") or bot_state.get(f"latest_prediction_{macro_tf}")
                                 ml_trend_dir = "Neutral"
                                 ml_prob = 0.0
                                 model_age_days = 0
