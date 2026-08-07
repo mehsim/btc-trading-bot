@@ -351,10 +351,12 @@ def add_triple_barrier_labels(df, interval):
         if atr_t <= 0:
             atr_t = p_t * 0.001
             
-        # Hysteretic regime assignment (ADX >= 22.0 to enter trending, <= 18.0 to exit ranging)
-        if adx_t >= 22.0:
+        from config import REGIME_ADX_ENTER_BY_INTERVAL, REGIME_ADX_EXIT_BY_INTERVAL, STRONG_TREND_ADX_ENTER, STRONG_TREND_ADX_EXIT
+        _enter_thr = REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)
+        _exit_thr = REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)
+        if adx_t >= _enter_thr:
             is_trending_state = True
-        elif adx_t <= 18.0:
+        elif adx_t <= _exit_thr:
             is_trending_state = False
             
         tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
