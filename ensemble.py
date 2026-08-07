@@ -21,14 +21,14 @@ def get_model_feature_names(model):
         try:
             fn = model.booster_.feature_name()
             if fn and len(fn) > 0:
-                return list(fn)
+                return [str(x) for x in fn]
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
     if hasattr(model, "feature_name") and callable(getattr(model, "feature_name")):
         try:
             fn = model.feature_name()
             if fn and len(fn) > 0:
-                return list(fn)
+                return [str(x) for x in fn]
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
     # 2. Estimators with feature_names_ / feature_names_in_ / feature_names / _feature_names
@@ -36,7 +36,7 @@ def get_model_feature_names(model):
         if hasattr(model, attr):
             fn = getattr(model, attr)
             if isinstance(fn, (list, tuple, np.ndarray)) and len(fn) > 0:
-                return list(fn)
+                return [str(x) for x in fn]
     # 3. XGBoost booster
     if hasattr(model, "get_booster") and callable(getattr(model, "get_booster")):
         try:
@@ -44,7 +44,7 @@ def get_model_feature_names(model):
             if hasattr(b, "feature_names") and b.feature_names:
                 fn = b.feature_names
                 if fn and not str(fn[0]).startswith("Column_"):
-                    return list(fn)
+                    return [str(x) for x in fn]
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
     # 4. Ensemble Classifier / Regressor wrapper
