@@ -403,9 +403,14 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         import math
         _look = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
         _reach = math.sqrt(_look)
-        tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.30 * _reach, 0.90 * _reach)
-        tp_m_trending = trial.suggest_float("tp_mult_trending", 0.30 * _reach, 1.10 * _reach)
+        tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.45 * _reach, 0.90 * _reach)
+        tp_m_trending = trial.suggest_float("tp_mult_trending", 0.45 * _reach, 1.10 * _reach)
         sl_m          = trial.suggest_float("sl_mult",          0.25 * _reach, 0.65 * _reach)
+
+        # Economic gate: reject geometries with R:R below 1.20 outright
+        rr = tp_m_trending / max(1e-9, sl_m)
+        if rr < 1.20:
+            return 0.0
         
         atr_vals = (df_clean["ATR_norm"] * df_clean["close"]).values
         closes = df_clean["close"].values
@@ -478,7 +483,8 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 w_ece = MODEL_SELECTION.get("ece_penalty_weight", 0.20)
                 w_imb = MODEL_SELECTION.get("imbalance_penalty_weight", 0.40)
 
-                fold_score = (w_bal * bal_acc) + (w_f1 * macro_f1) - (w_ece * ece) - (w_imb * imbalance_pen)
+                econ_penalty = 0.30 * max(0.0, 1.50 - rr)  # taper toward sensible R:R
+                fold_score = (w_bal * bal_acc) + (w_f1 * macro_f1) - (w_ece * ece) - (w_imb * imbalance_pen) - econ_penalty
                 scores.append(fold_score)
                 optuna_fold_scores.append(fold_score)
 
