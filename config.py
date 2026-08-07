@@ -30,7 +30,30 @@ MODEL_GOVERNANCE = {
     "enforce_stability_gate": True,
     "min_samples": 20,
     "min_mcc": 0.05,                   # C-1 Predictive Floor: MCC < 0.05 is at statistical chance
-    "min_balanced_accuracy": 0.36      # C-1 Predictive Floor: 3-class random chance is 0.333
+    "min_balanced_accuracy": 0.36,     # C-1 Predictive Floor: 3-class random chance is 0.333
+    "mcc_regression_tolerance": 0.010   # R-2: Absorbs run-to-run noise during challenger evaluation
+}
+
+# R-1: Model Quality Sizing Policy (Capital allocation scales by measured predictive content)
+QUALITY_SIZING = {
+    "enabled": True,
+    "reference_mcc": 0.15,  # Fleet benchmark defining 1.0x scaling point
+    "floor": 0.35           # Minimum scaling multiplier floor
+}
+
+# R-3: Institutional Kill Criteria Policy (Evaluated at >= 250 trades per timeframe)
+KILL_CRITERIA = {
+    "min_closed_trades": 250,
+    "win_rate_stop_delta": 0.08,    # Realised win rate > 8 points below claimed calibrated confidence -> STOP
+    "win_rate_review_delta": 0.04,  # Realised win rate 4-8 points below claimed -> REVIEW
+    "expectancy_stop_floor": 0.0    # Realised expectancy after costs < 0 -> STOP
+}
+
+# R-5: Retraining Governance Policy (Prevents retraining on noise variance)
+RETRAIN_POLICY = {
+    "min_days_between_retrains": 7,
+    "require_mhi_trigger": True,
+    "noise_band_mcc": 0.012
 }
 
 CVAR_PARAMETRIC_FALLBACK_RATIO = 1.25

@@ -9345,12 +9345,15 @@ def main():
                                         MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC,
                                         CVAR_TAIL_PERCENTILE, CVAR_FALLBACK, DAILY_LOSS_BUDGET_FRAC
                                     )
+                                    _latest_pred = bot_state.get(f"latest_prediction_{iv}", {})
+                                    _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
                                     scaled_kelly = risk_engine.compute_conservative_kelly(
                                         calibrated_confidence=calibrated_confidence,
                                         tp_multiplier=tp_multiplier_adjusted,
                                         sl_multiplier=sl_multiplier,
                                         interval=str(iv),
-                                        trade_history=bot_state.get("trade_history", [])
+                                        trade_history=bot_state.get("trade_history", []),
+                                        mcc_val=_mcc_val
                                     )
                                     
                                     # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)

@@ -291,6 +291,7 @@ class SignalEvaluator:
                         "model_version": served_version,
                         "calibrator_version": cal_ver,
                         "calibrator_ece": cal_ece,
+                        "manifest_mcc": mcc_val,
                         "is_fallback": False,
                         "timestamp": time.time()
                     }

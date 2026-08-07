@@ -63,7 +63,13 @@ class PSIMultiDriftRetrainer:
         trip_ece = bool(ece_score > max_ece)
         trip_wr = bool(win_rate_drop >= dynamic_wr_drop_high)
 
+        retrain_pol = getattr(config, "RETRAIN_POLICY", {})
+        require_mhi = retrain_pol.get("require_mhi_trigger", True)
+        
+        # MHI trigger or trip conditions required for retrain
         should_retrain = (mhi < retrain_thresh) or trip_psi or trip_ece or trip_wr
+        if require_mhi and not should_retrain:
+            should_retrain = False
 
         reasons = []
         if mhi < retrain_thresh:
@@ -75,7 +81,7 @@ class PSIMultiDriftRetrainer:
         if trip_wr:
             reasons.append(f"WR_Drop={win_rate_drop:.3f}>={dynamic_wr_drop_high:.3f}")
 
-        reason = f"Retrain Triggered: {', '.join(reasons)}" if should_retrain else "MODEL_HEALTHY"
+        reason = f"Retrain Triggered: {', '.join(reasons)}" if should_retrain else "MODEL_HEALTHY (No MHI trigger — retrain suppressed by RETRAIN_POLICY)"
         return round(mhi, 1), should_retrain, reason
 
 

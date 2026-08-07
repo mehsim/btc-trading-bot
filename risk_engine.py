@@ -115,15 +115,18 @@ def compute_conservative_kelly(
     tp_multiplier: float,
     sl_multiplier: float,
     interval: str = "15",
-    trade_history: Optional[list] = None
+    trade_history: Optional[list] = None,
+    mcc_val: Optional[float] = None
 ) -> float:
     """
     Computes conservative Kelly fraction for trading loop.
     Applies empirical Kelly tracker (Wilson CI + 95% Bootstrap lower bound) when history exists,
     or Wilson score lower bound on win rate to discount small-sample point estimates.
+    Scales by model quality (MCC) via R-1 QUALITY_SIZING policy.
     """
     import numpy as np
     from kelly_tracker import global_kelly_tracker
+    from config import QUALITY_SIZING
     
     if trade_history and len(trade_history) >= 10:
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
@@ -132,7 +135,14 @@ def compute_conservative_kelly(
             max_kelly_cap=0.20
         )
         if emp_kelly > 0:
-            return float(emp_kelly)
+            kelly_val = float(emp_kelly)
+            if QUALITY_SIZING.get("enabled", True) and mcc_val is not None:
+                ref_mcc = float(QUALITY_SIZING.get("reference_mcc", 0.15))
+                flr = float(QUALITY_SIZING.get("floor", 0.35))
+                q = float(mcc_val) / max(1e-9, ref_mcc)
+                quality_mult = float(np.clip(q, flr, 1.0))
+                kelly_val *= quality_mult
+            return kelly_val
             
     p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
     b_ratio = float(tp_multiplier / sl_multiplier) if sl_multiplier > 0 else 1.5
@@ -146,6 +156,15 @@ def compute_conservative_kelly(
     
     raw_kelly = max(0.0, (p_wilson * (b_ratio + 1.0) - 1.0) / b_ratio) if b_ratio > 0 else 0.0
     scaled_kelly = 0.25 * raw_kelly
+
+    # R-1 Model Quality Sizing Multiplier
+    if QUALITY_SIZING.get("enabled", True) and mcc_val is not None:
+        ref_mcc = float(QUALITY_SIZING.get("reference_mcc", 0.15))
+        flr = float(QUALITY_SIZING.get("floor", 0.35))
+        q = float(mcc_val) / max(1e-9, ref_mcc)
+        quality_mult = float(np.clip(q, flr, 1.0))
+        scaled_kelly *= quality_mult
+
     return float(scaled_kelly)
 
 
@@ -462,7 +481,8 @@ class JointRiskBudgetAllocator:
         top_book_depth_usd: float = 50000.0,
         df_completed: Optional[pd.DataFrame] = None,
         context_multipliers: Optional[Dict[str, float]] = None,
-        database_module = None
+        database_module = None,
+        mcc_val: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Jointly optimizes (stop_distance, target_distance, position_size, capital_at_risk, expected_utility).
@@ -523,6 +543,16 @@ class JointRiskBudgetAllocator:
         # Multipliers applied first, then final clamp against max_kelly_frac (MHI ceiling is binding)
         boosted_kelly = raw_kelly * max_kelly_frac * size_boost * avail_budget_factor
         effective_kelly = float(np.clip(boosted_kelly, 0.0, max_kelly_frac))
+
+        # R-1: Scale Kelly fraction by model quality (MCC)
+        from config import QUALITY_SIZING
+        quality_mult = 1.0
+        if QUALITY_SIZING.get("enabled", True) and mcc_val is not None:
+            ref_mcc = float(QUALITY_SIZING.get("reference_mcc", 0.15))
+            flr = float(QUALITY_SIZING.get("floor", 0.35))
+            q = float(mcc_val) / max(1e-9, ref_mcc)
+            quality_mult = float(np.clip(q, flr, 1.0))
+            effective_kelly *= quality_mult
         
         # Calculate Unconstrained Risk-Budgeted Position Size (USD)
         # Position Size = Capital * Effective Kelly (bounded by max available risk)
