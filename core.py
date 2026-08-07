@@ -77,7 +77,8 @@ def calculate_historical_thresholds(model_trend, interval):
                 print(f"  - Maximum Confidence (Maps to 100%): {max_conf*100:.2f}%")
                 return p95, max_conf
     except Exception as e:
-        print(f"Error calculating calibration for {interval}m: {e}. Using defaults.")
+        from logger import log_event
+        log_event("WARNING", f"[Calibration Fallback Engaged] Error calculating calibration for {interval}m: {e}. Defaulting to baseline thresholds (0.55, 0.75).")
     
     return 0.55, 0.75
 

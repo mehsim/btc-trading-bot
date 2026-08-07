@@ -77,6 +77,13 @@ REGIME_ADX_ENTER_BY_INTERVAL = {
 
 - **Hysteresis Logic**: Switching from Ranging to Trending requires ADX $\ge$ `REGIME_ADX_ENTER_BY_INTERVAL[tf]`. Switching back requires ADX $\le$ `REGIME_ADX_EXIT_BY_INTERVAL[tf]`. This prevents regime flapping on choppy candle boundaries.
 
+### 3.1 Directional-Mass Thresholds (15m & 30m Signal Evaluator)
+
+To suppress high-frequency noise and false breakouts, fast timeframes (15m and 30m) enforce a **0.52 Directional-Mass Threshold**:
+- **Bullish Signal**: Requires `prob_bullish >= 0.52` (signals in `[0.500, 0.519]` remain `Neutral`).
+- **Bearish Signal**: Requires `prob_bearish >= 0.52` (signals in `[0.500, 0.519]` remain `Neutral`).
+- **Operational Note**: Operators auditing signal logs must note that 15m/30m probabilities between 50.0% and 51.9% are intentionally filtered to `Neutral` by design to prevent chop overtrading.
+
 ---
 
 ## 4. Risk Management & Position Sizing Pipeline
