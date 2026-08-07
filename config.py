@@ -291,8 +291,8 @@ EQS_WEIGHTS = {
 }
 
 # v2 & v3 Quant Thresholds & Bounds
-STRONG_TREND_ADX_ENTER = 32.0
-STRONG_TREND_ADX_EXIT = 28.0
+STRONG_TREND_ADX_ENTER = 22.0   # Matches training labeller threshold
+STRONG_TREND_ADX_EXIT = 18.0    # Matches training labeller exit
 MIN_EXIT_QUALITY_SCORE = 75.0
 MIN_VOLATILITY_ATR_NORM = 0.0035  # 0.35% minimum ATR volatility gate
 MIN_STRATEGY_HEALTH_SCORE = 50.0  # Halt threshold below 50 SHS

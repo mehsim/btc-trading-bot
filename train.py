@@ -425,7 +425,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             atr_t = atr_vals[i]
             adx_t = adxs[i]
             if atr_t <= 0: atr_t = p_t * 0.001
-            tp_mult = tp_m_trending if adx_t >= 20.0 else tp_m_ranging
+            tp_mult = tp_m_trending if adx_t >= 22.0 else tp_m_ranging
             upper_b = p_t + tp_mult * atr_t
             lower_b = p_t - tp_mult * atr_t
             upper_s = p_t + sl_m * atr_t
@@ -1639,12 +1639,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
                 # Step 1: Record barrier contract — label definition the model was fitted against
+                from config import STRONG_TREND_ADX_ENTER
                 _bcfg = TIMEFRAME_CONFIG.get(str(interval), {})
                 manifest_data["barrier_config"] = {
                     "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 0.0)),
                     "tp_mult_ranging":  float(_bcfg.get("tp_mult_ranging", 0.0)),
                     "sl_mult":          float(_bcfg.get("sl_mult", 0.0)),
                     "lookahead":        int(_bcfg.get("lookahead", 0)),
+                    "regime_adx_enter": float(STRONG_TREND_ADX_ENTER),
                 }
 
                 manifest_data.pop("hmac_signature", None)
