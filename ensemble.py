@@ -677,6 +677,23 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
     clf.feature_version = feat_ver
     clf.ensemble_version = ens_ver
     clf.git_sha = git_sha
+
+    # Step 2: Barrier contract verification — refuse if recorded barriers differ from live config
+    from config import TIMEFRAME_CONFIG as _TFC
+    _saved_barriers = m_data.get("barrier_config")
+    if _saved_barriers:
+        _live_barriers = {k: _TFC.get(str(interval), {}).get(k) for k in _saved_barriers if _TFC.get(str(interval), {}).get(k) is not None}
+        _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
+        if _mismatched:
+            raise RuntimeError(
+                f"[Barrier Contract Error] Mismatch for '{prefix}' ({interval}m): "
+                f"trained {{{', '.join(f'{k}={_saved_barriers[k]}' for k in _mismatched)}}}, "
+                f"serving {{{', '.join(f'{k}={_live_barriers[k]}' for k in _mismatched)}}}. "
+                f"Model refused loading (Fail-Closed). Retrain required."
+            )
+    else:
+        log_event("WARNING", f"[Barrier Contract] {prefix}: no barrier_config in manifest — pre-contract model, load permitted until retrained")
+
     print(f"[Model Governance] Loaded '{prefix}' | Model: {model_ver} | Feature: {feat_ver} | Ensemble: {ens_ver} | SHA: {git_sha} | Features: {feat_count}")
 
     if os.environ.get("SPACE_ID"):

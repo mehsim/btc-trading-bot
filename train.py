@@ -400,9 +400,12 @@ def tune_triple_barrier_multipliers(df_coin, interval):
     cv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
     
     def objective(trial):
-        tp_m_ranging = trial.suggest_float("tp_mult_ranging", 1.0, 3.0)
-        tp_m_trending = trial.suggest_float("tp_mult_trending", 2.0, 5.0)
-        sl_m = trial.suggest_float("sl_mult", 0.5, 2.0)
+        import math
+        _look = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
+        _reach = math.sqrt(_look)
+        tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.30 * _reach, 0.90 * _reach)
+        tp_m_trending = trial.suggest_float("tp_mult_trending", 0.30 * _reach, 1.10 * _reach)
+        sl_m          = trial.suggest_float("sl_mult",          0.25 * _reach, 0.65 * _reach)
         
         atr_vals = (df_clean["ATR_norm"] * df_clean["close"]).values
         closes = df_clean["close"].values
@@ -423,7 +426,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             upper_s = p_t + sl_m * atr_t
             lower_s = p_t - sl_m * atr_t
             
-            for step in range(1, 11):
+            for step in range(1, _look + 1):
                 if i + step >= n_samples: break
                 h, l = highs[i + step], lows[i + step]
                 hit_bull = h >= upper_b and l > lower_s
@@ -485,9 +488,9 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             return 0.0
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=5)
+    study.optimize(objective, n_trials=40)
     best = study.best_params
-    best["lookahead"] = 10
+    best["lookahead"] = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10))
     print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
     try:
         _gov_path = "governance_state.json"
@@ -1623,6 +1626,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
+                # Step 1: Record barrier contract — label definition the model was fitted against
+                _bcfg = TIMEFRAME_CONFIG.get(str(interval), {})
+                manifest_data["barrier_config"] = {
+                    "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 0.0)),
+                    "tp_mult_ranging":  float(_bcfg.get("tp_mult_ranging", 0.0)),
+                    "sl_mult":          float(_bcfg.get("sl_mult", 0.0)),
+                    "lookahead":        int(_bcfg.get("lookahead", 0)),
+                }
 
                 manifest_data.pop("hmac_signature", None)
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
