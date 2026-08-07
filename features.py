@@ -163,6 +163,17 @@ def add_features(df, fetch_calendar_callback=None):
     if "oi_change_4h" not in df.columns:
         df["oi_change_4h"] = 0.0
         
+    # Symbol Microstructure Features
+    sym_name = str(df["symbol"].iloc[-1]) if "symbol" in df.columns else "BTCUSDT"
+    df["is_majors"] = 1.0 if sym_name.upper() in ("BTCUSDT", "ETHUSDT") else 0.0
+    
+    atr_tmp = AverageTrueRange(df["high"], df["low"], df["close"], window=14).average_true_range() / (df["close"] + 1e-8)
+    df["sym_atr_rank"] = atr_tmp.rolling(100, min_periods=10).apply(lambda x: (pd.Series(x).rank(pct=True).iloc[-1]), raw=False).fillna(0.50)
+    df["sym_vol_rank"] = df["volume"].rolling(100, min_periods=10).apply(lambda x: (pd.Series(x).rank(pct=True).iloc[-1]), raw=False).fillna(0.50)
+    
+    rets_tmp = df["close"].pct_change().fillna(0.0)
+    df["sym_beta_btc"] = rets_tmp.rolling(30, min_periods=10).std().fillna(0.0)
+        
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
     macd = MACD(df["close"])
     df["MACD_diff"] = macd.macd_diff() / (df["close"] + 1e-8)

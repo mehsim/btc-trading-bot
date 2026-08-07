@@ -276,6 +276,13 @@ class SignalEvaluator:
                             direction = "Neutral"
                             raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
 
+                    if direction in ["Bullish", "Bearish"]:
+                        from meta_labeler import evaluate_meta_filter
+                        meta_approved, meta_prob = evaluate_meta_filter(symbol, interval, direction)
+                        if not meta_approved:
+                            log_event("INFO", f"[MetaLabeler Filtered] {symbol} {interval}m {direction} signal rejected by second-stage meta-classifier (meta_prob={meta_prob*100:.1f}%). Filtered to Neutral.")
+                            direction = "Neutral"
+
                     calibrator = models.get("calibrator")
                     if calibrator is not None and isinstance(calibrator, dict) and "X" in calibrator and "y" in calibrator and direction in ["Bullish", "Bearish"]:
                         calibrated_conf = float(np.interp(raw_conf, calibrator["X"], calibrator["y"]))
