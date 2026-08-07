@@ -145,8 +145,9 @@ def run_manual_confluence_report(symbol, interval, bot_state=None, bot_state_loc
 
 def start_telegram_command_listener(bot_state, bot_state_lock):
     """Starts the background thread to poll and handle incoming Telegram commands."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    raw_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    from secret_manager import get_secure_env
+    token = get_secure_env("TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
+    raw_chat_id = get_secure_env("TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not raw_chat_id:
         print("[Telegram Command Listener] Unconfigured credentials. Listener skipped.")
         return
