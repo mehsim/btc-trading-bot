@@ -2,64 +2,18 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_15",
-  "timestamp": "2026-08-07T15:25:13.924459+00:00",
-  "model_version": "v7.2.0-14f5b4ed-202608071525",
+  "timestamp": "2026-08-07T15:49:39.451855+00:00",
+  "model_version": "v7.2.0-14f5b4ed-202608071549",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
   "git_sha": "14f5b4ed",
-  "feature_count": 22,
-  "feature_names": [
-    "open_interest",
-    "funding_rate",
-    "fear_greed",
-    "oi_change_1h",
-    "oi_change_4h",
-    "RSI",
-    "MACD_diff",
-    "EMA_9",
-    "EMA_21",
-    "EMA_50",
-    "EMA_200",
-    "BB_high",
-    "BB_low",
-    "BB_mid",
-    "MFI",
-    "ATR_norm",
-    "close_to_EMA9",
-    "close_to_EMA21",
-    "close_to_EMA50",
-    "close_to_EMA200",
-    "EMA9_to_EMA21",
-    "BB_pct"
-  ],
-  "surviving_features": [
-    "open_interest",
-    "funding_rate",
-    "fear_greed",
-    "oi_change_1h",
-    "oi_change_4h",
-    "RSI",
-    "MACD_diff",
-    "EMA_9",
-    "EMA_21",
-    "EMA_50",
-    "EMA_200",
-    "BB_high",
-    "BB_low",
-    "BB_mid",
-    "MFI",
-    "ATR_norm",
-    "close_to_EMA9",
-    "close_to_EMA21",
-    "close_to_EMA50",
-    "close_to_EMA200",
-    "EMA9_to_EMA21",
-    "BB_pct"
-  ],
+  "feature_count": 0,
+  "feature_names": [],
+  "surviving_features": [],
   "vif_values": {},
-  "feature_contract_hash": "44acc0809fe0",
-  "feature_pipeline_hash": "e8505f8ea0a0",
-  "training_data_hash": "990a3475b00d904e0e4427349218697937e34e20e87ee33e3f6b5510a6feb1f4",
+  "feature_contract_hash": "e3b0c44298fc",
+  "feature_pipeline_hash": "205b80ae1fe5",
+  "training_data_hash": "c31001d5ceecc8ef0a9c6a09987dbead9ae4a1d37daeb51a41438401576c4f6b",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "ffff0eccc6ed8ab0e30ab58858fa013a52a96d4dd68a652ac823672f5338b5f9",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -89,12 +43,96 @@
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
-  "metrics": {},
+  "metrics": {
+    "uniqueness_ratio": 0.077,
+    "effective_sample_size": 1034.54,
+    "raw_sample_size": 13443
+  },
   "barrier_config": {
     "tp_mult_trending": 1.65,
     "tp_mult_ranging": 1.35,
     "sl_mult": 1.25,
-    "lookahead": 12
+    "lookahead": 12,
+    "regime_adx_enter": 32.0
   },
-  "hmac_signature": "386c339e768b55385fdc19f5ee3946cb6a1d95a278ea9c46624be3307c40d97f"
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.4249,
+      "median": 0.4312,
+      "std": 0.0246,
+      "min": 0.3803,
+      "max": 0.4552
+    },
+    "macro_f1": {
+      "mean": 0.4152,
+      "median": 0.4187,
+      "std": 0.0279,
+      "min": 0.3653,
+      "max": 0.4497
+    },
+    "mcc": {
+      "mean": 0.1453,
+      "median": 0.1515,
+      "std": 0.041,
+      "min": 0.0731,
+      "max": 0.1926
+    },
+    "mean_kappa": 0.14310851980901834,
+    "mean_pr_auc_bear": 0.31316241218261687,
+    "mean_pr_auc_bull": 0.2795316626601334,
+    "mean_raw_accuracy": 0.4953,
+    "mean_mae": 0.008553,
+    "label_dist_bearish_pct": 21.94,
+    "label_dist_neutral_pct": 59.19,
+    "label_dist_bullish_pct": 18.87,
+    "n_training_samples": 13443,
+    "n_holdout_samples": 2216,
+    "effective_sample_size": 1034.54,
+    "raw_sample_size": 13443,
+    "uniqueness_ratio": 0.077,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          780,
+          1058,
+          617
+        ],
+        [
+          1111,
+          3968,
+          1504
+        ],
+        [
+          476,
+          887,
+          799
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.6137,
+    "holdout_balanced_accuracy": 0.4059,
+    "holdout_brier": 0.5421,
+    "holdout_ece": 0.0572,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "14f5b4ed"
+  },
+  "hmac_signature": "3602dc4d87375f11366543ef6387ac8d9b4c6bc1e57a263cff45bc58b05f89f1"
 }

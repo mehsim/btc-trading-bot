@@ -2,18 +2,18 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_15",
-  "timestamp": "2026-08-07T15:16:55.783130+00:00",
-  "model_version": "v7.2.0-99aa9773-202608071516",
+  "timestamp": "2026-08-07T15:49:39.451855+00:00",
+  "model_version": "v7.2.0-14f5b4ed-202608071549",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "99aa9773",
+  "git_sha": "14f5b4ed",
   "feature_count": 0,
   "feature_names": [],
   "surviving_features": [],
   "vif_values": {},
   "feature_contract_hash": "e3b0c44298fc",
   "feature_pipeline_hash": "205b80ae1fe5",
-  "training_data_hash": "8c5a4ba74b4863a6f71c198477cb56f6a13e01d30b12c876904ca85428eca992",
+  "training_data_hash": "c31001d5ceecc8ef0a9c6a09987dbead9ae4a1d37daeb51a41438401576c4f6b",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "ffff0eccc6ed8ab0e30ab58858fa013a52a96d4dd68a652ac823672f5338b5f9",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -45,8 +45,8 @@
   "promotion_metrics": {},
   "metrics": {
     "uniqueness_ratio": 0.077,
-    "effective_sample_size": 1039.92,
-    "raw_sample_size": 13513
+    "effective_sample_size": 1034.54,
+    "raw_sample_size": 13443
   },
   "barrier_config": {
     "tp_mult_trending": 1.65,
@@ -58,38 +58,38 @@
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.4283,
-      "median": 0.4279,
-      "std": 0.0256,
-      "min": 0.3824,
-      "max": 0.4543
+      "mean": 0.4249,
+      "median": 0.4312,
+      "std": 0.0246,
+      "min": 0.3803,
+      "max": 0.4552
     },
     "macro_f1": {
-      "mean": 0.4206,
-      "median": 0.4258,
-      "std": 0.0275,
-      "min": 0.371,
-      "max": 0.4471
+      "mean": 0.4152,
+      "median": 0.4187,
+      "std": 0.0279,
+      "min": 0.3653,
+      "max": 0.4497
     },
     "mcc": {
-      "mean": 0.1503,
-      "median": 0.154,
-      "std": 0.0431,
-      "min": 0.0768,
-      "max": 0.1998
+      "mean": 0.1453,
+      "median": 0.1515,
+      "std": 0.041,
+      "min": 0.0731,
+      "max": 0.1926
     },
-    "mean_kappa": 0.1475758156724889,
-    "mean_pr_auc_bear": 0.317117593521132,
-    "mean_pr_auc_bull": 0.28831034217522367,
-    "mean_raw_accuracy": 0.4988,
-    "mean_mae": 0.008197,
-    "label_dist_bearish_pct": 21.98,
-    "label_dist_neutral_pct": 59.2,
-    "label_dist_bullish_pct": 18.81,
-    "n_training_samples": 13513,
-    "n_holdout_samples": 2227,
-    "effective_sample_size": 1039.92,
-    "raw_sample_size": 13513,
+    "mean_kappa": 0.14310851980901834,
+    "mean_pr_auc_bear": 0.31316241218261687,
+    "mean_pr_auc_bull": 0.2795316626601334,
+    "mean_raw_accuracy": 0.4953,
+    "mean_mae": 0.008553,
+    "label_dist_bearish_pct": 21.94,
+    "label_dist_neutral_pct": 59.19,
+    "label_dist_bullish_pct": 18.87,
+    "n_training_samples": 13443,
+    "n_holdout_samples": 2216,
+    "effective_sample_size": 1034.54,
+    "raw_sample_size": 13443,
     "uniqueness_ratio": 0.077,
     "confusion_matrix": {
       "labels": [
@@ -104,26 +104,26 @@
       ],
       "matrix": [
         [
-          843,
-          1077,
-          550
+          780,
+          1058,
+          617
         ],
         [
-          1287,
-          4013,
-          1325
+          1111,
+          3968,
+          1504
         ],
         [
-          501,
-          904,
-          760
+          476,
+          887,
+          799
         ]
       ]
     },
-    "holdout_accuracy": 0.5959,
-    "holdout_balanced_accuracy": 0.3719,
-    "holdout_brier": 0.542,
-    "holdout_ece": 0.0311,
+    "holdout_accuracy": 0.6137,
+    "holdout_balanced_accuracy": 0.4059,
+    "holdout_brier": 0.5421,
+    "holdout_ece": 0.0572,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -132,9 +132,9 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "99aa9773"
+    "git_sha": "14f5b4ed"
   },
   "promoted": true,
-  "evaluation_timestamp": "2026-08-07T15:16:55.783130+00:00",
-  "hmac_signature": "3e433c73914b3b0128a95ec600b416b229563fb991cb880acc8bbb16c459969e"
+  "evaluation_timestamp": "2026-08-07T15:49:39.451855+00:00",
+  "hmac_signature": "f316373b21b479a1b0d9bda7c9cac1b74b91bd4294ea46f61cd8a2526651c047"
 }
