@@ -142,6 +142,17 @@ class SignalEvaluator:
             if df is None or len(df) < 50:
                 return
 
+            if symbol.upper() != "BTCUSDT" and "close_btc" not in df.columns:
+                try:
+                    df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350)
+                    if df_btc is not None and "close" in df_btc.columns and "timestamp" in df_btc.columns:
+                        btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
+                        df = pd.merge(df, btc_sub, on="timestamp", how="inner")
+                except Exception as ex_btc:
+                    log_event("WARNING", f"[SignalEvaluator] Failed merging BTC history for {symbol}: {ex_btc}")
+            if "close_btc" not in df.columns:
+                df["close_btc"] = df["close"]
+
             df = merge_derivatives_sentiment_features(df, symbol=symbol, interval=interval)
             df = add_features(df)
             
