@@ -135,7 +135,7 @@ class SignalEvaluator:
             log_event("ERROR", f"[SignalEvaluator ERROR] Lazy model loading for {interval}m ({regime_key}): {e}")
             return None
 
-    def evaluate_interval(self, symbol="BTCUSDT", interval="15"):
+    def evaluate_interval(self, symbol, interval):
         tf_key = TF_MAP.get(interval, f"{interval}m")
         try:
             df = get_history(symbol=symbol, interval=interval, limit=350)
@@ -576,14 +576,16 @@ def run_signal_evaluator_loop(bot_state):
     import gc, ctypes
     while True:
         try:
-            for iv in ["15", "30", "60", "120", "240"]:
-                try:
-                    evaluator.evaluate_interval(symbol="BTCUSDT", interval=iv)
-                except RuntimeError as run_err:
-                    log_event("CRITICAL", f"[SignalEvaluator Governance Alert] Interval {iv}m failed contract verification: {run_err}")
-                except Exception as iv_err:
-                    log_event("ERROR", f"[SignalEvaluator Error] Interval {iv}m evaluation error: {iv_err}")
-                time.sleep(1)
+            from config import SUPPORTED_SYMBOLS
+            for sym in SUPPORTED_SYMBOLS:
+                for iv in ["15", "30", "60", "120", "240"]:
+                    try:
+                        evaluator.evaluate_interval(symbol=sym, interval=iv)
+                    except RuntimeError as run_err:
+                        log_event("CRITICAL", f"[SignalEvaluator Governance Alert] {sym} {iv}m failed contract verification: {run_err}")
+                    except Exception as iv_err:
+                        log_event("ERROR", f"[SignalEvaluator Error] {sym} {iv}m evaluation error: {iv_err}")
+                    time.sleep(1)
             gc.collect()
             try:
                 ctypes.CDLL('libc.so.6').malloc_trim(0)
