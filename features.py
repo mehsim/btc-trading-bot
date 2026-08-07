@@ -172,7 +172,10 @@ def add_features(df, fetch_calendar_callback=None):
     df["sym_vol_rank"] = df["volume"].rolling(100, min_periods=10).apply(lambda x: (pd.Series(x).rank(pct=True).iloc[-1]), raw=False).fillna(0.50)
     
     rets_tmp = df["close"].pct_change().fillna(0.0)
-    df["sym_beta_btc"] = rets_tmp.rolling(30, min_periods=10).std().fillna(0.0)
+    btc_rets = df["close_btc"].pct_change().fillna(0.0) if "close_btc" in df.columns else rets_tmp
+    cov = rets_tmp.rolling(30, min_periods=10).cov(btc_rets)
+    var = btc_rets.rolling(30, min_periods=10).var()
+    df["sym_beta_btc"] = (cov / var.replace(0, np.nan)).fillna(1.0)
         
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
     macd = MACD(df["close"])
