@@ -1654,6 +1654,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
+                if "y_trend" in locals() and y_trend is not None:
+                    manifest_data["label_distribution"] = np.bincount(y_trend).tolist()
                 # Step 1: Record barrier contract — label definition the model was fitted against
                 from config import REGIME_ADX_ENTER_BY_INTERVAL, STRONG_TREND_ADX_ENTER
                 _bcfg = TIMEFRAME_CONFIG.get(str(interval), {})

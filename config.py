@@ -255,9 +255,9 @@ TIMEFRAME_CONFIG = {
     },
     "60": {   # 1H Timeframe - Swing
         "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 10)),
-        "sl_mult": _get_tf_env("TF_60M_SL_MULT", 1.20),
-        "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 2.16),
-        "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 2.70)
+        "sl_mult": _get_tf_env("TF_60M_SL_MULT", 1.00),
+        "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.20),
+        "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.40)
     },
     "120": {  # 2H Timeframe - Extended Swing
         "lookahead": int(_get_tf_env("TF_120M_LOOKAHEAD", 12)),

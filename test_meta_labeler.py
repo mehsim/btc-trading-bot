@@ -31,6 +31,18 @@ def test_tiny_negative_pred_change_does_not_invalidate():
     assert strong_conflict is False, f"Noise pred_change={pred_change} should not conflict (pred_pct={pred_pct:.4f}%)"
 
 
+def test_promotion_rejects_degenerate_predictions():
+    from mlops_engine import promote_if_better
+    import numpy as np
+    # 98% predictions in class 1 (degenerate)
+    probs = np.zeros((100, 3))
+    probs[:, 1] = 0.98
+    probs[:, 0] = 0.01
+    probs[:, 2] = 0.01
+    ok, msg = promote_if_better(cand={"probs": probs}, champ={"mcc": 0.10})
+    assert ok is False and "degenerate" in msg.lower()
+
+
 if __name__ == "__main__":
     test_meta_filter_passes_through_on_thin_data()
     print("✅ test_meta_filter_passes_through_on_thin_data PASSED")
@@ -38,3 +50,5 @@ if __name__ == "__main__":
     print("✅ test_promotion_rejects_mcc_regression PASSED")
     test_tiny_negative_pred_change_does_not_invalidate()
     print("✅ test_tiny_negative_pred_change_does_not_invalidate PASSED")
+    test_promotion_rejects_degenerate_predictions()
+    print("✅ test_promotion_rejects_degenerate_predictions PASSED")

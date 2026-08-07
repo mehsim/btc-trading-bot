@@ -241,6 +241,15 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         name = "custom_model"
         challenger_version = "v1"
 
+    if cand is not None:
+        probs = cand.get("probs")
+        if probs is not None:
+            probs_arr = np.asarray(probs)
+            if len(probs_arr) > 0:
+                dominant = np.bincount(probs_arr.argmax(axis=1), minlength=3).max() / len(probs_arr)
+                if dominant > 0.95:
+                    return False, f"REJECTED: degenerate — {dominant:.1%} in one class"
+
     if cand is not None and champ is not None:
         champ_mcc = champ.get("mcc", champ.get("mcc_mean"))
         cand_mcc = cand.get("mcc", cand.get("mcc_mean"))
