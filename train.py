@@ -1527,6 +1527,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif chal_bal_acc_mean < min_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")
                 should_save = False
+            else:
+                champ_cv_mcc = champ_manifest.get("cv_metrics", {}).get("mcc", {}) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else {}
+                champ_mcc_val = float(champ_cv_mcc.get("mean")) if (isinstance(champ_cv_mcc, dict) and champ_cv_mcc.get("mean") is not None) else None
+                if champ_mcc_val is not None and chal_mcc_mean < champ_mcc_val:
+                    print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f})")
+                    should_save = False
 
         if should_save:
             from mlops_engine import log_mlflow_training_run, promote_if_better

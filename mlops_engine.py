@@ -299,8 +299,11 @@ def promote_if_better(name: str, challenger_version: str, gates: Optional[Dict[s
             inc = inc_run.data.metrics
             inc_brier = inc.get("brier_score", 0.25)
             inc_sharpe = inc.get("sharpe_oos", 0.0)
+            inc_mcc = inc.get("mcc", inc.get("mcc_mean"))
 
             # Relative gates — must beat incumbent by a margin
+            if inc_mcc is not None and cand_mcc < float(inc_mcc):
+                return False, f"MCC ({cand_mcc:.4f}) lower than champion ({float(inc_mcc):.4f})"
             if cand_brier >= inc_brier * 0.98:
                 return False, f"Brier ({cand_brier:.4f}) not materially better than champion ({inc_brier:.4f})"
             if cand_sharpe < inc_sharpe:

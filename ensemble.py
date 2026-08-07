@@ -836,6 +836,21 @@ def write_model_manifest(
         }
         if "cv_metrics" in existing_manifest:
             manifest["cv_metrics"] = existing_manifest["cv_metrics"]
+        if "barrier_config" in existing_manifest and existing_manifest["barrier_config"]:
+            manifest["barrier_config"] = existing_manifest["barrier_config"]
+        else:
+            _pfx_parts = prefix.rsplit("_", 1)
+            _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
+            if _pfx_interval:
+                from config import TIMEFRAME_CONFIG as _TFC
+                _bcfg = _TFC.get(_pfx_interval, {})
+                if _bcfg:
+                    manifest["barrier_config"] = {
+                        "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 0.0)),
+                        "tp_mult_ranging":  float(_bcfg.get("tp_mult_ranging", 0.0)),
+                        "sl_mult":          float(_bcfg.get("sl_mult", 0.0)),
+                        "lookahead":        int(_bcfg.get("lookahead", 0)),
+                    }
 
         def _json_safe(o):
             if isinstance(o, (np.integer,)): return int(o)
