@@ -517,7 +517,6 @@ def api_status():
         status_data["prediction_history"] = pred_hist[-100:] if isinstance(pred_hist, list) else []
 
         # Model Governance Summary for Frontend Inspector Modals
-        import os, json
         gov_summary = {}
         for iv in ["15", "30", "60", "120", "240"]:
             for rg in ["trending", "ranging"]:
