@@ -1968,7 +1968,7 @@ def audit_model_diversity_and_calculate_brier_weights(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train XGBoost models for BTC Trading Bot")
-    parser.add_argument("--interval", type=str, default="60", choices=["15", "30", "60", "120", "240", "360", "all"], help="Timeframe interval to train")
+    parser.add_argument("--interval", "--intervals", type=str, default="60", choices=["15", "30", "60", "120", "240", "360", "all"], help="Timeframe interval to train")
     parser.add_argument("--pages", type=int, default=8, help="Number of data pages (default 8 for AWS 1GB RAM)")
     parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
     parser.add_argument("--force-rfecv", action="store_true", help="Force running RFECV feature selection instead of reusing cached features")
