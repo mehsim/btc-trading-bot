@@ -23,7 +23,7 @@ def run_manual_confluence_report(symbol, interval, bot_state=None, bot_state_loc
     try:
         from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
         from core import add_features, features
-        from confluence_engine import check_pre_trade_confluence, estimate_liquidation_pool
+        from confluence_engine import check_pre_trade_confluence
         
         iv = str(interval)
         df_raw = get_history(symbol=symbol, interval=iv, limit=300)
@@ -118,8 +118,9 @@ def run_manual_confluence_report(symbol, interval, bot_state=None, bot_state_loc
             calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.58, get_history_fn=get_history
         )
         
-        adx_regime = latest_candle["ADX"]
-        est_tp_val = estimate_liquidation_pool(df_features, ml_trend, latest_candle["close"])
+        adx_regime = float(latest_candle.get("ADX", 0.0))
+        atr_val = latest_candle.get("ATR_norm", 0.005) * latest_candle["close"]
+        est_tp_val = latest_candle["close"] + (1.5 * atr_val if ml_trend == "Bullish" else -1.5 * atr_val)
         
         report = (
             f"🔍 *CONFLUENCE REPORT: {symbol} ({iv.replace('60','1H').replace('120','2H').replace('240','4H').replace('360','6H')})*\n"
@@ -347,10 +348,12 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                     if not text:
                         continue
 
-                    raw_cmd = text.split()[0]
-                    cmd = raw_cmd.split("@")[0].lower() if text.startswith("/") else text.lower()
+                    parts = text.split()
+                    raw_cmd = parts[0] if parts else ""
+                    cmd = raw_cmd.split("@")[0].lower().lstrip("/")
+                    args = parts[1:] if len(parts) > 1 else []
 
-                    if cmd in ["/status", "status"]:
+                    if cmd in ["status"]:
                         with bot_state_lock:
                             running = bot_state.get("bot_running", True)
                             bal = bot_state.get("wallet_balance", 0.0)
@@ -370,7 +373,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         )
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": status_text, "parse_mode": "Markdown"})
 
-                    elif cmd in ["/balance", "balance"]:
+                    elif cmd in ["balance"]:
                         with bot_state_lock:
                             bal = bot_state.get("wallet_balance", 0.0)
                             avail = bot_state.get("available_balance", bal)
@@ -381,7 +384,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         )
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": bal_text, "parse_mode": "Markdown"})
 
-                    elif cmd in ["/trades", "trades", "/positions", "positions"]:
+                    elif cmd in ["trades", "positions"]:
                         trade_lines = ["📈 *ACTIVE OPEN POSITIONS*\n"]
                         total_trades = 0
                         with bot_state_lock:
@@ -397,36 +400,120 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                             trade_lines.append("ℹ️ *No active positions open currently.*")
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "\n".join(trade_lines), "parse_mode": "Markdown"})
 
-                    elif cmd in ["/start", "start"]:
+                    elif cmd in ["history"]:
+                        try:
+                            import database
+                            c_trades = database.get_completed_trades(limit=10)
+                            if not c_trades:
+                                hist_text = "ℹ️ *No completed trades in database history.*"
+                            else:
+                                hist_lines = ["📜 *RECENT COMPLETED TRADES*\n"]
+                                for t in c_trades:
+                                    sym = t.get("symbol", "BTCUSDT")
+                                    d = t.get("direction", "BUY")
+                                    pnl = float(t.get("pnl", 0.0) or 0.0)
+                                    pnl_pct = float(t.get("pnl_pct", 0.0) or 0.0)
+                                    reason = t.get("reason", "TP/SL")
+                                    icon = "🟢" if pnl >= 0 else "🔴"
+                                    hist_lines.append(f"• {icon} *{sym}* ({d}) | PnL: `${pnl:+.2f}` (`{pnl_pct:+.2f}%`) | `{reason}`")
+                                hist_text = "\n".join(hist_lines)
+                        except Exception as ex:
+                            hist_text = f"❌ *Error fetching trade history:* {ex}"
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": hist_text, "parse_mode": "Markdown"})
+
+                    elif cmd in ["performance"]:
+                        try:
+                            import database
+                            c_trades = database.get_completed_trades(limit=500)
+                            if not c_trades:
+                                perf_text = "ℹ️ *No completed trades found to calculate performance.*"
+                            else:
+                                total_cnt = len(c_trades)
+                                wins = [t for t in c_trades if float(t.get("pnl", 0.0) or 0.0) > 0]
+                                losses = [t for t in c_trades if float(t.get("pnl", 0.0) or 0.0) <= 0]
+                                win_rate = (len(wins) / total_cnt) * 100.0 if total_cnt > 0 else 0.0
+                                total_pnl = sum(float(t.get("pnl", 0.0) or 0.0) for t in c_trades)
+                                total_win_pnl = sum(float(t.get("pnl", 0.0) or 0.0) for t in wins)
+                                total_loss_pnl = abs(sum(float(t.get("pnl", 0.0) or 0.0) for t in losses))
+                                profit_factor = (total_win_pnl / total_loss_pnl) if total_loss_pnl > 0 else total_win_pnl
+                                perf_text = (
+                                    f"📊 *PERFORMANCE METRICS REPORT*\n\n"
+                                    f"• *Total Completed Trades*: `{total_cnt}`\n"
+                                    f"• *Win Rate*: `{win_rate:.1f}%` ({len(wins)}W / {len(losses)}L)\n"
+                                    f"• *Total Realized PnL*: `${total_pnl:+.2f} USDT`\n"
+                                    f"• *Profit Factor*: `{profit_factor:.2f}`\n"
+                                )
+                        except Exception as ex:
+                            perf_text = f"❌ *Error calculating performance:* {ex}"
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": perf_text, "parse_mode": "Markdown"})
+
+                    elif cmd in ["regime"]:
+                        with bot_state_lock:
+                            r15 = bot_state.get("regime_15m", "N/A")
+                            r30 = bot_state.get("regime_30m", "N/A")
+                            r1h = bot_state.get("regime_1h", "N/A")
+                            sent = bot_state.get("news_sentiment", "Neutral")
+                        reg_text = (
+                            f"🌐 *MARKET REGIME & VOLATILITY REPORT*\n\n"
+                            f"• *15m Regime*: `{r15}`\n"
+                            f"• *30m Regime*: `{r30}`\n"
+                            f"• *1h Regime*: `{r1h}`\n"
+                            f"• *News Sentiment*: `{sent}`\n"
+                        )
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": reg_text, "parse_mode": "Markdown"})
+
+                    elif cmd in ["skipped"]:
+                        target_tf = "15"
+                        if args:
+                            raw_arg = args[0].lower().replace("m", "").replace("h", "")
+                            target_tf = TF_MAP_SKIPPED.get(args[0].lower(), TF_MAP_SKIPPED.get(raw_arg, "15"))
+                        skipped_msg = get_skipped_trades_report(target_tf)
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": skipped_msg, "parse_mode": "Markdown"})
+
+                    elif cmd in ["confluence"]:
+                        target_sym = "BTCUSDT"
+                        target_tf = "15"
+                        if args:
+                            for a in args:
+                                a_clean = a.upper().strip()
+                                if a_clean in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT", "BTC", "ETH", "SOL"]:
+                                    target_sym = a_clean if a_clean.endswith("USDT") else f"{a_clean}USDT"
+                                elif a.lower() in TF_MAP_SKIPPED:
+                                    target_tf = TF_MAP_SKIPPED[a.lower()]
+                        conf_msg = run_manual_confluence_report(target_sym, target_tf, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": conf_msg, "parse_mode": "Markdown"})
+
+                    elif cmd in ["start"]:
                         with bot_state_lock:
                             bot_state["bot_running"] = True
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🟢 *Trading Bot Resumed.* Automatic trade execution enabled.", "parse_mode": "Markdown"})
 
-                    elif cmd in ["/stop", "stop", "/pause", "pause"]:
+                    elif cmd in ["stop", "pause"]:
                         with bot_state_lock:
                             bot_state["bot_running"] = False
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🔴 *Trading Bot Paused.* Automatic trade execution suspended.", "parse_mode": "Markdown"})
 
-                    elif cmd in ["/help", "help"]:
+                    elif cmd in ["kill"]:
+                        with bot_state_lock:
+                            bot_state["bot_running"] = False
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🚨 *EMERGENCY KILL SWITCH ENGAGED.* Automatic trading suspended.", "parse_mode": "Markdown"})
+
+                    elif cmd in ["help"]:
                         help_text = (
                             "📖 *BTC TRADING BOT COMMANDS*\n\n"
                             "• `/status` - Bot running state & active regime\n"
                             "• `/balance` - Wallet balance & available margin\n"
                             "• `/trades` - Active open positions\n"
-                            "• `/skipped` - View skipped trade signals\n"
-                            "• `/confluence` - Run manual confluence check\n"
+                            "• `/history` - Recent completed trades PnL summary\n"
+                            "• `/performance` - Win rate & total PnL report\n"
+                            "• `/regime` - Current market regime & sentiment\n"
+                            "• `/skipped [tf]` - View skipped signals (e.g. `/skipped 30`)\n"
+                            "• `/confluence [sym] [tf]` - Run confluence check (e.g. `/confluence ETH 30`)\n"
                             "• `/start` - Start automatic trading\n"
                             "• `/stop` - Pause automatic trading\n"
+                            "• `/kill` - Emergency halt trading\n"
                         )
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": help_text, "parse_mode": "Markdown"})
-
-                    elif cmd in ["/skipped", "skipped"]:
-                        skipped_msg = get_skipped_trades_report("15")
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": skipped_msg, "parse_mode": "Markdown"})
-
-                    elif cmd in ["/confluence", "confluence"]:
-                        conf_msg = run_manual_confluence_report("BTCUSDT", "15", bot_state=bot_state, bot_state_lock=bot_state_lock)
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": conf_msg, "parse_mode": "Markdown"})
 
             except Exception as e:
                 print(f"[Telegram Listener Error] {e}")
