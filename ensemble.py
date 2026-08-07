@@ -686,9 +686,9 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         _pfx_parts = prefix.rsplit("_", 1)
         _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
         if _pfx_interval:
-            from config import STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER
+            from config import REGIME_ADX_ENTER_BY_INTERVAL as _R_ADX_MAP, STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER
             _live_cfg = dict(_TFC.get(_pfx_interval, {}))
-            _live_cfg["regime_adx_enter"] = float(_ST_ADX_ENTER)
+            _live_cfg["regime_adx_enter"] = float(_R_ADX_MAP.get(str(_pfx_interval), _ST_ADX_ENTER))
             _live_barriers = {k: _live_cfg[k] for k in _saved_barriers if k in _live_cfg}
             _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
             if _mismatched:

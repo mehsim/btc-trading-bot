@@ -290,8 +290,27 @@ EQS_WEIGHTS = {
     "regime": 10.0
 }
 
-# v2 & v3 Quant Thresholds & Bounds
-STRONG_TREND_ADX_ENTER = 32.0   # Reverted: preserves 15m ranging model routing (MCC 0.1542)
+# v2 & v3 Quant Thresholds & Bounds (Per-Interval Regime ADX Hysteresis)
+REGIME_ADX_ENTER_BY_INTERVAL = {
+    "15": 32.0,   # Preserves 15m ranging model routing (MCC 0.1542)
+    "30": 32.0,
+    "60": 22.0,   # Matches 60m training labeller threshold (routes 60m ADX 22.4 to MCC 0.0646)
+    "120": 28.0,
+    "240": 28.0,  # 240m ADX 20.7 stays Ranging & abstains (MCC 0.0408 < 0.05 floor)
+    "360": 28.0,
+}
+
+REGIME_ADX_EXIT_BY_INTERVAL = {
+    "15": 28.0,
+    "30": 28.0,
+    "60": 18.0,
+    "120": 24.0,
+    "240": 24.0,
+    "360": 24.0,
+}
+
+# Global defaults for backwards compatibility
+STRONG_TREND_ADX_ENTER = 32.0
 STRONG_TREND_ADX_EXIT = 28.0
 MIN_EXIT_QUALITY_SCORE = 75.0
 MIN_VOLATILITY_ATR_NORM = 0.0035  # 0.35% minimum ATR volatility gate
