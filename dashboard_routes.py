@@ -509,7 +509,34 @@ def api_status():
             import database
             trades_hist = database.get_completed_trades(limit=100)
         status_data["trade_history"] = trades_hist[-50:]
-        status_data["prediction_history"] = state_manager.get("prediction_history", [])[-30:]
+        
+        pred_hist = state_manager.get("prediction_history", [])
+        if not pred_hist:
+            import database
+            pred_hist = database.get_prediction_history(limit=100)
+        status_data["prediction_history"] = pred_hist[-100:] if isinstance(pred_hist, list) else []
+
+        # Model Governance Summary for Frontend Inspector Modals
+        import os, json
+        gov_summary = {}
+        for iv in ["15", "30", "60", "120", "240"]:
+            for rg in ["trending", "ranging"]:
+                fn = f"ensemble_{rg}_trend_{iv}_manifest.json"
+                if os.path.exists(fn):
+                    try:
+                        m_data = json.load(open(fn))
+                        gov_summary[f"{iv}_{rg}"] = {
+                            "manifest_version": m_data.get("manifest_version", "3.0"),
+                            "mcc_mean": m_data.get("cv_metrics", {}).get("mcc", {}).get("mean"),
+                            "mcc_min": m_data.get("cv_metrics", {}).get("mcc", {}).get("min"),
+                            "mcc_std": m_data.get("cv_metrics", {}).get("mcc", {}).get("std"),
+                            "label_distribution": m_data.get("label_distribution"),
+                            "barrier_config": m_data.get("barrier_config"),
+                            "feature_count": len(m_data.get("feature_names", []))
+                        }
+                    except Exception:
+                        pass
+        status_data["model_governance_summary"] = gov_summary
         status_data["uptime_seconds"] = int(time.time() - startup_time)
         
     return jsonify(status_data)

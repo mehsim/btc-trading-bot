@@ -2047,6 +2047,60 @@
             </div>
         </div>
 
+        <!-- Combined Multi-Symbol Model Predictions & Signal Journal Panel -->
+        <div class="card" style="margin-top: 28px;">
+            <div class="section-header" style="flex-wrap: wrap; gap: 15px; justify-content: space-between; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="section-title">⚡ Combined Model Predictions & Signal Journal (Latest 10)</div>
+                    <span style="font-size: 11px; font-weight: 700; color: var(--accent-purple); background: rgba(139,92,246,0.12); padding: 4px 10px; border-radius: 20px;">Live Multi-Symbol Stream</span>
+                </div>
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <!-- Timeframe Filter Tabs -->
+                    <div class="filter-tabs">
+                        <button class="tab-btn active" id="pred-tab-all" onclick="setPredictionTimeframeFilter('all', this)">All TFs</button>
+                        <button class="tab-btn" id="pred-tab-15" onclick="setPredictionTimeframeFilter('15', this)">15M</button>
+                        <button class="tab-btn" id="pred-tab-30" onclick="setPredictionTimeframeFilter('30', this)">30M</button>
+                        <button class="tab-btn" id="pred-tab-60" onclick="setPredictionTimeframeFilter('60', this)">1H</button>
+                        <button class="tab-btn" id="pred-tab-120" onclick="setPredictionTimeframeFilter('120', this)">2H</button>
+                        <button class="tab-btn" id="pred-tab-240" onclick="setPredictionTimeframeFilter('240', this)">4H</button>
+                    </div>
+
+                    <!-- Model Specification & Training Inspector Modals -->
+                    <div class="filter-tabs">
+                        <button class="tab-btn" onclick="openModelInspectorModal('15')" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.3);">🔍 15M Model</button>
+                        <button class="tab-btn" onclick="openModelInspectorModal('30')" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.3);">🔍 30M Model</button>
+                        <button class="tab-btn" onclick="openModelInspectorModal('60')" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.3);">🔍 1H Model</button>
+                        <button class="tab-btn" onclick="openModelInspectorModal('120')" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.3);">🔍 2H Model</button>
+                        <button class="tab-btn" onclick="openModelInspectorModal('240')" style="color: var(--accent-cyan); border-color: rgba(6,182,212,0.3);">🔍 4H Model</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table Container -->
+            <div class="table-container" style="margin-top: 15px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time (UTC)</th>
+                            <th>Symbol</th>
+                            <th>Timeframe</th>
+                            <th>Direction / Signal</th>
+                            <th class="hide-mobile">Calibrated Conf (Thresh)</th>
+                            <th class="hide-mobile">Expected Move</th>
+                            <th>Status / Reason</th>
+                            <th>Inspect</th>
+                        </tr>
+                    </thead>
+                    <tbody id="combined-predictions-rows">
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">Loading combined predictions...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Completed Trades Panel -->
         <div class="card" style="margin-top: 28px;">
             <div class="section-header" style="flex-wrap: wrap; gap: 15px;">
@@ -3110,6 +3164,10 @@
                     // 7b. Active Open Trades Table
                     renderActiveOpenTrades();
 
+                    // 7c. Combined Multi-Symbol Model Predictions Table
+                    allPredictions = data.prediction_history || [];
+                    renderCombinedPredictionsTable();
+
                     // 8. Update Terminal Console logs
                     const logs = data.logs || [];
                     const logContainer = document.getElementById("terminal-console-logs");
@@ -3513,6 +3571,251 @@
 
         const tfIntervalMap = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"};
         let activeTradesModalTf = "";
+
+        let allPredictions = [];
+        let currentPredTfFilter = 'all';
+
+        function setPredictionTimeframeFilter(tf, btnElem) {
+            currentPredTfFilter = tf;
+            document.querySelectorAll('#pred-tab-all, #pred-tab-15, #pred-tab-30, #pred-tab-60, #pred-tab-120, #pred-tab-240').forEach(el => el.classList.remove('active'));
+            if (btnElem) btnElem.classList.add('active');
+            renderCombinedPredictionsTable();
+        }
+
+        function renderCombinedPredictionsTable() {
+            const tbody = document.getElementById("combined-predictions-rows");
+            if (!tbody) return;
+
+            let filtered = (allPredictions || []).slice();
+            if (currentPredTfFilter !== 'all') {
+                filtered = filtered.filter(p => {
+                    const iv = String(p.interval || '').replace('m', '');
+                    return iv === currentPredTfFilter;
+                });
+            }
+
+            const latest10 = filtered.slice(-10).reverse();
+
+            if (latest10.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" style="text-align: center; color: var(--text-secondary); font-style: italic; padding: 25px 0;">No model predictions recorded for this timeframe filter yet.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = "";
+            latest10.forEach((p) => {
+                const tsVal = p.candle_timestamp || p.timestamp || Date.now() / 1000;
+                const tsSec = tsVal > 1e11 ? tsVal / 1000 : tsVal;
+                const dateObj = new Date(tsSec * 1000);
+                const timeStr = dateObj.toUTCString().split(' ')[4] + ' UTC';
+
+                const sym = p.symbol || "BTCUSDT";
+                const ivStr = String(p.interval || "15").replace('m', '') + 'M';
+                const dir = p.direction || "Neutral";
+                const dirClass = dir === "Bullish" ? "color-bullish" : (dir === "Bearish" ? "color-bearish" : "");
+                const badgeStyle = dir === "Bullish" ? "background:rgba(16,185,129,0.15); color:var(--accent-green); border:1px solid rgba(16,185,129,0.3);" :
+                                  (dir === "Bearish" ? "background:rgba(244,63,94,0.15); color:var(--accent-red); border:1px solid rgba(244,63,94,0.3);" :
+                                  "background:rgba(255,255,255,0.06); color:var(--text-secondary); border:1px solid var(--card-border);");
+
+                const conf = p.calibrated_confidence !== undefined ? p.calibrated_confidence : (p.confidence || 0.0);
+                const confPct = (parseFloat(conf) * 100).toFixed(1) + '%';
+                const threshVal = p.dynamic_threshold !== undefined && p.dynamic_threshold !== null ? (parseFloat(p.dynamic_threshold) * 100).toFixed(1) + '%' : 'N/A';
+                
+                const predChange = parseFloat(p.predicted_change) || 0.0;
+                const changeStr = (predChange >= 0 ? '+' : '') + predChange.toFixed(3);
+
+                const statusStr = p.status || p.reason || (p.is_fallback ? "Fallback" : "Evaluated");
+                const statusBadgeStyle = statusStr.includes("Evaluated") ? "color:var(--accent-green);" : (statusStr.includes("Skipped") ? "color:var(--accent-orange);" : "color:var(--text-secondary);");
+
+                const jsonStr = JSON.stringify(p).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+
+                html += `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                        <td style="font-weight: 600; font-size: 12px; color: var(--text-secondary);">${timeStr}</td>
+                        <td><span style="font-weight: 800; font-size: 12px; color: var(--accent-purple); background: rgba(139,92,246,0.1); padding: 3px 8px; border-radius: 12px; border: 1px solid rgba(139,92,246,0.2);">${sym}</span></td>
+                        <td><span style="font-weight: 700; font-size: 11px; color: var(--text-primary);">${ivStr}</span></td>
+                        <td><span style="padding: 3px 10px; border-radius: 12px; font-weight: 800; font-size: 11px; ${badgeStyle}">${dir}</span></td>
+                        <td class="hide-mobile" style="font-weight: 700; font-size: 12px;">${confPct} <span style="font-size: 10px; color: var(--text-muted);">(${threshVal})</span></td>
+                        <td class="hide-mobile ${dirClass}" style="font-weight: 700; font-size: 12px;">${changeStr}</td>
+                        <td style="font-weight: 600; font-size: 11px; ${statusBadgeStyle}">${statusStr}</td>
+                        <td>
+                            <button onclick='openPredictionInspectModal(${jsonStr})' style="padding: 3px 8px; font-size: 10px; font-weight: 800; background: rgba(6,182,212,0.12); color: var(--accent-cyan); border: 1px solid rgba(6,182,212,0.3); border-radius: 12px; cursor: pointer;">Details</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function openModelInspectorModal(tf) {
+            const container = document.getElementById("model-inspector-modal-content");
+            const titleElem = document.getElementById("model-inspector-modal-title");
+            if (!container || !titleElem) return;
+
+            titleElem.innerText = `🔍 ${tf.toUpperCase()} Timeframe Model Specifications & Training Metrics`;
+            
+            const govData = (globalDataCache && globalDataCache.model_governance_summary) ? globalDataCache.model_governance_summary : {};
+            const trendingKey = `${tf}_trending`;
+            const rangingKey = `${tf}_ranging`;
+
+            const tModel = govData[trendingKey] || {};
+            const rModel = govData[rangingKey] || {};
+
+            const tLabels = tModel.label_distribution || [0, 0, 0];
+            const tTot = tLabels.reduce((a,b)=>a+b, 0) || 1;
+            const tBearPct = ((tLabels[0]/tTot)*100).toFixed(1);
+            const tNeutPct = ((tLabels[1]/tTot)*100).toFixed(1);
+            const tBullPct = ((tLabels[2]/tTot)*100).toFixed(1);
+
+            const rLabels = rModel.label_distribution || [0, 0, 0];
+            const rTot = rLabels.reduce((a,b)=>a+b, 0) || 1;
+            const rBearPct = ((rLabels[0]/rTot)*100).toFixed(1);
+            const rNeutPct = ((rLabels[1]/rTot)*100).toFixed(1);
+            const rBullPct = ((rLabels[2]/rTot)*100).toFixed(1);
+
+            const tBarriers = tModel.barrier_config || {};
+            const rBarriers = rModel.barrier_config || {};
+
+            container.innerHTML = `
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 800; color: var(--accent-purple); font-size: 14px;">⚡ Trending Regime Model (ensemble_trending_trend_${tf})</span>
+                        <span style="font-size: 11px; background: rgba(16,185,129,0.15); color: var(--accent-green); padding: 2px 8px; border-radius: 10px; font-weight: 700;">PROMOTED PRODUCTION</span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; margin-top: 4px;">
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Mean</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-green);">${tModel.mcc_mean !== undefined ? tModel.mcc_mean.toFixed(4) : '—'}</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Min</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--text-primary);">${tModel.mcc_min !== undefined ? tModel.mcc_min.toFixed(4) : '—'}</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <div style="font-size: 10px; color: var(--text-secondary);">Feature Count</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-cyan);">${tModel.feature_count || '34'}</div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700;">
+                            <span>Training Label Distribution (Total: ${tTot})</span>
+                            <span style="color: var(--accent-purple);">Neut Share: ${tNeutPct}%</span>
+                        </div>
+                        <div style="display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: rgba(255,255,255,0.05);">
+                            <div style="width: ${tBearPct}%; background: var(--accent-red);" title="Bear: ${tLabels[0]} (${tBearPct}%)"></div>
+                            <div style="width: ${tNeutPct}%; background: var(--text-secondary);" title="Neutral: ${tLabels[1]} (${tNeutPct}%)"></div>
+                            <div style="width: ${tBullPct}%; background: var(--accent-green);" title="Bull: ${tLabels[2]} (${tBullPct}%)"></div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted);">
+                            <span>Bear: ${tLabels[0]} (${tBearPct}%)</span>
+                            <span>Neut: ${tLabels[1]} (${tNeutPct}%)</span>
+                            <span>Bull: ${tLabels[2]} (${tBullPct}%)</span>
+                        </div>
+                    </div>
+
+                    <div style="font-size: 11px; color: var(--text-secondary); background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; margin-top: 2px;">
+                        <strong>Barrier Settings:</strong> TP Mult: ${tBarriers.tp_mult_trending || 1.4}x | SL Mult: ${tBarriers.sl_mult || 1.0}x | Lookahead: ${tBarriers.lookahead || 10} candles
+                    </div>
+                </div>
+
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 800; color: var(--accent-cyan); font-size: 14px;">🌊 Ranging Regime Model (ensemble_ranging_trend_${tf})</span>
+                        <span style="font-size: 11px; background: rgba(139,92,246,0.15); color: var(--accent-purple); padding: 2px 8px; border-radius: 10px; font-weight: 700;">ACTIVE MODEL</span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; margin-top: 4px;">
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Mean</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-green);">${rModel.mcc_mean !== undefined ? rModel.mcc_mean.toFixed(4) : '—'}</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Min</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--text-primary);">${rModel.mcc_min !== undefined ? rModel.mcc_min.toFixed(4) : '—'}</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                            <div style="font-size: 10px; color: var(--text-secondary);">Feature Count</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-cyan);">${rModel.feature_count || '34'}</div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700;">
+                            <span>Training Label Distribution (Total: ${rTot})</span>
+                            <span style="color: var(--accent-cyan);">Neut Share: ${rNeutPct}%</span>
+                        </div>
+                        <div style="display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: rgba(255,255,255,0.05);">
+                            <div style="width: ${rBearPct}%; background: var(--accent-red);" title="Bear: ${rLabels[0]} (${rBearPct}%)"></div>
+                            <div style="width: ${rNeutPct}%; background: var(--text-secondary);" title="Neutral: ${rLabels[1]} (${rNeutPct}%)"></div>
+                            <div style="width: ${rBullPct}%; background: var(--accent-green);" title="Bull: ${rLabels[2]} (${rBullPct}%)"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById("model-inspector-modal").style.display = "flex";
+        }
+
+        function closeModelInspectorModal() {
+            document.getElementById("model-inspector-modal").style.display = "none";
+        }
+
+        function openPredictionInspectModal(p) {
+            const container = document.getElementById("prediction-inspect-content");
+            const titleElem = document.getElementById("prediction-inspect-title");
+            if (!container || !titleElem) return;
+
+            const sym = p.symbol || "BTCUSDT";
+            const ivStr = String(p.interval || "15").replace('m', '') + 'M';
+            titleElem.innerText = `⚡ ${sym} (${ivStr}) Prediction Diagnostics`;
+
+            const tsVal = p.candle_timestamp || p.timestamp || Date.now() / 1000;
+            const tsSec = tsVal > 1e11 ? tsVal / 1000 : tsVal;
+            const timeStr = new Date(tsSec * 1000).toUTCString();
+
+            const confPct = ((p.calibrated_confidence !== undefined ? p.calibrated_confidence : (p.confidence || 0.0)) * 100).toFixed(1);
+            const threshPct = p.dynamic_threshold !== undefined && p.dynamic_threshold !== null ? (parseFloat(p.dynamic_threshold) * 100).toFixed(1) + '%' : 'N/A';
+            const predChange = parseFloat(p.predicted_change) || 0.0;
+
+            container.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                        <div style="font-size: 10px; color: var(--text-secondary);">Signal Direction</div>
+                        <div style="font-size: 16px; font-weight: 800; color: ${p.direction === 'Bullish' ? 'var(--accent-green)' : (p.direction === 'Bearish' ? 'var(--accent-red)' : 'var(--text-secondary)')};">${p.direction || 'Neutral'}</div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                        <div style="font-size: 10px; color: var(--text-secondary);">Signal Source</div>
+                        <div style="font-size: 14px; font-weight: 800; color: var(--accent-purple);">${p.signal_source || (p.is_fallback ? 'FALLBACK' : 'ML_ENSEMBLE')}</div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                        <div style="font-size: 10px; color: var(--text-secondary);">Calibrated Confidence</div>
+                        <div style="font-size: 16px; font-weight: 800; color: var(--accent-green);">${confPct}%</div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                        <div style="font-size: 10px; color: var(--text-secondary);">Dynamic Threshold</div>
+                        <div style="font-size: 16px; font-weight: 800; color: var(--accent-orange);">${threshPct}</div>
+                    </div>
+                </div>
+
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+                    <div><strong>Candle Time:</strong> ${timeStr}</div>
+                    <div><strong>Status / Gate Reason:</strong> ${p.status || p.reason || 'Evaluated'}</div>
+                    <div><strong>Predicted Move:</strong> ${predChange >= 0 ? '+' : ''}${predChange.toFixed(3)} ($)</div>
+                    <div><strong>Calibrator ECE:</strong> ${p.calibrator_ece !== undefined ? p.calibrator_ece : '0.080'}</div>
+                </div>
+            `;
+
+            document.getElementById("prediction-inspect-modal").style.display = "flex";
+        }
+
+        function closePredictionInspectModal() {
+            document.getElementById("prediction-inspect-modal").style.display = "none";
+        }
 
         function openActiveTradesModal(tf) {
             activeTradesModalTf = tf;
@@ -4235,6 +4538,60 @@
                     style="padding:8px 16px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-weight:700; font-size:12px; transition:transform 0.1s;"
                     onmouseover="this.style.transform='scale(1.02)'"
                     onmouseout="this.style.transform='scale(1)'">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Specification & Governance Inspector Modal -->
+    <div id="model-inspector-modal" class="modal"
+        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); backdrop-filter:blur(6px); z-index:9999; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--card-bg); border:1px solid rgba(6,182,212,0.4); border-radius:15px; width:95%; max-width:650px; box-shadow:0 0 35px rgba(6,182,212,0.25); display:flex; flex-direction:column; overflow:hidden; font-family:'Outfit', sans-serif; color:var(--text-primary);">
+            <div
+                style="padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; background:rgba(6,182,212,0.05);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:18px;">🔍</span>
+                    <span id="model-inspector-modal-title" style="font-size:16px; font-weight:800; color:var(--accent-cyan);">Model Specifications & Training Metrics</span>
+                </div>
+                <button onclick="closeModelInspectorModal()"
+                    style="background:none; border:none; color:var(--text-secondary); font-size:22px; cursor:pointer; font-weight:700; outline:none;"
+                    onmouseover="this.style.color='var(--accent-red)'"
+                    onmouseout="this.style.color='var(--text-secondary)'">&times;</button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:16px; max-height:500px; overflow-y:auto;" id="model-inspector-modal-content">
+                <!-- Loaded dynamically -->
+            </div>
+            <div
+                style="padding:12px 20px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02); display:flex; justify-content:flex-end;">
+                <button onclick="closeModelInspectorModal()"
+                    style="padding:8px 18px; border-radius:6px; background:var(--accent-cyan); color:#000; border:none; cursor:pointer; font-weight:800; font-size:12px;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prediction Inspection Modal -->
+    <div id="prediction-inspect-modal" class="modal"
+        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); backdrop-filter:blur(6px); z-index:9999; justify-content:center; align-items:center;">
+        <div
+            style="background:var(--card-bg); border:1px solid rgba(139,92,246,0.4); border-radius:15px; width:95%; max-width:600px; box-shadow:0 0 35px rgba(139,92,246,0.25); display:flex; flex-direction:column; overflow:hidden; font-family:'Outfit', sans-serif; color:var(--text-primary);">
+            <div
+                style="padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center; background:rgba(139,92,246,0.05);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:18px;">⚡</span>
+                    <span id="prediction-inspect-title" style="font-size:16px; font-weight:800; color:var(--accent-purple);">Prediction Diagnostics & Confluence Audit</span>
+                </div>
+                <button onclick="closePredictionInspectModal()"
+                    style="background:none; border:none; color:var(--text-secondary); font-size:22px; cursor:pointer; font-weight:700; outline:none;"
+                    onmouseover="this.style.color='var(--accent-red)'"
+                    onmouseout="this.style.color='var(--text-secondary)'">&times;</button>
+            </div>
+            <div style="padding:20px; display:flex; flex-direction:column; gap:14px; max-height:480px; overflow-y:auto;" id="prediction-inspect-content">
+                <!-- Loaded dynamically -->
+            </div>
+            <div
+                style="padding:12px 20px; border-top:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02); display:flex; justify-content:flex-end;">
+                <button onclick="closePredictionInspectModal()"
+                    style="padding:8px 18px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-weight:800; font-size:12px;">Close</button>
             </div>
         </div>
     </div>
