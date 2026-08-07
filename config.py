@@ -60,6 +60,7 @@ CVAR_PARAMETRIC_FALLBACK_RATIO = 1.25
 PSI_INSUFFICIENT_CYCLES_THRESHOLD = 5
 MIN_LIQUIDITY_MULTIPLIER = 0.20
 MIN_EVAL_THRESHOLD_FLOOR = 0.25  # Minimum decision threshold floor based on risk preference & calibration uncertainty
+MAX_THRESHOLD_UPLIFT = 0.12     # Maximum allowed threshold uplift above economic base threshold
 ALMGREN_CHRISS_CALIBRATION_INTERVAL_DAYS = 30
 ALMGREN_CHRISS_MIN_FILLS = 1000
 HISTORICAL_STRESS_QUANTILE = 0.001

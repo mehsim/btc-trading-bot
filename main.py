@@ -8849,7 +8849,8 @@ def main():
                                 regime=regime_name,
                                 drift_p_val=drift_p,
                                 u_total=u_tot,
-                                symbol_sharpe=sym_sharpe
+                                symbol_sharpe=sym_sharpe,
+                                base_threshold=economic_base_threshold
                             )
                             if adaptive_val > dynamic_conf_threshold:
                                 adapt_delta = round(adaptive_val - dynamic_conf_threshold, 4)
@@ -8984,8 +8985,8 @@ def main():
                                             htf_meta["adx"] = adx_val
                                             htf_meta["sma50"] = sma50_val
 
-                                            ema_bullish = (e9_val > e21_val) and (e21_slope > -0.05)
-                                            ema_bearish = (e9_val < e21_val) and (e21_slope < 0.05)
+                                            ema_bullish = (e9_val > e21_val) and (e21_slope > 0.0)
+                                            ema_bearish = (e9_val < e21_val) and (e21_slope < 0.0)
 
                                             if ema_bullish:
                                                 htf_trend = "Bullish"
@@ -9058,9 +9059,10 @@ def main():
                             print(f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
 
                         # Bound final threshold relative to economic base
-                        max_allowed_threshold = min(0.85, max(0.65, economic_base_threshold * 2.0))
+                        from config import MAX_THRESHOLD_UPLIFT
+                        max_allowed_threshold = min(0.85, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
                         dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(0.40, dynamic_conf_threshold)), 4))
-
+                        
                         # Log threshold lineage to prediction state
                         if f"latest_prediction_{tf}" in bot_state and isinstance(bot_state[f"latest_prediction_{tf}"], dict):
                             bot_state[f"latest_prediction_{tf}"]["threshold_base"] = economic_base_threshold

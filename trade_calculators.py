@@ -856,20 +856,21 @@ def calculate_adaptive_15m_threshold(
     regime: str = "Trending",
     drift_p_val: float = 0.50,
     u_total: float = 0.04,
-    symbol_sharpe: float = 1.2
+    symbol_sharpe: float = 1.2,
+    base_threshold: float = 0.55
 ) -> float:
     """
     Refinement 1: Adaptive Confidence Threshold Matrix.
-    Threshold = Base (0.68) + Regime Adj + Drift Adj + Uncertainty Adj + Symbol Alpha Adj
+    Threshold = Base + Regime Adj + Drift Adj + Uncertainty Adj + Symbol Alpha Adj
     """
-    base = 0.68
+    base = base_threshold
     regime_upper = str(regime).upper()
     regime_adj = 0.00 if "TRENDING" in regime_upper else (0.03 if "RANGING" in regime_upper else 0.05)
     drift_adj = 0.03 if drift_p_val < 0.05 else 0.00
     u_adj = 0.02 if (0.10 <= u_total < 0.20) else (0.05 if u_total >= 0.20 else 0.00)
     alpha_adj = 0.03 if symbol_sharpe < 1.0 else 0.00
 
-    final_threshold = round(min(0.78, base + regime_adj + drift_adj + u_adj + alpha_adj), 4)
+    final_threshold = round(min(0.85, base + regime_adj + drift_adj + u_adj + alpha_adj), 4)
     return final_threshold
 
 
