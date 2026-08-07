@@ -401,9 +401,9 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         import math
         _look = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
         _reach = math.sqrt(_look)
-        tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.45 * _reach, 0.90 * _reach)
-        tp_m_trending = trial.suggest_float("tp_mult_trending", 0.45 * _reach, 1.10 * _reach)
-        sl_m          = trial.suggest_float("sl_mult",          0.25 * _reach, 0.65 * _reach)
+        tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.35 * _reach, 0.90 * _reach)
+        tp_m_trending = trial.suggest_float("tp_mult_trending", 0.40 * _reach, 1.10 * _reach)
+        sl_m          = trial.suggest_float("sl_mult",          0.20 * _reach, 0.50 * _reach)
 
         # Economic gate: reject geometries with R:R below 1.20 outright
         rr = tp_m_trending / max(1e-9, sl_m)
@@ -723,6 +723,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             best_barriers = tune_triple_barrier_multipliers(df_tune, interval)
             if best_barriers:
                 OPTIMIZED_BARRIERS = best_barriers
+                if str(interval) in TIMEFRAME_CONFIG:
+                    TIMEFRAME_CONFIG[str(interval)].update(best_barriers)
                 # Save to JSON for live load
                 with open(f"optimized_barriers_{interval}.json", "w") as f:
                     json.dump(best_barriers, f)

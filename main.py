@@ -6046,9 +6046,11 @@ def main():
                 active_trades_list = list(active_trades_list)
                 
             if (symbol, iv) not in fetched_data:
+                log_event("WARNING", f"[{symbol} {iv}m] Market data missing from fetched_data batch. Skipping evaluation.")
                 continue
             df_raw, df = fetched_data[(symbol, iv)]
             if df is None or len(df) == 0:
+                log_event("WARNING", f"[{symbol} {iv}m] DataFrame is empty or None. Skipping evaluation.")
                 continue
                 
             try:
@@ -6599,43 +6601,43 @@ def main():
 
                         if not bot_state.get("bot_running", True):
                             status_msg = "Skipped (Bot Stopped)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
                         elif bot_state.get("circuit_breaker_active", False):
                             status_msg = "Skipped (Circuit Breaker)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
                         elif flash_crash_active:
                             status_msg = "Skipped (Flash Crash Block)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Flash crash detected (>3.0% drop in last 5 minutes).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Flash crash detected (>3.0% drop in last 5 minutes).")
                         elif low_liquidity:
                             status_msg = "Skipped (Low Liquidity)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Insufficient L2 orderbook liquidity (Score: {liq_score:.2f} < 0.30).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Insufficient L2 orderbook liquidity (Score: {liq_score:.2f} < 0.30).")
                         elif already_active:
                             status_msg = "Skipped (Already Active)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
                         elif not in_session:
                             status_msg = "Skipped (Off-Session)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
                         elif is_cooling:
                             status_msg = "Skipped (Cool-Off)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
                         elif confluence_blocked:
                             status_msg = "Skipped (HTF Trend Block)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Counter-trend relative to macro timeframe ({macro_tf} trend: {htf_trend}).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Counter-trend relative to macro timeframe ({macro_tf} trend: {htf_trend}).")
                         elif funding_blocked:
                             status_msg = "Skipped (Funding Block)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
                         elif ml_trend == "Neutral":
                             status_msg = "Skipped (Neutral)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
                         elif strong_conflict:
                             status_msg = "Skipped (Contradiction)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
                         elif calibrated_confidence < dynamic_conf_threshold:
                             status_msg = "Skipped (Low Confidence)"
-                            print(f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
                         elif conformal_is_uncertain and ml_trend in ["Bullish", "Bearish"]:
                             status_msg = "Skipped (High Conformal Uncertainty)"
-                            print(f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
 
                         if status_msg == "Pending":
                             # Refinements 2, 8, 9, 10: 15m Institutional Hardening Filters
@@ -7161,9 +7163,9 @@ def main():
                                             if TRADE_MODE != "simulation":
                                                 # Live trading execution offloaded to background thread to minimize latency
                                                 just_opened_symbols.add(symbol)
-                                                with active_execution_lock:
-                                                    active_execution_symbols.add(symbol)
                                                 if bybit_success:
+                                                    with active_execution_lock:
+                                                        active_execution_symbols.add(symbol)
                                                     actual_qty = raw_qty if raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
                                                     actual_notional_val = float(actual_qty * entry_price)
                                                     actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
