@@ -31,7 +31,7 @@ def train_meta_labeler() -> tuple[bool, str]:
     try:
         conn = sqlite3.connect(db_path)
         df_trades = pd.read_sql_query(
-            "SELECT symbol, interval, direction, change_pct, pnl_usd, entry_ts FROM completed_trades ORDER BY exit_time DESC",
+            "SELECT symbol, interval, direction, change_pct, pnl_usd FROM completed_trades ORDER BY exit_time DESC",
             conn
         )
         conn.close()
