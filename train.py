@@ -384,10 +384,6 @@ def add_triple_barrier_labels(df, interval):
             elif hit_bearish and not hit_bullish:
                 labels[i] = 0  # Bearish
                 break
-            elif l <= lower_stop or h >= upper_stop: # Hit stop loss before TP barrier -> Neutral label (1)
-                labels[i] = 1
-                break
-                
     df["target_trend"] = labels
     return df
 
