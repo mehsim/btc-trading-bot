@@ -1,0 +1,137 @@
+{
+  "manifest_schema_version": 3,
+  "governance_version": 2,
+  "prefix": "ensemble_ranging_price_15",
+  "timestamp": "2026-08-07T15:21:25.837482+00:00",
+  "model_version": "v7.2.0-d4f022fd-202608061753",
+  "feature_version": "v3.1.0",
+  "ensemble_version": "v3.0_stacking",
+  "git_sha": "99aa9773",
+  "feature_count": 0,
+  "feature_names": [],
+  "surviving_features": [],
+  "vif_values": {},
+  "feature_contract_hash": "e3b0c44298fc",
+  "feature_pipeline_hash": "205b80ae1fe5",
+  "training_data_hash": "132c59e0557e213f176cd6b46e8bdbd1b79704070affcf05f41f42313a13281f",
+  "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
+  "parent_model_hash": "fa423d8a09b2a6fbb1aba9f3bfb0f70d076e127221eb6f3d0b1dd1a3ac46abca",
+  "promotion_reason": "Initial deployment / benchmark promotion",
+  "replaced_model_hash": "fa423d8a09b2a6fbb1aba9f3bfb0f70d076e127221eb6f3d0b1dd1a3ac46abca",
+  "rollback_reference": "ensemble_ranging_price_15_backup",
+  "governance_policy": {
+    "version": "v2.4",
+    "max_ece": 0.08,
+    "max_brier": 0.5,
+    "min_oos_sharpe": 0.5,
+    "min_sharpe_delta": 0.1,
+    "max_cv_bal_acc_std": 0.05,
+    "max_cv_fold_range": 0.12,
+    "enforce_stability_gate": false,
+    "min_samples": 20
+  },
+  "dependencies": {
+    "python": "3.14.4",
+    "scikit-learn": "1.9.0",
+    "pandas": "2.3.3",
+    "numpy": "2.5.1",
+    "xgboost": "3.3.0",
+    "lightgbm": "4.6.0",
+    "catboost": "1.2.10"
+  },
+  "promotion_metrics": {},
+  "metrics": {
+    "uniqueness_ratio": 0.0769,
+    "effective_sample_size": 3647.85,
+    "raw_sample_size": 47416
+  },
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.4029,
+      "median": 0.4069,
+      "std": 0.0105,
+      "min": 0.386,
+      "max": 0.4162
+    },
+    "macro_f1": {
+      "mean": 0.4032,
+      "median": 0.4072,
+      "std": 0.0115,
+      "min": 0.3878,
+      "max": 0.4185
+    },
+    "mcc": {
+      "mean": 0.102,
+      "median": 0.1081,
+      "std": 0.0168,
+      "min": 0.0738,
+      "max": 0.1225
+    },
+    "mean_kappa": 0.10089828075375415,
+    "mean_pr_auc_bear": 0.4030255860181395,
+    "mean_pr_auc_bull": 0.36780769339147407,
+    "mean_raw_accuracy": 0.4049,
+    "mean_mae": 0.006501,
+    "label_dist_bearish_pct": 36.64,
+    "label_dist_neutral_pct": 30.3,
+    "label_dist_bullish_pct": 33.06,
+    "n_training_samples": 47416,
+    "n_holdout_samples": 7812,
+    "effective_sample_size": 3647.85,
+    "raw_sample_size": 47416,
+    "uniqueness_ratio": 0.0769,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          6225,
+          2707,
+          5517
+        ],
+        [
+          3929,
+          4477,
+          3652
+        ],
+        [
+          5405,
+          2301,
+          5297
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.3958,
+    "holdout_balanced_accuracy": 0.384,
+    "holdout_brier": 0.6507,
+    "holdout_ece": 0.0275,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "99aa9773"
+  },
+  "barrier_config": {
+    "tp_mult_trending": 1.65,
+    "tp_mult_ranging": 1.35,
+    "sl_mult": 1.25,
+    "lookahead": 12,
+    "regime_adx_enter": 32.0
+  },
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-07T15:21:25.837482+00:00",
+  "hmac_signature": "1e96eef0292cdc336bba5f296065b92ece649341cf3596586212b801504ce8bb"
+}
