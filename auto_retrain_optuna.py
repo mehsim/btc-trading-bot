@@ -62,14 +62,14 @@ class OptunaModelRetrainer:
         from walk-forward historical returns via Optuna / Bayesian Optimization.
         """
         if walk_forward_df is None or len(walk_forward_df) < 50:
-            return {"STRONG_TREND_ADX_ENTER": 22.0, "MIN_EXIT_QUALITY_SCORE": 75.0, "MIN_STRATEGY_HEALTH_SCORE": 50.0}
+            return {"STRONG_TREND_ADX_ENTER": 32.0, "MIN_EXIT_QUALITY_SCORE": 75.0, "MIN_STRATEGY_HEALTH_SCORE": 50.0}
 
         try:
             import optuna
             optuna.logging.set_verbosity(optuna.logging.WARNING)
 
             def objective(trial):
-                adx_t = trial.suggest_float("STRONG_TREND_ADX_ENTER", 18.0, 32.0, step=0.5)
+                adx_t = trial.suggest_float("STRONG_TREND_ADX_ENTER", 25.0, 35.0, step=0.5)
                 eqs_t = trial.suggest_float("MIN_EXIT_QUALITY_SCORE", 65.0, 85.0, step=1.0)
                 
                 # Evaluate Calmar ratio surrogate on walk_forward_df
@@ -88,13 +88,13 @@ class OptunaModelRetrainer:
             study.optimize(objective, n_trials=5)
 
             best_thresholds = {
-                "STRONG_TREND_ADX_ENTER": float(np.round(study.best_params.get("STRONG_TREND_ADX_ENTER", 22.0), 1)),
+                "STRONG_TREND_ADX_ENTER": float(np.round(study.best_params.get("STRONG_TREND_ADX_ENTER", 32.0), 1)),
                 "MIN_EXIT_QUALITY_SCORE": float(np.round(study.best_params.get("MIN_EXIT_QUALITY_SCORE", 75.0), 1)),
                 "MIN_STRATEGY_HEALTH_SCORE": 50.0,
                 "optimization_objective": "Maximized_Calmar_Ratio"
             }
             return best_thresholds
         except (ImportError, AttributeError, ValueError, KeyError, TypeError, RuntimeError) as e:
-            return {"STRONG_TREND_ADX_ENTER": 22.0, "MIN_EXIT_QUALITY_SCORE": 75.0, "MIN_STRATEGY_HEALTH_SCORE": 50.0}
+            return {"STRONG_TREND_ADX_ENTER": 32.0, "MIN_EXIT_QUALITY_SCORE": 75.0, "MIN_STRATEGY_HEALTH_SCORE": 50.0}
 
 optuna_retrainer = OptunaModelRetrainer()

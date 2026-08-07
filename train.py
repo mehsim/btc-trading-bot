@@ -425,7 +425,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             atr_t = atr_vals[i]
             adx_t = adxs[i]
             if atr_t <= 0: atr_t = p_t * 0.001
-            tp_mult = tp_m_trending if adx_t >= 22.0 else tp_m_ranging
+            tp_mult = tp_m_trending if adx_t >= 32.0 else tp_m_ranging
             upper_b = p_t + tp_mult * atr_t
             lower_b = p_t - tp_mult * atr_t
             upper_s = p_t + sl_m * atr_t
