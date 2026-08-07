@@ -200,5 +200,11 @@
     "training_pipeline_version": "v7.2.0",
     "git_sha": "b2d0d3b0"
   },
-  "hmac_signature": "9951c1b7309364afaa3730ff8298316ebdb6c7ced63bac338e15c885081e2ecb"
+  "barrier_config": {
+    "tp_mult_trending": 2.7,
+    "tp_mult_ranging": 2.16,
+    "sl_mult": 1.2,
+    "lookahead": 10
+  },
+  "hmac_signature": "0ee14bbaa22ca5472f1715521199fca6cd2dd081591e9b00f2ff10c50f821f8b"
 }
