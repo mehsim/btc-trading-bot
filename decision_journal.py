@@ -22,6 +22,7 @@ _db_initialized = False
 class DecisionRecord:
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     ts: float = field(default_factory=time.time)
+    candle_timestamp: Optional[int] = None
     symbol: str = ""
     interval: str = ""
 

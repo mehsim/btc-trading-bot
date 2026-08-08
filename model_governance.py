@@ -60,4 +60,11 @@ class ModelGovernanceEngine:
             "config_hash": self.config_hash
         }
 
+    def log_barrier_manifest_audit(self, symbol: str, interval: str, manifest: Dict[str, Any]):
+        """Logs and audits effective barrier config parameters loaded from manifest."""
+        from logger import log_event
+        barrier_cfg = manifest.get("barrier_config") or manifest.get("effective_barrier_config", {})
+        log_event("INFO", f"[{symbol} {interval}m Manifest Audit] Effective Barrier Config: {barrier_cfg}")
+        return barrier_cfg
+
 model_governance_engine = ModelGovernanceEngine()

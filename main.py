@@ -35,8 +35,8 @@ from gmm_trail import gmm_trailing_engine
 from garch_monitor import garch_vol_monitor
 from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
-import database
 import trade_calculators
+import exit_manager
 from trade_calculators import transaction_cost_model, calculate_break_even_stop, UnifiedTargetGenerator, calculate_probabilistic_utility_bootstrap
 from statistical_validation import statistical_validation
 from decision_outcome_db import decision_outcome_db
@@ -2355,6 +2355,8 @@ def load_model_weights(iv):
                 if schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION or schema_v < 1:
                     print(f"[CRITICAL ALERT] Model manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
                     return False
+                from model_governance import model_governance_engine
+                model_governance_engine.log_barrier_manifest_audit("BTCUSDT", str(iv), m)
                 return True
             except Exception as e:
                 print(f"[CRITICAL ALERT] Corrupted model manifest for {prefix}: {e}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
@@ -5063,140 +5065,30 @@ def main():
                     break_even_triggered = active_trade.get("break_even_triggered", False)
                     position_size_usd = active_trade.get("position_size_usd", 100.0)
     
-                    # Volatility-Scaled Trailing Stops: multiplier is dynamic based on current ADX
+                    # Volatility-Scaled Trailing Stops & Break-Even via exit_manager module
                     if active_trade.get("half_closed", False):
                         trailing_multiplier = 1.0
                     else:
                         current_adx = bot_state.get(f"adx_{tf}", 20.0)
-                        # Rule 6: GMM-based continuous ADX trailing multiplier
-                        trailing_multiplier = gmm_trailing_engine.calculate_gmm_trailing_multiplier(current_adx)
+                        trailing_multiplier = exit_manager.compute_trailing_multiplier(active_trade, tf, current_adx)
 
-                    # Rule 2: Adaptive Time-Decayed Trailing Tightening (per timeframe calibration)
-                    entry_time_ms = active_trade.get("entry_time")
-                    if entry_time_ms:
-                        trade_age_hours = max(0.0, (time.time() - (entry_time_ms / 1000.0)) / 3600.0)
-                        start_decay_h, decay_rate_unit = decay_calibrator.get_decay_start_and_rate(tf)
-                        if trade_age_hours > start_decay_h:
-                            decay_rate = min(0.30, decay_rate_unit * ((trade_age_hours - start_decay_h) / 2.0))
-                            trailing_multiplier = trailing_multiplier * (1.0 - decay_rate)
-
-                    # Auto-Calibrated Stop Floor & MFE-Based Break-Even Trigger (Hardened for high leverage)
                     min_pct_floor = risk_engine.auto_stop_floor.get_floor(active_symbol, database_module=database) if hasattr(risk_engine, 'auto_stop_floor') else volatility_clusterer.get_symbol_break_even_floor(active_symbol)
                     be_mult = mfe_be_trigger.get_trigger_multiple(active_symbol, timeframe=str(iv))
                     trade_leverage = float(active_trade.get("leverage", 1.0))
                     required_be_dist = compute_be_trigger_distance(atr_dollars, trade_leverage, iv, be_mult, entry_price, min_pct_floor)
 
-                    # Update trailing stop peak prices
-                    if direction == "Bullish":
-                        if current_price > highest_price:
-                            highest_price = current_price
-                            active_trade["highest_price"] = highest_price
-                            
-                            # 🥇 Upgrade 1: Hybrid Structure-Based Swing Trail (ATR + 3-bar Swing Low)
-                            atr_sl = highest_price - trailing_multiplier * atr_dollars
-                            swing_low_3b = active_trade.get("swing_low_3b")
-                            if swing_low_3b is not None and swing_low_3b > 0:
-                                potential_sl = max(atr_sl, min(highest_price - 0.001 * entry_price, swing_low_3b))
-                            else:
-                                potential_sl = atr_sl
-
-                            # Invariant: If Break-Even is active, SL cannot regress below cost-aware BE floor
-                            if break_even_triggered:
-                                be_floor = calculate_break_even_stop("Bullish", entry_price, current_price, atr_dollars)
-                                potential_sl = max(potential_sl, be_floor)
-
-                            if potential_sl > stop_loss:
-                                if TRADE_MODE != "simulation":
-                                    success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
-                                    if success:
-                                        stop_loss = potential_sl
-                                        active_trade["stop_loss"] = stop_loss
-                                        active_trades_updated = True
-                                        gross_r = (stop_loss - entry_price) / max(1e-4, atr_dollars)
-                                        net_pnl_est = (stop_loss - entry_price) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                        print(f"[{active_symbol} {iv}m Trailing Engine] Mode: TRAILING | Direction: Bullish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Net Expected PnL: ${net_pnl_est:+.2f}")
-                                else:
-                                    stop_loss = potential_sl
-                                    active_trade["stop_loss"] = stop_loss
-                                    active_trades_updated = True
-                                    gross_r = (stop_loss - entry_price) / max(1e-4, atr_dollars)
-                                    net_pnl_est = (stop_loss - entry_price) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                    print(f"[{active_symbol} {iv}m Trailing Engine] Mode: TRAILING | Direction: Bullish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Net Expected PnL: ${net_pnl_est:+.2f}")
-                        
-                        # Break-Even Guard with Adaptive Floor
-                        if not break_even_triggered and current_price >= entry_price + required_be_dist:
-                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                                if success:
-                                    break_even_triggered = True
-                                    active_trade["break_even_triggered"] = True
-                                    stop_loss = target_sl
-                                    active_trade["stop_loss"] = stop_loss
-                                    active_trades_updated = True
-                                    gross_r = (stop_loss - entry_price) / max(1e-4, atr_dollars)
-                                    net_pnl_est = (stop_loss - entry_price) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                    print(f"[{active_symbol} {iv}m Trailing Engine] Mode: BREAK_EVEN | Activated | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Guaranteed Min Net PnL: ${net_pnl_est:+.2f}")
-                            else:
-                                break_even_triggered = True
-                                active_trade["break_even_triggered"] = True
-                                stop_loss = target_sl
-                                active_trade["stop_loss"] = stop_loss
-                                active_trades_updated = True
-                                gross_r = (stop_loss - entry_price) / max(1e-4, atr_dollars)
-                                net_pnl_est = (stop_loss - entry_price) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                print(f"[{active_symbol} {iv}m Trailing Engine] Mode: BREAK_EVEN | Activated | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Guaranteed Min Net PnL: ${net_pnl_est:+.2f}")
-                    else:
-                        if current_price < lowest_price:
-                            lowest_price = current_price
-                            active_trade["lowest_price"] = lowest_price
-                            
-                            # 🥇 Upgrade 1: Hybrid Structure-Based Swing Trail (ATR + 3-bar Swing High)
-                            atr_sl = lowest_price + trailing_multiplier * atr_dollars
-                            swing_high_3b = active_trade.get("swing_high_3b")
-                            if swing_high_3b is not None and swing_high_3b > 0:
-                                potential_sl = min(atr_sl, max(lowest_price + 0.001 * entry_price, swing_high_3b))
-                            else:
-                                potential_sl = atr_sl
-
-                            # Invariant: If Break-Even is active, SL cannot regress above cost-aware BE floor
-                            if break_even_triggered:
-                                be_floor = calculate_break_even_stop("Bearish", entry_price, current_price, atr_dollars)
-                                potential_sl = min(potential_sl, be_floor)
-
-                            if potential_sl < stop_loss:
-                                if TRADE_MODE != "simulation":
-                                    success = update_bybit_stop_loss(active_symbol, potential_sl, active_trade)
-                                    if success:
-                                        stop_loss = potential_sl
-                                        active_trade["stop_loss"] = stop_loss
-                                        active_trades_updated = True
-                                        gross_r = (entry_price - stop_loss) / max(1e-4, atr_dollars)
-                                        net_pnl_est = (entry_price - stop_loss) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                        print(f"[{active_symbol} {iv}m Trailing Engine] Mode: TRAILING | Direction: Bearish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Net Expected PnL: ${net_pnl_est:+.2f}")
-                                else:
-                                    stop_loss = potential_sl
-                                    active_trade["stop_loss"] = stop_loss
-                                    active_trades_updated = True
-                                    gross_r = (entry_price - stop_loss) / max(1e-4, atr_dollars)
-                                    net_pnl_est = (entry_price - stop_loss) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                    print(f"[{active_symbol} {iv}m Trailing Engine] Mode: TRAILING | Direction: Bearish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Net Expected PnL: ${net_pnl_est:+.2f}")
-                                
-                        # Break-Even Guard with Adaptive Floor
-                        if not break_even_triggered and current_price <= entry_price - required_be_dist:
-                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                                if success:
-                                    break_even_triggered = True
-                                    active_trade["break_even_triggered"] = True
-                                    stop_loss = target_sl
-                                    active_trade["stop_loss"] = stop_loss
-                                    active_trades_updated = True
-                                    gross_r = (entry_price - stop_loss) / max(1e-4, atr_dollars)
-                                    net_pnl_est = (entry_price - stop_loss) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                                    print(f"[{active_symbol} {iv}m Trailing Engine] Mode: BREAK_EVEN | Activated | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Guaranteed Min Net PnL: ${net_pnl_est:+.2f}")
-                                print(f"[{active_symbol} {iv}m Trailing Engine] Mode: BREAK_EVEN | Activated | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Guaranteed Min Net PnL: ${net_pnl_est:+.2f}")
+                    exit_eval = exit_manager.evaluate_trailing_and_break_even(
+                        active_symbol, iv, tf, direction, entry_price, current_price,
+                        highest_price, lowest_price, stop_loss, break_even_triggered,
+                        atr_dollars, position_size_usd, active_trade, required_be_dist,
+                        trailing_multiplier, update_bybit_stop_loss, trade_mode=TRADE_MODE
+                    )
+                    highest_price = exit_eval["highest_price"]
+                    lowest_price = exit_eval["lowest_price"]
+                    stop_loss = exit_eval["stop_loss"]
+                    break_even_triggered = exit_eval["break_even_triggered"]
+                    if exit_eval["active_trades_updated"]:
+                        active_trades_updated = True
     
                     # Rule 10: ATR Fibonacci Step-Lock (38.2% -> lock 25%, 50% -> lock 40%, 61.8% -> lock 55%)
                     take_profit_val = active_trade.get("take_profit", 0.0)
