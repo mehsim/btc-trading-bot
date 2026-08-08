@@ -4448,8 +4448,10 @@ def recover_missed_closed_trades():
                         
                         exit_time_sec = updated_time_ms / 1000.0
                         already_logged = False
-                        for t in bot_state.get("trade_history", []):
-                            if t.get("symbol") == symbol and abs(t.get("exit_time", 0.0) - exit_time_sec) < 10.0:
+                        db_trades = database.get_completed_trades(limit=200)
+                        all_known_trades = list(bot_state.get("trade_history", [])) + db_trades
+                        for t in all_known_trades:
+                            if t.get("symbol") == symbol and abs(float(t.get("exit_time", 0.0) or 0.0) - exit_time_sec) < 60.0:
                                 already_logged = True
                                 break
                                 

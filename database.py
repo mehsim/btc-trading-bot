@@ -298,11 +298,19 @@ def init_db():
 
 
 def get_completed_trades(limit: int = 100) -> List[Dict[str, Any]]:
-    """Retrieve recent completed trades from SQLite database."""
+    """Retrieve recent completed trades from SQLite database, deduplicated by symbol, exit_time, entry & exit price."""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM completed_trades ORDER BY exit_time DESC LIMIT ?;", (limit,))
+        cursor.execute("""
+            SELECT * FROM completed_trades 
+            WHERE rowid IN (
+                SELECT MIN(rowid) 
+                FROM completed_trades 
+                GROUP BY symbol, round(exit_time / 60), round(entry_price, 4), round(exit_price, 4)
+            )
+            ORDER BY exit_time DESC LIMIT ?;
+        """, (limit,))
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows]
@@ -425,6 +433,22 @@ def save_completed_trade(trade) -> bool:
     with db_lock:
         conn = get_db_connection()
         try:
+            entry_p = round_monetary(trade.get("entry_price"), 4)
+            exit_p = round_monetary(trade.get("exit_price"), 4)
+            sym = trade.get("symbol")
+            
+            # Deduplication Guard: Check if matching trade already exists in DB
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT trade_id FROM completed_trades 
+                WHERE symbol = ? AND abs(exit_time - ?) < 60.0 AND abs(entry_price - ?) < 0.0005 AND abs(exit_price - ?) < 0.0005;
+            """, (sym, exit_ts, entry_p, exit_p))
+            dup = cursor.fetchone()
+            if dup:
+                print(f"[Database] Skipped duplicate completed trade insert for {sym} at exit_time {exit_ts}.")
+                conn.close()
+                return True
+
             try:
                 conn.execute("""
                     INSERT INTO completed_trades (
@@ -433,8 +457,8 @@ def save_completed_trade(trade) -> bool:
                         balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
-                    t_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
-                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    t_id, sym, trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
+                    entry_p, exit_p,
                     round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
                     trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
                     round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
