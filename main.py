@@ -35,6 +35,7 @@ from gmm_trail import gmm_trailing_engine
 from garch_monitor import garch_vol_monitor
 from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
+import database
 import trade_calculators
 import exit_manager
 from trade_calculators import transaction_cost_model, calculate_break_even_stop, UnifiedTargetGenerator, calculate_probabilistic_utility_bootstrap
