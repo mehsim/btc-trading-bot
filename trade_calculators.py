@@ -24,6 +24,17 @@ def safe_float(val, default=0.0):
 
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 
+def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
+    """Raises ValueError if SL/TP sit on the wrong side of entry."""
+    direction_clean = str(direction).strip().title()
+    if direction_clean in ("Bullish", "Long", "Buy"):
+        ok = sl < entry < tp
+    else:
+        ok = sl > entry > tp
+    if not ok:
+        raise ValueError(f"[{symbol}] Invalid {direction} geometry: SL={sl}, entry={entry}, TP={tp}")
+    return True
+
 MAX_RR_RATIO = {
     "5m": 3.0,
     "15": 4.0, "15m": 4.0,

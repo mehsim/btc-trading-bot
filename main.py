@@ -1744,10 +1744,12 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
     if live_price is not None:
         if side == "Buy" or side == "Long":  # Long position: Take Profit must be > current price
             if tp_price <= live_price:
+                log_event("WARNING", f"[{symbol}] TP {tp_price} <= price {live_price} on a long — skipped")
                 print(f"[Bybit API] Take Profit update skipped for Long {symbol}: Proposed TP {tp_price:.4f} is <= current price {live_price:.4f}.")
                 return False
         else:  # Short position: Take Profit must be < current price
             if tp_price >= live_price:
+                log_event("WARNING", f"[{symbol}] TP {tp_price} >= price {live_price} on a short — skipped")
                 print(f"[Bybit API] Take Profit update skipped for Short {symbol}: Proposed TP {tp_price:.4f} is >= current price {live_price:.4f}.")
                 return False
 
@@ -4308,6 +4310,7 @@ def sync_active_positions_from_bybit():
                     calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
                     if calc_atr > 0.05 * avg_price or calc_atr == 0:
                         calc_atr = 0.015 * avg_price
+                        log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
                     
                     # Sanitize TP and SL on recovery
                     if tp_price == 0.0:
@@ -4320,18 +4323,27 @@ def sync_active_positions_from_bybit():
                         if direction == "Bullish":
                             sl_price = avg_price - 0.75 * calc_atr
                             if liq_price > 0.0 and sl_price <= liq_price:
-                                sl_price = liq_price + 0.2 * calc_atr
+                                sl_price = min(avg_price * 0.999, liq_price + 0.2 * calc_atr)
+                            if sl_price >= avg_price:
+                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid long stop — leaving exchange SL")
+                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
+                                sl_price = None
                         else:
                             sl_price = avg_price + 0.75 * calc_atr
                             if liq_price > 0.0 and sl_price >= liq_price:
-                                sl_price = liq_price - 0.2 * calc_atr
+                                sl_price = max(avg_price * 1.001, liq_price - 0.2 * calc_atr)
+                            if sl_price <= avg_price:
+                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid short stop — leaving exchange SL")
+                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
+                                sl_price = None
                                 
                     # Push the recovered/sanitized TP & SL to Bybit
                     if TRADE_MODE != "simulation":
                         update_bybit_take_profit(symbol, tp_price)
-                        success = update_bybit_stop_loss(symbol, sl_price)
-                        if not success:
-                            sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+                        if sl_price is not None:
+                            success = update_bybit_stop_loss(symbol, sl_price)
+                            if not success:
+                                sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
      
                     # Dynamic timeframe and confidence resolution from prediction history matching symbol and direction
                     matched_tf = "1h"  # fallback default
@@ -4525,14 +4537,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
 
     # SL/TP Geometry Direction Guard (Hard Abort — Do NOT auto-correct)
-    if ml_trend in ["Bearish", "SHORT", "SELL"] and not (stop_loss_price > entry_price > take_profit_price):
-        log_event("ERROR", f"[{symbol} {iv}m] Aborting trade placement! Invalid Bearish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
-        send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid Bearish geometry (SL: ${stop_loss_price:.4f}, Entry: ${entry_price:.4f}, TP: ${take_profit_price:.4f})")
-        return
-
-    if ml_trend in ["Bullish", "LONG", "BUY"] and not (stop_loss_price < entry_price < take_profit_price):
-        log_event("ERROR", f"[{symbol} {iv}m] Aborting trade placement! Invalid Bullish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
-        send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid Bullish geometry (SL: ${stop_loss_price:.4f}, Entry: ${entry_price:.4f}, TP: ${take_profit_price:.4f})")
+    try:
+        trade_calculators.assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=f"{symbol} {iv}m")
+    except ValueError as geom_err:
+        log_event("ERROR", str(geom_err))
+        send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
         return
 
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
@@ -7091,13 +7100,11 @@ def main():
                                         
                                         # Post-Floor Geometry & Economic Viability Recheck
                                         all_pass = True
-                                        if ml_trend in ["Bearish", "SHORT", "SELL"] and not (stop_loss_price > entry_price > take_profit_price):
-                                            log_event("ERROR", f"[{symbol} {iv}m] Aborting trade entry! Invalid Bearish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
-                                            status_msg = "Skipped (Invalid Bearish Geometry)"
-                                            all_pass = False
-                                        elif ml_trend in ["Bullish", "LONG", "BUY"] and not (stop_loss_price < entry_price < take_profit_price):
-                                            log_event("ERROR", f"[{symbol} {iv}m] Aborting trade entry! Invalid Bullish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
-                                            status_msg = "Skipped (Invalid Bullish Geometry)"
+                                        try:
+                                            trade_calculators.assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=f"{symbol} {iv}m")
+                                        except ValueError as geom_err:
+                                            log_event("ERROR", str(geom_err))
+                                            status_msg = f"Skipped (Invalid {ml_trend} Geometry)"
                                             all_pass = False
                                         
                                         if all_pass:
