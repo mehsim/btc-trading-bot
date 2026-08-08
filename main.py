@@ -68,10 +68,12 @@ from telegram_listener import run_manual_confluence_report, start_telegram_comma
 from websocket_client import init_bybit_websocket_listeners, get_ws_status
 from dashboard_routes import dashboard_bp
 from risk_limits import assert_risk_governance_invariants
+from config_verifier import assert_shared_constants_aligned
 from decision_journal import DecisionRecord, write_decision
 
 # F-09 Governance Startup Lock: Assert hard safety bounds before trading initialization
 assert_risk_governance_invariants()
+assert_shared_constants_aligned()
 
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 
