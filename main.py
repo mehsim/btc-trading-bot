@@ -6805,7 +6805,7 @@ def main():
                                     
                                     wallet_exceeded = False
                                     if total_active_count >= MAX_CONCURRENT_POSITIONS:
-                                        print(f"[{symbol} {iv}m] Trade skipped: Reached MAX_CONCURRENT_POSITIONS ({MAX_CONCURRENT_POSITIONS}). Current active count: {total_active_count}.")
+                                        log_event("WARNING", f"[{symbol} {iv}m] Skipped: MAX_CONCURRENT_POSITIONS ({MAX_CONCURRENT_POSITIONS}) reached")
                                         status_msg = f"Skipped (Max Concurrent Positions {MAX_CONCURRENT_POSITIONS} Reached)"
                                         wallet_exceeded = True
                                     elif current_bal <= min_bal_limit:
