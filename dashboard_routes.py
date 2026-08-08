@@ -504,11 +504,17 @@ def api_status():
         status_data["simulated_balance"] = state_manager.get("simulated_balance", 80.0)
         status_data["real_balance"] = real_bal
         status_data["real_bybit_balance"] = real_bal
-        trades_hist = state_manager.get("trade_history", [])
-        if not trades_hist:
-            import database
-            trades_hist = database.get_completed_trades(limit=100)
-        status_data["trade_history"] = trades_hist[-50:]
+        import database
+        trades_hist = database.get_completed_trades(limit=100)
+        mem_hist = state_manager.get("trade_history", [])
+        all_t = list(mem_hist) + list(trades_hist)
+        dedup_dict = {}
+        for t in all_t:
+            if isinstance(t, dict):
+                k = (t.get("symbol"), round(float(t.get("exit_time", 0) or 0) / 60), round(float(t.get("entry_price", 0) or 0), 4), round(float(t.get("exit_price", 0) or 0), 4))
+                if k not in dedup_dict:
+                    dedup_dict[k] = t
+        status_data["trade_history"] = list(dedup_dict.values())[-50:]
         
         pred_hist = state_manager.get("prediction_history", [])
         if not pred_hist:
