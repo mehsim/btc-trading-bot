@@ -3,7 +3,7 @@ telegram_listener.py
 ---------------------
 Standalone Telegram command listener and interactive report generator extracted from main.py.
 Handles polling getUpdates, commands (/status, /balance, /trades, /openmanualtrade, /skipped, /regime, /help, etc.),
-and authenticating users.
+inline keyboards, parameter auto-suggestions, and authenticating users.
 """
 
 import os
@@ -130,13 +130,61 @@ def get_live_trades_report(bot_state=None, bot_state_lock=None):
     return "\n".join(report_lines)
 
 
-def execute_manual_trade(symbol, interval, direction, bot_state=None, bot_state_lock=None):
+def get_manual_trade_suggestion(symbol, interval, direction="Bullish"):
+    try:
+        from data import get_history
+        from core import add_features
+
+        sym = symbol.upper().strip()
+        if not sym.endswith("USDT"):
+            sym += "USDT"
+
+        iv = str(interval).replace("m", "").replace("h", "")
+        if iv not in ["15", "30", "60", "120", "240", "360"]:
+            iv = "15"
+
+        df_raw = get_history(symbol=sym, interval=iv, limit=100)
+        if df_raw is None or len(df_raw) < 10:
+            return None
+
+        df = add_features(df_raw)
+        latest = df.iloc[-1]
+        entry_price = float(latest["close"])
+        atr_dollars = float(latest.get("ATR_norm", 0.005) * entry_price)
+
+        dir_clean = str(direction).strip().title()
+        ml_trend = "Bullish" if dir_clean in ["Bullish", "Long", "Buy"] else "Bearish"
+
+        if ml_trend == "Bullish":
+            sl_price = entry_price - (1.0 * atr_dollars)
+            tp_price = entry_price + (2.0 * atr_dollars)
+        else:
+            sl_price = entry_price + (1.0 * atr_dollars)
+            tp_price = entry_price - (2.0 * atr_dollars)
+
+        return {
+            "symbol": sym,
+            "interval": iv,
+            "direction": ml_trend,
+            "entry_price": entry_price,
+            "stop_loss": sl_price,
+            "take_profit": tp_price,
+            "leverage": 5.0,
+            "atr_dollars": atr_dollars
+        }
+    except Exception as ex:
+        print(f"[Manual Suggestion Error] {ex}")
+        return None
+
+
+def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_loss=None, take_profit=None, leverage=5.0, bot_state=None, bot_state_lock=None):
     try:
         from data import get_history
         from core import add_features
         from bybit_client import place_bybit_taker_ioc_order, format_bybit_qty, set_bybit_leverage, get_bybit_min_qty_step
         from trade_calculators import assert_valid_geometry
         import uuid
+        import math
 
         sym = symbol.upper().strip()
         if not sym.endswith("USDT"):
@@ -171,35 +219,40 @@ def execute_manual_trade(symbol, interval, direction, bot_state=None, bot_state_
 
         df = add_features(df_raw)
         latest = df.iloc[-1]
-        entry_price = float(latest["close"])
-        atr_dollars = float(latest.get("ATR_norm", 0.005) * entry_price)
+        live_price = float(latest["close"])
+        atr_dollars = float(latest.get("ATR_norm", 0.005) * live_price)
 
-        if ml_trend == "Bullish":
-            stop_loss_price = entry_price - (1.0 * atr_dollars)
-            take_profit_price = entry_price + (2.0 * atr_dollars)
+        final_entry = float(entry_price) if entry_price is not None and float(entry_price) > 0 else live_price
+        if stop_loss is not None and float(stop_loss) > 0:
+            final_sl = float(stop_loss)
         else:
-            stop_loss_price = entry_price + (1.0 * atr_dollars)
-            take_profit_price = entry_price - (2.0 * atr_dollars)
+            final_sl = final_entry - (1.0 * atr_dollars) if ml_trend == "Bullish" else final_entry + (1.0 * atr_dollars)
 
-        assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=sym)
+        if take_profit is not None and float(take_profit) > 0:
+            final_tp = float(take_profit)
+        else:
+            final_tp = final_entry + (2.0 * atr_dollars) if ml_trend == "Bullish" else final_entry - (2.0 * atr_dollars)
 
-        leverage_val = 5.0
+        final_lev = float(leverage) if leverage is not None and float(leverage) > 0 else 5.0
+
+        # Validate geometry
+        assert_valid_geometry(ml_trend, final_entry, final_sl, final_tp, symbol=sym)
+
         position_size_usd = 2.0
-        set_bybit_leverage(sym, leverage_val)
+        set_bybit_leverage(sym, final_lev)
 
-        leveraged_size = position_size_usd * leverage_val
-        raw_qty = leveraged_size / entry_price
+        leveraged_size = position_size_usd * final_lev
+        raw_qty = leveraged_size / final_entry
         qty_str = format_bybit_qty(sym, raw_qty)
         qty_val = float(qty_str)
 
-        if qty_val * entry_price < 5.1:
+        if qty_val * final_entry < 5.1:
             step = get_bybit_min_qty_step(sym)
-            import math
             if step > 0:
-                qty_val = math.ceil(5.1 / (entry_price * step)) * step
+                qty_val = math.ceil(5.1 / (final_entry * step)) * step
                 qty_str = format_bybit_qty(sym, qty_val)
 
-        order_res = place_bybit_taker_ioc_order(sym, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
+        order_res = place_bybit_taker_ioc_order(sym, side, qty_str, sl=final_sl, tp=final_tp)
         if order_res.get("retCode") == 0:
             bybit_order_id = order_res.get("result", {}).get("orderId")
             
@@ -211,10 +264,10 @@ def execute_manual_trade(symbol, interval, direction, bot_state=None, bot_state_
                 "bybit_order_id": bybit_order_id,
                 "symbol": sym,
                 "direction": ml_trend,
-                "entry_price": entry_price,
-                "stop_loss": stop_loss_price,
-                "take_profit": take_profit_price,
-                "leverage": leverage_val,
+                "entry_price": final_entry,
+                "stop_loss": final_sl,
+                "take_profit": final_tp,
+                "leverage": final_lev,
                 "position_size_usd": position_size_usd,
                 "qty": float(qty_str),
                 "entry_time": int(time.time() * 1000),
@@ -234,10 +287,10 @@ def execute_manual_trade(symbol, interval, direction, bot_state=None, bot_state_
                 f"🟢 *MANUAL TRADE EXECUTED SUCCESSFULLY*\n\n"
                 f"• *Asset*: `{sym}` ({tf_key})\n"
                 f"• *Direction*: `{ml_trend}`\n"
-                f"• *Entry Price*: `${entry_price:.4f}`\n"
-                f"• *Stop Loss*: `${stop_loss_price:.4f}`\n"
-                f"• *Take Profit*: `${take_profit_price:.4f}`\n"
-                f"• *Leverage*: `{leverage_val:.1f}x` | *Margin*: `${position_size_usd:.2f}`\n"
+                f"• *Entry Price*: `${final_entry:.4f}`\n"
+                f"• *Stop Loss*: `${final_sl:.4f}`\n"
+                f"• *Take Profit*: `${final_tp:.4f}`\n"
+                f"• *Leverage*: `{final_lev:.1f}x` | *Margin*: `${position_size_usd:.2f}`\n"
                 f"• *Bybit Order ID*: `{bybit_order_id}`"
             )
         else:
@@ -402,9 +455,9 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                 {"command": "status", "description": "Current bot status, balance & active regime"},
                 {"command": "balance", "description": "Live Bybit wallet balance, margin & equity"},
                 {"command": "trades", "description": "View all open active trades with live PnL"},
-                {"command": "skipped", "description": "View skipped trades for 15m/30m/1h/2h"},
+                {"command": "skipped", "description": "View skipped trades by timeframe"},
                 {"command": "regime", "description": "Current market regime & volatility breakdown"},
-                {"command": "openmanualtrade", "description": "Execute manual trade (e.g. /openmanualtrade BTC 15 Long)"},
+                {"command": "openmanualtrade", "description": "Execute manual trade with live suggestions"},
                 {"command": "start", "description": "Start automatic trading bot"},
                 {"command": "stop", "description": "Pause automatic trading bot"},
                 {"command": "kill", "description": "Emergency kill switch - halt & close all positions"},
@@ -425,6 +478,33 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
 
                 for update in updates_res.get("result", []):
                     offset = update["update_id"] + 1
+
+                    # Handle Callback Queries (Inline Keyboard Clicks)
+                    cb_query = update.get("callback_query")
+                    if cb_query:
+                        cb_chat_id = str(cb_query.get("message", {}).get("chat", {}).get("id"))
+                        cb_data = str(cb_query.get("data", ""))
+                        if cb_chat_id in allowed_chat_ids or len(allowed_chat_ids) == 0:
+                            if cb_data.startswith("skipped_"):
+                                tf_choice = cb_data.replace("skipped_", "")
+                                rep = get_skipped_trades_report(tf_choice)
+                                execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": rep, "parse_mode": "Markdown"})
+                            elif cb_data.startswith("quick_trade_"):
+                                # Format: quick_trade_BTC_15_Bullish
+                                cb_parts = cb_data.split("_")
+                                if len(cb_parts) >= 4:
+                                    q_sym, q_tf, q_dir = cb_parts[2], cb_parts[3], cb_parts[4] if len(cb_parts) > 4 else "Bullish"
+                                    res_msg = execute_manual_trade(q_sym, q_tf, q_dir, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                                    execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": res_msg, "parse_mode": "Markdown"})
+                            elif cb_data.startswith("exec_manual_"):
+                                # Format: exec_manual_{sym}_{tf}_{direction}_{entry}_{sl}_{tp}_{lev}
+                                cb_parts = cb_data.split("_")
+                                if len(cb_parts) >= 8:
+                                    e_sym, e_tf, e_dir = cb_parts[2], cb_parts[3], cb_parts[4]
+                                    e_entry, e_sl, e_tp, e_lev = cb_parts[5], cb_parts[6], cb_parts[7], cb_parts[8] if len(cb_parts) > 8 else 5.0
+                                    res_msg = execute_manual_trade(e_sym, e_tf, e_dir, entry_price=e_entry, stop_loss=e_sl, take_profit=e_tp, leverage=e_lev, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                                    execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": res_msg, "parse_mode": "Markdown"})
+
                     message = update.get("message") or update.get("edited_message") or update.get("channel_post")
                     if not message:
                         continue
@@ -503,21 +583,86 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": trades_text, "parse_mode": "Markdown"})
 
                     elif cmd in ["openmanualtrade", "manualtrade"]:
-                        if not args or len(args) < 3:
-                            usage_text = (
-                                "⚠️ *Usage for Manual Trade Execution*:\n"
-                                "`/openmanualtrade <SYMBOL> <TIMEFRAME> <DIRECTION>`\n\n"
+                        if not args:
+                            btc_sug = get_manual_trade_suggestion("BTCUSDT", "15", "Bullish")
+                            eth_sug = get_manual_trade_suggestion("ETHUSDT", "15", "Bullish")
+                            
+                            prompt_text = (
+                                "🛠️ *MANUAL TRADE SETUP & AUTO-SUGGESTIONS*\n\n"
+                                "Specify custom parameters or review live ATR suggestions:\n\n"
+                                "*Full Command Format*:\n"
+                                "`/openmanualtrade <SYMBOL> <TF> <DIR> [ENTRY] [SL] [TP] [LEV]`\n\n"
                                 "*Examples*:\n"
-                                "• `/openmanualtrade BTC 15 Bullish`\n"
-                                "• `/openmanualtrade ETH 60 Bearish`\n"
-                                "• `/openmanualtrade SOL 30 Long`"
+                                "• Auto-suggested defaults: `/openmanualtrade BTC 15 Long`\n"
+                                "• Custom parameters: `/openmanualtrade BTC 15 Long 68500 67800 70000 10`\n\n"
                             )
-                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": usage_text, "parse_mode": "Markdown"})
+                            if btc_sug:
+                                prompt_text += (
+                                    f"💡 *Live Suggested Setup (BTCUSDT 15m)*:\n"
+                                    f"• Entry: `${btc_sug['entry_price']:.2f}` | SL: `${btc_sug['stop_loss']:.2f}` | TP: `${btc_sug['take_profit']:.2f}` | Lev: `5x`\n\n"
+                                )
+                            if eth_sug:
+                                prompt_text += (
+                                    f"💡 *Live Suggested Setup (ETHUSDT 15m)*:\n"
+                                    f"• Entry: `${eth_sug['entry_price']:.2f}` | SL: `${eth_sug['stop_loss']:.2f}` | TP: `${eth_sug['take_profit']:.2f}` | Lev: `5x`\n\n"
+                                )
+
+                            reply_markup = {
+                                "inline_keyboard": [
+                                    [
+                                        {"text": "🚀 Trade BTC 15m Long (Suggested)", "callback_data": "quick_trade_BTC_15_Bullish"},
+                                        {"text": "🚀 Trade ETH 15m Long (Suggested)", "callback_data": "quick_trade_ETH_15_Bullish"}
+                                    ]
+                                ]
+                            }
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": prompt_text,
+                                "parse_mode": "Markdown",
+                                "reply_markup": reply_markup
+                            })
+                        elif len(args) <= 3:
+                            m_sym, m_tf = args[0], args[1]
+                            m_dir = args[2] if len(args) >= 3 else "Bullish"
+                            sug = get_manual_trade_suggestion(m_sym, m_tf, m_dir)
+                            if sug:
+                                confirm_text = (
+                                    f"🎯 *PROPOSED MANUAL TRADE SETUP*\n\n"
+                                    f"• *Asset*: `{sug['symbol']}` ({sug['interval']}m)\n"
+                                    f"• *Direction*: `{sug['direction']}`\n"
+                                    f"• *Entry Price (Live)*: `${sug['entry_price']:.4f}`\n"
+                                    f"• *Suggested Stop Loss*: `${sug['stop_loss']:.4f}` (1.0x ATR)\n"
+                                    f"• *Suggested Take Profit*: `${sug['take_profit']:.4f}` (2.0x ATR)\n"
+                                    f"• *Suggested Leverage*: `{sug['leverage']:.1f}x`\n\n"
+                                    f"Click *Confirm & Execute Trade* below, or pass custom values:\n"
+                                    f"`/openmanualtrade {m_sym} {m_tf} {m_dir} <ENTRY> <SL> <TP> [LEVERAGE]`"
+                                )
+                                cb_payload = f"exec_manual_{sug['symbol']}_{sug['interval']}_{sug['direction']}_{sug['entry_price']:.4f}_{sug['stop_loss']:.4f}_{sug['take_profit']:.4f}_{sug['leverage']:.0f}"
+                                reply_markup = {
+                                    "inline_keyboard": [
+                                        [
+                                            {"text": "✅ Confirm & Execute Trade", "callback_data": cb_payload}
+                                        ]
+                                    ]
+                                }
+                                execute_telegram_api_call("sendMessage", {
+                                    "chat_id": chat_id,
+                                    "text": confirm_text,
+                                    "parse_mode": "Markdown",
+                                    "reply_markup": reply_markup
+                                })
+                            else:
+                                res_msg = execute_manual_trade(m_sym, m_tf, m_dir, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                                execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": res_msg, "parse_mode": "Markdown"})
                         else:
                             m_sym = args[0]
                             m_tf = args[1]
                             m_dir = args[2]
-                            res_msg = execute_manual_trade(m_sym, m_tf, m_dir, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                            c_entry = args[3] if len(args) > 3 else None
+                            c_sl = args[4] if len(args) > 4 else None
+                            c_tp = args[5] if len(args) > 5 else None
+                            c_lev = args[6] if len(args) > 6 else 5.0
+                            res_msg = execute_manual_trade(m_sym, m_tf, m_dir, entry_price=c_entry, stop_loss=c_sl, take_profit=c_tp, leverage=c_lev, bot_state=bot_state, bot_state_lock=bot_state_lock)
                             execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": res_msg, "parse_mode": "Markdown"})
 
                     elif cmd in ["regime"]:
@@ -536,12 +681,42 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": reg_text, "parse_mode": "Markdown"})
 
                     elif cmd in ["skipped"]:
-                        target_tf = "15"
-                        if args:
+                        if not args:
+                            menu_text = (
+                                "🔍 *SKIPPED TRADES — SELECT TIMEFRAME / MODEL*\n\n"
+                                "Please select which model timeframe you want to inspect:\n\n"
+                                "• `/skipped 15m` — 15-Minute Scalping Model\n"
+                                "• `/skipped 30m` — 30-Minute Model\n"
+                                "• `/skipped 1h` — 1-Hour Model\n"
+                                "• `/skipped 2h` — 2-Hour Model\n"
+                                "• `/skipped 4h` — 4-Hour Model\n"
+                                "• `/skipped 6h` — 6-Hour Model\n"
+                            )
+                            reply_markup = {
+                                "inline_keyboard": [
+                                    [
+                                        {"text": "⚡ 15m", "callback_data": "skipped_15"},
+                                        {"text": "⏱️ 30m", "callback_data": "skipped_30"},
+                                        {"text": "📈 1h", "callback_data": "skipped_60"}
+                                    ],
+                                    [
+                                        {"text": "📊 2h", "callback_data": "skipped_120"},
+                                        {"text": "⏳ 4h", "callback_data": "skipped_240"},
+                                        {"text": "🏆 6h", "callback_data": "skipped_360"}
+                                    ]
+                                ]
+                            }
+                            execute_telegram_api_call("sendMessage", {
+                                "chat_id": chat_id,
+                                "text": menu_text,
+                                "parse_mode": "Markdown",
+                                "reply_markup": reply_markup
+                            })
+                        else:
                             raw_arg = args[0].lower().replace("m", "").replace("h", "")
                             target_tf = TF_MAP_SKIPPED.get(args[0].lower(), TF_MAP_SKIPPED.get(raw_arg, "15"))
-                        skipped_msg = get_skipped_trades_report(target_tf)
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": skipped_msg, "parse_mode": "Markdown"})
+                            skipped_msg = get_skipped_trades_report(target_tf)
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": skipped_msg, "parse_mode": "Markdown"})
 
                     elif cmd in ["start"]:
                         with bot_state_lock:
@@ -564,8 +739,8 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                             "• `/status` - Bot running state & active regime\n"
                             "• `/balance` - Real live Bybit wallet balance, margin & equity\n"
                             "• `/trades` - Active open positions with live PnL\n"
-                            "• `/openmanualtrade [sym] [tf] [dir]` - Execute manual trade (e.g. `/openmanualtrade BTC 15 Long`)\n"
-                            "• `/skipped [tf]` - View skipped signals (e.g. `/skipped 30`)\n"
+                            "• `/openmanualtrade [sym] [tf] [dir] [entry] [sl] [tp] [lev]` - Execute manual trade with live suggestions\n"
+                            "• `/skipped [tf]` - View skipped signals by model timeframe\n"
                             "• `/regime` - Current market regime & sentiment\n"
                             "• `/start` - Start automatic trading\n"
                             "• `/stop` - Pause automatic trading\n"
