@@ -2,7 +2,7 @@
 telegram_listener.py
 ---------------------
 Standalone Telegram command listener and interactive report generator extracted from main.py.
-Handles polling getUpdates, commands (/status, /balance, /trades, /skipped, /confluence, /help, etc.),
+Handles polling getUpdates, commands (/status, /balance, /trades, /openmanualtrade, /skipped, /regime, /help, etc.),
 and authenticating users.
 """
 
@@ -19,129 +19,228 @@ from logger import log_event
 from telegram_bot import execute_telegram_api_call, send_telegram_alert
 
 
-def run_manual_confluence_report(symbol, interval, bot_state=None, bot_state_lock=None):
+def get_live_bybit_wallet_details():
     try:
-        from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
-        from core import add_features, features
-        from confluence_engine import check_pre_trade_confluence
-        
-        iv = str(interval)
-        df_raw = get_history(symbol=symbol, interval=iv, limit=300)
-        if df_raw is None or len(df_raw) < 2:
-            return f"❌ Failed to fetch price history from Bybit/Binance/Kraken for *{symbol}*."
-            
-        # Ensure close_btc is populated (required for features calculations)
-        if symbol == "BTCUSDT":
-            df_raw["close_btc"] = df_raw["close"]
-        else:
-            df_btc = get_history(symbol="BTCUSDT", interval=iv, limit=300)
-            if df_btc is not None and len(df_btc) > 0:
-                df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-                df_raw = pd.merge(df_raw, df_btc_sub, on="timestamp", how="left")
-                df_raw["close_btc"] = df_raw["close_btc"].ffill().bfill().fillna(df_raw["close"])
-            else:
-                df_raw["close_btc"] = df_raw["close"]
+        from bybit_client import bybit_get_request
+        for acct_type in ["UNIFIED", "CONTRACT", "SPOT"]:
+            res = bybit_get_request("/v5/account/wallet-balance", {"accountType": acct_type})
+            if isinstance(res, dict) and res.get("retCode") == 0:
+                list_data = res.get("result", {}).get("list", [])
+                if list_data:
+                    first = list_data[0]
+                    total_eq = float(first.get("totalEquity") or first.get("totalWalletBalance") or 0.0)
+                    total_wb = float(first.get("totalWalletBalance") or total_eq)
+                    total_upl = float(first.get("totalPerpUPL") or 0.0)
+                    coins = first.get("coin", [])
+                    avail_bal = total_wb
+                    used_margin = 0.0
+                    if coins and isinstance(coins, list):
+                        usdt_coin = next((c for c in coins if c.get("coin") == "USDT"), coins[0])
+                        wb = float(usdt_coin.get("walletBalance") or total_wb)
+                        eq = float(usdt_coin.get("equity") or total_eq)
+                        pos_im = float(usdt_coin.get("totalPositionIM") or 0.0)
+                        order_im = float(usdt_coin.get("totalOrderIM") or 0.0)
+                        upl = float(usdt_coin.get("unrealisedPnl") or total_upl)
+                        used_margin = pos_im + order_im
+                        avail_bal = max(0.0, wb - used_margin)
+                        return {
+                            "wallet_balance": wb,
+                            "equity": eq,
+                            "available_balance": avail_bal,
+                            "used_margin": used_margin,
+                            "unrealized_pnl": upl,
+                            "account_type": acct_type
+                        }
+                    return {
+                        "wallet_balance": total_wb,
+                        "equity": total_eq,
+                        "available_balance": max(0.0, total_wb - used_margin),
+                        "used_margin": used_margin,
+                        "unrealized_pnl": total_upl,
+                        "account_type": acct_type
+                    }
+    except Exception as ex:
+        print(f"[Balance Detail Error] {ex}")
+    return None
 
-        df_raw = merge_derivatives_sentiment_features(df_raw, symbol=symbol, interval=iv)
-        df_features = add_features(df_raw)
-        latest_candle = df_features.iloc[-1]
-        
-        models_by_interval = bot_state.get("models_by_interval", {}) if bot_state else {}
-        models_tf = models_by_interval.get(iv)
-        if not models_tf or not (models_tf.get("trending", {}).get("price") or models_tf.get("ranging", {}).get("price")):
-            return "❌ Models are currently not fully loaded or active."
-            
-        # Unsupervised GMM Market Regime Classification
-        regime = classify_market_regime(df_features, interval=iv)
-        regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
-        m_price = models_tf.get(regime_key, {}).get("price")
-        m_trend = models_tf.get(regime_key, {}).get("trend")
-        calibrator = models_tf.get(regime_key, {}).get("calibrator")
-        feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
 
-        if m_price is None or m_trend is None or not feat_list:
-            alt_key = "ranging" if regime_key == "trending" else "trending"
-            alt_price = models_tf.get(alt_key, {}).get("price")
-            alt_trend = models_tf.get(alt_key, {}).get("trend")
-            alt_cal = models_tf.get(alt_key, {}).get("calibrator")
-            alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
-            if alt_price is not None and alt_trend is not None and alt_feats:
-                m_price, m_trend, calibrator, feat_list = alt_price, alt_trend, alt_cal, alt_feats
-            else:
-                return "❌ Models are currently not fully loaded or active."
+def get_live_trades_report(bot_state=None, bot_state_lock=None):
+    from bybit_client import bybit_get_request
+    
+    active_map = {}
+    if bot_state and bot_state_lock:
+        with bot_state_lock:
+            for tf in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                t_list = bot_state.get(f"active_trade_{tf}", [])
+                if isinstance(t_list, list):
+                    for t in t_list:
+                        sym = t.get("symbol")
+                        if sym:
+                            active_map[sym] = (tf, t)
 
-        active_model_price = m_price
-        active_model_trend = m_trend
-            
-        if feat_list is not None:
-            X_live = latest_candle[feat_list].values.reshape(1, -1)
-        else:
-            X_live = latest_candle[features].values.reshape(1, -1)
-            
-        ensemble_weights = [0.3, 0.2, 0.5] if regime == "Trending" else [0.3, 0.5, 0.2]
-        pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
-        pred_change = pred_pct * float(latest_candle["close"])
-        expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
-        probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
-        if len(probs) >= 3:
-            prob_bearish = float(probs[0])
-            prob_neutral = float(probs[1])
-            prob_bullish = float(probs[2])
-        elif len(probs) == 2:
-            prob_bearish = float(probs[0])
-            prob_neutral = 0.0
-            prob_bullish = float(probs[1])
-        else:
-            prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
-            prob_neutral = 0.0
-            prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
+    pos_res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
+    bybit_positions = []
+    if isinstance(pos_res, dict) and pos_res.get("retCode") == 0:
+        raw_list = pos_res.get("result", {}).get("list", [])
+        for p in raw_list:
+            if float(p.get("size", "0") or 0.0) > 0:
+                bybit_positions.append(p)
 
-        if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= 0.50:
+    if not bybit_positions and not active_map:
+        return "📈 *ACTIVE OPEN POSITIONS*\n\nℹ️ *No active positions open currently.*"
+
+    report_lines = [f"📈 *ACTIVE OPEN POSITIONS ({len(bybit_positions)})*\n"]
+
+    for pos in bybit_positions:
+        sym = pos.get("symbol", "N/A")
+        side_raw = pos.get("side", "Buy")
+        direction = "Bullish (Long)" if side_raw in ["Buy", "Long"] else "Bearish (Short)"
+        size_qty = float(pos.get("size", 0.0))
+        entry_p = float(pos.get("avgPrice", 0.0) or 0.0)
+        mark_p = float(pos.get("markPrice", 0.0) or entry_p)
+        sl_p = float(pos.get("stopLoss", 0.0) or 0.0)
+        tp_p = float(pos.get("takeProfit", 0.0) or 0.0)
+        upnl = float(pos.get("unrealisedPnl", 0.0) or 0.0)
+        lev = float(pos.get("leverage", 1.0) or 1.0)
+        pos_val_usd = size_qty * mark_p
+        margin_usd = pos_val_usd / lev if lev > 0 else pos_val_usd
+        upnl_pct = (upnl / margin_usd * 100.0) if margin_usd > 0 else 0.0
+
+        tf_str = "1h"
+        if sym in active_map:
+            tf_str = active_map[sym][0]
+
+        pnl_icon = "🟢" if upnl >= 0 else "🔴"
+        sl_str = f"${sl_p:.4f}" if sl_p > 0 else "None"
+        tp_str = f"${tp_p:.4f}" if tp_p > 0 else "None"
+
+        block = (
+            f"{pnl_icon} *{sym}* ({tf_str}) | *{direction}*\n"
+            f"• *Entry*: `${entry_p:.4f}` | *Mark*: `${mark_p:.4f}`\n"
+            f"• *Stop Loss*: `{sl_str}` | *Take Profit*: `{tp_str}`\n"
+            f"• *Leverage*: `{lev:.1f}x` | *Margin*: `${margin_usd:.2f}` (Val: `${pos_val_usd:.2f}`)\n"
+            f"• *Live Unrealized PnL*: *${upnl:+.2f} USDT* (`{upnl_pct:+.2f}%`)\n"
+        )
+        report_lines.append(block)
+
+    return "\n".join(report_lines)
+
+
+def execute_manual_trade(symbol, interval, direction, bot_state=None, bot_state_lock=None):
+    try:
+        from data import get_history
+        from core import add_features
+        from bybit_client import place_bybit_taker_ioc_order, format_bybit_qty, set_bybit_leverage, get_bybit_min_qty_step
+        from trade_calculators import assert_valid_geometry
+        import uuid
+
+        sym = symbol.upper().strip()
+        if not sym.endswith("USDT"):
+            sym += "USDT"
+
+        iv = str(interval).replace("m", "").replace("h", "")
+        if iv == "1":
+            iv = "60"
+        elif iv == "2":
+            iv = "120"
+        elif iv == "4":
+            iv = "240"
+        elif iv == "6":
+            iv = "360"
+
+        if iv not in ["15", "30", "60", "120", "240", "360"]:
+            return f"❌ Invalid timeframe: `{interval}`. Supported: 15, 30, 60 (1h), 120 (2h), 240 (4h)."
+
+        dir_clean = str(direction).strip().title()
+        if dir_clean in ["Bullish", "Long", "Buy"]:
             ml_trend = "Bullish"
-            ml_confidence = prob_bullish
-        elif prob_bearish > max(prob_bullish, prob_neutral) and prob_bearish >= 0.50:
+            side = "Buy"
+        elif dir_clean in ["Bearish", "Short", "Sell"]:
             ml_trend = "Bearish"
-            ml_confidence = prob_bearish
+            side = "Sell"
         else:
-            ml_trend = "Neutral"
-            ml_confidence = max(prob_bullish, prob_bearish, prob_neutral)
-            
-        if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+            return f"❌ Invalid direction: `{direction}`. Supported: Bullish/Long/Buy or Bearish/Short/Sell."
+
+        df_raw = get_history(symbol=sym, interval=iv, limit=100)
+        if df_raw is None or len(df_raw) < 10:
+            return f"❌ Failed to fetch market data for `{sym}` ({iv}m)."
+
+        df = add_features(df_raw)
+        latest = df.iloc[-1]
+        entry_price = float(latest["close"])
+        atr_dollars = float(latest.get("ATR_norm", 0.005) * entry_price)
+
+        if ml_trend == "Bullish":
+            stop_loss_price = entry_price - (1.0 * atr_dollars)
+            take_profit_price = entry_price + (2.0 * atr_dollars)
         else:
-            calibrated_confidence = float(np.clip(ml_confidence, 0.0, 1.0))
+            stop_loss_price = entry_price + (1.0 * atr_dollars)
+            take_profit_price = entry_price - (2.0 * atr_dollars)
+
+        assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=sym)
+
+        leverage_val = 5.0
+        position_size_usd = 2.0
+        set_bybit_leverage(sym, leverage_val)
+
+        leveraged_size = position_size_usd * leverage_val
+        raw_qty = leveraged_size / entry_price
+        qty_str = format_bybit_qty(sym, raw_qty)
+        qty_val = float(qty_str)
+
+        if qty_val * entry_price < 5.1:
+            step = get_bybit_min_qty_step(sym)
+            import math
+            if step > 0:
+                qty_val = math.ceil(5.1 / (entry_price * step)) * step
+                qty_str = format_bybit_qty(sym, qty_val)
+
+        order_res = place_bybit_taker_ioc_order(sym, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
+        if order_res.get("retCode") == 0:
+            bybit_order_id = order_res.get("result", {}).get("orderId")
             
-        news_sentiment = bot_state.get("news_sentiment", "Neutral") if bot_state else "Neutral"
-            
-        all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
-            latest_candle["close"], df_features, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol,
-            calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=0.58, get_history_fn=get_history
-        )
-        
-        adx_regime = float(latest_candle.get("ADX", 0.0))
-        atr_val = latest_candle.get("ATR_norm", 0.005) * latest_candle["close"]
-        est_tp_val = latest_candle["close"] + (1.5 * atr_val if ml_trend == "Bullish" else -1.5 * atr_val)
-        
-        report = (
-            f"🔍 *CONFLUENCE REPORT: {symbol} ({iv.replace('60','1H').replace('120','2H').replace('240','4H').replace('360','6H')})*\n"
-            f"• *Signal*: {ml_trend} ({calibrated_confidence*100:.1f}% confidence)\n"
-            f"• *Regime*: {regime} (ADX: {adx_regime:.1f})\n"
-            f"• *Expected Move*: {pred_change:+.4f} ({expected_pct_change:.2f}%)\n"
-            f"• *Liquidation TP Target*: ${est_tp_val:.2f}\n"
-            f"• *Decision*: *{'APPROVED' if all_pass else 'REJECTED'}*\n\n"
-            f"*Check Details:*\n"
-        )
-        for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
-            if check_name == "_Score_Summary" or not isinstance(res_val, dict):
-                continue
-            circle = "🟢" if res_val.get("pass", False) else "🔴"
-            detail_str = res_val.get("detail", "")
-            report += f"{circle} *{check_name.replace('_', ' ')}*: {detail_str}\n"
-            
-        report += f"\n📊 *{confluence_results.get('_Score_Summary', {}).get('detail', '')}*"
-        return report
-    except Exception as e:
-        return f"❌ *Error running manual check:* {str(e)}"
+            tf_map_inv = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+            tf_key = tf_map_inv.get(iv, f"{iv}m")
+            trade_uuid = str(uuid.uuid4())
+            trade_record = {
+                "trade_id": f"{sym}_{trade_uuid}",
+                "bybit_order_id": bybit_order_id,
+                "symbol": sym,
+                "direction": ml_trend,
+                "entry_price": entry_price,
+                "stop_loss": stop_loss_price,
+                "take_profit": take_profit_price,
+                "leverage": leverage_val,
+                "position_size_usd": position_size_usd,
+                "qty": float(qty_str),
+                "entry_time": int(time.time() * 1000),
+                "end_time": time.time() + (int(iv) * 60 * 10),
+                "atr_dollars": atr_dollars
+            }
+            if bot_state and bot_state_lock:
+                with bot_state_lock:
+                    key = f"active_trade_{tf_key}"
+                    curr_list = bot_state.get(key, [])
+                    if not isinstance(curr_list, list):
+                        curr_list = []
+                    curr_list.append(trade_record)
+                    bot_state[key] = curr_list
+
+            return (
+                f"🟢 *MANUAL TRADE EXECUTED SUCCESSFULLY*\n\n"
+                f"• *Asset*: `{sym}` ({tf_key})\n"
+                f"• *Direction*: `{ml_trend}`\n"
+                f"• *Entry Price*: `${entry_price:.4f}`\n"
+                f"• *Stop Loss*: `${stop_loss_price:.4f}`\n"
+                f"• *Take Profit*: `${take_profit_price:.4f}`\n"
+                f"• *Leverage*: `{leverage_val:.1f}x` | *Margin*: `${position_size_usd:.2f}`\n"
+                f"• *Bybit Order ID*: `{bybit_order_id}`"
+            )
+        else:
+            return f"🔴 *Manual Trade Execution Failed*: {order_res.get('retMsg')}"
+
+    except Exception as ex:
+        return f"🔴 *Manual Trade Error*: {str(ex)}"
 
 
 def start_telegram_command_listener(bot_state, bot_state_lock):
@@ -160,11 +259,6 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
         for dyn_id in dyn_list:
             if dyn_id not in allowed_chat_ids:
                 allowed_chat_ids.append(dyn_id)
-
-    pending_auth = {}
-    pending_confluence = {}
-    pending_manual_trade = {}
-    pending_skipped = {}
 
     TF_MAP_SKIPPED = {
         "15": "15", "15m": "15", "15min": "15", "15-min": "15", "15 min": "15",
@@ -302,13 +396,11 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
         commands_payload = {
             "commands": [
                 {"command": "status", "description": "Current bot status, balance & active regime"},
-                {"command": "balance", "description": "Wallet balance, margin used & available funds"},
-                {"command": "trades", "description": "View all open active trades across timeframes"},
-                {"command": "history", "description": "View recent completed trades PnL summary"},
-                {"command": "performance", "description": "Win rate, total PnL & Sharpe metrics"},
+                {"command": "balance", "description": "Live Bybit wallet balance, margin & equity"},
+                {"command": "trades", "description": "View all open active trades with live PnL"},
                 {"command": "skipped", "description": "View skipped trades for 15m/30m/1h/2h"},
-                {"command": "confluence", "description": "Run manual confluence report for BTC/ETH"},
                 {"command": "regime", "description": "Current market regime & volatility breakdown"},
+                {"command": "openmanualtrade", "description": "Execute manual trade (e.g. /openmanualtrade BTC 15 Long)"},
                 {"command": "start", "description": "Start automatic trading bot"},
                 {"command": "stop", "description": "Pause automatic trading bot"},
                 {"command": "kill", "description": "Emergency kill switch - halt & close all positions"},
@@ -374,78 +466,55 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": status_text, "parse_mode": "Markdown"})
 
                     elif cmd in ["balance"]:
-                        with bot_state_lock:
-                            bal = bot_state.get("wallet_balance", 0.0)
-                            avail = bot_state.get("available_balance", bal)
-                        bal_text = (
-                            f"💰 *WALLET BALANCE REPORT*\n\n"
-                            f"• *Total Wallet Balance*: `${bal:.2f} USDT`\n"
-                            f"• *Available Margin*: `${avail:.2f} USDT`\n"
-                        )
+                        bal_info = get_live_bybit_wallet_details()
+                        if bal_info:
+                            wb = bal_info["wallet_balance"]
+                            eq = bal_info["equity"]
+                            avail = bal_info["available_balance"]
+                            used = bal_info["used_margin"]
+                            upl = bal_info["unrealized_pnl"]
+                            pnl_icon = "🟢" if upl >= 0 else "🔴"
+                            bal_text = (
+                                f"💰 *REAL LIVE BYBIT WALLET BALANCE*\n\n"
+                                f"• *Total Wallet Balance*: `${wb:.2f} USDT`\n"
+                                f"• *Account Equity*: `${eq:.2f} USDT`\n"
+                                f"• *Available Margin*: `${avail:.2f} USDT`\n"
+                                f"• *Used Position Margin*: `${used:.2f} USDT`\n"
+                                f"• *Live Unrealized PnL*: {pnl_icon} `${upl:+.4f} USDT`\n"
+                                f"• *Account Type*: `{bal_info['account_type']}`"
+                            )
+                        else:
+                            with bot_state_lock:
+                                bal = bot_state.get("wallet_balance", 0.0)
+                                avail = bot_state.get("available_balance", bal)
+                            bal_text = (
+                                f"💰 *WALLET BALANCE REPORT*\n\n"
+                                f"• *Total Wallet Balance*: `${bal:.2f} USDT`\n"
+                                f"• *Available Margin*: `${avail:.2f} USDT`\n"
+                            )
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": bal_text, "parse_mode": "Markdown"})
 
                     elif cmd in ["trades", "positions"]:
-                        trade_lines = ["📈 *ACTIVE OPEN POSITIONS*\n"]
-                        total_trades = 0
-                        with bot_state_lock:
-                            for tf in ["15m", "30m", "1h", "2h", "4h", "6h"]:
-                                t_list = bot_state.get(f"active_trade_{tf}", [])
-                                for t in t_list:
-                                    total_trades += 1
-                                    sym = t.get("symbol", "BTCUSDT")
-                                    d = t.get("direction", "BUY")
-                                    ep = t.get("entry_price", 0.0)
-                                    trade_lines.append(f"• *{sym}* ({tf}) | {d} @ `${ep:.2f}`")
-                        if total_trades == 0:
-                            trade_lines.append("ℹ️ *No active positions open currently.*")
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "\n".join(trade_lines), "parse_mode": "Markdown"})
+                        trades_text = get_live_trades_report(bot_state=bot_state, bot_state_lock=bot_state_lock)
+                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": trades_text, "parse_mode": "Markdown"})
 
-                    elif cmd in ["history"]:
-                        try:
-                            import database
-                            c_trades = database.get_completed_trades(limit=10)
-                            if not c_trades:
-                                hist_text = "ℹ️ *No completed trades in database history.*"
-                            else:
-                                hist_lines = ["📜 *RECENT COMPLETED TRADES*\n"]
-                                for t in c_trades:
-                                    sym = t.get("symbol", "BTCUSDT")
-                                    d = t.get("direction", "BUY")
-                                    pnl = float(t.get("pnl", 0.0) or 0.0)
-                                    pnl_pct = float(t.get("pnl_pct", 0.0) or 0.0)
-                                    reason = t.get("reason", "TP/SL")
-                                    icon = "🟢" if pnl >= 0 else "🔴"
-                                    hist_lines.append(f"• {icon} *{sym}* ({d}) | PnL: `${pnl:+.2f}` (`{pnl_pct:+.2f}%`) | `{reason}`")
-                                hist_text = "\n".join(hist_lines)
-                        except Exception as ex:
-                            hist_text = f"❌ *Error fetching trade history:* {ex}"
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": hist_text, "parse_mode": "Markdown"})
-
-                    elif cmd in ["performance"]:
-                        try:
-                            import database
-                            c_trades = database.get_completed_trades(limit=500)
-                            if not c_trades:
-                                perf_text = "ℹ️ *No completed trades found to calculate performance.*"
-                            else:
-                                total_cnt = len(c_trades)
-                                wins = [t for t in c_trades if float(t.get("pnl", 0.0) or 0.0) > 0]
-                                losses = [t for t in c_trades if float(t.get("pnl", 0.0) or 0.0) <= 0]
-                                win_rate = (len(wins) / total_cnt) * 100.0 if total_cnt > 0 else 0.0
-                                total_pnl = sum(float(t.get("pnl", 0.0) or 0.0) for t in c_trades)
-                                total_win_pnl = sum(float(t.get("pnl", 0.0) or 0.0) for t in wins)
-                                total_loss_pnl = abs(sum(float(t.get("pnl", 0.0) or 0.0) for t in losses))
-                                profit_factor = (total_win_pnl / total_loss_pnl) if total_loss_pnl > 0 else total_win_pnl
-                                perf_text = (
-                                    f"📊 *PERFORMANCE METRICS REPORT*\n\n"
-                                    f"• *Total Completed Trades*: `{total_cnt}`\n"
-                                    f"• *Win Rate*: `{win_rate:.1f}%` ({len(wins)}W / {len(losses)}L)\n"
-                                    f"• *Total Realized PnL*: `${total_pnl:+.2f} USDT`\n"
-                                    f"• *Profit Factor*: `{profit_factor:.2f}`\n"
-                                )
-                        except Exception as ex:
-                            perf_text = f"❌ *Error calculating performance:* {ex}"
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": perf_text, "parse_mode": "Markdown"})
+                    elif cmd in ["openmanualtrade", "manualtrade"]:
+                        if not args or len(args) < 3:
+                            usage_text = (
+                                "⚠️ *Usage for Manual Trade Execution*:\n"
+                                "`/openmanualtrade <SYMBOL> <TIMEFRAME> <DIRECTION>`\n\n"
+                                "*Examples*:\n"
+                                "• `/openmanualtrade BTC 15 Bullish`\n"
+                                "• `/openmanualtrade ETH 60 Bearish`\n"
+                                "• `/openmanualtrade SOL 30 Long`"
+                            )
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": usage_text, "parse_mode": "Markdown"})
+                        else:
+                            m_sym = args[0]
+                            m_tf = args[1]
+                            m_dir = args[2]
+                            res_msg = execute_manual_trade(m_sym, m_tf, m_dir, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": res_msg, "parse_mode": "Markdown"})
 
                     elif cmd in ["regime"]:
                         with bot_state_lock:
@@ -470,19 +539,6 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         skipped_msg = get_skipped_trades_report(target_tf)
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": skipped_msg, "parse_mode": "Markdown"})
 
-                    elif cmd in ["confluence"]:
-                        target_sym = "BTCUSDT"
-                        target_tf = "15"
-                        if args:
-                            for a in args:
-                                a_clean = a.upper().strip()
-                                if a_clean in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT", "BTC", "ETH", "SOL"]:
-                                    target_sym = a_clean if a_clean.endswith("USDT") else f"{a_clean}USDT"
-                                elif a.lower() in TF_MAP_SKIPPED:
-                                    target_tf = TF_MAP_SKIPPED[a.lower()]
-                        conf_msg = run_manual_confluence_report(target_sym, target_tf, bot_state=bot_state, bot_state_lock=bot_state_lock)
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": conf_msg, "parse_mode": "Markdown"})
-
                     elif cmd in ["start"]:
                         with bot_state_lock:
                             bot_state["bot_running"] = True
@@ -502,13 +558,11 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         help_text = (
                             "📖 *BTC TRADING BOT COMMANDS*\n\n"
                             "• `/status` - Bot running state & active regime\n"
-                            "• `/balance` - Wallet balance & available margin\n"
-                            "• `/trades` - Active open positions\n"
-                            "• `/history` - Recent completed trades PnL summary\n"
-                            "• `/performance` - Win rate & total PnL report\n"
-                            "• `/regime` - Current market regime & sentiment\n"
+                            "• `/balance` - Real live Bybit wallet balance, margin & equity\n"
+                            "• `/trades` - Active open positions with live PnL\n"
+                            "• `/openmanualtrade [sym] [tf] [dir]` - Execute manual trade (e.g. `/openmanualtrade BTC 15 Long`)\n"
                             "• `/skipped [tf]` - View skipped signals (e.g. `/skipped 30`)\n"
-                            "• `/confluence [sym] [tf]` - Run confluence check (e.g. `/confluence ETH 30`)\n"
+                            "• `/regime` - Current market regime & sentiment\n"
                             "• `/start` - Start automatic trading\n"
                             "• `/stop` - Pause automatic trading\n"
                             "• `/kill` - Emergency halt trading\n"
