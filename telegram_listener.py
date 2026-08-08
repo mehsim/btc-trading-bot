@@ -19,6 +19,10 @@ from logger import log_event
 from telegram_bot import execute_telegram_api_call, send_telegram_alert
 
 
+def run_manual_confluence_report(symbol, interval, bot_state=None, bot_state_lock=None):
+    return "ℹ️ Confluence report command deprecated."
+
+
 def get_live_bybit_wallet_details():
     try:
         from bybit_client import bybit_get_request
