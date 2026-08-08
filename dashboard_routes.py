@@ -1046,7 +1046,7 @@ def api_institutional_summary():
             "today_win_rate_pct": float(round(today_win_rate, 1)),
             "today_pf": today_pf,
             "today_drawdown_pct": float(today_dd),
-            "real_bybit_balance": get_real_bybit_balance_cached(),
+            "real_bybit_balance": (lambda: (get_real_bybit_balance_cached() if True else 0.0))() if True else 0.0,
             "simulated_balance": state_manager.get("simulated_balance", 80.0)
         },
         "shs_breakdown": {
@@ -1506,12 +1506,12 @@ def api_strategy_health():
     
     for t in history:
         if not isinstance(t, dict): continue
-        entry = float(t.get("entry_price", 0.0))
-        sl = float(t.get("stop_loss", 0.0))
-        tp = float(t.get("take_profit", 0.0))
-        atr = float(t.get("atr_dollars", 0.0))
-        pnl_usd = float(t.get("pnl_usd", 0.0))
-        pos_usd = float(t.get("position_size_usd", 15.0))
+        entry = float(t.get("entry_price") or 0.0)
+        sl = float(t.get("stop_loss") or 0.0)
+        tp = float(t.get("take_profit") or 0.0)
+        atr = float(t.get("atr_dollars") or 0.0)
+        pnl_usd = float(t.get("pnl_usd") or 0.0)
+        pos_usd = float(t.get("position_size_usd") or 15.0)
 
         if entry > 0 and sl > 0 and abs(entry - sl) > 0:
             risk_dist = abs(entry - sl)
