@@ -4474,7 +4474,7 @@ def execute_bybit_trade_async(*args, **kwargs):
         with active_execution_lock:
             active_execution_symbols.discard(symbol)
 
-def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False):
+def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None):
 
     if latest_candle is None:
         latest_candle = {}
@@ -4764,6 +4764,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "break_even_triggered": False,
             "half_closed": False,
             "original_size": float(position_size_usd),
+            "intended_size_usd": float(intended_size_usd if intended_size_usd is not None else position_size_usd),
             "position_size_usd": actual_size_usd,
             "scaled_out_pnl": 0.0,
             "kelly_fraction": float(kelly_fraction),
@@ -5477,6 +5478,7 @@ def main():
                             "success": bool(signal_correct),
                             "reason": str(exit_reason) + (" (Scale-Out)" if active_trade.get("half_closed", False) else ""),
                             "position_size_usd": float(position_size_usd),
+                            "intended_size_usd": float(active_trade.get("intended_size_usd") or active_trade.get("original_size") or position_size_usd),
                             "original_size": float(original_size),
                             "pnl_usd": float(total_pnl),
                             "balance": float(new_bal),
@@ -5484,6 +5486,9 @@ def main():
                             "confidence": active_trade.get("confidence") if active_trade.get("confidence") == "MT" else float(active_trade.get("confidence") or 0.0),
                             "take_profit": float(active_trade.get("take_profit", 0.0)),
                             "stop_loss": float(active_trade.get("stop_loss", 0.0)),
+                            "venue_closed_pnl": float(bybit_pnl_data["total_pnl"]) if (bybit_pnl_data and bybit_pnl_data.get("total_pnl") is not None) else None,
+                            "venue_qty": float(bybit_pnl_data["total_qty"]) if (bybit_pnl_data and bybit_pnl_data.get("total_qty") is not None) else None,
+                            "venue_entry_value": float(bybit_pnl_data["total_entry_value"]) if (bybit_pnl_data and bybit_pnl_data.get("total_entry_value") is not None) else None,
                             "stop_state": active_trade.get("stop_state", "INITIAL"),
                             "stop_state_meta": active_trade.get("stop_state_meta", {}),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
@@ -6775,7 +6780,6 @@ def main():
                                         position_size_usd = min(position_size_usd, max_cvar_size)
                                     except Exception as cvar_err:
                                         print(f"[CVaR Error] {cvar_err}")
-                                    
                                     if is_golden_hour:
                                         # Golden Hour: Double the target slot allocation size
                                         position_size_usd = position_size_usd * 2.0
@@ -6785,17 +6789,26 @@ def main():
                                         
                                     # Clip to minimum Bybit order requirement (e.g. $2.0)
                                     position_size_usd = max(2.0, position_size_usd)
+                                    original_kelly_size = float(position_size_usd) # Keep intended size pre-clamp
                                     print(f"[{iv}m Trade Size Boundary Check] Final size before leverage (CVaR constrained): ${position_size_usd:.2f}")
 
                                     # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
                                     kelly_fraction = scaled_kelly
+
+                                    # 3. Concurrent Position Limit Check
+                                    from config import MAX_CONCURRENT_POSITIONS
+                                    total_active_count = sum(len(bot_state.get(f"active_trade_{tf_k}", [])) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"])
 
                                     # Ensure total size of active trades does not exceed the wallet balance
                                     min_bal_limit = 2.0
                                     min_size_limit = 2.0
                                     
                                     wallet_exceeded = False
-                                    if current_bal <= min_bal_limit:
+                                    if total_active_count >= MAX_CONCURRENT_POSITIONS:
+                                        print(f"[{symbol} {iv}m] Trade skipped: Reached MAX_CONCURRENT_POSITIONS ({MAX_CONCURRENT_POSITIONS}). Current active count: {total_active_count}.")
+                                        status_msg = f"Skipped (Max Concurrent Positions {MAX_CONCURRENT_POSITIONS} Reached)"
+                                        wallet_exceeded = True
+                                    elif current_bal <= min_bal_limit:
                                         print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f} to open new trades.")
                                         status_msg = "Skipped (Insufficient Balance)"
                                         wallet_exceeded = True
@@ -7078,7 +7091,7 @@ def main():
                                                     actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
                                                     threading.Thread(
                                                         target=execute_bybit_trade_async,
-                                                        args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade),
+                                                        args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size),
                                                         daemon=True
                                                     ).start()
                                                     bybit_success = False # Skip the simulation path for this trade

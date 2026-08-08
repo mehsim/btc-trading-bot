@@ -126,12 +126,16 @@ def init_db():
                 );
             """)
             
-            # Migration check for model lineage columns
+            # Migration check for model lineage & venue & intended size columns
             cols = [row[1] for row in cursor.execute("PRAGMA table_info(completed_trades);").fetchall()]
-            for col_name in ["model_version", "model_sha", "feature_set_version"]:
+            for col_name, col_type in [
+                ("model_version", "TEXT"), ("model_sha", "TEXT"), ("feature_set_version", "TEXT"),
+                ("venue_closed_pnl", "REAL"), ("venue_qty", "REAL"), ("venue_entry_value", "REAL"),
+                ("intended_size_usd", "REAL")
+            ]:
                 if col_name not in cols:
                     try:
-                        cursor.execute(f"ALTER TABLE completed_trades ADD COLUMN {col_name} TEXT;")
+                        cursor.execute(f"ALTER TABLE completed_trades ADD COLUMN {col_name} {col_type};")
                     except Exception as ex_database:
                         log_event("WARNING", f"database notice: {ex_database}")
             
@@ -453,18 +457,25 @@ def save_completed_trade(trade) -> bool:
                 conn.execute("""
                     INSERT INTO completed_trades (
                         trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
-                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        change_pct, success, reason, position_size_usd, intended_size_usd, original_size, pnl_usd,
+                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct,
+                        venue_closed_pnl, venue_qty, venue_entry_value, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
                     t_id, sym, trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
                     entry_p, exit_p,
                     round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
-                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4),
+                    round_monetary(trade.get("intended_size_usd", trade.get("position_size_usd")), 4),
+                    round_monetary(trade.get("original_size"), 4),
                     round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
                     round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
                     round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
-                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+                    round_monetary(trade.get("fill_pct"), 2),
+                    round_monetary(trade.get("venue_closed_pnl"), 4) if trade.get("venue_closed_pnl") is not None else None,
+                    round_monetary(trade.get("venue_qty"), 4) if trade.get("venue_qty") is not None else None,
+                    round_monetary(trade.get("venue_entry_value"), 4) if trade.get("venue_entry_value") is not None else None,
+                    json.dumps(trade)
                 ))
                 conn.commit()
                 success = True
@@ -475,18 +486,25 @@ def save_completed_trade(trade) -> bool:
                 conn.execute("""
                     INSERT INTO completed_trades (
                         trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
-                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        change_pct, success, reason, position_size_usd, intended_size_usd, original_size, pnl_usd,
+                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct,
+                        venue_closed_pnl, venue_qty, venue_entry_value, raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
                     new_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
-                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    entry_p, exit_p,
                     round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
-                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4),
+                    round_monetary(trade.get("intended_size_usd", trade.get("position_size_usd")), 4),
+                    round_monetary(trade.get("original_size"), 4),
                     round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
                     round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
                     round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
-                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+                    round_monetary(trade.get("fill_pct"), 2),
+                    round_monetary(trade.get("venue_closed_pnl"), 4) if trade.get("venue_closed_pnl") is not None else None,
+                    round_monetary(trade.get("venue_qty"), 4) if trade.get("venue_qty") is not None else None,
+                    round_monetary(trade.get("venue_entry_value"), 4) if trade.get("venue_entry_value") is not None else None,
+                    json.dumps(trade)
                 ))
                 conn.commit()
                 success = True
