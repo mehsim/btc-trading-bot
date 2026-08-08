@@ -4524,6 +4524,17 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     except Exception as pos_check_err:
         print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
 
+    # SL/TP Geometry Direction Guard (Hard Abort — Do NOT auto-correct)
+    if ml_trend in ["Bearish", "SHORT", "SELL"] and not (stop_loss_price > entry_price > take_profit_price):
+        log_event("ERROR", f"[{symbol} {iv}m] Aborting trade placement! Invalid Bearish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
+        send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid Bearish geometry (SL: ${stop_loss_price:.4f}, Entry: ${entry_price:.4f}, TP: ${take_profit_price:.4f})")
+        return
+
+    if ml_trend in ["Bullish", "LONG", "BUY"] and not (stop_loss_price < entry_price < take_profit_price):
+        log_event("ERROR", f"[{symbol} {iv}m] Aborting trade placement! Invalid Bullish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
+        send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid Bullish geometry (SL: ${stop_loss_price:.4f}, Entry: ${entry_price:.4f}, TP: ${take_profit_price:.4f})")
+        return
+
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
     leverage_ok = set_bybit_leverage(symbol, leverage_val)
     if leverage_ok:
@@ -5675,6 +5686,14 @@ def main():
                                 f"• *New Balance*: ${new_bal:.2f}"
                                 f"{scale_out_block}"
                             )
+                            
+                            entry_ts_raw = float(active_trade.get("entry_time", 0))
+                            entry_ts_sec = entry_ts_raw / 1000.0 if entry_ts_raw > 1e11 else entry_ts_raw
+                            if entry_ts_sec > 0:
+                                dur_sec = abs(time.time() - entry_ts_sec)
+                                if dur_sec < 5.0:
+                                    send_telegram_alert(f"🚨 *CRITICAL EXECUTION ALERT*: `{active_symbol}` ({iv}m) stopped out within {dur_sec:.1f}s of entry — check SL placement/geometry!")
+                                    log_event("ERROR", f"[{active_symbol} {iv}m] Stopped out within {dur_sec:.1f}s of entry (Entry: ${entry_price:.4f}, Exit: ${actual_price:.4f})")
                         
                         
                         # Send email alert on any profitable trade exit
@@ -7069,6 +7088,34 @@ def main():
 
                                         # Priority 3: Balance Guard - Remove auto-leverage escalation. If margin doesn't fit within 90% of balance, reject trade.
                                         required_margin = (qty_val * entry_price) / leverage_val
+                                        
+                                        # Post-Floor Geometry & Economic Viability Recheck
+                                        all_pass = True
+                                        if ml_trend in ["Bearish", "SHORT", "SELL"] and not (stop_loss_price > entry_price > take_profit_price):
+                                            log_event("ERROR", f"[{symbol} {iv}m] Aborting trade entry! Invalid Bearish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
+                                            status_msg = "Skipped (Invalid Bearish Geometry)"
+                                            all_pass = False
+                                        elif ml_trend in ["Bullish", "LONG", "BUY"] and not (stop_loss_price < entry_price < take_profit_price):
+                                            log_event("ERROR", f"[{symbol} {iv}m] Aborting trade entry! Invalid Bullish SL/TP geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
+                                            status_msg = "Skipped (Invalid Bullish Geometry)"
+                                            all_pass = False
+                                        
+                                        if all_pass:
+                                            # Post-Floor R:R & Economic Re-check (Closing the loop on widened SL)
+                                            final_sl_dist = abs(entry_price - stop_loss_price)
+                                            final_tp_dist = abs(take_profit_price - entry_price)
+                                            final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
+                                            cost_frac = 0.0016
+                                            required_p = (1.0 / (1.0 + max(1e-9, final_rr))) + cost_frac
+
+                                            if calibrated_confidence < required_p:
+                                                log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {required_p:.3f}. Aborting entry.")
+                                                status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
+                                                all_pass = False
+                                        
+                                        if not all_pass:
+                                            wallet_exceeded = True
+                                        
                                         if not wallet_exceeded and required_margin > current_bal * 0.90:
                                             print(f"[{symbol} {iv}m Margin Guard] REJECTED: Required margin (${required_margin:.2f}) exceeds 90% of available wallet balance (${current_bal:.2f}). Trade entry aborted.")
                                             status_msg = "Skipped (Exceeds Wallet Margin)"
