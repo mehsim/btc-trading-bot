@@ -53,13 +53,13 @@ from order_state_machine import StopState, StopStateMachine
 from secret_manager import get_secure_env
 
 from bybit_client import (
-
     bybit_get_request,
     bybit_post_request,
     get_real_bybit_balance_cached,
     get_all_bybit_positions,
     place_bybit_order,
     format_bybit_price,
+    format_bybit_qty,
     get_bybit_time_offset,
     execute_bybit_order_ws_or_rest
 )
@@ -1370,50 +1370,6 @@ def format_bybit_price(symbol, price):
     }
     p = price_precisions.get(symbol, 2)
     return str(round(price, p))
-
-def format_bybit_qty(symbol, qty):
-    precisions = {
-        "BTCUSDT": 3,
-        "ETHUSDT": 2,
-        "SOLUSDT": 1,
-        "BNBUSDT": 1,
-        "AVAXUSDT": 1,
-        "NEARUSDT": 1,
-        "LINKUSDT": 1,
-        "LTCUSDT": 1,
-        "ADAUSDT": 0,
-        "XRPUSDT": 0,
-        "DOGEUSDT": 0,
-        "DOTUSDT": 0,
-        "SUIUSDT": 0,
-        "APTUSDT": 1
-    }
-    min_limits = {
-        "BTCUSDT": 0.001,
-        "ETHUSDT": 0.01,
-        "SOLUSDT": 0.1,
-        "BNBUSDT": 0.1,
-        "AVAXUSDT": 0.1,
-        "NEARUSDT": 0.1,
-        "LINKUSDT": 0.1,
-        "LTCUSDT": 0.1,
-        "ADAUSDT": 1.0,
-        "XRPUSDT": 1.0,
-        "DOGEUSDT": 1.0,
-        "DOTUSDT": 1.0,
-        "SUIUSDT": 1.0,
-        "APTUSDT": 0.1
-    }
-    p = precisions.get(symbol, 1)
-    min_val = min_limits.get(symbol, 0.1)
-    
-    # Enforce minimum order quantity limits
-    if qty < min_val:
-        qty = min_val
-        
-    if p == 0:
-        return str(int(round(qty)))
-    return str(round(qty, p))
 
 def get_bybit_min_qty_step(symbol):
     min_limits = {
