@@ -24,9 +24,12 @@ class AutoStopFloor:
                 if len(pain_trades) >= self.min_sample_size:
                     required_floors = []
                     for t in pain_trades:
-                        entry = t.get('entry_price', 0)
-                        exit_p = t.get('exit_price', 0)
-                        if entry and entry > 0:
+                        try:
+                            entry = float(t.get('entry_price', 0) or 0)
+                            exit_p = float(t.get('exit_price', 0) or 0)
+                        except (ValueError, TypeError):
+                            entry, exit_p = 0.0, 0.0
+                        if entry > 0:
                             adv = abs(exit_p - entry) / entry
                             required_floors.append(adv * 1.2)
                     if required_floors:
