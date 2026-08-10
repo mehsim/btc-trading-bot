@@ -6163,6 +6163,13 @@ def main():
                             bot_state[f"latest_prediction_{symbol}_{tf}"] = pred_entry_dict
                             bot_state[f"latest_prediction_{tf}"] = pred_entry_dict
 
+                            rec.regime = str(regime_name)
+                            rec.direction = str(ml_trend)
+                            rec.raw_conf = float(ml_confidence)
+                            rec.calibrated_conf = float(calibrated_confidence)
+                            rec.signal_source = str(pred_entry_dict.get("signal_source") or "RULE_BASED_FALLBACK")
+                            rec.is_fallback = int(pred_entry_dict.get("is_fallback", False))
+
                             print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
                             # Determine dynamic confidence threshold based on trade economics (p* break-even payoff) + bounded modifiers
