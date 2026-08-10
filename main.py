@@ -6178,8 +6178,7 @@ def main():
                             rec.is_calibrated = 1 if (active_calibrator is not None and ml_trend in ["Bullish", "Bearish"]) else 0
                             rec.is_floor_scaled = 1 if (locals().get('is_floor_scaled', False)) else 0
 
-                            norm_bull_val = norm_bull if ('norm_bull' in locals() and norm_bull is not None) else 0.0
-                            log_event("INFO", f"[{symbol} {iv}m] probs=[{prob_bearish:.4f}, {prob_neutral:.4f}, {prob_bullish:.4f}] norm={norm_bull_val:.4f} ml_conf={ml_confidence:.4f} cal={calibrated_confidence:.4f}")
+                            log_event("INFO", f"[{symbol} {iv}m] probs=[{prob_bearish:.4f}, {prob_neutral:.4f}, {prob_bullish:.4f}] ml_conf={ml_confidence:.4f} cal={calibrated_confidence:.4f}")
 
                             print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 

@@ -1,4 +1,5 @@
 import os
+import config
 import sys
 import time
 import joblib
