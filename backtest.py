@@ -128,7 +128,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             i += 1
             continue
 
-        calibrated_confidence = calibrate_confidence(ml_confidence, p95, max_conf)
+        calibrated_confidence = calibrate_confidence(ml_confidence)
         expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
 
         # 1. Confidence threshold
