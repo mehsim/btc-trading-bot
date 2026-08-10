@@ -295,7 +295,7 @@ EQS_WEIGHTS = {
 
 # v2 & v3 Quant Thresholds & Bounds (Per-Interval Regime ADX Hysteresis)
 REGIME_ADX_ENTER_BY_INTERVAL = {
-    "15": 32.0,   # Preserves 15m ranging model routing (MCC 0.1542)
+    "15": 22.0,   # Restored 15m ADX enter threshold to 22.0
     "30": 32.0,
     "60": 22.0,   # Matches 60m training labeller threshold (routes 60m ADX 22.4 to MCC 0.0646)
     "120": 28.0,
