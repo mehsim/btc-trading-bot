@@ -6167,7 +6167,7 @@ def main():
                             rec.direction = str(ml_trend)
                             rec.raw_conf = float(ml_confidence)
                             rec.calibrated_conf = float(calibrated_confidence)
-                            rec.signal_source = str(pred_entry_dict.get("signal_source") or "RULE_BASED_FALLBACK")
+                            rec.signal_source = str(pred_entry_dict.get("signal_source") or "UNSET")
                             rec.is_fallback = int(pred_entry_dict.get("is_fallback", False))
 
                             print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
@@ -7037,7 +7037,7 @@ def main():
 
                                             # Pre-Trade Risk Checklist Check
                                             pred_info = bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
-                                            if pred_info.get("is_fallback", False) or pred_info.get("signal_source") == "RULE_BASED_FALLBACK":
+                                            if pred_info.get("is_fallback", False) or pred_info.get("signal_source") in ["RULE_BASED_FALLBACK", "UNSET"]:
                                                 position_size_usd *= 0.50
                                                 print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
 
@@ -7060,7 +7060,7 @@ def main():
                                                 open_positions_count=len(active_trades_list),
                                                 wallet_exceeded=wallet_exceeded
                                             )
-                                            rec.signal_source      = str(pred_info.get("signal_source") or "RULE_BASED_FALLBACK")
+                                            rec.signal_source      = str(pred_info.get("signal_source") or "UNSET")
                                             rec.is_fallback        = int(pred_info.get("is_fallback", False))
                                             rec.direction          = ml_trend
                                             rec.raw_confidence     = pred_info.get("raw_confidence")

@@ -27,8 +27,8 @@ class DecisionRecord:
     interval: str = ""
 
     # signal provenance
-    signal_source: str = "RULE_BASED_FALLBACK"
-    is_fallback: int = 1
+    signal_source: str = "UNSET"
+    is_fallback: int = 0
     direction: Optional[str] = None
     raw_confidence: Optional[float] = None
     calibrated_conf: Optional[float] = None
