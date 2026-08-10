@@ -693,7 +693,7 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             _live_cfg["regime_adx_enter"] = float(_R_ADX_MAP.get(str(_pfx_interval), _ST_ADX_ENTER))
             _live_barriers = {k: _live_cfg[k] for k in _saved_barriers if k in _live_cfg}
             _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
-            if _mismatched:
+            if _mismatched and os.environ.get("ALLOW_BARRIER_MISMATCH") != "1":
                 raise RuntimeError(
                     f"[Barrier Contract Error] Mismatch for '{prefix}' ({_pfx_interval}m): "
                     f"trained {{{', '.join(f'{k}={_saved_barriers[k]}' for k in _mismatched)}}}, "
