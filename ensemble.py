@@ -559,7 +559,7 @@ class EnsembleRegressor:
 # NATIVE SAVING/LOADING (TEXT/JSON ONLY)
 # ==========================================
 
-def save_ensemble_classifier(model, prefix):
+def save_ensemble_classifier(model, prefix, feature_names=None, write_manifest=True):
     import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
     if hasattr(model.lgb_model, "_Booster") and model.lgb_model._Booster is not None:
@@ -578,6 +578,8 @@ def save_ensemble_classifier(model, prefix):
     }
     with open(f"{prefix}_weights.json", "w") as f:
         json.dump(meta_data, f)
+    if write_manifest:
+        write_model_manifest(prefix, feature_names=feature_names)
 
 def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
     if n_features is None:
@@ -938,7 +940,7 @@ def is_feature_contract_compatible(
 
     return True, "compatible"
 
-def save_ensemble_regressor(model, prefix, feature_names=None):
+def save_ensemble_regressor(model, prefix, feature_names=None, write_manifest=True):
     import json
     model.xgb_model.save_model(f"{prefix}_xgb.json")
     if hasattr(model.lgb_model, "_Booster") and model.lgb_model._Booster is not None:
@@ -956,7 +958,8 @@ def save_ensemble_regressor(model, prefix, feature_names=None):
     }
     with open(f"{prefix}_weights.json", "w") as f:
         json.dump(meta_data, f)
-    write_model_manifest(prefix, feature_names=feature_names)
+    if write_manifest:
+        write_model_manifest(prefix, feature_names=feature_names)
 
 def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
     if n_features is None:

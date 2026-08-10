@@ -1386,11 +1386,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
             X_train=X_train, y_train=y_train_p
         )
         
-        # Save models to disk using native text/JSON saving methods
-        from ensemble import load_ensemble_classifier, load_ensemble_regressor, is_feature_contract_compatible
+        from ensemble import save_ensemble_classifier, save_ensemble_regressor, load_ensemble_classifier, load_ensemble_regressor, is_feature_contract_compatible
 
         c_prefix_t = f"ensemble_{name}_trend_{interval}"
         c_prefix_p = f"ensemble_{name}_price_{interval}"
+
+        # Save challenger models to disk without touching active champion manifest
+        save_ensemble_classifier(final_ensemble_t, f"{c_prefix_t}_challenger", feature_names=features, write_manifest=False)
+        save_ensemble_regressor(final_ensemble_p, f"{c_prefix_p}_challenger", feature_names=features, write_manifest=False)
 
         champion_exists = os.path.exists(f"{c_prefix_t}_xgb.json")
         should_save = True
@@ -1587,7 +1590,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
         else:
-            print(f"  [Champion-Challenger] Champion retained. Updating manifest with latest evaluation metrics...")
+            print(f"  [Champion-Challenger] Champion retained. Preserving champion manifest intact.")
 
         # Write/update governance manifest with complete cv_metrics block and sample uniqueness metrics
         _pipeline_git_sha = _chal_git_sha
@@ -1672,8 +1675,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                with open(manifest_path, "w") as mf:
-                    json.dump(manifest_data, mf, indent=2, default=_json_safe)
+                if should_save:
+                    with open(manifest_path, "w") as mf:
+                        json.dump(manifest_data, mf, indent=2, default=_json_safe)
 
                 # H-2 MLOps sidecar: record challenger evaluation metrics regardless of promotion status
                 chal_manifest = dict(manifest_data)
