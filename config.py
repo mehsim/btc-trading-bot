@@ -256,7 +256,7 @@ TIMEFRAME_CONFIG = {
         "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.25),
         "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.68),
         "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.35),
-        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.65)
+        "tp_mult_trending": 1.40
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
