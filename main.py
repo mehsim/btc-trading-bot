@@ -5963,877 +5963,865 @@ def main():
                 if latest_completed_ts != last_processed_timestamps[last_ts_key]:
                     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {symbol} {iv}-minute candle detected (TS: {latest_completed_ts})")
                     log_event("INFO", f"[{symbol} {iv}m] Evaluation start — candle {latest_completed_ts}")
+                    rec = DecisionRecord(symbol=symbol, interval=str(iv))
+                    rec.candle_timestamp = latest_completed_ts
+                    status_msg = "Abstain"
+                    placed = False
+                    try:
                     
-                    latest_candle = df.iloc[-1]
+                        latest_candle = df.iloc[-1]
                     
-                    # Dynamic Regime Routing based on GMM Unsupervised Classifier
-                    regime = classify_market_regime(df, interval=iv)
-                    adx_regime = latest_candle["ADX"]
+                        # Dynamic Regime Routing based on GMM Unsupervised Classifier
+                        regime = classify_market_regime(df, interval=iv)
+                        adx_regime = latest_candle["ADX"]
                     
-                    # Ensure models for interval iv are loaded into memory on-demand
-                    if models_by_interval.get(iv, {}).get("trending", {}).get("trend") is None:
-                        load_model_weights(iv)
+                        # Ensure models for interval iv are loaded into memory on-demand
+                        if models_by_interval.get(iv, {}).get("trending", {}).get("trend") is None:
+                            load_model_weights(iv)
 
-                    if iv in models_by_interval:
-                        models_tf = models_by_interval[iv]
-                        regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
-                        m_price = models_tf.get(regime_key, {}).get("price")
-                        m_trend = models_tf.get(regime_key, {}).get("trend")
-                        m_cal = models_tf.get(regime_key, {}).get("calibrator")
-                        m_meta = models_tf.get(regime_key, {}).get("meta")
-                        feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
-                        served_regime = regime
+                        if iv in models_by_interval:
+                            models_tf = models_by_interval[iv]
+                            regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
+                            m_price = models_tf.get(regime_key, {}).get("price")
+                            m_trend = models_tf.get(regime_key, {}).get("trend")
+                            m_cal = models_tf.get(regime_key, {}).get("calibrator")
+                            m_meta = models_tf.get(regime_key, {}).get("meta")
+                            feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
+                            served_regime = regime
 
-                        if m_price is None or m_trend is None or not feat_list:
-                            alt_key = "ranging" if regime_key == "trending" else "trending"
-                            alt_price = models_tf.get(alt_key, {}).get("price")
-                            alt_trend = models_tf.get(alt_key, {}).get("trend")
-                            alt_cal = models_tf.get(alt_key, {}).get("calibrator")
-                            alt_meta = models_tf.get(alt_key, {}).get("meta")
-                            alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
-                            if alt_price is not None and alt_trend is not None and alt_feats:
-                                log_event("WARNING", f"[{symbol} {iv}m] {regime} model incomplete — falling back to {alt_key.title()} ensemble & feature contract")
-                                m_price, m_trend, m_cal, m_meta, feat_list = alt_price, alt_trend, alt_cal, alt_meta, alt_feats
-                                served_regime = f"{alt_key.title()}_Fallback"
+                            if m_price is None or m_trend is None or not feat_list:
+                                alt_key = "ranging" if regime_key == "trending" else "trending"
+                                alt_price = models_tf.get(alt_key, {}).get("price")
+                                alt_trend = models_tf.get(alt_key, {}).get("trend")
+                                alt_cal = models_tf.get(alt_key, {}).get("calibrator")
+                                alt_meta = models_tf.get(alt_key, {}).get("meta")
+                                alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
+                                if alt_price is not None and alt_trend is not None and alt_feats:
+                                    log_event("WARNING", f"[{symbol} {iv}m] {regime} model incomplete — falling back to {alt_key.title()} ensemble & feature contract")
+                                    m_price, m_trend, m_cal, m_meta, feat_list = alt_price, alt_trend, alt_cal, alt_meta, alt_feats
+                                    served_regime = f"{alt_key.title()}_Fallback"
+                                else:
+                                    log_event("CRITICAL", f"[{symbol} {iv}m] {regime} model & fallback unavailable — skipping interval (Fail-Closed)")
+                                    continue
+
+                            active_model_price = m_price
+                            active_model_trend = m_trend
+                            active_calibrator = m_cal
+                            active_meta_model = m_meta
+                            regime_name = f"{served_regime} (GMM)"
+                            
+                            # C-1: Preserve strict train/serve feature distribution consistency
+                            # Remove ad-hoc inference-time feature multiplier scaling
+                            latest_candle_weighted = latest_candle.copy()
+                            if hasattr(latest_candle_weighted.index, "duplicated") and latest_candle_weighted.index.duplicated().any():
+                                latest_candle_weighted = latest_candle_weighted[~latest_candle_weighted.index.duplicated(keep="first")]
+
+                            from ensemble import get_model_feature_names
+                            _exp_names = get_model_feature_names(active_model_trend)
+                            if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
+                                _features_to_use = [f for f in _exp_names if f in latest_candle_weighted.index]
+                            elif feat_list is not None:
+                                _features_to_use = feat_list
                             else:
-                                log_event("CRITICAL", f"[{symbol} {iv}m] {regime} model & fallback unavailable — skipping interval (Fail-Closed)")
+                                from core import features as master_features
+                                _features_to_use = master_features
+
+                            X_live_full = latest_candle_weighted[_features_to_use].to_frame().T if isinstance(latest_candle_weighted[_features_to_use], pd.Series) else latest_candle_weighted[_features_to_use]
+                            X_live = _slice_model_input(active_model_trend, X_live_full)
+
+                            # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
+                            if str(iv) == "15":
+                                ensemble_weights = [0.10, 0.45, 0.45]
+                            elif str(iv) == "30":
+                                ensemble_weights = [0.15, 0.42, 0.43]
+                            else:
+                                ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
+                        
+                            try:
+                                pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
+                                pred_change = pred_pct * float(latest_candle["close"])
+                                predicted_price = float(latest_candle["close"]) + pred_change
+                            
+                                # 3-class probabilities with Conformal Uncertainty estimation
+                                if hasattr(active_model_trend, "predict_with_uncertainty"):
+                                    probs_arr, conformal_unc_score, conformal_is_uncertain = active_model_trend.predict_with_uncertainty(X_live, weights=ensemble_weights)
+                                    probs = probs_arr[0]
+                                else:
+                                    probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
+                                    conformal_unc_score = 0.0
+                                    conformal_is_uncertain = False
+                            except Exception as pred_err:
+                                print(f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] Model prediction exception: {pred_err}. Aborting trade entry (Fail-Closed).")
+                                status_msg = "Skipped (Prediction Error)"
+                                all_pass = False
                                 continue
-
-                        active_model_price = m_price
-                        active_model_trend = m_trend
-                        active_calibrator = m_cal
-                        active_meta_model = m_meta
-                        regime_name = f"{served_regime} (GMM)"
-                            
-                        # C-1: Preserve strict train/serve feature distribution consistency
-                        # Remove ad-hoc inference-time feature multiplier scaling
-                        latest_candle_weighted = latest_candle.copy()
-                        if hasattr(latest_candle_weighted.index, "duplicated") and latest_candle_weighted.index.duplicated().any():
-                            latest_candle_weighted = latest_candle_weighted[~latest_candle_weighted.index.duplicated(keep="first")]
-
-                        from ensemble import get_model_feature_names
-                        _exp_names = get_model_feature_names(active_model_trend)
-                        if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
-                            _features_to_use = [f for f in _exp_names if f in latest_candle_weighted.index]
-                        elif feat_list is not None:
-                            _features_to_use = feat_list
-                        else:
-                            from core import features as master_features
-                            _features_to_use = master_features
-
-                        X_live_full = latest_candle_weighted[_features_to_use].to_frame().T if isinstance(latest_candle_weighted[_features_to_use], pd.Series) else latest_candle_weighted[_features_to_use]
-                        X_live = _slice_model_input(active_model_trend, X_live_full)
-
-                        # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
-                        if str(iv) == "15":
-                            ensemble_weights = [0.10, 0.45, 0.45]
-                        elif str(iv) == "30":
-                            ensemble_weights = [0.15, 0.42, 0.43]
-                        else:
-                            ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
                         
-                        try:
-                            pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
-                            pred_change = pred_pct * float(latest_candle["close"])
-                            predicted_price = float(latest_candle["close"]) + pred_change
-                            
-                            # 3-class probabilities with Conformal Uncertainty estimation
-                            if hasattr(active_model_trend, "predict_with_uncertainty"):
-                                probs_arr, conformal_unc_score, conformal_is_uncertain = active_model_trend.predict_with_uncertainty(X_live, weights=ensemble_weights)
-                                probs = probs_arr[0]
+                            if len(probs) >= 3:
+                                prob_bearish = float(probs[0])
+                                prob_neutral = float(probs[1])
+                                prob_bullish = float(probs[2])
+                            elif len(probs) == 2:
+                                prob_bearish = float(probs[0])
+                                prob_neutral = 0.0
+                                prob_bullish = float(probs[1])
                             else:
-                                probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
-                                conformal_unc_score = 0.0
-                                conformal_is_uncertain = False
-                        except Exception as pred_err:
-                            print(f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] Model prediction exception: {pred_err}. Aborting trade entry (Fail-Closed).")
-                            status_msg = "Skipped (Prediction Error)"
-                            all_pass = False
-                            continue
+                                prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
+                                prob_neutral = 0.0
+                                prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
                         
-                        if len(probs) >= 3:
-                            prob_bearish = float(probs[0])
-                            prob_neutral = float(probs[1])
-                            prob_bullish = float(probs[2])
-                        elif len(probs) == 2:
-                            prob_bearish = float(probs[0])
-                            prob_neutral = 0.0
-                            prob_bullish = float(probs[1])
-                        else:
-                            prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
-                            prob_neutral = 0.0
-                            prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
+                            winning_class = int(np.argmax(probs))
+                            dir_total = prob_bearish + prob_bullish
                         
-                        winning_class = int(np.argmax(probs))
-                        dir_total = prob_bearish + prob_bullish
-                        
-                        # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
-                        if str(iv) in ["15", "30"]:
-                            if dir_total >= 0.15:
-                                norm_bear = prob_bearish / max(1e-9, dir_total)
-                                norm_bull = prob_bullish / max(1e-9, dir_total)
+                            # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
+                            if str(iv) in ["15", "30"]:
+                                if dir_total >= 0.15:
+                                    norm_bear = prob_bearish / max(1e-9, dir_total)
+                                    norm_bull = prob_bullish / max(1e-9, dir_total)
                                 
-                                if norm_bear >= 0.52:
-                                    ml_trend = "Bearish"
-                                    ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
-                                elif norm_bull >= 0.52:
-                                    ml_trend = "Bullish"
-                                    ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
+                                    if norm_bear >= 0.52:
+                                        ml_trend = "Bearish"
+                                        ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
+                                    elif norm_bull >= 0.52:
+                                        ml_trend = "Bullish"
+                                        ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
+                                    else:
+                                        ml_trend = "Neutral"
+                                        ml_confidence = prob_neutral
                                 else:
                                     ml_trend = "Neutral"
                                     ml_confidence = prob_neutral
+
+                            elif winning_class == 2:
+                                ml_trend = "Bullish"
+                                ml_confidence = prob_bullish
+                            elif winning_class == 0:
+                                ml_trend = "Bearish"
+                                ml_confidence = prob_bearish
                             else:
                                 ml_trend = "Neutral"
                                 ml_confidence = prob_neutral
 
-                        elif winning_class == 2:
-                            ml_trend = "Bullish"
-                            ml_confidence = prob_bullish
-                        elif winning_class == 0:
-                            ml_trend = "Bearish"
-                            ml_confidence = prob_bearish
-                        else:
-                            ml_trend = "Neutral"
-                            ml_confidence = prob_neutral
-
-                        # Apply Isotonic Regression probability calibration if available
-                        calibrated_confidence = ml_confidence
-                        calibrator = active_calibrator
-                        if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-                            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
-                            print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
-                        else:
+                            # Apply Isotonic Regression probability calibration if available
                             calibrated_confidence = ml_confidence
+                            calibrator = active_calibrator
+                            if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
+                                calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+                                print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
+                            else:
+                                calibrated_confidence = ml_confidence
 
-                        # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
-                        calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
+                            # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
+                            calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
 
                             
-                        # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
-                        htf_decay_threshold_penalty = 0.0
-                        if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
-                            pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get("latest_prediction_30m") or {}
-                            pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get("latest_prediction_1h") or {}
+                            # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
+                            htf_decay_threshold_penalty = 0.0
+                            if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
+                                pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get("latest_prediction_30m") or {}
+                                pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get("latest_prediction_1h") or {}
                             
-                            now_time_sec = time.time()
-                            for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
-                                p_dir = pred_dict.get("direction")
-                                p_ts = pred_dict.get("timestamp", now_time_sec)
-                                if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
-                                    age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
-                                    decay = 0.5 ** (age_mins / 30.0)
-                                    htf_decay_threshold_penalty += 0.03 * decay
+                                now_time_sec = time.time()
+                                for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
+                                    p_dir = pred_dict.get("direction")
+                                    p_ts = pred_dict.get("timestamp", now_time_sec)
+                                    if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
+                                        age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
+                                        decay = 0.5 ** (age_mins / 30.0)
+                                        htf_decay_threshold_penalty += 0.03 * decay
                                     
-                            if htf_decay_threshold_penalty > 0:
-                                htf_decay_threshold_penalty = min(0.04, htf_decay_threshold_penalty)
-                                print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction gate penalty (+{htf_decay_threshold_penalty*100:.1f}% required threshold). Calibrated conf preserved -> {calibrated_confidence*100:.2f}%")
+                                if htf_decay_threshold_penalty > 0:
+                                    htf_decay_threshold_penalty = min(0.04, htf_decay_threshold_penalty)
+                                    print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction gate penalty (+{htf_decay_threshold_penalty*100:.1f}% required threshold). Calibrated conf preserved -> {calibrated_confidence*100:.2f}%")
 
-                        expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
+                            expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
-                        # Update global state prediction metrics for this timeframe
-                        pred_entry_dict = {
-                            "predicted_change": pred_change,
-                            "predicted_price": predicted_price,
-                            "direction": ml_trend,
-                            "raw_confidence": ml_confidence,
-                            "calibrated_confidence": calibrated_confidence,
-                            "signal_source": "ML_ENSEMBLE",
-                            "is_fallback": False
-                        }
-                        bot_state[f"regime_{symbol}_{tf}"] = regime_name
-                        bot_state[f"adx_{symbol}_{tf}"] = adx_regime
-                        bot_state[f"regime_{tf}"] = regime_name
-                        bot_state[f"adx_{tf}"] = adx_regime
-                        bot_state[f"latest_prediction_{symbol}_{tf}"] = pred_entry_dict
-                        bot_state[f"latest_prediction_{tf}"] = pred_entry_dict
+                            # Update global state prediction metrics for this timeframe
+                            pred_entry_dict = {
+                                "predicted_change": pred_change,
+                                "predicted_price": predicted_price,
+                                "direction": ml_trend,
+                                "raw_confidence": ml_confidence,
+                                "calibrated_confidence": calibrated_confidence,
+                                "signal_source": "ML_ENSEMBLE",
+                                "is_fallback": False
+                            }
+                            bot_state[f"regime_{symbol}_{tf}"] = regime_name
+                            bot_state[f"adx_{symbol}_{tf}"] = adx_regime
+                            bot_state[f"regime_{tf}"] = regime_name
+                            bot_state[f"adx_{tf}"] = adx_regime
+                            bot_state[f"latest_prediction_{symbol}_{tf}"] = pred_entry_dict
+                            bot_state[f"latest_prediction_{tf}"] = pred_entry_dict
 
-                        print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
+                            print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
-                        # Determine dynamic confidence threshold based on trade economics (p* break-even payoff) + bounded modifiers
-                        atr_norm_val = latest_candle["ATR_norm"]
+                            # Determine dynamic confidence threshold based on trade economics (p* break-even payoff) + bounded modifiers
+                            atr_norm_val = latest_candle["ATR_norm"]
                         
-                        # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
-                        from config import TIMEFRAME_CONFIG
-                        from trade_calculators import transaction_cost_model, UnifiedTargetGenerator
-                        cfg = TIMEFRAME_CONFIG.get(str(iv), {})
-                        base_tp_m = cfg.get("tp_mult_trending", 1.85)
-                        base_sl_m = cfg.get("sl_mult", 0.8)
-                        atr_dollars = float(latest_candle.get("ATR", latest_candle["close"] * 0.01))
-                        entry_close = float(latest_candle["close"])
-                        actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
-                            interval=str(iv), entry_price=entry_close,
-                            atr_dollars=atr_dollars, base_tp_m=base_tp_m
-                        )
-                        _bars_per_day = max(1, round(1440 / max(1, int(iv))))
-                        _adv_usd = float(df_completed["volume"].tail(_bars_per_day).sum() * entry_close) if ("volume" in df_completed.columns and len(df_completed) >= _bars_per_day) else 50_000_000.0
-                        _order_usd = float(bot_state.get("position_size_usd", 1000.0))
-                        _tcm = transaction_cost_model.estimate_transaction_cost(
-                            order_size_usd=_order_usd,
-                            volume_24h_usd=_adv_usd,
-                            is_maker=True,
-                        )
-                        cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
-                        p_star = base_sl_m / (actual_tp_m + base_sl_m)
-                        economic_base_threshold = float(round(p_star + (cost_bps / 1e4) / (actual_tp_m + base_sl_m), 4))
-                        
-                        dynamic_conf_threshold = economic_base_threshold
-                        adjustments_applied = [("economic_base", economic_base_threshold)]
-
-                        # 2. Bounded Regime & Volatility Adjustments
-                        if "Ranging" in regime_name:
-                            regime_delta = 0.03 if str(iv) in ["15", "30"] else 0.05
-                            dynamic_conf_threshold += regime_delta
-                            adjustments_applied.append(("regime_ranging", regime_delta))
-                            
-                        # High Volatility Adjustment (ATR > 0.015)
-                        if atr_norm_val > 0.015:
-                            vol_delta = 0.05
-                            dynamic_conf_threshold += vol_delta
-                            adjustments_applied.append(("high_volatility", vol_delta))
-                                
-                        if htf_decay_threshold_penalty > 0:
-                            dynamic_conf_threshold += htf_decay_threshold_penalty
-                            adjustments_applied.append(("htf_decay_penalty", htf_decay_threshold_penalty))
-                            
-                        # Recent 50-Trade Performance Decay Filter
-                        recent_trades = bot_state.get("trade_history", [])[-50:]
-                        if len(recent_trades) >= 10:
-                            win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
-                            recent_win_rate = (win_count / len(recent_trades)) * 100.0
-                            if recent_win_rate < 45.0:
-                                perf_delta = 0.10
-                                dynamic_conf_threshold += perf_delta
-                                adjustments_applied.append(("performance_decay", perf_delta))
-                                print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
-                            
-                        # Sentiment-Adaptive Adjustment
-                        with news_sentiment_lock:
-                            current_sentiment = cached_news_sentiment
-                        if current_sentiment == "Bullish":
-                            if ml_trend == "Bullish":
-                                dynamic_conf_threshold -= 0.03
-                                adjustments_applied.append(("sentiment_align_bull", -0.03))
-                            elif ml_trend == "Bearish":
-                                dynamic_conf_threshold += 0.05
-                                adjustments_applied.append(("sentiment_oppose_bear", 0.05))
-                        elif current_sentiment == "Bearish":
-                            if ml_trend == "Bearish":
-                                dynamic_conf_threshold -= 0.03
-                                adjustments_applied.append(("sentiment_align_bear", -0.03))
-                            elif ml_trend == "Bullish":
-                                dynamic_conf_threshold += 0.05
-                                adjustments_applied.append(("sentiment_oppose_bull", 0.05))
-
-                        # Asian Market Session Awareness (00:00 - 08:00 UTC)
-                        utc_hour_now = datetime.now(timezone.utc).hour
-                        if 0 <= utc_hour_now < 8:
-                            dynamic_conf_threshold += 0.05
-                            adjustments_applied.append(("asian_session", 0.05))
-                            print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
-                                
-                        # Adaptive Confidence Threshold Matrix for 15m
-                        if str(iv) == "15":
-                            drift_p = bot_state.get("drift_p_val", 0.50) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.50
-                            u_tot = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
-                            sym_sharpe = float(bot_state.get("symbol_sharpe", 1.2)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1.2
-                            adaptive_val = trade_calculators.calculate_adaptive_15m_threshold(
-                                regime=regime_name,
-                                drift_p_val=drift_p,
-                                u_total=u_tot,
-                                symbol_sharpe=sym_sharpe,
-                                base_threshold=economic_base_threshold
+                            # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
+                            from config import TIMEFRAME_CONFIG
+                            from trade_calculators import transaction_cost_model, UnifiedTargetGenerator
+                            cfg = TIMEFRAME_CONFIG.get(str(iv), {})
+                            base_tp_m = cfg.get("tp_mult_trending", 1.85)
+                            base_sl_m = cfg.get("sl_mult", 0.8)
+                            atr_dollars = float(latest_candle.get("ATR", latest_candle["close"] * 0.01))
+                            entry_close = float(latest_candle["close"])
+                            actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+                                interval=str(iv), entry_price=entry_close,
+                                atr_dollars=atr_dollars, base_tp_m=base_tp_m
                             )
-                            if adaptive_val > dynamic_conf_threshold:
-                                adapt_delta = round(adaptive_val - dynamic_conf_threshold, 4)
-                                dynamic_conf_threshold = adaptive_val
-                                adjustments_applied.append(("adaptive_15m_matrix", adapt_delta))
-
-                        # Bayesian Cold-Start Adjustment (Trades 3-9)
-                        bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))
-                        if bayesian_res.get("confidence_boost", 0) > 0:
-                            b_boost = bayesian_res["confidence_boost"]
-                            dynamic_conf_threshold += b_boost
-                            adjustments_applied.append(("bayesian_cold_start", b_boost))
-                            print(f"[{symbol} {iv}m] {bayesian_res['note']} -> Threshold: {dynamic_conf_threshold*100:.2f}%")
-
-                        print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Economic Base: {economic_base_threshold*100:.2f}%, Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
-
-                        # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
-                        meta_adjustment = 0.0
-                        if ml_trend in ["Bullish", "Bearish"] and active_meta_model is not None:
-                            try:
-                                _exp_meta_names = get_model_feature_names(active_meta_model)
-                                if _exp_meta_names and not all(str(n).startswith("Column_") for n in _exp_meta_names):
-                                    _meta_feats_to_use = [f for f in _exp_meta_names if f in latest_candle_weighted.index]
-                                else:
-                                    _meta_feats_to_use = features
-                                X_meta_live = latest_candle_weighted[_meta_feats_to_use].to_frame().T if isinstance(latest_candle_weighted[_meta_feats_to_use], pd.Series) else latest_candle_weighted[_meta_feats_to_use]
-                                X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
-                                meta_pred = int(active_meta_model.predict(X_meta_input)[0])
-                                if meta_pred == 1:
-                                    meta_adjustment = -0.05  # Lowers required gate threshold by 5%
-                                    print(f"[{iv}m] Meta-Classifier: PASS (required gate threshold lowered by -5%)")
-                                else:
-                                    meta_adjustment = +0.07  # Raises required gate threshold by 7%
-                                    print(f"[{iv}m] Meta-Classifier: FAIL (required gate threshold raised by +7%)")
-                                dynamic_conf_threshold += meta_adjustment
-                                adjustments_applied.append(("meta_classifier", meta_adjustment))
-                            except Exception as meta_err:
-                                print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
-
-                        # Candlestick Pattern Alignment Overlay Boost (-4% Threshold Gate Lowering)
-                        bull_patterns = ["cdl_hammer", "cdl_bullish_engulfing", "cdl_morning_star", "cdl_three_white_soldiers", "cdl_three_inside_up", "cdl_abandoned_baby_bull", "cdl_piercing_line", "cdl_tweezer_bottom", "cdl_marubozu_bull"]
-                        bear_patterns = ["cdl_shooting_star", "cdl_bearish_engulfing", "cdl_evening_star", "cdl_three_black_crows", "cdl_three_inside_down", "cdl_dark_cloud_cover", "cdl_tweezer_top", "cdl_marubozu_bear"]
-                        pattern_boost = False
-                        if ml_trend == "Bullish" and any(latest_candle.get(p, 0) == 1 for p in bull_patterns):
-                            pattern_boost = True
-                        elif ml_trend == "Bearish" and any(latest_candle.get(p, 0) in [1, -1] for p in bear_patterns):
-                            pattern_boost = True
-
-                        if pattern_boost:
-                            candlestick_delta = -0.04
-                            dynamic_conf_threshold += candlestick_delta
-                            adjustments_applied.append(("candlestick_pattern", candlestick_delta))
-                            print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (required threshold lowered -4.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
-
-                        # Determine tracking status
-                        # Softened contradiction: only block if regressor predicts > 0.05% in OPPOSITE direction
-                        pred_pct = (abs(pred_change) / latest_candle["close"]) * 100
-                        strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > 0.05) or \
-                                          (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
+                            _bars_per_day = max(1, round(1440 / max(1, int(iv))))
+                            _adv_usd = float(df_completed["volume"].tail(_bars_per_day).sum() * entry_close) if ("volume" in df_completed.columns and len(df_completed) >= _bars_per_day) else 50_000_000.0
+                            _order_usd = float(bot_state.get("position_size_usd", 1000.0))
+                            _tcm = transaction_cost_model.estimate_transaction_cost(
+                                order_size_usd=_order_usd,
+                                volume_24h_usd=_adv_usd,
+                                is_maker=True,
+                            )
+                            cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
+                            p_star = base_sl_m / (actual_tp_m + base_sl_m)
+                            economic_base_threshold = float(round(p_star + (cost_bps / 1e4) / (actual_tp_m + base_sl_m), 4))
                         
-                        is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
-                        news_event = ""
-                        
-                        # Hierarchical Confluence Check, Institutional HTF Waterfall & Decision Lineage
-                        confluence_blocked = False
-                        htf_trend = "Neutral"
-                        macro_tf = ""
-                        htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
-                        macro_iv = htf_mapping.get(str(iv), "")
-                        htf_meta = {
-                            "trend": "Neutral",
-                            "trend_source": "NONE",
-                            "ml_probability": 0.0,
-                            "ml_prediction": "Neutral",
-                            "model_age_days": 0,
-                            "fallback_reason": "UNINITIALIZED",
-                            "ema_fast": 0.0,
-                            "ema_slow": 0.0,
-                            "ema_slow_slope": 0.0,
-                            "adx": 0.0,
-                            "sma50": 0.0,
-                            "consensus_score": "LOW",
-                            "decision_timestamp": datetime.now(timezone.utc).isoformat(),
-                            "model_version": f"{macro_iv}_v1" if macro_iv else "default"
-                        }
+                            dynamic_conf_threshold = economic_base_threshold
+                            adjustments_applied = [("economic_base", economic_base_threshold)]
 
-                        if str(iv) in htf_mapping:
-                            macro_tf = tf_map.get(str(macro_iv))
-                            learned_threshold = get_learned_confidence_threshold(symbol, macro_iv, regime)
-
-                            if macro_tf:
-                                macro_pred = bot_state.get(f"latest_prediction_{symbol}_{macro_tf}") or bot_state.get(f"latest_prediction_{macro_tf}")
-                                ml_trend_dir = "Neutral"
-                                ml_prob = 0.0
-                                model_age_days = 0
-
-                                if macro_pred and isinstance(macro_pred, dict):
-                                    ml_trend_dir = macro_pred.get("direction", "Neutral")
-                                    ml_prob = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.0)
-                                    model_age_days = int(macro_pred.get("model_age_days") or 0)
-
-                                htf_meta["ml_prediction"] = ml_trend_dir
-                                htf_meta["ml_probability"] = ml_prob
-                                htf_meta["model_age_days"] = model_age_days
-
-                                # STEP 1: Check ML Model Freshness & Learned Confidence
-                                if ml_trend_dir in ["Bullish", "Bearish"] and ml_prob >= learned_threshold and model_age_days < 45:
-                                    htf_trend = ml_trend_dir
-                                    htf_meta["trend_source"] = "ML_MODEL"
-                                    htf_meta["fallback_reason"] = "NONE"
-                                else:
-                                    fallback_reason = "MODEL_NEUTRAL" if ml_trend_dir == "Neutral" else ("LOW_CONFIDENCE" if ml_prob < learned_threshold else "MODEL_STALE")
-                                    htf_meta["fallback_reason"] = fallback_reason
-
-                                    # STEP 2: EMA9 vs EMA21 + EMA21 Slope > 0 Technical Fallback
-                                    try:
-                                        from ta.trend import EMAIndicator, ADXIndicator, SMAIndicator
-                                        htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=60)
-                                        if htf_df is not None and len(htf_df) >= 50:
-                                            s_e9 = EMAIndicator(htf_df["close"], window=9).ema_indicator()
-                                            s_e21 = EMAIndicator(htf_df["close"], window=21).ema_indicator()
-                                            s_adx = ADXIndicator(htf_df["high"], htf_df["low"], htf_df["close"], window=14).adx()
-                                            s_sma50 = SMAIndicator(htf_df["close"], window=50).sma_indicator()
-
-                                            e9_val = float(s_e9.iloc[-1]) if pd.notna(s_e9.iloc[-1]) else 0.0
-                                            e21_val = float(s_e21.iloc[-1]) if pd.notna(s_e21.iloc[-1]) else 0.0
-                                            e21_prev = float(s_e21.iloc[-3]) if len(s_e21) >= 3 and pd.notna(s_e21.iloc[-3]) else e21_val
-                                            e21_slope = (e21_val - e21_prev) / (e21_prev or 1.0) * 100.0
-
-                                            adx_val = float(s_adx.iloc[-1]) if pd.notna(s_adx.iloc[-1]) else 0.0
-                                            sma50_val = float(s_sma50.iloc[-1]) if pd.notna(s_sma50.iloc[-1]) else 0.0
-                                            latest_close = float(htf_df["close"].iloc[-1])
-
-                                            htf_meta["ema_fast"] = e9_val
-                                            htf_meta["ema_slow"] = e21_val
-                                            htf_meta["ema_slow_slope"] = e21_slope
-                                            htf_meta["adx"] = adx_val
-                                            htf_meta["sma50"] = sma50_val
-
-                                            ema_bullish = (e9_val > e21_val) and (e21_slope > 0.0)
-                                            ema_bearish = (e9_val < e21_val) and (e21_slope < 0.0)
-
-                                            if ema_bullish:
-                                                htf_trend = "Bullish"
-                                                htf_meta["trend_source"] = "EMA_FALLBACK"
-                                            elif ema_bearish:
-                                                htf_trend = "Bearish"
-                                                htf_meta["trend_source"] = "EMA_FALLBACK"
-                                            else:
-                                                # STEP 3: ADX + Close vs SMA50 Secondary Fallback
-                                                if adx_val >= 20.0:
-                                                    if latest_close > sma50_val:
-                                                        htf_trend = "Bullish"
-                                                        htf_meta["trend_source"] = "ADX_FALLBACK"
-                                                    elif latest_close < sma50_val:
-                                                        htf_trend = "Bearish"
-                                                        htf_meta["trend_source"] = "ADX_FALLBACK"
-                                    except Exception as err:
-                                        print(f"[{symbol} HTF Fallback Warning] Error computing technical waterfall: {err}")
-
-                                # STEP 4: HTF Consensus Scoring (HIGH, MEDIUM, LOW)
-                                htf_meta["trend"] = htf_trend
-                                ml_matches = (ml_trend_dir == htf_trend) and (htf_trend in ["Bullish", "Bearish"])
-                                if ml_matches and htf_meta["trend_source"] == "ML_MODEL":
-                                    consensus = "HIGH"
-                                elif htf_trend in ["Bullish", "Bearish"] and htf_meta["trend_source"] in ["EMA_FALLBACK", "ADX_FALLBACK"]:
-                                    consensus = "MEDIUM" if ml_trend_dir == "Neutral" else "LOW"
-                                else:
-                                    consensus = "LOW"
-                                htf_meta["consensus_score"] = consensus
-
-                                # Save lineage metadata in bot_state
-                                bot_state[f"htf_trend_metadata_{symbol}_{iv}"] = htf_meta
-
-                                if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
-                                    if ml_trend == htf_trend:
-                                        dynamic_conf_threshold -= 0.08
-                                        adjustments_applied.append(("macro_alignment", -0.08))
-                                        print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
-                                    else:
-                                        dynamic_conf_threshold += 0.10
-                                        confluence_blocked = True
-                                        adjustments_applied.append(("macro_opposition", 0.10))
-                                        print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
-
-                        # Funding Rate Carry Overlay
-                        funding_rate = get_funding_rate(symbol)
-                        funding_blocked = False
-                        if funding_rate > 0.0005 and ml_trend == "Bullish":
-                            dynamic_conf_threshold += 0.05
-                            adjustments_applied.append(("funding_carry_long", 0.05))
-                            print(f"[{symbol} {iv}m] Funding Carry Adjustment: Positive funding rate ({funding_rate*100:.3f}%) raised Long threshold to {dynamic_conf_threshold*100:.1f}%")
-                        elif funding_rate < -0.0005 and ml_trend == "Bearish":
-                            dynamic_conf_threshold += 0.05
-                            adjustments_applied.append(("funding_carry_short", 0.05))
-                            print(f"[{symbol} {iv}m] Funding Carry Adjustment: Negative funding rate ({funding_rate*100:.3f}%) raised Short threshold to {dynamic_conf_threshold*100:.1f}%")
-
-                        if ml_trend == "Bullish" and funding_rate > 0.001:
-                            funding_blocked = True
-                        elif ml_trend == "Bearish" and funding_rate < -0.001:
-                            funding_blocked = True
+                            # 2. Bounded Regime & Volatility Adjustments
+                            if "Ranging" in regime_name:
+                                regime_delta = 0.03 if str(iv) in ["15", "30"] else 0.05
+                                dynamic_conf_threshold += regime_delta
+                                adjustments_applied.append(("regime_ranging", regime_delta))
                             
-                        # Open Interest Momentum Guard
-                        try:
-                            oi_delta = df.iloc[-1].get("open_interest_pct_change", 0.0) * 100.0
-                            if oi_delta < 0.5:
-                                dynamic_conf_threshold += 0.05
-                                adjustments_applied.append(("oi_momentum_guard", 0.05))
-                                print(f"[{symbol} {iv}m] OI Momentum Guard: Low Open Interest Delta ({oi_delta:+.2f}%) raised threshold to {dynamic_conf_threshold*100:.1f}%")
-                        except Exception as e:
-                            print(f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
-
-                        # Bound final threshold relative to economic base
-                        from config import MAX_THRESHOLD_UPLIFT
-                        max_allowed_threshold = min(0.85, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
-                        dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(0.40, dynamic_conf_threshold)), 4))
-                        
-                        # Log threshold lineage to prediction state
-                        if f"latest_prediction_{tf}" in bot_state and isinstance(bot_state[f"latest_prediction_{tf}"], dict):
-                            bot_state[f"latest_prediction_{tf}"]["threshold_base"] = economic_base_threshold
-                            bot_state[f"latest_prediction_{tf}"]["threshold_adjustments"] = adjustments_applied
-                            bot_state[f"latest_prediction_{tf}"]["dynamic_threshold"] = dynamic_conf_threshold
-                        
-                        status_msg = "Pending"
-                        active_trade_key = f"active_trade_{tf}"
-                        active_trades_list = bot_state.get(active_trade_key, [])
-                        
-                        # Prevent duplicate parallel trades of the same symbol on ANY interval/timeframe
-                        already_active = False
-                        active_on_tf = None
-                        if symbol in just_opened_symbols:
-                            already_active = True
-                            active_on_tf = "current_cycle"
-                        else:
-                            for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
-                                if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
-                                    already_active = True
-                                    active_on_tf = tf_key
-                                    break
-                        
-                        # Session Filter: temporarily allow 24-hour trading
-                        utc_hour = datetime.now(timezone.utc).hour
-                        in_session = True
-
-                        flash_crash_active = check_flash_crash(symbol, max_drop_pct=3.0, window_minutes=5) if str(iv) in ["15", "30"] else False
-                        liq_score = get_liquidity_score(symbol)
-                        low_liquidity = (str(iv) in ["15", "30"] and liq_score < 0.3)
-
-                        if not bot_state.get("bot_running", True):
-                            status_msg = "Skipped (Bot Stopped)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
-                        elif bot_state.get("circuit_breaker_active", False):
-                            status_msg = "Skipped (Circuit Breaker)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
-                        elif flash_crash_active:
-                            status_msg = "Skipped (Flash Crash Block)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Flash crash detected (>3.0% drop in last 5 minutes).")
-                        elif low_liquidity:
-                            status_msg = "Skipped (Low Liquidity)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Insufficient L2 orderbook liquidity (Score: {liq_score:.2f} < 0.30).")
-                        elif already_active:
-                            status_msg = "Skipped (Already Active)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
-                        elif not in_session:
-                            status_msg = "Skipped (Off-Session)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
-                        elif is_cooling:
-                            status_msg = "Skipped (Cool-Off)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
-                        elif confluence_blocked:
-                            status_msg = "Skipped (HTF Trend Block)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Counter-trend relative to macro timeframe ({macro_tf} trend: {htf_trend}).")
-                        elif funding_blocked:
-                            status_msg = "Skipped (Funding Block)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
-                        elif ml_trend == "Neutral":
-                            status_msg = "Skipped (Neutral)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
-                        elif strong_conflict:
-                            status_msg = "Skipped (Contradiction)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
-                        elif calibrated_confidence < dynamic_conf_threshold:
-                            status_msg = "Skipped (Low Confidence)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
-                        elif conformal_is_uncertain and ml_trend in ["Bullish", "Bearish"]:
-                            status_msg = "Skipped (High Conformal Uncertainty)"
-                            log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
-
-                        if status_msg == "Pending":
-                            # Refinements 2, 8, 9, 10: 15m Institutional Hardening Filters
-                            if str(iv) == "15":
-                                # Refinement 2: Liquidity & Volatility Compression Filter
-                                vol_series = pd.to_numeric(df["volume"], errors="coerce") if (df is not None and "volume" in df.columns) else None
-                                vol_20th = float(vol_series.quantile(0.20)) if (vol_series is not None and len(vol_series.dropna()) >= 20) else 0.0
-                                curr_vol = float(latest_candle.get("volume", 0.0))
-                                mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
-                                current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
-                                u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
-                                exp_r_val = abs(float(expected_pct_change)) / max(1e-4, atr_norm_val)
-
-                                # C-2: estimate per-symbol 24h ADV from candle volume * price
-                                _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
-                                _order_usd = float(bot_state.get("position_size_usd", 1000.0)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1000.0
-                                tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
-                                exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
-
-                                if curr_vol < vol_20th and vol_20th > 0:
-                                    status_msg = "Skipped (Volume Compression <20th Pct)"
-                                    print(f"[{symbol} 15m Filter] Trade skipped: Volume ({curr_vol:.1f}) < 20th percentile ({vol_20th:.1f}).")
-                                elif atr_norm_val > (1.5 * mean_atr_24h):
-                                    status_msg = "Skipped (ATR Spike >1.5x Mean)"
-                                    print(f"[{symbol} 15m Filter] Trade skipped: ATR spike ({atr_norm_val*100:.2f}%) > 1.5x 24h mean ({mean_atr_24h*100:.2f}%).")
-                                elif current_spread_bps > 4.5:
-                                    status_msg = "Skipped (Spread Widening >4.5 bps)"
-                                    print(f"[{symbol} 15m Filter] Trade skipped: Spread ({current_spread_bps:.1f} bps) exceeds 4.5 bps limit.")
-                                elif exp_r_val < 1.0:
-                                    status_msg = "Skipped (Expected R < 1.0R)"
-                                    print(f"[{symbol} 15m Filter] Trade skipped: Expected R ({exp_r_val:.2f}R) < 1.00R floor.")
-                                elif exp_edge_bps <= 0:
-                                    status_msg = "Skipped (TCM Net Edge <= 0)"
-                                    print(f"[{symbol} 15m Filter] Trade skipped: TCM Expected Net Edge ({exp_edge_bps:.1f} bps) is non-positive.")
-                                elif u_tot_live >= 0.20:
-                                    status_msg = "Skipped (Uncertainty U >= 0.20)"
-                                    print(f"[{symbol} 15m Filter] Trade skipped: Total Ensemble Uncertainty ({u_tot_live:.3f}) >= 0.20 threshold.")
-
-                        if status_msg == "Pending":
-                            # Check news window proximity status for logging/blocking purposes
-                            in_news_window, news_event = is_high_impact_news_window()
-                            if in_news_window:
-                                print(f"[{iv}m News Block] Trade skipped: high-impact news event window active ({news_event}).")
-                                status_msg = "Skipped (News Block)"
+                            # High Volatility Adjustment (ATR > 0.015)
+                            if atr_norm_val > 0.015:
+                                vol_delta = 0.05
+                                dynamic_conf_threshold += vol_delta
+                                adjustments_applied.append(("high_volatility", vol_delta))
                                 
+                            if htf_decay_threshold_penalty > 0:
+                                dynamic_conf_threshold += htf_decay_threshold_penalty
+                                adjustments_applied.append(("htf_decay_penalty", htf_decay_threshold_penalty))
+                            
+                            # Recent 50-Trade Performance Decay Filter
+                            recent_trades = bot_state.get("trade_history", [])[-50:]
+                            if len(recent_trades) >= 10:
+                                win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
+                                recent_win_rate = (win_count / len(recent_trades)) * 100.0
+                                if recent_win_rate < 45.0:
+                                    perf_delta = 0.10
+                                    dynamic_conf_threshold += perf_delta
+                                    adjustments_applied.append(("performance_decay", perf_delta))
+                                    print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
+                            
+                            # Sentiment-Adaptive Adjustment
                             with news_sentiment_lock:
-                                news_sentiment = cached_news_sentiment
-                                latest_titles = cached_news_titles
-                                all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
-                                    latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
-                                    calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold, get_history_fn=get_history
-                                )
+                                current_sentiment = cached_news_sentiment
+                            if current_sentiment == "Bullish":
+                                if ml_trend == "Bullish":
+                                    dynamic_conf_threshold -= 0.03
+                                    adjustments_applied.append(("sentiment_align_bull", -0.03))
+                                elif ml_trend == "Bearish":
+                                    dynamic_conf_threshold += 0.05
+                                    adjustments_applied.append(("sentiment_oppose_bear", 0.05))
+                            elif current_sentiment == "Bearish":
+                                if ml_trend == "Bearish":
+                                    dynamic_conf_threshold -= 0.03
+                                    adjustments_applied.append(("sentiment_align_bear", -0.03))
+                                elif ml_trend == "Bullish":
+                                    dynamic_conf_threshold += 0.05
+                                    adjustments_applied.append(("sentiment_oppose_bull", 0.05))
 
-                                # Update global confluence status
-                                bot_state[f"confluence_results_{tf}"] = {
-                                    "approved": all_pass,
-                                    "checks": confluence_results
-                                }
-
-                                print(f"\n==================================================")
-                                print(f"[{iv}m] PRE-TRADE CONFLUENCE ANALYSIS REPORT")
-                                print("--------------------------------------------------")
-                                print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {symbol}")
-                                print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
-                                print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.3f} [{expected_pct_change:.3f}%])")
-                                print("--------------------------------------------------")
-                                print("Checks Status:")
-                                for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
-                                    status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
-                                    print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
+                            # Asian Market Session Awareness (00:00 - 08:00 UTC)
+                            utc_hour_now = datetime.now(timezone.utc).hour
+                            if 0 <= utc_hour_now < 8:
+                                dynamic_conf_threshold += 0.05
+                                adjustments_applied.append(("asian_session", 0.05))
+                                print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
                                 
-                                if all_pass:
-                                    status_msg = "Traded"
+                            # Adaptive Confidence Threshold Matrix for 15m
+                            if str(iv) == "15":
+                                drift_p = bot_state.get("drift_p_val", 0.50) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.50
+                                u_tot = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
+                                sym_sharpe = float(bot_state.get("symbol_sharpe", 1.2)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1.2
+                                adaptive_val = trade_calculators.calculate_adaptive_15m_threshold(
+                                    regime=regime_name,
+                                    drift_p_val=drift_p,
+                                    u_total=u_tot,
+                                    symbol_sharpe=sym_sharpe,
+                                    base_threshold=economic_base_threshold
+                                )
+                                if adaptive_val > dynamic_conf_threshold:
+                                    adapt_delta = round(adaptive_val - dynamic_conf_threshold, 4)
+                                    dynamic_conf_threshold = adaptive_val
+                                    adjustments_applied.append(("adaptive_15m_matrix", adapt_delta))
+
+                            # Bayesian Cold-Start Adjustment (Trades 3-9)
+                            bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(iv, bot_state.get("trade_history", []))
+                            if bayesian_res.get("confidence_boost", 0) > 0:
+                                b_boost = bayesian_res["confidence_boost"]
+                                dynamic_conf_threshold += b_boost
+                                adjustments_applied.append(("bayesian_cold_start", b_boost))
+                                print(f"[{symbol} {iv}m] {bayesian_res['note']} -> Threshold: {dynamic_conf_threshold*100:.2f}%")
+
+                            print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Economic Base: {economic_base_threshold*100:.2f}%, Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
+
+                            # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
+                            meta_adjustment = 0.0
+                            if ml_trend in ["Bullish", "Bearish"] and active_meta_model is not None:
+                                try:
+                                    _exp_meta_names = get_model_feature_names(active_meta_model)
+                                    if _exp_meta_names and not all(str(n).startswith("Column_") for n in _exp_meta_names):
+                                        _meta_feats_to_use = [f for f in _exp_meta_names if f in latest_candle_weighted.index]
+                                    else:
+                                        _meta_feats_to_use = features
+                                    X_meta_live = latest_candle_weighted[_meta_feats_to_use].to_frame().T if isinstance(latest_candle_weighted[_meta_feats_to_use], pd.Series) else latest_candle_weighted[_meta_feats_to_use]
+                                    X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
+                                    meta_pred = int(active_meta_model.predict(X_meta_input)[0])
+                                    if meta_pred == 1:
+                                        meta_adjustment = -0.05  # Lowers required gate threshold by 5%
+                                        print(f"[{iv}m] Meta-Classifier: PASS (required gate threshold lowered by -5%)")
+                                    else:
+                                        meta_adjustment = +0.07  # Raises required gate threshold by 7%
+                                        print(f"[{iv}m] Meta-Classifier: FAIL (required gate threshold raised by +7%)")
+                                    dynamic_conf_threshold += meta_adjustment
+                                    adjustments_applied.append(("meta_classifier", meta_adjustment))
+                                except Exception as meta_err:
+                                    print(f"[{iv}m Warning] Meta-Classifier prediction skipped: {meta_err}")
+
+                            # Candlestick Pattern Alignment Overlay Boost (-4% Threshold Gate Lowering)
+                            bull_patterns = ["cdl_hammer", "cdl_bullish_engulfing", "cdl_morning_star", "cdl_three_white_soldiers", "cdl_three_inside_up", "cdl_abandoned_baby_bull", "cdl_piercing_line", "cdl_tweezer_bottom", "cdl_marubozu_bull"]
+                            bear_patterns = ["cdl_shooting_star", "cdl_bearish_engulfing", "cdl_evening_star", "cdl_three_black_crows", "cdl_three_inside_down", "cdl_dark_cloud_cover", "cdl_tweezer_top", "cdl_marubozu_bear"]
+                            pattern_boost = False
+                            if ml_trend == "Bullish" and any(latest_candle.get(p, 0) == 1 for p in bull_patterns):
+                                pattern_boost = True
+                            elif ml_trend == "Bearish" and any(latest_candle.get(p, 0) in [1, -1] for p in bear_patterns):
+                                pattern_boost = True
+
+                            if pattern_boost:
+                                candlestick_delta = -0.04
+                                dynamic_conf_threshold += candlestick_delta
+                                adjustments_applied.append(("candlestick_pattern", candlestick_delta))
+                                print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (required threshold lowered -4.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
+
+                            # Determine tracking status
+                            # Softened contradiction: only block if regressor predicts > 0.05% in OPPOSITE direction
+                            pred_pct = (abs(pred_change) / latest_candle["close"]) * 100
+                            strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > 0.05) or \
+                                              (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
+                        
+                            is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
+                            news_event = ""
+                        
+                            # Hierarchical Confluence Check, Institutional HTF Waterfall & Decision Lineage
+                            confluence_blocked = False
+                            htf_trend = "Neutral"
+                            macro_tf = ""
+                            htf_mapping = {"15": "60", "30": "120", "60": "240", "120": "360"}
+                            macro_iv = htf_mapping.get(str(iv), "")
+                            htf_meta = {
+                                "trend": "Neutral",
+                                "trend_source": "NONE",
+                                "ml_probability": 0.0,
+                                "ml_prediction": "Neutral",
+                                "model_age_days": 0,
+                                "fallback_reason": "UNINITIALIZED",
+                                "ema_fast": 0.0,
+                                "ema_slow": 0.0,
+                                "ema_slow_slope": 0.0,
+                                "adx": 0.0,
+                                "sma50": 0.0,
+                                "consensus_score": "LOW",
+                                "decision_timestamp": datetime.now(timezone.utc).isoformat(),
+                                "model_version": f"{macro_iv}_v1" if macro_iv else "default"
+                            }
+
+                            if str(iv) in htf_mapping:
+                                macro_tf = tf_map.get(str(macro_iv))
+                                learned_threshold = get_learned_confidence_threshold(symbol, macro_iv, regime)
+
+                                if macro_tf:
+                                    macro_pred = bot_state.get(f"latest_prediction_{symbol}_{macro_tf}") or bot_state.get(f"latest_prediction_{macro_tf}")
+                                    ml_trend_dir = "Neutral"
+                                    ml_prob = 0.0
+                                    model_age_days = 0
+
+                                    if macro_pred and isinstance(macro_pred, dict):
+                                        ml_trend_dir = macro_pred.get("direction", "Neutral")
+                                        ml_prob = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.0)
+                                        model_age_days = int(macro_pred.get("model_age_days") or 0)
+
+                                    htf_meta["ml_prediction"] = ml_trend_dir
+                                    htf_meta["ml_probability"] = ml_prob
+                                    htf_meta["model_age_days"] = model_age_days
+
+                                    # STEP 1: Check ML Model Freshness & Learned Confidence
+                                    if ml_trend_dir in ["Bullish", "Bearish"] and ml_prob >= learned_threshold and model_age_days < 45:
+                                        htf_trend = ml_trend_dir
+                                        htf_meta["trend_source"] = "ML_MODEL"
+                                        htf_meta["fallback_reason"] = "NONE"
+                                    else:
+                                        fallback_reason = "MODEL_NEUTRAL" if ml_trend_dir == "Neutral" else ("LOW_CONFIDENCE" if ml_prob < learned_threshold else "MODEL_STALE")
+                                        htf_meta["fallback_reason"] = fallback_reason
+
+                                        # STEP 2: EMA9 vs EMA21 + EMA21 Slope > 0 Technical Fallback
+                                        try:
+                                            from ta.trend import EMAIndicator, ADXIndicator, SMAIndicator
+                                            htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=60)
+                                            if htf_df is not None and len(htf_df) >= 50:
+                                                s_e9 = EMAIndicator(htf_df["close"], window=9).ema_indicator()
+                                                s_e21 = EMAIndicator(htf_df["close"], window=21).ema_indicator()
+                                                s_adx = ADXIndicator(htf_df["high"], htf_df["low"], htf_df["close"], window=14).adx()
+                                                s_sma50 = SMAIndicator(htf_df["close"], window=50).sma_indicator()
+
+                                                e9_val = float(s_e9.iloc[-1]) if pd.notna(s_e9.iloc[-1]) else 0.0
+                                                e21_val = float(s_e21.iloc[-1]) if pd.notna(s_e21.iloc[-1]) else 0.0
+                                                e21_prev = float(s_e21.iloc[-3]) if len(s_e21) >= 3 and pd.notna(s_e21.iloc[-3]) else e21_val
+                                                e21_slope = (e21_val - e21_prev) / (e21_prev or 1.0) * 100.0
+
+                                                adx_val = float(s_adx.iloc[-1]) if pd.notna(s_adx.iloc[-1]) else 0.0
+                                                sma50_val = float(s_sma50.iloc[-1]) if pd.notna(s_sma50.iloc[-1]) else 0.0
+                                                latest_close = float(htf_df["close"].iloc[-1])
+
+                                                htf_meta["ema_fast"] = e9_val
+                                                htf_meta["ema_slow"] = e21_val
+                                                htf_meta["ema_slow_slope"] = e21_slope
+                                                htf_meta["adx"] = adx_val
+                                                htf_meta["sma50"] = sma50_val
+
+                                                ema_bullish = (e9_val > e21_val) and (e21_slope > 0.0)
+                                                ema_bearish = (e9_val < e21_val) and (e21_slope < 0.0)
+
+                                                if ema_bullish:
+                                                    htf_trend = "Bullish"
+                                                    htf_meta["trend_source"] = "EMA_FALLBACK"
+                                                elif ema_bearish:
+                                                    htf_trend = "Bearish"
+                                                    htf_meta["trend_source"] = "EMA_FALLBACK"
+                                                else:
+                                                    # STEP 3: ADX + Close vs SMA50 Secondary Fallback
+                                                    if adx_val >= 20.0:
+                                                        if latest_close > sma50_val:
+                                                            htf_trend = "Bullish"
+                                                            htf_meta["trend_source"] = "ADX_FALLBACK"
+                                                        elif latest_close < sma50_val:
+                                                            htf_trend = "Bearish"
+                                                            htf_meta["trend_source"] = "ADX_FALLBACK"
+                                        except Exception as err:
+                                            print(f"[{symbol} HTF Fallback Warning] Error computing technical waterfall: {err}")
+
+                                    # STEP 4: HTF Consensus Scoring (HIGH, MEDIUM, LOW)
+                                    htf_meta["trend"] = htf_trend
+                                    ml_matches = (ml_trend_dir == htf_trend) and (htf_trend in ["Bullish", "Bearish"])
+                                    if ml_matches and htf_meta["trend_source"] == "ML_MODEL":
+                                        consensus = "HIGH"
+                                    elif htf_trend in ["Bullish", "Bearish"] and htf_meta["trend_source"] in ["EMA_FALLBACK", "ADX_FALLBACK"]:
+                                        consensus = "MEDIUM" if ml_trend_dir == "Neutral" else "LOW"
+                                    else:
+                                        consensus = "LOW"
+                                    htf_meta["consensus_score"] = consensus
+
+                                    # Save lineage metadata in bot_state
+                                    bot_state[f"htf_trend_metadata_{symbol}_{iv}"] = htf_meta
+
+                                    if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
+                                        if ml_trend == htf_trend:
+                                            dynamic_conf_threshold -= 0.08
+                                            adjustments_applied.append(("macro_alignment", -0.08))
+                                            print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
+                                        else:
+                                            dynamic_conf_threshold += 0.10
+                                            confluence_blocked = True
+                                            adjustments_applied.append(("macro_opposition", 0.10))
+                                            print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
+
+                            # Funding Rate Carry Overlay
+                            funding_rate = get_funding_rate(symbol)
+                            funding_blocked = False
+                            if funding_rate > 0.0005 and ml_trend == "Bullish":
+                                dynamic_conf_threshold += 0.05
+                                adjustments_applied.append(("funding_carry_long", 0.05))
+                                print(f"[{symbol} {iv}m] Funding Carry Adjustment: Positive funding rate ({funding_rate*100:.3f}%) raised Long threshold to {dynamic_conf_threshold*100:.1f}%")
+                            elif funding_rate < -0.0005 and ml_trend == "Bearish":
+                                dynamic_conf_threshold += 0.05
+                                adjustments_applied.append(("funding_carry_short", 0.05))
+                                print(f"[{symbol} {iv}m] Funding Carry Adjustment: Negative funding rate ({funding_rate*100:.3f}%) raised Short threshold to {dynamic_conf_threshold*100:.1f}%")
+
+                            if ml_trend == "Bullish" and funding_rate > 0.001:
+                                funding_blocked = True
+                            elif ml_trend == "Bearish" and funding_rate < -0.001:
+                                funding_blocked = True
+                            
+                            # Open Interest Momentum Guard
+                            try:
+                                oi_delta = df.iloc[-1].get("open_interest_pct_change", 0.0) * 100.0
+                                if oi_delta < 0.5:
+                                    dynamic_conf_threshold += 0.05
+                                    adjustments_applied.append(("oi_momentum_guard", 0.05))
+                                    print(f"[{symbol} {iv}m] OI Momentum Guard: Low Open Interest Delta ({oi_delta:+.2f}%) raised threshold to {dynamic_conf_threshold*100:.1f}%")
+                            except Exception as e:
+                                print(f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
+
+                            # Bound final threshold relative to economic base
+                            from config import MAX_THRESHOLD_UPLIFT
+                            max_allowed_threshold = min(0.85, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
+                            dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(0.40, dynamic_conf_threshold)), 4))
+                        
+                            # Log threshold lineage to prediction state
+                            if f"latest_prediction_{tf}" in bot_state and isinstance(bot_state[f"latest_prediction_{tf}"], dict):
+                                bot_state[f"latest_prediction_{tf}"]["threshold_base"] = economic_base_threshold
+                                bot_state[f"latest_prediction_{tf}"]["threshold_adjustments"] = adjustments_applied
+                                bot_state[f"latest_prediction_{tf}"]["dynamic_threshold"] = dynamic_conf_threshold
+                        
+                            status_msg = "Pending"
+                            active_trade_key = f"active_trade_{tf}"
+                            active_trades_list = bot_state.get(active_trade_key, [])
+                        
+                            # Prevent duplicate parallel trades of the same symbol on ANY interval/timeframe
+                            already_active = False
+                            active_on_tf = None
+                            if symbol in just_opened_symbols:
+                                already_active = True
+                                active_on_tf = "current_cycle"
+                            else:
+                                for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                                    if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
+                                        already_active = True
+                                        active_on_tf = tf_key
+                                        break
+                        
+                            # Session Filter: temporarily allow 24-hour trading
+                            utc_hour = datetime.now(timezone.utc).hour
+                            in_session = True
+
+                            flash_crash_active = check_flash_crash(symbol, max_drop_pct=3.0, window_minutes=5) if str(iv) in ["15", "30"] else False
+                            liq_score = get_liquidity_score(symbol)
+                            low_liquidity = (str(iv) in ["15", "30"] and liq_score < 0.3)
+
+                            if not bot_state.get("bot_running", True):
+                                status_msg = "Skipped (Bot Stopped)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
+                            elif bot_state.get("circuit_breaker_active", False):
+                                status_msg = "Skipped (Circuit Breaker)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
+                            elif flash_crash_active:
+                                status_msg = "Skipped (Flash Crash Block)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Flash crash detected (>3.0% drop in last 5 minutes).")
+                            elif low_liquidity:
+                                status_msg = "Skipped (Low Liquidity)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Insufficient L2 orderbook liquidity (Score: {liq_score:.2f} < 0.30).")
+                            elif already_active:
+                                status_msg = "Skipped (Already Active)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
+                            elif not in_session:
+                                status_msg = "Skipped (Off-Session)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
+                            elif is_cooling:
+                                status_msg = "Skipped (Cool-Off)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
+                            elif confluence_blocked:
+                                status_msg = "Skipped (HTF Trend Block)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Counter-trend relative to macro timeframe ({macro_tf} trend: {htf_trend}).")
+                            elif funding_blocked:
+                                status_msg = "Skipped (Funding Block)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
+                            elif ml_trend == "Neutral":
+                                status_msg = "Skipped (Neutral)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
+                            elif strong_conflict:
+                                status_msg = "Skipped (Contradiction)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
+                            elif calibrated_confidence < dynamic_conf_threshold:
+                                status_msg = "Skipped (Low Confidence)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
+                            elif conformal_is_uncertain and ml_trend in ["Bullish", "Bearish"]:
+                                status_msg = "Skipped (High Conformal Uncertainty)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
+
+                            if status_msg == "Pending":
+                                # Refinements 2, 8, 9, 10: 15m Institutional Hardening Filters
+                                if str(iv) == "15":
+                                    # Refinement 2: Liquidity & Volatility Compression Filter
+                                    vol_series = pd.to_numeric(df["volume"], errors="coerce") if (df is not None and "volume" in df.columns) else None
+                                    vol_20th = float(vol_series.quantile(0.20)) if (vol_series is not None and len(vol_series.dropna()) >= 20) else 0.0
+                                    curr_vol = float(latest_candle.get("volume", 0.0))
+                                    mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
+                                    current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
+                                    u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
+                                    exp_r_val = abs(float(expected_pct_change)) / max(1e-4, atr_norm_val)
+
+                                    # C-2: estimate per-symbol 24h ADV from candle volume * price
+                                    _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
+                                    _order_usd = float(bot_state.get("position_size_usd", 1000.0)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1000.0
+                                    tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
+                                    exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
+
+                                    if curr_vol < vol_20th and vol_20th > 0:
+                                        status_msg = "Skipped (Volume Compression <20th Pct)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: Volume ({curr_vol:.1f}) < 20th percentile ({vol_20th:.1f}).")
+                                    elif atr_norm_val > (1.5 * mean_atr_24h):
+                                        status_msg = "Skipped (ATR Spike >1.5x Mean)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: ATR spike ({atr_norm_val*100:.2f}%) > 1.5x 24h mean ({mean_atr_24h*100:.2f}%).")
+                                    elif current_spread_bps > 4.5:
+                                        status_msg = "Skipped (Spread Widening >4.5 bps)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: Spread ({current_spread_bps:.1f} bps) exceeds 4.5 bps limit.")
+                                    elif exp_r_val < 1.0:
+                                        status_msg = "Skipped (Expected R < 1.0R)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: Expected R ({exp_r_val:.2f}R) < 1.00R floor.")
+                                    elif exp_edge_bps <= 0:
+                                        status_msg = "Skipped (TCM Net Edge <= 0)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: TCM Expected Net Edge ({exp_edge_bps:.1f} bps) is non-positive.")
+                                    elif u_tot_live >= 0.20:
+                                        status_msg = "Skipped (Uncertainty U >= 0.20)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: Total Ensemble Uncertainty ({u_tot_live:.3f}) >= 0.20 threshold.")
+
+                            if status_msg == "Pending":
+                                # Check news window proximity status for logging/blocking purposes
+                                in_news_window, news_event = is_high_impact_news_window()
+                                if in_news_window:
+                                    print(f"[{iv}m News Block] Trade skipped: high-impact news event window active ({news_event}).")
+                                    status_msg = "Skipped (News Block)"
+                                
+                                with news_sentiment_lock:
+                                    news_sentiment = cached_news_sentiment
+                                    latest_titles = cached_news_titles
+                                    all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
+                                        latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
+                                        calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold, get_history_fn=get_history
+                                    )
+
+                                    # Update global confluence status
+                                    bot_state[f"confluence_results_{tf}"] = {
+                                        "approved": all_pass,
+                                        "checks": confluence_results
+                                    }
+
+                                    print(f"\n==================================================")
+                                    print(f"[{iv}m] PRE-TRADE CONFLUENCE ANALYSIS REPORT")
                                     print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
-                                    print("==================================================\n")
+                                    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Symbol: {symbol}")
+                                    print(f"Signal: {ml_trend} | Calibrated Confidence: {calibrated_confidence * 100:.2f}%")
+                                    print(f"Current Price: {latest_candle['close']:.2f} | Predicted Price: {predicted_price:.2f} (Expected: {pred_change:+.3f} [{expected_pct_change:.3f}%])")
+                                    print("--------------------------------------------------")
+                                    print("Checks Status:")
+                                    for idx, (check_name, res_val) in enumerate(confluence_results.items(), 1):
+                                        status_str = "[PASS]" if res_val["pass"] else "[FAIL]"
+                                        print(f"  {status_str} {idx}. {check_name.replace('_', ' '):<22}: {res_val['detail']}")
+                                
+                                    if all_pass:
+                                        status_msg = "Traded"
+                                        print("--------------------------------------------------")
+                                        print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
+                                        print("==================================================\n")
                                     
-                                    atr_norm_val = latest_candle["ATR_norm"]
-                                    atr_dollars = atr_norm_val * latest_candle["close"]
+                                        atr_norm_val = latest_candle["ATR_norm"]
+                                        atr_dollars = atr_norm_val * latest_candle["close"]
                                     
-                                    # Volatility (ATR)-Adaptive Take-Profit Multiplier
-                                    # High Volatility (ATR_norm >= 0.008) -> Smaller targets to lock profits
-                                    # Low Volatility (ATR_norm <= 0.003) -> Larger targets to capture extensions
-                                    base_tp = 2.0 if latest_candle["ADX"] >= 20.0 else 1.2
-                                    vol_factor = 1.0
-                                    if atr_norm_val > 0:
-                                        vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
-                                        vol_factor = max(0.75, min(1.5, vol_factor))
-                                    tp_multiplier = round(base_tp * vol_factor, 2)
-                                    print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
+                                        # Volatility (ATR)-Adaptive Take-Profit Multiplier
+                                        # High Volatility (ATR_norm >= 0.008) -> Smaller targets to lock profits
+                                        # Low Volatility (ATR_norm <= 0.003) -> Larger targets to capture extensions
+                                        base_tp = 2.0 if latest_candle["ADX"] >= 20.0 else 1.2
+                                        vol_factor = 1.0
+                                        if atr_norm_val > 0:
+                                            vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
+                                            vol_factor = max(0.75, min(1.5, vol_factor))
+                                        tp_multiplier = round(base_tp * vol_factor, 2)
+                                        print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
                                     
-                                    # Align stop loss and take profit multipliers dynamically from baseline TIMEFRAME_CONFIG or release-gate approved walk-forward state
-                                    optimized_cfg = bot_state.get("optimized_timeframe_config", {}).get(str(iv), {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
-                                    baseline_cfg = TIMEFRAME_CONFIG.get(str(iv), {
-                                        "lookahead": 10,
-                                        "sl_mult": 0.8,
-                                        "tp_mult_ranging": 1.45,
-                                        "tp_mult_trending": 1.75
-                                    })
-                                    # Merge approved optimizations over baseline defaults
-                                    cfg = {**baseline_cfg, **optimized_cfg}
-                                    adx_val = latest_candle.get("ADX", 0.0)
-                                    sl_multiplier = cfg.get("sl_mult", 1.0)
-                                    if adx_val >= 20.0:
-                                        tp_multiplier_adjusted = cfg.get("tp_mult_trending", 2.0)
-                                    else:
-                                        tp_multiplier_adjusted = cfg.get("tp_mult_ranging", 1.5)
-
-                                    # 1. Volatility (ATR Percentile) Adjustment (±5%)
-                                    atr_series = pd.to_numeric(df_completed["ATR"], errors="coerce").tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
-                                    vol_adj = 1.00
-                                    if atr_series is not None and len(atr_series.dropna()) > 10:
-                                        curr_atr = float(latest_candle.get("ATR", atr_dollars))
-                                        clean_atr = atr_series.dropna()
-                                        atr_percentile = float((clean_atr < curr_atr).mean() * 100.0) if len(clean_atr) > 0 else 50.0
-                                        if atr_percentile > 90.0:
-                                            vol_adj = 0.95  # Extreme volatility: tighten target before exhaustion reversal
-                                        elif atr_percentile < 20.0:
-                                            vol_adj = 1.05  # Quiet market: expand target for breakout extension
-                                    tp_multiplier_adjusted *= vol_adj
-
-                                    # 2. Session Liquidity Adjustment
-                                    curr_utc_hour = datetime.now(timezone.utc).hour
-                                    if 6 <= curr_utc_hour < 8:
-                                        session_factor = 0.95  # Late Asian session: lower liquidity
-                                    elif 12 <= curr_utc_hour < 16:
-                                        session_factor = 1.00  # London / NY overlap: prime liquidity
-                                    else:
-                                        session_factor = 0.98
-                                    tp_multiplier_adjusted *= session_factor
-
-                                    # 3. Walk-Forward Optimal Rounding (0.05 precision)
-                                    from trade_calculators import UnifiedTargetGenerator
-                                    tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
-                                        interval=str(iv), entry_price=float(latest_candle["close"]),
-                                        atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
-                                    )
-                                    tp_change = tp_m * atr_dollars
-
-                                    print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted:.2f}x (Vol: {vol_adj:.2f}x, Session: {session_factor:.2f}x)")
-                                    
-                                    # Maker execution: zero entry slippage for limit orders
-                                    slippage_pct = 0.0
-                                    raw_entry_price = float(latest_candle["close"])
-                                    entry_price = raw_entry_price
-
-                                    # Take-Profit distance tp_change resolved via UnifiedTargetGenerator above
-                                    
-                                    # Dynamically adjust Stop Loss multiplier based on prediction confidence
-                                    sl_multiplier_adjusted = sl_multiplier
-                                    if calibrated_confidence > dynamic_conf_threshold:
-                                        confidence_ratio = (calibrated_confidence - dynamic_conf_threshold) / (1.0 - dynamic_conf_threshold)
-                                        # Scale SL down by up to 30% for maximum confidence trades
-                                        sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
-                                        
-                                    # Refinements 3, 4, 7: Adaptive Structural Swing Stop & Recency Guard for 15m
-                                    if str(iv) == "15":
-                                        struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
-                                            df_recent=df_completed,
-                                            entry_price=entry_price,
-                                            direction=ml_trend,
-                                            atr_val=atr_dollars,
-                                            regime=regime_name,
-                                            volatility=atr_norm_val
-                                        )
-                                        stop_loss_price = struct_sl
-                                        raw_sl_dist = abs(entry_price - stop_loss_price)
-                                        
-                                        # Refinements 5 & 6: Dynamic Leverage Scaling & Floor
-                                        base_sl_pct = max(0.4, (atr_dollars * 0.75 / entry_price) * 100.0)
-                                        scaled_lev, is_valid_lev = trade_calculators.scale_leverage_for_fixed_risk(
-                                            base_leverage=7.5,
-                                            base_sl_pct=base_sl_pct,
-                                            structural_sl_pct=struct_sl_dist_pct
-                                        )
-                                        if not is_valid_lev:
-                                            print(f"[{symbol} 15m Filter] Trade skipped: Scaled leverage ({scaled_lev}x) below 1.5x floor limit.")
-                                            status_msg = "Skipped (Leverage Floor < 1.5x)"
-                                            all_pass = False
-
-                                        take_profit_price = (entry_price + tp_change) if ml_trend == "Bullish" else (entry_price - tp_change)
-                                        print(f"[15m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
-                                    else:
-                                        raw_sl_dist = risk_engine.calculate_final_stop_distance(
-                                            entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
-                                        )
-                                        if ml_trend == "Bullish":
-                                            stop_loss_price = entry_price - raw_sl_dist
-                                            take_profit_price = entry_price + tp_change
+                                        # Align stop loss and take profit multipliers dynamically from baseline TIMEFRAME_CONFIG or release-gate approved walk-forward state
+                                        optimized_cfg = bot_state.get("optimized_timeframe_config", {}).get(str(iv), {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
+                                        baseline_cfg = TIMEFRAME_CONFIG.get(str(iv), {
+                                            "lookahead": 10,
+                                            "sl_mult": 0.8,
+                                            "tp_mult_ranging": 1.45,
+                                            "tp_mult_trending": 1.75
+                                        })
+                                        # Merge approved optimizations over baseline defaults
+                                        cfg = {**baseline_cfg, **optimized_cfg}
+                                        adx_val = latest_candle.get("ADX", 0.0)
+                                        sl_multiplier = cfg.get("sl_mult", 1.0)
+                                        if adx_val >= 20.0:
+                                            tp_multiplier_adjusted = cfg.get("tp_mult_trending", 2.0)
                                         else:
-                                            stop_loss_price = entry_price + raw_sl_dist
-                                            take_profit_price = entry_price - tp_change
-                                        print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
+                                            tp_multiplier_adjusted = cfg.get("tp_mult_ranging", 1.5)
 
+                                        # 1. Volatility (ATR Percentile) Adjustment (±5%)
+                                        atr_series = pd.to_numeric(df_completed["ATR"], errors="coerce").tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
+                                        vol_adj = 1.00
+                                        if atr_series is not None and len(atr_series.dropna()) > 10:
+                                            curr_atr = float(latest_candle.get("ATR", atr_dollars))
+                                            clean_atr = atr_series.dropna()
+                                            atr_percentile = float((clean_atr < curr_atr).mean() * 100.0) if len(clean_atr) > 0 else 50.0
+                                            if atr_percentile > 90.0:
+                                                vol_adj = 0.95  # Extreme volatility: tighten target before exhaustion reversal
+                                            elif atr_percentile < 20.0:
+                                                vol_adj = 1.05  # Quiet market: expand target for breakout extension
+                                        tp_multiplier_adjusted *= vol_adj
 
-                                    # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
-                                    c_prob = float(calibrated_confidence)
-                                    current_hour_pkt = get_pkt_time().hour
-                                    is_golden_hour = 18 <= current_hour_pkt < 21
-                                    
-                                    # Pre-calculate active trade stats needed for dynamic sizing
-                                    total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
-                                    current_bal = bot_state.get("simulated_balance", 80.0)
-                                    if TRADE_MODE != "simulation":
-                                        real_bal = get_real_bybit_balance_cached(force=True)
-                                        if isinstance(real_bal, (int, float)) and real_bal > 0:
-                                            current_bal = real_bal
-                                    cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
-                                    
-                                    # Base size dynamic calculation using Risk Engine Conservative Kelly (Wilson CI / Bootstrap)
-                                    from config import (
-                                        MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC,
-                                        CVAR_TAIL_PERCENTILE, CVAR_FALLBACK, DAILY_LOSS_BUDGET_FRAC
-                                    )
-                                    _latest_pred = bot_state.get(f"latest_prediction_{iv}", {})
-                                    _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
-                                    scaled_kelly = risk_engine.compute_conservative_kelly(
-                                        calibrated_confidence=calibrated_confidence,
-                                        tp_multiplier=tp_multiplier_adjusted,
-                                        sl_multiplier=sl_multiplier,
-                                        interval=str(iv),
-                                        trade_history=bot_state.get("trade_history", []),
-                                        mcc_val=_mcc_val
-                                    )
-                                    
-                                    # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)
-                                    f_clamped = max(MIN_POSITION_BALANCE_FRAC, min(MAX_POSITION_BALANCE_FRAC, scaled_kelly))
-                                    
-                                    # Sizing before leverage
-                                    position_size_usd = current_bal * f_clamped
-                                    
-                                    # Covariance multiplier to account for existing correlations
-                                    position_size_usd = position_size_usd * cov_multiplier
-                                    
-                                    # Volatility Regime Sizing Multiplier (Sweet spot 1.2x boost, extreme vol 0.5x, flat chop 0.3x)
-                                    vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
-                                    position_size_usd = position_size_usd * vol_regime_mult
-                                    print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
-                                    
-                                    # CVaR (Expected Shortfall) Risk Constraint
-                                    try:
-                                        hist_close = df["close"].values
-                                        if len(hist_close) > 30:
-                                            returns_pct = (hist_close[1:] - hist_close[:-1]) / hist_close[:-1]
-                                            returns_sorted = np.sort(returns_pct)
-                                            alpha_idx = max(1, int(len(returns_sorted) * CVAR_TAIL_PERCENTILE))
-                                            tail_losses = returns_sorted[:alpha_idx]
-                                            cvar_95 = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else CVAR_FALLBACK
+                                        # 2. Session Liquidity Adjustment
+                                        curr_utc_hour = datetime.now(timezone.utc).hour
+                                        if 6 <= curr_utc_hour < 8:
+                                            session_factor = 0.95  # Late Asian session: lower liquidity
+                                        elif 12 <= curr_utc_hour < 16:
+                                            session_factor = 1.00  # London / NY overlap: prime liquidity
                                         else:
-                                            cvar_95 = CVAR_FALLBACK
-                                        daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
-                                        max_cvar_size = daily_loss_budget / (cvar_95 + 1e-8)
-                                        print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Risk Size Allowed: ${max_cvar_size:.2f}")
-                                        position_size_usd = min(position_size_usd, max_cvar_size)
-                                    except Exception as cvar_err:
-                                        print(f"[CVaR Error] {cvar_err}")
-                                    if is_golden_hour:
-                                        # Golden Hour: Double the target slot allocation size
-                                        position_size_usd = position_size_usd * 2.0
-                                        print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Golden Target: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
-                                    else:
-                                        print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Final Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
-                                        
-                                    # Clip to minimum Bybit order requirement (e.g. $2.0)
-                                    position_size_usd = max(2.0, position_size_usd)
-                                    original_kelly_size = float(position_size_usd) # Keep intended size pre-clamp
-                                    print(f"[{iv}m Trade Size Boundary Check] Final size before leverage (CVaR constrained): ${position_size_usd:.2f}")
+                                            session_factor = 0.98
+                                        tp_multiplier_adjusted *= session_factor
 
-                                    # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
-                                    kelly_fraction = scaled_kelly
-
-                                    # 3. Concurrent Position Limit Check
-                                    from config import MAX_CONCURRENT_POSITIONS
-                                    total_active_count = sum(len(bot_state.get(f"active_trade_{tf_k}", [])) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"])
-
-                                    # Ensure total size of active trades does not exceed the wallet balance
-                                    min_bal_limit = 2.0
-                                    min_size_limit = 2.0
-                                    
-                                    wallet_exceeded = False
-                                    if total_active_count >= MAX_CONCURRENT_POSITIONS:
-                                        log_event("WARNING", f"[{symbol} {iv}m] Skipped: MAX_CONCURRENT_POSITIONS ({MAX_CONCURRENT_POSITIONS}) reached")
-                                        status_msg = f"Skipped (Max Concurrent Positions {MAX_CONCURRENT_POSITIONS} Reached)"
-                                        wallet_exceeded = True
-                                    elif current_bal <= min_bal_limit:
-                                        print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f} to open new trades.")
-                                        status_msg = "Skipped (Insufficient Balance)"
-                                        wallet_exceeded = True
-                                        send_telegram_alert(
-                                            f"⚠️ *SIGNAL PASSED (SKIPPED - LOW BALANCE)* ⚠️\n"
-                                            f"• *Asset*: {symbol}\n"
-                                            f"• *Interval*: {iv}m\n"
-                                            f"• *Direction*: {ml_trend}\n"
-                                            f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
-                                            f"• *Detail*: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f}."
+                                        # 3. Walk-Forward Optimal Rounding (0.05 precision)
+                                        from trade_calculators import UnifiedTargetGenerator
+                                        tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+                                            interval=str(iv), entry_price=float(latest_candle["close"]),
+                                            atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
                                         )
-                                    elif total_active_size + position_size_usd > current_bal:
-                                        remaining_bal = current_bal - total_active_size
-                                        if remaining_bal >= min_size_limit:
-                                            print(f"[{symbol} {iv}m] Sizing scaled down from ${position_size_usd:.2f} to ${remaining_bal:.2f} to fit remaining wallet balance (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}).")
-                                            position_size_usd = remaining_bal
+                                        tp_change = tp_m * atr_dollars
+
+                                        print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted:.2f}x (Vol: {vol_adj:.2f}x, Session: {session_factor:.2f}x)")
+                                    
+                                        # Maker execution: zero entry slippage for limit orders
+                                        slippage_pct = 0.0
+                                        raw_entry_price = float(latest_candle["close"])
+                                        entry_price = raw_entry_price
+
+                                        # Take-Profit distance tp_change resolved via UnifiedTargetGenerator above
+                                    
+                                        # Dynamically adjust Stop Loss multiplier based on prediction confidence
+                                        sl_multiplier_adjusted = sl_multiplier
+                                        if calibrated_confidence > dynamic_conf_threshold:
+                                            confidence_ratio = (calibrated_confidence - dynamic_conf_threshold) / (1.0 - dynamic_conf_threshold)
+                                            # Scale SL down by up to 30% for maximum confidence trades
+                                            sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
+                                        
+                                        # Refinements 3, 4, 7: Adaptive Structural Swing Stop & Recency Guard for 15m
+                                        if str(iv) == "15":
+                                            struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
+                                                df_recent=df_completed,
+                                                entry_price=entry_price,
+                                                direction=ml_trend,
+                                                atr_val=atr_dollars,
+                                                regime=regime_name,
+                                                volatility=atr_norm_val
+                                            )
+                                            stop_loss_price = struct_sl
+                                            raw_sl_dist = abs(entry_price - stop_loss_price)
+                                        
+                                            # Refinements 5 & 6: Dynamic Leverage Scaling & Floor
+                                            base_sl_pct = max(0.4, (atr_dollars * 0.75 / entry_price) * 100.0)
+                                            scaled_lev, is_valid_lev = trade_calculators.scale_leverage_for_fixed_risk(
+                                                base_leverage=7.5,
+                                                base_sl_pct=base_sl_pct,
+                                                structural_sl_pct=struct_sl_dist_pct
+                                            )
+                                            if not is_valid_lev:
+                                                print(f"[{symbol} 15m Filter] Trade skipped: Scaled leverage ({scaled_lev}x) below 1.5x floor limit.")
+                                                status_msg = "Skipped (Leverage Floor < 1.5x)"
+                                                all_pass = False
+
+                                            take_profit_price = (entry_price + tp_change) if ml_trend == "Bullish" else (entry_price - tp_change)
+                                            print(f"[15m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
                                         else:
-                                            print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum ${min_size_limit:.2f} trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
-                                            status_msg = "Skipped (Exceeds Wallet)"
+                                            raw_sl_dist = risk_engine.calculate_final_stop_distance(
+                                                entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
+                                            )
+                                            if ml_trend == "Bullish":
+                                                stop_loss_price = entry_price - raw_sl_dist
+                                                take_profit_price = entry_price + tp_change
+                                            else:
+                                                stop_loss_price = entry_price + raw_sl_dist
+                                                take_profit_price = entry_price - tp_change
+                                            print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
+
+
+                                        # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
+                                        c_prob = float(calibrated_confidence)
+                                        current_hour_pkt = get_pkt_time().hour
+                                        is_golden_hour = 18 <= current_hour_pkt < 21
+                                    
+                                        # Pre-calculate active trade stats needed for dynamic sizing
+                                        total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                                        current_bal = bot_state.get("simulated_balance", 80.0)
+                                        if TRADE_MODE != "simulation":
+                                            real_bal = get_real_bybit_balance_cached(force=True)
+                                            if isinstance(real_bal, (int, float)) and real_bal > 0:
+                                                current_bal = real_bal
+                                        cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
+                                    
+                                        # Base size dynamic calculation using Risk Engine Conservative Kelly (Wilson CI / Bootstrap)
+                                        from config import (
+                                            MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC,
+                                            CVAR_TAIL_PERCENTILE, CVAR_FALLBACK, DAILY_LOSS_BUDGET_FRAC
+                                        )
+                                        _latest_pred = bot_state.get(f"latest_prediction_{iv}", {})
+                                        _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
+                                        scaled_kelly = risk_engine.compute_conservative_kelly(
+                                            calibrated_confidence=calibrated_confidence,
+                                            tp_multiplier=tp_multiplier_adjusted,
+                                            sl_multiplier=sl_multiplier,
+                                            interval=str(iv),
+                                            trade_history=bot_state.get("trade_history", []),
+                                            mcc_val=_mcc_val
+                                        )
+                                    
+                                        # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)
+                                        f_clamped = max(MIN_POSITION_BALANCE_FRAC, min(MAX_POSITION_BALANCE_FRAC, scaled_kelly))
+                                    
+                                        # Sizing before leverage
+                                        position_size_usd = current_bal * f_clamped
+                                    
+                                        # Covariance multiplier to account for existing correlations
+                                        position_size_usd = position_size_usd * cov_multiplier
+                                    
+                                        # Volatility Regime Sizing Multiplier (Sweet spot 1.2x boost, extreme vol 0.5x, flat chop 0.3x)
+                                        vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
+                                        position_size_usd = position_size_usd * vol_regime_mult
+                                        print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
+                                    
+                                        # CVaR (Expected Shortfall) Risk Constraint
+                                        try:
+                                            hist_close = df["close"].values
+                                            if len(hist_close) > 30:
+                                                returns_pct = (hist_close[1:] - hist_close[:-1]) / hist_close[:-1]
+                                                returns_sorted = np.sort(returns_pct)
+                                                alpha_idx = max(1, int(len(returns_sorted) * CVAR_TAIL_PERCENTILE))
+                                                tail_losses = returns_sorted[:alpha_idx]
+                                                cvar_95 = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else CVAR_FALLBACK
+                                            else:
+                                                cvar_95 = CVAR_FALLBACK
+                                            daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
+                                            max_cvar_size = daily_loss_budget / (cvar_95 + 1e-8)
+                                            print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Risk Size Allowed: ${max_cvar_size:.2f}")
+                                            position_size_usd = min(position_size_usd, max_cvar_size)
+                                        except Exception as cvar_err:
+                                            print(f"[CVaR Error] {cvar_err}")
+                                        if is_golden_hour:
+                                            # Golden Hour: Double the target slot allocation size
+                                            position_size_usd = position_size_usd * 2.0
+                                            print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Golden Target: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                        else:
+                                            print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Final Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                        
+                                        # Clip to minimum Bybit order requirement (e.g. $2.0)
+                                        position_size_usd = max(2.0, position_size_usd)
+                                        original_kelly_size = float(position_size_usd) # Keep intended size pre-clamp
+                                        print(f"[{iv}m Trade Size Boundary Check] Final size before leverage (CVaR constrained): ${position_size_usd:.2f}")
+
+                                        # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
+                                        kelly_fraction = scaled_kelly
+
+                                        # 3. Concurrent Position Limit Check
+                                        from config import MAX_CONCURRENT_POSITIONS
+                                        total_active_count = sum(len(bot_state.get(f"active_trade_{tf_k}", [])) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"])
+
+                                        # Ensure total size of active trades does not exceed the wallet balance
+                                        min_bal_limit = 2.0
+                                        min_size_limit = 2.0
+                                    
+                                        wallet_exceeded = False
+                                        if total_active_count >= MAX_CONCURRENT_POSITIONS:
+                                            log_event("WARNING", f"[{symbol} {iv}m] Skipped: MAX_CONCURRENT_POSITIONS ({MAX_CONCURRENT_POSITIONS}) reached")
+                                            status_msg = f"Skipped (Max Concurrent Positions {MAX_CONCURRENT_POSITIONS} Reached)"
+                                            wallet_exceeded = True
+                                        elif current_bal <= min_bal_limit:
+                                            print(f"[{symbol} {iv}m] Trade skipped: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f} to open new trades.")
+                                            status_msg = "Skipped (Insufficient Balance)"
                                             wallet_exceeded = True
                                             send_telegram_alert(
                                                 f"⚠️ *SIGNAL PASSED (SKIPPED - LOW BALANCE)* ⚠️\n"
@@ -6841,399 +6829,422 @@ def main():
                                                 f"• *Interval*: {iv}m\n"
                                                 f"• *Direction*: {ml_trend}\n"
                                                 f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
-                                                f"• *Detail*: Insufficient wallet balance to maintain minimum ${min_size_limit:.2f} size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f})."
+                                                f"• *Detail*: Wallet balance (${current_bal:.2f}) must be greater than ${min_bal_limit:.2f}."
                                             )
-
-                                    if not wallet_exceeded:
-                                        # Continuous Leverage Scaling: scale smoothly from 1x (at dynamic threshold) to 50x (at 100% confidence)
-                                        c = float(calibrated_confidence)
-                                        min_conf = dynamic_conf_threshold
-                                        if c >= min_conf:
-                                            leverage_val = 1.0 + (c - min_conf) / (1.0 - min_conf) * 49.0
-                                        else:
-                                            leverage_val = 1.0
-                                        
-                                        # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
-                                        stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
-                                        max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
-                                        
-                                        if symbol == "BTCUSDT":
-                                            lev_cap = 30.0
-                                        elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
-                                            lev_cap = 20.0
-                                        else:
-                                            lev_cap = 5.0
-                                        # Volatility-based leverage scaling cap
-                                        atr_pct_of_price = (atr_dollars / entry_price) * 100.0
-                                        if atr_pct_of_price > 3.0:
-                                            vol_lev_cap = 2.0 if symbol in ["BTCUSDT", "ETHUSDT"] else 1.0
-                                            lev_cap = min(lev_cap, vol_lev_cap)
-                                            print(f"[{symbol} {iv}m Volatility-Scaled Leverage] Extreme Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Capped leverage to {lev_cap}x.")
-                                        elif atr_pct_of_price > 1.5:
-                                            lev_cap = min(lev_cap, lev_cap * 0.5)
-                                            print(f"[{symbol} {iv}m Volatility-Scaled Leverage] High Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Halved leverage cap to {lev_cap}x.")
-                                        
-                                            
-                                        # Double leverage target and cap during Golden Hour (18:00 - 21:00 PKT)
-                                        current_hour_pkt = get_pkt_time().hour
-                                        if 18 <= current_hour_pkt < 21:
-                                            leverage_val *= 2.0
-                                            lev_cap *= 2.0
-                                        # Sharpe-Adaptive Leverage Multiplier (Dynamic drawdown safety)
-                                        sharpe_mult = calculate_recent_performance_leverage_multiplier(days=7)
-                                        leverage_val = leverage_val * sharpe_mult
-                                        lev_cap = lev_cap * sharpe_mult
-                                            
-                                        leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
-
-                                        # === FIX 1 & 3: COMBINED PRE-FLIGHT ENTRY VALIDATION ===
-                                        is_valid, adjusted_struct, struct_log = validate_trade_structure(
-                                            entry_price=entry_price,
-                                            stop_price=stop_loss_price,
-                                            tp_price=take_profit_price,
-                                            atr_dollars=atr_dollars,
-                                            leverage=leverage_val,
-                                            interval=iv,
-                                            symbol=symbol,
-                                            direction=ml_trend
-                                        )
-                                        if not is_valid:
-                                            print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Trade submission aborted: {struct_log}")
-                                            status_msg = "Skipped (Min R:R Floor Reject)"
-                                            continue
-
-                                        if struct_log != "OK":
-                                            print(f"[{symbol} {iv}m Pre-Flight Audit] {struct_log}")
-
-                                        stop_loss_price = adjusted_struct["stop_price"]
-                                        take_profit_price = adjusted_struct["tp_price"]
-                                        leverage_val = adjusted_struct["leverage"]
-
-                                        cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
-                                        lookahead = cfg.get("lookahead", 10)
-                                        duration_seconds = int(iv) * 60.0 * lookahead
-                                        import uuid
-                                        trade_uuid = str(uuid.uuid4())
-                                        # Calculate quantity (qty) in coins rounded according to symbol requirements
-                                        leveraged_size = position_size_usd * leverage_val
-                                        raw_qty = leveraged_size / entry_price
-                                        qty_str = format_bybit_qty(symbol, raw_qty)
-                                        qty_val = float(qty_str)
-                                         
-                                        original_notional = qty_val * entry_price
-                                        original_stop_dist = abs(entry_price - stop_loss_price)
-                                        original_risk_usd = (original_notional / entry_price) * original_stop_dist
-                                        is_oversized_trade = False
-
-                                        # Enforce minimum order value of 5.0 USDT (using 5.1 USDT as buffer)
-                                        min_order_value = 5.1
-                                        if qty_val * entry_price < min_order_value:
-                                            step = get_bybit_min_qty_step(symbol)
-                                            required_qty = min_order_value / entry_price
-                                            import math
-                                            if step > 0:
-                                                qty_val = math.ceil(required_qty / step) * step
-                                                qty_str = format_bybit_qty(symbol, qty_val)
-                                                qty_val = float(qty_str)
-                                                raw_qty = qty_val
-                                                
-                                            scaled_notional = qty_val * entry_price
-                                            
-                                            # Priority 1: Tighten stop distance proportionally to keep dollar risk constant
-                                            scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
-                                            new_stop_dist = original_stop_dist * scale_ratio
-                                            
-                                            # Enforce absolute floor: Never compress SL tighter than 0.60x ATR to prevent spread noise stop-outs
-                                            min_allowed_sl_dist = atr_dollars * 0.60
-                                            if new_stop_dist < min_allowed_sl_dist:
-                                                new_stop_dist = min_allowed_sl_dist
-                                                print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to 0.60x ATR (${min_allowed_sl_dist:.4f}) to protect against spread noise.")
-                                            
-                                            if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
-                                                new_sl_price = entry_price - new_stop_dist
+                                        elif total_active_size + position_size_usd > current_bal:
+                                            remaining_bal = current_bal - total_active_size
+                                            if remaining_bal >= min_size_limit:
+                                                print(f"[{symbol} {iv}m] Sizing scaled down from ${position_size_usd:.2f} to ${remaining_bal:.2f} to fit remaining wallet balance (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}).")
+                                                position_size_usd = remaining_bal
                                             else:
-                                                new_sl_price = entry_price + new_stop_dist
-
-                                                
-                                            scaled_risk_usd = (scaled_notional / entry_price) * new_stop_dist
-                                            
-                                            # Priority 2: Hard Cap - Never exceed 110% of approved original risk
-                                            if scaled_risk_usd > original_risk_usd * 1.10:
-                                                print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed 110% of approved risk (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
-                                                status_msg = "Skipped (Exceeds 110% Risk Cap)"
+                                                print(f"[{symbol} {iv}m] Trade skipped: Insufficient wallet balance to maintain minimum ${min_size_limit:.2f} trade size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f}).")
+                                                status_msg = "Skipped (Exceeds Wallet)"
                                                 wallet_exceeded = True
+                                                send_telegram_alert(
+                                                    f"⚠️ *SIGNAL PASSED (SKIPPED - LOW BALANCE)* ⚠️\n"
+                                                    f"• *Asset*: {symbol}\n"
+                                                    f"• *Interval*: {iv}m\n"
+                                                    f"• *Direction*: {ml_trend}\n"
+                                                    f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
+                                                    f"• *Detail*: Insufficient wallet balance to maintain minimum ${min_size_limit:.2f} size (Total Active: ${total_active_size:.2f}, Wallet: ${current_bal:.2f}, Proposed: ${position_size_usd:.2f})."
+                                                )
+
+                                        if not wallet_exceeded:
+                                            # Continuous Leverage Scaling: scale smoothly from 1x (at dynamic threshold) to 50x (at 100% confidence)
+                                            c = float(calibrated_confidence)
+                                            min_conf = dynamic_conf_threshold
+                                            if c >= min_conf:
+                                                leverage_val = 1.0 + (c - min_conf) / (1.0 - min_conf) * 49.0
                                             else:
-                                                stop_loss_price = new_sl_price
-                                                is_oversized_trade = True
-                                                print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Tightened SL from ${original_stop_dist:.2f} to ${new_stop_dist:.2f} to keep risk constant at ${scaled_risk_usd:.2f}.")
-
-                                        # Priority 3: Balance Guard - Remove auto-leverage escalation. If margin doesn't fit within 90% of balance, reject trade.
-                                        required_margin = (qty_val * entry_price) / leverage_val
+                                                leverage_val = 1.0
                                         
-                                        # Post-Floor Geometry & Economic Viability Recheck
-                                        all_pass = True
-                                        try:
-                                            trade_calculators.assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=f"{symbol} {iv}m")
-                                        except ValueError as geom_err:
-                                            log_event("ERROR", str(geom_err))
-                                            status_msg = f"Skipped (Invalid {ml_trend} Geometry)"
-                                            all_pass = False
+                                            # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
+                                            stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
+                                            max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
                                         
-                                        if all_pass:
-                                            # Post-Floor R:R & Economic Re-check (Closing the loop on widened SL)
-                                            final_sl_dist = abs(entry_price - stop_loss_price)
-                                            final_tp_dist = abs(take_profit_price - entry_price)
-                                            final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
-                                            cost_frac = 0.0016
-                                            required_p = (1.0 / (1.0 + max(1e-9, final_rr))) + cost_frac
+                                            if symbol == "BTCUSDT":
+                                                lev_cap = 30.0
+                                            elif symbol in ["ETHUSDT", "BNBUSDT", "SOLUSDT"]:
+                                                lev_cap = 20.0
+                                            else:
+                                                lev_cap = 5.0
+                                            # Volatility-based leverage scaling cap
+                                            atr_pct_of_price = (atr_dollars / entry_price) * 100.0
+                                            if atr_pct_of_price > 3.0:
+                                                vol_lev_cap = 2.0 if symbol in ["BTCUSDT", "ETHUSDT"] else 1.0
+                                                lev_cap = min(lev_cap, vol_lev_cap)
+                                                print(f"[{symbol} {iv}m Volatility-Scaled Leverage] Extreme Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Capped leverage to {lev_cap}x.")
+                                            elif atr_pct_of_price > 1.5:
+                                                lev_cap = min(lev_cap, lev_cap * 0.5)
+                                                print(f"[{symbol} {iv}m Volatility-Scaled Leverage] High Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Halved leverage cap to {lev_cap}x.")
+                                        
+                                            
+                                            # Double leverage target and cap during Golden Hour (18:00 - 21:00 PKT)
+                                            current_hour_pkt = get_pkt_time().hour
+                                            if 18 <= current_hour_pkt < 21:
+                                                leverage_val *= 2.0
+                                                lev_cap *= 2.0
+                                            # Sharpe-Adaptive Leverage Multiplier (Dynamic drawdown safety)
+                                            sharpe_mult = calculate_recent_performance_leverage_multiplier(days=7)
+                                            leverage_val = leverage_val * sharpe_mult
+                                            lev_cap = lev_cap * sharpe_mult
+                                            
+                                            leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
-                                            if calibrated_confidence < required_p:
-                                                log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {required_p:.3f}. Aborting entry.")
-                                                status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
+                                            # === FIX 1 & 3: COMBINED PRE-FLIGHT ENTRY VALIDATION ===
+                                            is_valid, adjusted_struct, struct_log = validate_trade_structure(
+                                                entry_price=entry_price,
+                                                stop_price=stop_loss_price,
+                                                tp_price=take_profit_price,
+                                                atr_dollars=atr_dollars,
+                                                leverage=leverage_val,
+                                                interval=iv,
+                                                symbol=symbol,
+                                                direction=ml_trend
+                                            )
+                                            if not is_valid:
+                                                print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Trade submission aborted: {struct_log}")
+                                                status_msg = "Skipped (Min R:R Floor Reject)"
+                                                continue
+
+                                            if struct_log != "OK":
+                                                print(f"[{symbol} {iv}m Pre-Flight Audit] {struct_log}")
+
+                                            stop_loss_price = adjusted_struct["stop_price"]
+                                            take_profit_price = adjusted_struct["tp_price"]
+                                            leverage_val = adjusted_struct["leverage"]
+
+                                            cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
+                                            lookahead = cfg.get("lookahead", 10)
+                                            duration_seconds = int(iv) * 60.0 * lookahead
+                                            import uuid
+                                            trade_uuid = str(uuid.uuid4())
+                                            # Calculate quantity (qty) in coins rounded according to symbol requirements
+                                            leveraged_size = position_size_usd * leverage_val
+                                            raw_qty = leveraged_size / entry_price
+                                            qty_str = format_bybit_qty(symbol, raw_qty)
+                                            qty_val = float(qty_str)
+                                         
+                                            original_notional = qty_val * entry_price
+                                            original_stop_dist = abs(entry_price - stop_loss_price)
+                                            original_risk_usd = (original_notional / entry_price) * original_stop_dist
+                                            is_oversized_trade = False
+
+                                            # Enforce minimum order value of 5.0 USDT (using 5.1 USDT as buffer)
+                                            min_order_value = 5.1
+                                            if qty_val * entry_price < min_order_value:
+                                                step = get_bybit_min_qty_step(symbol)
+                                                required_qty = min_order_value / entry_price
+                                                import math
+                                                if step > 0:
+                                                    qty_val = math.ceil(required_qty / step) * step
+                                                    qty_str = format_bybit_qty(symbol, qty_val)
+                                                    qty_val = float(qty_str)
+                                                    raw_qty = qty_val
+                                                
+                                                scaled_notional = qty_val * entry_price
+                                            
+                                                # Priority 1: Tighten stop distance proportionally to keep dollar risk constant
+                                                scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
+                                                new_stop_dist = original_stop_dist * scale_ratio
+                                            
+                                                # Enforce absolute floor: Never compress SL tighter than 0.60x ATR to prevent spread noise stop-outs
+                                                min_allowed_sl_dist = atr_dollars * 0.60
+                                                if new_stop_dist < min_allowed_sl_dist:
+                                                    new_stop_dist = min_allowed_sl_dist
+                                                    print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to 0.60x ATR (${min_allowed_sl_dist:.4f}) to protect against spread noise.")
+                                            
+                                                if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
+                                                    new_sl_price = entry_price - new_stop_dist
+                                                else:
+                                                    new_sl_price = entry_price + new_stop_dist
+
+                                                
+                                                scaled_risk_usd = (scaled_notional / entry_price) * new_stop_dist
+                                            
+                                                # Priority 2: Hard Cap - Never exceed 110% of approved original risk
+                                                if scaled_risk_usd > original_risk_usd * 1.10:
+                                                    print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed 110% of approved risk (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
+                                                    status_msg = "Skipped (Exceeds 110% Risk Cap)"
+                                                    wallet_exceeded = True
+                                                else:
+                                                    stop_loss_price = new_sl_price
+                                                    is_oversized_trade = True
+                                                    print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Tightened SL from ${original_stop_dist:.2f} to ${new_stop_dist:.2f} to keep risk constant at ${scaled_risk_usd:.2f}.")
+
+                                            # Priority 3: Balance Guard - Remove auto-leverage escalation. If margin doesn't fit within 90% of balance, reject trade.
+                                            required_margin = (qty_val * entry_price) / leverage_val
+                                        
+                                            # Post-Floor Geometry & Economic Viability Recheck
+                                            all_pass = True
+                                            try:
+                                                trade_calculators.assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=f"{symbol} {iv}m")
+                                            except ValueError as geom_err:
+                                                log_event("ERROR", str(geom_err))
+                                                status_msg = f"Skipped (Invalid {ml_trend} Geometry)"
                                                 all_pass = False
                                         
-                                        if not all_pass:
-                                            wallet_exceeded = True
+                                            if all_pass:
+                                                # Post-Floor R:R & Economic Re-check (Closing the loop on widened SL)
+                                                final_sl_dist = abs(entry_price - stop_loss_price)
+                                                final_tp_dist = abs(take_profit_price - entry_price)
+                                                final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
+                                                cost_frac = 0.0016
+                                                required_p = (1.0 / (1.0 + max(1e-9, final_rr))) + cost_frac
+
+                                                if calibrated_confidence < required_p:
+                                                    log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {required_p:.3f}. Aborting entry.")
+                                                    status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
+                                                    all_pass = False
                                         
-                                        if not wallet_exceeded and required_margin > current_bal * 0.90:
-                                            print(f"[{symbol} {iv}m Margin Guard] REJECTED: Required margin (${required_margin:.2f}) exceeds 90% of available wallet balance (${current_bal:.2f}). Trade entry aborted.")
-                                            status_msg = "Skipped (Exceeds Wallet Margin)"
-                                            wallet_exceeded = True
+                                            if not all_pass:
+                                                wallet_exceeded = True
+                                        
+                                            if not wallet_exceeded and required_margin > current_bal * 0.90:
+                                                print(f"[{symbol} {iv}m Margin Guard] REJECTED: Required margin (${required_margin:.2f}) exceeds 90% of available wallet balance (${current_bal:.2f}). Trade entry aborted.")
+                                                status_msg = "Skipped (Exceeds Wallet Margin)"
+                                                wallet_exceeded = True
 
-                                        # Adaptive Volume Gate Check
-                                        vol_pass, vol_msg, vol_pctile = adaptive_volume_gate.check(symbol, kline_df=df_completed)
-                                        print(f"[{symbol} {iv}m Volume Gate] {vol_msg}")
-                                        if not vol_pass:
-                                            print(f"[{symbol} {iv}m Volume Gate Block] Trade entry aborted.")
-                                            status_msg = "Skipped (Volume Gate Block)"
-                                            wallet_exceeded = True
-                                            bybit_success = False
+                                            # Adaptive Volume Gate Check
+                                            vol_pass, vol_msg, vol_pctile = adaptive_volume_gate.check(symbol, kline_df=df_completed)
+                                            print(f"[{symbol} {iv}m Volume Gate] {vol_msg}")
+                                            if not vol_pass:
+                                                print(f"[{symbol} {iv}m Volume Gate Block] Trade entry aborted.")
+                                                status_msg = "Skipped (Volume Gate Block)"
+                                                wallet_exceeded = True
+                                                bybit_success = False
 
-                                        # Pre-Trade Risk Checklist Check
-                                        pred_info = bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
-                                        if pred_info.get("is_fallback", False) or pred_info.get("signal_source") == "RULE_BASED_FALLBACK":
-                                            position_size_usd *= 0.50
-                                            print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
+                                            # Pre-Trade Risk Checklist Check
+                                            pred_info = bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
+                                            if pred_info.get("is_fallback", False) or pred_info.get("signal_source") == "RULE_BASED_FALLBACK":
+                                                position_size_usd *= 0.50
+                                                print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
 
-                                        active_trades_list = [t for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])]
-                                        df_dict = {symbol: df_completed}
-                                        for t in active_trades_list:
-                                            pos_sym = t.get("symbol")
-                                            if pos_sym and pos_sym != symbol and pos_sym not in df_dict:
-                                                try:
-                                                    df_pos = get_history(symbol=pos_sym, interval=str(iv), limit=100)
-                                                    if df_pos is not None and not df_pos.empty:
-                                                        df_dict[pos_sym] = df_pos
-                                                except Exception:
-                                                    pass
-                                        log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
-                                        rec = DecisionRecord(symbol=symbol, interval=str(iv))
-                                        rec.snapshot(
-                                            prediction=pred_info,
-                                            equity=float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))),
-                                            open_positions_count=len(active_trades_list),
-                                            wallet_exceeded=wallet_exceeded
-                                        )
-                                        rec.signal_source      = str(pred_info.get("signal_source") or "RULE_BASED_FALLBACK")
-                                        rec.is_fallback        = int(pred_info.get("is_fallback", False))
-                                        rec.direction          = ml_trend
-                                        rec.raw_confidence     = pred_info.get("raw_confidence")
-                                        rec.calibrated_conf    = pred_info.get("calibrated_confidence")
-                                        rec.calibrator_version = pred_info.get("calibrator_version")
-                                        rec.calibrator_ece     = pred_info.get("calibrator_ece")
-                                        rec.model_version      = pred_info.get("model_version")
-                                        rec.feature_hash       = pred_info.get("feature_contract_hash") or pred_info.get("feature_hash")
-                                        rec.manifest_schema    = pred_info.get("manifest_schema_version")
-                                        rec.git_sha            = pred_info.get("git_sha")
-                                        rec.regime             = pred_info.get("regime_mode") or pred_info.get("regime")
-                                        rec.adx                = pred_info.get("adx")
-                                        rec.atr_norm           = pred_info.get("atr_norm")
-                                        rec.liquidity_score    = bot_state.get("liquidity_score", 1.0)
-                                        rec.position_size_usd  = position_size_usd
-                                        rec.leverage           = leverage_val
-
-                                        try:
-                                            passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
-                                                symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=rec
+                                            active_trades_list = [t for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])]
+                                            df_dict = {symbol: df_completed}
+                                            for t in active_trades_list:
+                                                pos_sym = t.get("symbol")
+                                                if pos_sym and pos_sym != symbol and pos_sym not in df_dict:
+                                                    try:
+                                                        df_pos = get_history(symbol=pos_sym, interval=str(iv), limit=100)
+                                                        if df_pos is not None and not df_pos.empty:
+                                                            df_dict[pos_sym] = df_pos
+                                                    except Exception:
+                                                        pass
+                                            log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
+                                            # rec already initialized at start of evaluation
+                                            rec.snapshot(
+                                                prediction=pred_info,
+                                                equity=float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))),
+                                                open_positions_count=len(active_trades_list),
+                                                wallet_exceeded=wallet_exceeded
                                             )
-                                            rec.outcome = "EXECUTED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
-                                            rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else checklist_msg
-                                            if passed_checklist and not wallet_exceeded:
-                                                rec.position_size_usd = capped_size * dd_mult
-                                                rec.trade_id = f"{symbol}_{trade_uuid}"
-                                        except Exception as risk_err:
-                                            rec.outcome = "ERROR"
-                                            rec.reject_reason = f"Risk checklist exception: {risk_err}"
-                                            print(f"[{symbol} {iv}m CRITICAL RISK CHECKLIST EXCEPTION] {risk_err}. Aborting trade entry (Fail-Closed).")
-                                            passed_checklist = False
-                                            checklist_msg = f"REJECTED: Risk Checklist Exception ({risk_err})"
-                                            dd_mult = 0.0
-                                            capped_size = 0.0
-                                        finally:
-                                            write_decision(rec)
+                                            rec.signal_source      = str(pred_info.get("signal_source") or "RULE_BASED_FALLBACK")
+                                            rec.is_fallback        = int(pred_info.get("is_fallback", False))
+                                            rec.direction          = ml_trend
+                                            rec.raw_confidence     = pred_info.get("raw_confidence")
+                                            rec.calibrated_conf    = pred_info.get("calibrated_confidence")
+                                            rec.calibrator_version = pred_info.get("calibrator_version")
+                                            rec.calibrator_ece     = pred_info.get("calibrator_ece")
+                                            rec.model_version      = pred_info.get("model_version")
+                                            rec.feature_hash       = pred_info.get("feature_contract_hash") or pred_info.get("feature_hash")
+                                            rec.manifest_schema    = pred_info.get("manifest_schema_version")
+                                            rec.git_sha            = pred_info.get("git_sha")
+                                            rec.regime             = pred_info.get("regime_mode") or pred_info.get("regime")
+                                            rec.adx                = pred_info.get("adx")
+                                            rec.atr_norm           = pred_info.get("atr_norm")
+                                            rec.liquidity_score    = bot_state.get("liquidity_score", 1.0)
+                                            rec.position_size_usd  = position_size_usd
+                                            rec.leverage           = leverage_val
 
-                                        print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
-                                        if not passed_checklist or wallet_exceeded:
-                                            print(f"[{symbol} {iv}m Risk Checklist Block] Trade entry aborted.")
-                                            if not passed_checklist:
-                                                status_msg = "Skipped (Risk Checklist Block)"
-                                            wallet_exceeded = True
-                                            bybit_success = False
-                                        else:
-                                            position_size_usd = capped_size * dd_mult
+                                            try:
+                                                passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
+                                                    symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=rec
+                                                )
+                                                rec.outcome = "EXECUTED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
+                                                rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else checklist_msg
+                                                if passed_checklist and not wallet_exceeded:
+                                                    rec.position_size_usd = capped_size * dd_mult
+                                                    rec.trade_id = f"{symbol}_{trade_uuid}"
+                                            except Exception as risk_err:
+                                                rec.outcome = "ERROR"
+                                                rec.reject_reason = f"Risk checklist exception: {risk_err}"
+                                                print(f"[{symbol} {iv}m CRITICAL RISK CHECKLIST EXCEPTION] {risk_err}. Aborting trade entry (Fail-Closed).")
+                                                passed_checklist = False
+                                                checklist_msg = f"REJECTED: Risk Checklist Exception ({risk_err})"
+                                                dd_mult = 0.0
+                                                capped_size = 0.0
+                                            finally:
+                                                pass
 
-                                            # Set Bybit Leverage and Place Order if in live/testnet mode
-                                            bybit_success = True
-                                            bybit_order_id = None
-                                            bybit_scale_out_order_id = None
+                                            print(f"[{symbol} {iv}m Pre-Trade Checklist] {checklist_msg}")
+                                            if not passed_checklist or wallet_exceeded:
+                                                print(f"[{symbol} {iv}m Risk Checklist Block] Trade entry aborted.")
+                                                if not passed_checklist:
+                                                    status_msg = "Skipped (Risk Checklist Block)"
+                                                wallet_exceeded = True
+                                                bybit_success = False
+                                            else:
+                                                position_size_usd = capped_size * dd_mult
+
+                                                # Set Bybit Leverage and Place Order if in live/testnet mode
+                                                bybit_success = True
+                                                bybit_order_id = None
+                                                bybit_scale_out_order_id = None
                                             
-                                            if TRADE_MODE != "simulation":
-                                                # Live trading execution offloaded to background thread to minimize latency
+                                                if TRADE_MODE != "simulation":
+                                                    # Live trading execution offloaded to background thread to minimize latency
+                                                    just_opened_symbols.add(symbol)
+                                                    if bybit_success:
+                                                        with active_execution_lock:
+                                                            active_execution_symbols.add(symbol)
+                                                        actual_qty = raw_qty if raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
+                                                        actual_notional_val = float(actual_qty * entry_price)
+                                                        actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
+                                                        threading.Thread(
+                                                            target=execute_bybit_trade_async,
+                                                            args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size),
+                                                            daemon=True
+                                                        ).start()
+                                                        bybit_success = False # Skip the simulation path for this trade
+
+                                            if bybit_success:
+                                                actual_notional_val = float(actual_qty * entry_price)
+                                                actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
+                                                actual_size_usd = actual_margin_usd
+                                                active_trade = {
+                                                    "trade_id": f"{symbol}_{trade_uuid}",
+                                                    "bybit_order_id": bybit_order_id,
+                                                    "bybit_scale_out_order_id": bybit_scale_out_order_id,
+                                                    "symbol": symbol,
+                                                    "entry_price": float(entry_price),
+                                                    "predicted_price": float(predicted_price),
+                                                    "stop_loss": float(stop_loss_price),
+                                                    "take_profit": float(take_profit_price),
+                                                    "direction": str(ml_trend),
+                                                    "end_time": float(time.time() + duration_seconds),
+                                                    "entry_time": int(time.time() * 1000),
+                                                    "atr_dollars": float(atr_dollars),
+                                                    "highest_price": float(entry_price),
+                                                    "lowest_price": float(entry_price),
+                                                    "break_even_triggered": False,
+                                                    "half_closed": False,
+                                                    "original_size": float(position_size_usd),
+                                                    "position_size_usd": actual_size_usd,
+                                                    "scaled_out_pnl": 0.0,
+                                                    "kelly_fraction": float(kelly_fraction),
+                                                    "leverage": float(leverage_val),
+                                                    "confidence": float(calibrated_confidence),
+                                                    "qty": float(actual_qty),
+                                                    "original_qty": float(actual_qty),
+                                                    "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
+                                                }
+                                            
+                                                # Send Telegram alert for successful prediction/trade entry
+                                                entry_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                                send_telegram_alert(
+                                                    f"🟢 *POSITION OPENED (SUCCESSFUL SIGNAL)* 🟢\n"
+                                                    f"• *Asset*: {symbol}\n"
+                                                    f"• *Interval*: {iv}m\n"
+                                                    f"• *Direction*: {ml_trend}\n"
+                                                    f"• *Entry Price*: ${float(entry_price):.4f}\n"
+                                                    f"• *Entry Time*: {entry_time_str}\n"
+                                                    f"• *Take Profit*: ${float(take_profit_price):.4f}\n"
+                                                    f"• *Stop Loss*: ${float(stop_loss_price):.4f}\n"
+                                                    f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
+                                                    f"• *Leverage*: {leverage_val:.1f}x\n"
+                                                    f"• *Position Size (Margin)*: ${actual_margin_usd:.2f} (Value: ${actual_notional_val:.2f})\n"
+                                                    f"• *Execution Mode*: {TRADE_MODE.upper()}"
+                                                )
+                                            
+                                                with active_trades_lock:
+                                                    current_trades = bot_state.get(active_trade_key, [])
+                                                    if not isinstance(current_trades, list):
+                                                        current_trades = []
+                                                    current_trades = list(current_trades)
+                                                    current_trades.append(active_trade)
+                                                    bot_state[active_trade_key] = current_trades
+                                            
+                                                # Mark symbol as opened this cycle — prevents duplicate opens due to Bybit sync latency
                                                 just_opened_symbols.add(symbol)
-                                                if bybit_success:
-                                                    with active_execution_lock:
-                                                        active_execution_symbols.add(symbol)
-                                                    actual_qty = raw_qty if raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
-                                                    actual_notional_val = float(actual_qty * entry_price)
-                                                    actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
-                                                    threading.Thread(
-                                                        target=execute_bybit_trade_async,
-                                                        args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size),
-                                                        daemon=True
-                                                    ).start()
-                                                    bybit_success = False # Skip the simulation path for this trade
-
-                                        if bybit_success:
-                                            actual_notional_val = float(actual_qty * entry_price)
-                                            actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
-                                            actual_size_usd = actual_margin_usd
-                                            active_trade = {
-                                                "trade_id": f"{symbol}_{trade_uuid}",
-                                                "bybit_order_id": bybit_order_id,
-                                                "bybit_scale_out_order_id": bybit_scale_out_order_id,
-                                                "symbol": symbol,
-                                                "entry_price": float(entry_price),
-                                                "predicted_price": float(predicted_price),
-                                                "stop_loss": float(stop_loss_price),
-                                                "take_profit": float(take_profit_price),
-                                                "direction": str(ml_trend),
-                                                "end_time": float(time.time() + duration_seconds),
-                                                "entry_time": int(time.time() * 1000),
-                                                "atr_dollars": float(atr_dollars),
-                                                "highest_price": float(entry_price),
-                                                "lowest_price": float(entry_price),
-                                                "break_even_triggered": False,
-                                                "half_closed": False,
-                                                "original_size": float(position_size_usd),
-                                                "position_size_usd": actual_size_usd,
-                                                "scaled_out_pnl": 0.0,
-                                                "kelly_fraction": float(kelly_fraction),
-                                                "leverage": float(leverage_val),
-                                                "confidence": float(calibrated_confidence),
-                                                "qty": float(actual_qty),
-                                                "original_qty": float(actual_qty),
-                                                "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0
-                                            }
+                                                # Sync positions immediately to load live Bybit state parameters
+                                                if TRADE_MODE != "simulation":
+                                                    sync_active_positions_from_bybit()
                                             
-                                            # Send Telegram alert for successful prediction/trade entry
-                                            entry_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                            send_telegram_alert(
-                                                f"🟢 *POSITION OPENED (SUCCESSFUL SIGNAL)* 🟢\n"
-                                                f"• *Asset*: {symbol}\n"
-                                                f"• *Interval*: {iv}m\n"
-                                                f"• *Direction*: {ml_trend}\n"
-                                                f"• *Entry Price*: ${float(entry_price):.4f}\n"
-                                                f"• *Entry Time*: {entry_time_str}\n"
-                                                f"• *Take Profit*: ${float(take_profit_price):.4f}\n"
-                                                f"• *Stop Loss*: ${float(stop_loss_price):.4f}\n"
-                                                f"• *Calibrated Confidence*: {calibrated_confidence * 100:.2f}%\n"
-                                                f"• *Leverage*: {leverage_val:.1f}x\n"
-                                                f"• *Position Size (Margin)*: ${actual_margin_usd:.2f} (Value: ${actual_notional_val:.2f})\n"
-                                                f"• *Execution Mode*: {TRADE_MODE.upper()}"
-                                            )
+                                                # Deduct size from wallet balance immediately (only in simulation)
+                                                if TRADE_MODE == "simulation":
+                                                    bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
                                             
-                                            with active_trades_lock:
-                                                current_trades = bot_state.get(active_trade_key, [])
-                                                if not isinstance(current_trades, list):
-                                                    current_trades = []
-                                                current_trades = list(current_trades)
-                                                current_trades.append(active_trade)
-                                                bot_state[active_trade_key] = current_trades
-                                            
-                                            # Mark symbol as opened this cycle — prevents duplicate opens due to Bybit sync latency
-                                            just_opened_symbols.add(symbol)
-                                            # Sync positions immediately to load live Bybit state parameters
-                                            if TRADE_MODE != "simulation":
-                                                sync_active_positions_from_bybit()
-                                            
-                                            # Deduct size from wallet balance immediately (only in simulation)
-                                            if TRADE_MODE == "simulation":
-                                                bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
-                                            
-                                            print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
-                                else:
-                                    status_msg = "Skipped (Confluence Failed)"
-                                    failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
-                                    print("--------------------------------------------------")
-                                    print(f"CONFLUENCE RESULT: REJECTED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score too low')})")
-                                    print(f"Failed checks: {', '.join(failed_list)}")
-                                    print("==================================================\n")
+                                                print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
+                                    else:
+                                        status_msg = "Skipped (Confluence Failed)"
+                                        failed_list = [name.replace('_', ' ') for name, res_val in confluence_results.items() if not res_val["pass"] and name != '_Score_Summary']
+                                        print("--------------------------------------------------")
+                                        print(f"CONFLUENCE RESULT: REJECTED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score too low')})")
+                                        print(f"Failed checks: {', '.join(failed_list)}")
+                                        print("==================================================\n")
                         
 
 
-                        # Update existing prediction from SignalEvaluator or append new entry with final live gate status
-                        matched_pred = None
-                        c_ts_target = int(latest_completed_ts * 1000) if latest_completed_ts < 1e11 else int(latest_completed_ts)
-                        window_ms = int(iv) * 60 * 1000
-                        for p in reversed(bot_state.get("prediction_history", [])):
-                            p_c_ts = p.get("candle_timestamp", 0)
-                            p_c_ts_conv = int(p_c_ts * 1000) if p_c_ts < 1e11 else int(p_c_ts)
-                            if abs(p_c_ts_conv - c_ts_target) <= window_ms and str(p.get("interval")) == str(iv) and str(p.get("symbol")) == str(symbol):
-                                matched_pred = p
-                                break
+                            # Update existing prediction from SignalEvaluator or append new entry with final live gate status
+                            matched_pred = None
+                            c_ts_target = int(latest_completed_ts * 1000) if latest_completed_ts < 1e11 else int(latest_completed_ts)
+                            window_ms = int(iv) * 60 * 1000
+                            for p in reversed(bot_state.get("prediction_history", [])):
+                                p_c_ts = p.get("candle_timestamp", 0)
+                                p_c_ts_conv = int(p_c_ts * 1000) if p_c_ts < 1e11 else int(p_c_ts)
+                                if abs(p_c_ts_conv - c_ts_target) <= window_ms and str(p.get("interval")) == str(iv) and str(p.get("symbol")) == str(symbol):
+                                    matched_pred = p
+                                    break
 
-                        if matched_pred is not None:
-                            matched_pred["status"] = str(status_msg)
-                            matched_pred["direction"] = str(ml_trend)
-                            matched_pred["ref_price"] = float(latest_candle["close"])
-                            matched_pred["predicted_change"] = float(pred_change)
-                            matched_pred["predicted_price"] = float(predicted_price)
-                            matched_pred["calibrated_confidence"] = float(calibrated_confidence)
-                            matched_pred["raw_confidence"] = float(ml_confidence)
-                            matched_pred["dynamic_threshold"] = float(dynamic_conf_threshold)
-                            matched_pred["threshold_base"] = float(economic_base_threshold) if 'economic_base_threshold' in locals() else None
-                            matched_pred["threshold_adjustments"] = adjustments_applied if 'adjustments_applied' in locals() else []
-                        else:
-                            bot_state["prediction_history"].append({
-                                "symbol": symbol,
-                                "timestamp": float(time.time()),
-                                "candle_timestamp": c_ts_target,
-                                "interval": str(iv),
-                                "direction": str(ml_trend),
-                                "ref_price": float(latest_candle["close"]),
-                                "predicted_change": float(pred_change),
-                                "predicted_price": float(predicted_price),
-                                "status": str(status_msg),
-                                "calibrated_confidence": float(calibrated_confidence),
-                                "raw_confidence": float(ml_confidence),
-                                "dynamic_threshold": float(dynamic_conf_threshold),
-                                "threshold_base": float(economic_base_threshold) if 'economic_base_threshold' in locals() else None,
-                                "threshold_adjustments": adjustments_applied if 'adjustments_applied' in locals() else [],
-                                "evaluation": {
-                                    "evaluated": False,
-                                    "exit_price": None,
-                                    "change": None,
-                                    "change_pct": None,
-                                    "success": None
-                                }
-                            })
+                            if matched_pred is not None:
+                                matched_pred["status"] = str(status_msg)
+                                matched_pred["direction"] = str(ml_trend)
+                                matched_pred["ref_price"] = float(latest_candle["close"])
+                                matched_pred["predicted_change"] = float(pred_change)
+                                matched_pred["predicted_price"] = float(predicted_price)
+                                matched_pred["calibrated_confidence"] = float(calibrated_confidence)
+                                matched_pred["raw_confidence"] = float(ml_confidence)
+                                matched_pred["dynamic_threshold"] = float(dynamic_conf_threshold)
+                                matched_pred["threshold_base"] = float(economic_base_threshold) if 'economic_base_threshold' in locals() else None
+                                matched_pred["threshold_adjustments"] = adjustments_applied if 'adjustments_applied' in locals() else []
+                            else:
+                                bot_state["prediction_history"].append({
+                                    "symbol": symbol,
+                                    "timestamp": float(time.time()),
+                                    "candle_timestamp": c_ts_target,
+                                    "interval": str(iv),
+                                    "direction": str(ml_trend),
+                                    "ref_price": float(latest_candle["close"]),
+                                    "predicted_change": float(pred_change),
+                                    "predicted_price": float(predicted_price),
+                                    "status": str(status_msg),
+                                    "calibrated_confidence": float(calibrated_confidence),
+                                    "raw_confidence": float(ml_confidence),
+                                    "dynamic_threshold": float(dynamic_conf_threshold),
+                                    "threshold_base": float(economic_base_threshold) if 'economic_base_threshold' in locals() else None,
+                                    "threshold_adjustments": adjustments_applied if 'adjustments_applied' in locals() else [],
+                                    "evaluation": {
+                                        "evaluated": False,
+                                        "exit_price": None,
+                                        "change": None,
+                                        "change_pct": None,
+                                        "success": None
+                                    }
+                                })
                             
-                            if len(bot_state["prediction_history"]) > 200:
-                                bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
+                                if len(bot_state["prediction_history"]) > 200:
+                                    bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
                         
-                        evaluate_predictions(df_completed, iv, symbol)
-                        save_history()
+                            evaluate_predictions(df_completed, iv, symbol)
+                            save_history()
                         
+                    finally:
+                        rec.status_msg = status_msg
+                        if not hasattr(rec, "outcome") or not rec.outcome:
+                            rec.outcome = "EXECUTED" if placed else "SKIPPED"
+                        write_decision(rec)
+                        log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
                         last_processed_timestamps[last_ts_key] = latest_completed_ts
             except Exception as e:
                 import traceback
