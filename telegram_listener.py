@@ -530,9 +530,15 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                     args = parts[1:] if len(parts) > 1 else []
 
                     if cmd in ["status"]:
+                        bal_info = get_live_bybit_wallet_details()
                         with bot_state_lock:
                             running = bot_state.get("bot_running", True)
-                            bal = bot_state.get("wallet_balance", 0.0)
+                            if bal_info:
+                                bal = bal_info["wallet_balance"]
+                                equity = bal_info["equity"]
+                            else:
+                                bal = float(bot_state.get("live_balance", bot_state.get("wallet_balance", 0.0)))
+                                equity = float(bot_state.get("live_balance", bot_state.get("wallet_balance", 0.0)))
                             active_trades = sum(len(bot_state.get(f"active_trade_{tf}", [])) for tf in ["15m", "30m", "1h", "2h", "4h", "6h"])
                             regime_15 = bot_state.get("regime_15m", "N/A")
                             regime_1h = bot_state.get("regime_1h", "N/A")
@@ -541,7 +547,8 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         status_text = (
                             f"🤖 *BTC TRADING BOT STATUS*\n\n"
                             f"• *Status*: {'🟢 RUNNING' if running else '🔴 PAUSED'}\n"
-                            f"• *Wallet Balance*: `${bal:.2f} USDT`\n"
+                            f"• *Real Wallet Balance*: `${bal:.2f} USDT`\n"
+                            f"• *Account Equity*: `${equity:.2f} USDT`\n"
                             f"• *Active Trades*: `{active_trades}`\n"
                             f"• *15m Regime*: `{regime_15}`\n"
                             f"• *1h Regime*: `{regime_1h}`\n"
