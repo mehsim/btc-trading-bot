@@ -45,5 +45,12 @@
     "effective_sample_size": 416.67,
     "raw_sample_size": 5000
   },
-  "hmac_signature": "66f0627257c09fb2075116978b45a6e6e151fc02716806d094cf10d9d119a4f5"
+  "barrier_config": {
+    "tp_mult_trending": 1.65,
+    "tp_mult_ranging": 1.35,
+    "sl_mult": 1.25,
+    "lookahead": 12,
+    "regime_adx_enter": 22.0
+  },
+  "hmac_signature": "ef7162b130a963dc00d44d8d0eb2bf0ae985c1c24440e62db95d2027e8ddfec7"
 }

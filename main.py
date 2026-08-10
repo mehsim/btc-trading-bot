@@ -5962,6 +5962,7 @@ def main():
                 
                 if latest_completed_ts != last_processed_timestamps[last_ts_key]:
                     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {symbol} {iv}-minute candle detected (TS: {latest_completed_ts})")
+                    log_event("INFO", f"[{symbol} {iv}m] Evaluation start — candle {latest_completed_ts}")
                     
                     latest_candle = df.iloc[-1]
                     
@@ -7025,6 +7026,7 @@ def main():
                                                         df_dict[pos_sym] = df_pos
                                                 except Exception:
                                                     pass
+                                        log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
                                         rec = DecisionRecord(symbol=symbol, interval=str(iv))
                                         rec.snapshot(
                                             prediction=pred_info,

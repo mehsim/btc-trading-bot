@@ -175,12 +175,12 @@
     "tp_mult_ranging": 1.35,
     "sl_mult": 1.25,
     "lookahead": 12,
-    "regime_adx_enter": 32.0
+    "regime_adx_enter": 22.0
   },
   "label_distribution": [
     3029,
     8160,
     2609
   ],
-  "hmac_signature": "243f981ba4387d49696065e476b77f2c71ba2fc3d23ac07a552b846bd687620f"
+  "hmac_signature": "b8a3865da3504b9d002fe6bc048136e91c0ad21cf8c54e39c3a2bdd8e86cfe87"
 }
