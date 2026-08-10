@@ -723,8 +723,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             best_barriers = tune_triple_barrier_multipliers(df_tune, interval)
             if best_barriers:
                 OPTIMIZED_BARRIERS = best_barriers
-                if str(interval) in TIMEFRAME_CONFIG:
-                    TIMEFRAME_CONFIG[str(interval)].update(best_barriers)
+                # Reverted B-4: Do not override authoritative serving config from config.py
                 # Save to JSON for live load
                 with open(f"optimized_barriers_{interval}.json", "w") as f:
                     json.dump(best_barriers, f)
