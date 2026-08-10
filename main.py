@@ -7261,8 +7261,8 @@ def main():
                         
                     finally:
                         rec.status_msg = status_msg
-                        if not hasattr(rec, "outcome") or not rec.outcome:
-                            rec.outcome = "EXECUTED" if placed else "SKIPPED"
+                        if not hasattr(rec, "outcome") or not rec.outcome or rec.outcome == "ERROR":
+                            rec.outcome = "EXECUTED" if placed else ("REJECTED" if status_msg.startswith("REJECTED") else "SKIPPED")
                         write_decision(rec)
                         log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
                         last_processed_timestamps[last_ts_key] = latest_completed_ts
