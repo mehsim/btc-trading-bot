@@ -12,6 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any
+import sqlite3
 from database import db_lock, get_db_connection
 
 get_connection = get_db_connection
@@ -75,6 +76,8 @@ class DecisionRecord:
     position_size_usd: Optional[float] = None
     leverage: Optional[float] = None
     trade_id: Optional[str] = None
+    order_payload_json: Optional[str] = None
+    venue_response_json: Optional[str] = None
 
     # reproducibility
     simulation_seed: Optional[int] = None
@@ -151,6 +154,8 @@ def init_decision_journal_db():
                     position_size_usd  REAL,
                     leverage           REAL,
                     trade_id           TEXT,
+                    order_payload_json TEXT,
+                    venue_response_json TEXT,
 
                     simulation_seed    INTEGER,
                     inputs_json        TEXT,
@@ -158,10 +163,10 @@ def init_decision_journal_db():
                 );
             """)
 
-            for col_n, col_t in [("candle_timestamp", "INTEGER"), ("directional_mass_passed", "INTEGER"), ("is_calibrated", "INTEGER"), ("is_floor_scaled", "INTEGER")]:
+            for col_n, col_t in [("candle_timestamp", "INTEGER"), ("directional_mass_passed", "INTEGER"), ("is_calibrated", "INTEGER"), ("is_floor_scaled", "INTEGER"), ("order_payload_json", "TEXT"), ("venue_response_json", "TEXT")]:
                 try:
                     conn.execute(f"ALTER TABLE decision_journal ADD COLUMN {col_n} {col_t};")
-                except Exception:
+                except sqlite3.OperationalError:
                     pass
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dj_ts        ON decision_journal(ts DESC);")

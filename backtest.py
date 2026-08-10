@@ -90,11 +90,13 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if adx_val >= 20.0:
             row_X = X_matrix_trending[i].reshape(1, -1)
             pred_pct = float(models_trending["price"].predict(row_X)[0])
-            probs = models_trending["trend"].predict_proba(row_X)[0]
+            probs = models_trending["trend"].predict_proba(row_X, weights=models_trending.get("weights"))[0]
+            calibrator = models_trending.get("calibrator")
         else:
             row_X = X_matrix_ranging[i].reshape(1, -1)
             pred_pct = float(models_ranging["price"].predict(row_X)[0])
-            probs = models_ranging["trend"].predict_proba(row_X)[0]
+            probs = models_ranging["trend"].predict_proba(row_X, weights=models_ranging.get("weights"))[0]
+            calibrator = models_ranging.get("calibrator")
 
         pred_change = pred_pct * close_price
 
@@ -102,32 +104,23 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         prob_bearish = float(probs[0])
         prob_neutral = float(probs[1])
         prob_bullish = float(probs[2])
-        dir_total = prob_bearish + prob_bullish
-        
-        # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
-        if str(interval) in ["15", "30"] and dir_total > 1e-6:
-            norm_bear = prob_bearish / max(1e-9, dir_total)
-            norm_bull = prob_bullish / max(1e-9, dir_total)
 
-            
-            if norm_bear >= 0.70 and prob_bearish >= 0.12:
-                ml_trend = "Bearish"
-                ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.4)))
-            elif norm_bull >= 0.70 and prob_bullish >= 0.12:
-                ml_trend = "Bullish"
-                ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.4)))
-            else:
-                ml_trend = "Neutral"
-                ml_confidence = prob_neutral
-        elif winning_class == 2:
+        neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.20)
+        if winning_class == 2:
             ml_trend = "Bullish"
-            ml_confidence = prob_bullish
+            ml_confidence = min(0.95, prob_bullish * (1.0 - prob_neutral * neutral_coeff))
         elif winning_class == 0:
             ml_trend = "Bearish"
-            ml_confidence = prob_bearish
+            ml_confidence = min(0.95, prob_bearish * (1.0 - prob_neutral * neutral_coeff))
         else:
             ml_trend = "Neutral"
             ml_confidence = prob_neutral
+
+        # B-3: Live Isotonic calibration alignment
+        calibrated_confidence = ml_confidence
+        if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
+            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+        calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
         # Skip Neutral trades
         if ml_trend == "Neutral":

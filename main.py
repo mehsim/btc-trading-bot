@@ -19,13 +19,13 @@ os.environ["MALLOC_TRIM_THRESHOLD_"] = "65536"
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    except (AttributeError, Exception) as ex:
+        log_event("WARNING", f"sys.stdout reconfigure exception: {ex}")
 if hasattr(sys.stderr, "reconfigure"):
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    except (AttributeError, Exception) as ex:
+        log_event("WARNING", f"sys.stderr reconfigure exception: {ex}")
 
 import numpy as np
 from datetime import datetime, timezone
@@ -6104,31 +6104,14 @@ def main():
                             winning_class = int(np.argmax(probs))
                             dir_total = prob_bearish + prob_bullish
                         
-                            # Apply Directional Conviction Normalization for 15M & 30M scalp timeframes
-                            if str(iv) in ["15", "30"]:
-                                if dir_total >= 0.15:
-                                    norm_bear = prob_bearish / max(1e-9, dir_total)
-                                    norm_bull = prob_bullish / max(1e-9, dir_total)
-                                
-                                    if norm_bear >= 0.52:
-                                        ml_trend = "Bearish"
-                                        ml_confidence = min(0.95, norm_bear * (1.0 - prob_neutral * 0.2))
-                                    elif norm_bull >= 0.52:
-                                        ml_trend = "Bullish"
-                                        ml_confidence = min(0.95, norm_bull * (1.0 - prob_neutral * 0.2))
-                                    else:
-                                        ml_trend = "Neutral"
-                                        ml_confidence = prob_neutral
-                                else:
-                                    ml_trend = "Neutral"
-                                    ml_confidence = prob_neutral
-
-                            elif winning_class == 2:
+                            # B-2: Uniform raw model class probability trend assignment across all timeframes
+                            neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.20)
+                            if winning_class == 2:
                                 ml_trend = "Bullish"
-                                ml_confidence = prob_bullish
+                                ml_confidence = min(0.95, prob_bullish * (1.0 - prob_neutral * neutral_coeff))
                             elif winning_class == 0:
                                 ml_trend = "Bearish"
-                                ml_confidence = prob_bearish
+                                ml_confidence = min(0.95, prob_bearish * (1.0 - prob_neutral * neutral_coeff))
                             else:
                                 ml_trend = "Neutral"
                                 ml_confidence = prob_neutral
@@ -6895,13 +6878,14 @@ def main():
                                                 )
 
                                         if not wallet_exceeded:
-                                            # Continuous Leverage Scaling: scale smoothly from 1x (at dynamic threshold) to 50x (at 100% confidence)
+                                            # B-1: Continuous Leverage Scaling: scale smoothly from 1.5x (at dynamic threshold) to 50x (at 100% confidence)
                                             c = float(calibrated_confidence)
                                             min_conf = dynamic_conf_threshold
+                                            min_lev_start = getattr(config, "MIN_LEVERAGE_RAMP_START", 1.5)
                                             if c >= min_conf:
-                                                leverage_val = 1.0 + (c - min_conf) / (1.0 - min_conf) * 49.0
+                                                leverage_val = min_lev_start + ((c - min_conf) / max(1e-9, 1.0 - min_conf)) * (50.0 - min_lev_start)
                                             else:
-                                                leverage_val = 1.0
+                                                leverage_val = min_lev_start
                                         
                                             # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
                                             stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
