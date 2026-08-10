@@ -110,6 +110,7 @@ def init_decision_journal_db():
                 CREATE TABLE IF NOT EXISTS decision_journal (
                     decision_id        TEXT PRIMARY KEY,
                     ts                 REAL NOT NULL,
+                    candle_timestamp   INTEGER,
                     symbol             TEXT NOT NULL,
                     interval           TEXT NOT NULL,
 
@@ -153,6 +154,11 @@ def init_decision_journal_db():
                     schema_version     INTEGER NOT NULL DEFAULT 1
                 );
             """)
+
+            try:
+                conn.execute("ALTER TABLE decision_journal ADD COLUMN candle_timestamp INTEGER;")
+            except Exception:
+                pass
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dj_ts        ON decision_journal(ts DESC);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dj_sym_ts    ON decision_journal(symbol, ts DESC);")
