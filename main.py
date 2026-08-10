@@ -4632,19 +4632,13 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 bybit_success = False
 
         if bybit_success:
-            # 3. Timeframe-Adaptive Minimum Stop Floor & SL Target Calculation
-            iv_str = str(iv)
-            if iv_str == "15":
-                min_sl_pct = 0.35 if symbol == "BTCUSDT" else (0.50 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 0.65)
-            elif iv_str == "30":
-                min_sl_pct = 0.50 if symbol == "BTCUSDT" else (0.75 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 1.00)
-            elif iv_str == "60":
-                min_sl_pct = 0.75 if symbol == "BTCUSDT" else (1.00 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 1.25)
-            else:
-                min_sl_pct = 1.00 if symbol == "BTCUSDT" else (1.50 if symbol in ["ETHUSDT", "SOLUSDT", "BNBUSDT"] else 1.75)
+            # F-7: Timeframe-Adaptive Minimum Stop Floor via config.MIN_SL_PCT_CONFIG
+            min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+            min_sl_pct = min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)) * 100.0
 
             min_sl_dist = entry_price * (min_sl_pct / 100.0)
             atr_sl_dist = sl_multiplier_adjusted * atr_dollars
+            is_floor_scaled = False
 
             if atr_sl_dist >= min_sl_dist:
                 raw_sl_dist = atr_sl_dist
@@ -4686,8 +4680,35 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             
             stop_loss_price = cand_sl
             take_profit_price = unified_res["take_profit_price"]
+
+            # F-2: Scale TP target with SL floor expansion & check horizon reachability
+            if sl_source == "MIN_FLOOR":
+                from config import TIMEFRAME_CONFIG
+                import math
+                cfg = TIMEFRAME_CONFIG.get(str(iv), {})
+                target_rr = cfg.get("tp_mult_trending", 1.85) / max(1e-9, cfg.get("sl_mult", 0.8))
+                new_tp_dist = raw_sl_dist * target_rr
                 
-            from trade_calculators import passes_economic_gate
+                lookahead = cfg.get("lookahead", 10)
+                reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 0.90)
+                max_reachable = math.sqrt(lookahead) * atr_dollars * reach_factor
+                
+                if new_tp_dist > max_reachable:
+                    log_event("WARNING", f"[{symbol} {iv}m F-2 Reachability Guard] Floor-scaled TP distance (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}). Aborting trade entry.")
+                    send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — floor-scaled TP target (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}).")
+                    return
+                
+                take_profit_price = (entry_price + new_tp_dist) if ml_trend == "Bullish" else (entry_price - new_tp_dist)
+                is_floor_scaled = True
+                log_event("INFO", f"[{symbol} {iv}m F-2 Target Scaling] Scaled TP to ${take_profit_price:.4f} (R:R {target_rr:.2f}) to match MIN_FLOOR SL (${stop_loss_price:.4f}).")
+                
+            from trade_calculators import passes_economic_gate, assert_valid_geometry
+            try:
+                assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol)
+            except ValueError as geo_err:
+                log_event("WARNING", f"[{symbol} {iv}m] Geometry assertion failed: {geo_err}. Aborting.")
+                return
+
             if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
                 _sl_dist = abs(entry_price - stop_loss_price)
                 _tp_dist = abs(take_profit_price - entry_price)
@@ -6169,6 +6190,9 @@ def main():
                             rec.calibrated_conf = float(calibrated_confidence)
                             rec.signal_source = str(pred_entry_dict.get("signal_source") or "UNSET")
                             rec.is_fallback = int(pred_entry_dict.get("is_fallback", False))
+                            rec.directional_mass_passed = 1 if str(iv) not in ["15", "30"] or ml_trend in ["Bullish", "Bearish"] else 0
+                            rec.is_calibrated = 1 if (active_calibrator is not None and ml_trend in ["Bullish", "Bearish"]) else 0
+                            rec.is_floor_scaled = 1 if ('is_floor_scaled' in locals() and is_floor_scaled) else 0
 
                             print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
@@ -6885,6 +6909,16 @@ def main():
                                                 lev_cap = 20.0
                                             else:
                                                 lev_cap = 5.0
+
+                                            # F-1: MCC Leverage Qualification Threshold Clamp
+                                            mcc_val = pred_info.get("manifest_mcc") if 'pred_info' in locals() else None
+                                            mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
+                                            if mcc_val is not None and mcc_val < mcc_thresh:
+                                                cons_caps = getattr(config, "CONSERVATIVE_LEVERAGE_CAPS", {})
+                                                mcc_cap = cons_caps.get(symbol, cons_caps.get("default", 3.0))
+                                                lev_cap = min(lev_cap, mcc_cap)
+                                                log_event("INFO", f"[{symbol} {iv}m F-1 Leverage Guard] Model MCC ({mcc_val:.4f} < {mcc_thresh:.4f}) — Clamped max leverage to {lev_cap:.1f}x.")
+
                                             # Volatility-based leverage scaling cap
                                             atr_pct_of_price = (atr_dollars / entry_price) * 100.0
                                             if atr_pct_of_price > 3.0:
@@ -6895,12 +6929,11 @@ def main():
                                                 lev_cap = min(lev_cap, lev_cap * 0.5)
                                                 print(f"[{symbol} {iv}m Volatility-Scaled Leverage] High Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Halved leverage cap to {lev_cap}x.")
                                         
-                                            
-                                            # Double leverage target and cap during Golden Hour (18:00 - 21:00 PKT)
+                                            # F-4: Apply Golden Hour multiplier before final lev_cap and max_safe_lev single clamp
                                             current_hour_pkt = get_pkt_time().hour
                                             if 18 <= current_hour_pkt < 21:
                                                 leverage_val *= 2.0
-                                                lev_cap *= 2.0
+                                            
                                             # Sharpe-Adaptive Leverage Multiplier (Dynamic drawdown safety)
                                             sharpe_mult = calculate_recent_performance_leverage_multiplier(days=7)
                                             leverage_val = leverage_val * sharpe_mult

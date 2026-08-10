@@ -34,6 +34,9 @@ class DecisionRecord:
     calibrated_conf: Optional[float] = None
     calibrator_version: Optional[str] = None
     calibrator_ece: Optional[float] = None
+    directional_mass_passed: Optional[int] = None
+    is_calibrated: int = 0
+    is_floor_scaled: int = 0
 
     # model identity
     model_version: Optional[str] = None
@@ -155,10 +158,11 @@ def init_decision_journal_db():
                 );
             """)
 
-            try:
-                conn.execute("ALTER TABLE decision_journal ADD COLUMN candle_timestamp INTEGER;")
-            except Exception:
-                pass
+            for col_n, col_t in [("candle_timestamp", "INTEGER"), ("directional_mass_passed", "INTEGER"), ("is_calibrated", "INTEGER"), ("is_floor_scaled", "INTEGER")]:
+                try:
+                    conn.execute(f"ALTER TABLE decision_journal ADD COLUMN {col_n} {col_t};")
+                except Exception:
+                    pass
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dj_ts        ON decision_journal(ts DESC);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dj_sym_ts    ON decision_journal(symbol, ts DESC);")

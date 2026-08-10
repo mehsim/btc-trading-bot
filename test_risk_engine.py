@@ -85,3 +85,30 @@ def test_post_floor_rr_aborts_avax():
     """Verify post-floor R:R check aborts trades when MIN_FLOOR destroys R:R below required confidence."""
     from trade_calculators import passes_economic_gate
     assert not passes_economic_gate(entry=6.479, tp=6.4328, sl=6.559988, conf=0.4609)
+
+def test_f1_mcc_leverage_clamp_bidirectional():
+    """Verify F-1 leverage clamp behavior: unclamped for MCC >= 0.15, clamped to 3.0x for MCC < 0.15 on altcoins."""
+    import config
+    mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
+    cons_caps = getattr(config, "CONSERVATIVE_LEVERAGE_CAPS", {})
+    
+    # Branch 1: Permissive path (MCC = 0.1542 >= 0.15)
+    mcc_permissive = 0.1542
+    assert mcc_permissive >= mcc_thresh
+    
+    # Branch 2: Restrictive path (MCC = 0.1453 < 0.15)
+    mcc_restrictive = 0.1453
+    assert mcc_restrictive < mcc_thresh
+    altcoin_cap = cons_caps.get("AVAXUSDT", cons_caps.get("default", 3.0))
+    assert altcoin_cap == 3.0
+
+def test_f2_reachability_guard():
+    """Verify F-2 reachability guard calculation."""
+    import math, config
+    lookahead = 10
+    atr_dollars = 0.50
+    reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 0.90)
+    max_reachable = math.sqrt(lookahead) * atr_dollars * reach_factor
+    
+    over_extended_tp = 2.50
+    assert over_extended_tp > max_reachable

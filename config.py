@@ -37,6 +37,12 @@ MODEL_GOVERNANCE = {
     "mcc_regression_tolerance": 0.010   # R-2: Absorbs run-to-run noise during challenger evaluation
 }
 
+# Architectural Remediation Configurations (F-1, F-2, F-7)
+MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
+CONSERVATIVE_LEVERAGE_CAPS = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "default": 3.0}
+MIN_SL_PCT_CONFIG = {"15": 0.006, "30": 0.008, "60": 0.010, "120": 0.012, "240": 0.015, "360": 0.015, "default": 0.008}
+HORIZON_REACHABILITY_FACTOR = 0.90  # F-2: Arbitrary horizon reachability scale factor (lookahead^0.5 * ATR * factor)
+
 # R-1: Model Quality Sizing Policy (Capital allocation scales by measured predictive content)
 QUALITY_SIZING = {
     "enabled": True,
