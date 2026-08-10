@@ -6192,7 +6192,7 @@ def main():
                             rec.is_fallback = int(pred_entry_dict.get("is_fallback", False))
                             rec.directional_mass_passed = 1 if str(iv) not in ["15", "30"] or ml_trend in ["Bullish", "Bearish"] else 0
                             rec.is_calibrated = 1 if (active_calibrator is not None and ml_trend in ["Bullish", "Bearish"]) else 0
-                            rec.is_floor_scaled = 1 if ('is_floor_scaled' in locals() and is_floor_scaled) else 0
+                            rec.is_floor_scaled = 1 if (locals().get('is_floor_scaled', False)) else 0
 
                             print(f"[{iv}m] Regime Selected: {regime_name} | ML Output: {ml_trend} (Bull: {prob_bullish*100:.1f}%, Bear: {prob_bearish*100:.1f}%, Neut: {prob_neutral*100:.1f}%) | Raw Conf: {ml_confidence*100:.2f}% | Calibrated Conf: {calibrated_confidence*100:.2f}% | Expected Change: {pred_change:+.3f}")
 
@@ -6911,7 +6911,7 @@ def main():
                                                 lev_cap = 5.0
 
                                             # F-1: MCC Leverage Qualification Threshold Clamp
-                                            mcc_val = pred_info.get("manifest_mcc") if 'pred_info' in locals() else None
+                                            mcc_val = pred_entry_dict.get("manifest_mcc") if 'pred_entry_dict' in locals() else (locals().get("pred_info", {}).get("manifest_mcc"))
                                             mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
                                             if mcc_val is not None and mcc_val < mcc_thresh:
                                                 cons_caps = getattr(config, "CONSERVATIVE_LEVERAGE_CAPS", {})
