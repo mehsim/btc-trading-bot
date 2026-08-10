@@ -6112,10 +6112,10 @@ def main():
                                 
                                     if norm_bear >= 0.52:
                                         ml_trend = "Bearish"
-                                        ml_confidence = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
+                                        ml_confidence = min(0.95, norm_bear * (1.0 - prob_neutral * 0.2))
                                     elif norm_bull >= 0.52:
                                         ml_trend = "Bullish"
-                                        ml_confidence = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
+                                        ml_confidence = min(0.95, norm_bull * (1.0 - prob_neutral * 0.2))
                                     else:
                                         ml_trend = "Neutral"
                                         ml_confidence = prob_neutral
