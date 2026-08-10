@@ -37,3 +37,5 @@
 {"event": "label_distribution", "interval": "15", "regime": "ranging", "n_total": 55507, "bearish_pct": 45.92, "neutral_pct": 11.86, "bullish_pct": 42.22, "timestamp": "2026-08-10T12:51:32Z"}
 {"event": "label_distribution", "interval": "60", "regime": "trending", "n_total": 11601, "bearish_pct": 42.42, "neutral_pct": 21.77, "bullish_pct": 35.82, "timestamp": "2026-08-10T13:19:08Z"}
 {"event": "label_distribution", "interval": "60", "regime": "ranging", "n_total": 60285, "bearish_pct": 44.12, "neutral_pct": 16.57, "bullish_pct": 39.31, "timestamp": "2026-08-10T13:22:42Z"}
+{"event": "label_distribution", "interval": "15", "regime": "trending", "n_total": 16247, "bearish_pct": 21.97, "neutral_pct": 59.09, "bullish_pct": 18.94, "timestamp": "2026-08-10T13:43:14Z"}
+{"event": "label_distribution", "interval": "15", "regime": "ranging", "n_total": 55461, "bearish_pct": 36.52, "neutral_pct": 30.05, "bullish_pct": 33.43, "timestamp": "2026-08-10T13:46:40Z"}
