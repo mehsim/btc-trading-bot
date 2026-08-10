@@ -4687,6 +4687,16 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             stop_loss_price = cand_sl
             take_profit_price = unified_res["take_profit_price"]
                 
+            from trade_calculators import passes_economic_gate
+            if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
+                _sl_dist = abs(entry_price - stop_loss_price)
+                _tp_dist = abs(take_profit_price - entry_price)
+                _rr = _tp_dist / max(1e-9, _sl_dist)
+                _required_p = (1.0 / (1.0 + max(1e-9, _rr))) + 0.0016
+                log_event("WARNING", f"[{symbol} {iv}m] MIN_FLOOR widened SL to {min_sl_pct:.2f}%: R:R {_rr:.2f} requires {_required_p:.3f}, have {calibrated_confidence:.3f}. Aborting.")
+                send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — post-floor R:R {_rr:.2f} (requires {_required_p:.3f}, have {calibrated_confidence:.3f})")
+                return
+
             # 4. Set SL/TP on active position on Bybit
             temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
             update_bybit_stop_loss(symbol, stop_loss_price, active_trade=temp_trade)
@@ -6943,6 +6953,10 @@ def main():
                                                     raw_qty = qty_val
                                                 
                                                 scaled_notional = qty_val * entry_price
+                                                clamped_val = float(position_size_usd)
+                                                final_val = float(scaled_notional / max(1e-9, leverage_val))
+                                                if final_val > clamped_val:
+                                                    log_event("INFO", f"[{symbol} {iv}m] Scaled UP to min order value: ${clamped_val:.2f} -> ${final_val:.2f}")
                                             
                                                 # Priority 1: Tighten stop distance proportionally to keep dollar risk constant
                                                 scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
@@ -7121,6 +7135,12 @@ def main():
                                                     "predicted_price": float(predicted_price),
                                                     "stop_loss": float(stop_loss_price),
                                                     "take_profit": float(take_profit_price),
+                                                    "initial_stop_loss": float(stop_loss_price),
+                                                    "initial_take_profit": float(take_profit_price),
+                                                    "initial_rr": float(abs(take_profit_price - entry_price) / max(1e-9, abs(entry_price - stop_loss_price))),
+                                                    "kelly_size_usd": float(original_kelly_size) if 'original_kelly_size' in locals() else float(position_size_usd),
+                                                    "clamped_size_usd": float(position_size_usd),
+                                                    "final_size_usd": float(actual_size_usd),
                                                     "direction": str(ml_trend),
                                                     "end_time": float(time.time() + duration_seconds),
                                                     "entry_time": int(time.time() * 1000),

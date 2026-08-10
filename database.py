@@ -131,7 +131,9 @@ def init_db():
             for col_name, col_type in [
                 ("model_version", "TEXT"), ("model_sha", "TEXT"), ("feature_set_version", "TEXT"),
                 ("venue_closed_pnl", "REAL"), ("venue_qty", "REAL"), ("venue_entry_value", "REAL"),
-                ("intended_size_usd", "REAL")
+                ("intended_size_usd", "REAL"), ("initial_stop_loss", "REAL"), ("initial_take_profit", "REAL"),
+                ("initial_rr", "REAL"), ("kelly_size_usd", "REAL"), ("clamped_size_usd", "REAL"),
+                ("final_size_usd", "REAL")
             ]:
                 if col_name not in cols:
                     try:
@@ -591,6 +593,29 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
                     round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
                     round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
                 ))
+
+            # Step 1b: Set initial stop/TP/RR and size breakdown columns if available
+            try:
+                conn.execute("""
+                    UPDATE completed_trades SET
+                        initial_stop_loss = ?,
+                        initial_take_profit = ?,
+                        initial_rr = ?,
+                        kelly_size_usd = ?,
+                        clamped_size_usd = ?,
+                        final_size_usd = ?
+                    WHERE trade_id = ?;
+                """, (
+                    round_monetary(trade.get("initial_stop_loss"), 4),
+                    round_monetary(trade.get("initial_take_profit"), 4),
+                    round_monetary(trade.get("initial_rr"), 4),
+                    round_monetary(trade.get("kelly_size_usd"), 4),
+                    round_monetary(trade.get("clamped_size_usd"), 4),
+                    round_monetary(trade.get("final_size_usd"), 4),
+                    t_id
+                ))
+            except Exception as ex_init_cols:
+                log_event("WARNING", f"database notice updating initial/size columns: {ex_init_cols}")
             
             # Step 2: Delete from active_trades
             conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR (tf = ? AND symbol = ?);", (t_id, str(tf), symbol))
