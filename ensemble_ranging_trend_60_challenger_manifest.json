@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_trend_60",
-  "timestamp": "2026-08-09T12:01:40.367809+00:00",
+  "timestamp": "2026-08-10T13:29:38.409784+00:00",
   "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "073eeb61",
+  "git_sha": "db6b44dd",
   "feature_count": 34,
   "feature_names": [
     "open_interest",
@@ -112,44 +112,44 @@
   "promotion_metrics": {},
   "metrics": {
     "uniqueness_ratio": 0.0909,
-    "effective_sample_size": 2922.27,
-    "raw_sample_size": 32140
+    "effective_sample_size": 4658.0,
+    "raw_sample_size": 51233
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3753,
-      "median": 0.3679,
-      "std": 0.0178,
-      "min": 0.3569,
-      "max": 0.4087
+      "mean": 0.3615,
+      "median": 0.3666,
+      "std": 0.0225,
+      "min": 0.3358,
+      "max": 0.395
     },
     "macro_f1": {
-      "mean": 0.3538,
-      "median": 0.3461,
-      "std": 0.0211,
-      "min": 0.3315,
-      "max": 0.393
+      "mean": 0.308,
+      "median": 0.3266,
+      "std": 0.0556,
+      "min": 0.2181,
+      "max": 0.3648
     },
     "mcc": {
-      "mean": 0.0713,
-      "median": 0.0611,
-      "std": 0.0298,
-      "min": 0.0419,
-      "max": 0.1282
+      "mean": 0.0319,
+      "median": 0.0458,
+      "std": 0.0278,
+      "min": -0.0068,
+      "max": 0.0666
     },
-    "mean_kappa": 0.06602462120401216,
-    "mean_pr_auc_bear": 0.21171646393215635,
-    "mean_pr_auc_bull": 0.19323674501497723,
-    "mean_raw_accuracy": 0.4662,
-    "mean_mae": 0.012326,
-    "label_dist_bearish_pct": 17.15,
-    "label_dist_neutral_pct": 67.52,
-    "label_dist_bullish_pct": 15.33,
-    "n_training_samples": 32140,
-    "n_holdout_samples": 5295,
-    "effective_sample_size": 2922.27,
-    "raw_sample_size": 32140,
+    "mean_kappa": 0.029769692762577283,
+    "mean_pr_auc_bear": 0.45009444358208855,
+    "mean_pr_auc_bull": 0.42743854579450336,
+    "mean_raw_accuracy": 0.3826,
+    "mean_mae": 0.014085,
+    "label_dist_bearish_pct": 44.12,
+    "label_dist_neutral_pct": 16.57,
+    "label_dist_bullish_pct": 39.31,
+    "n_training_samples": 51233,
+    "n_holdout_samples": 8440,
+    "effective_sample_size": 4658.0,
+    "raw_sample_size": 51233,
     "uniqueness_ratio": 0.0909,
     "confusion_matrix": {
       "labels": [
@@ -164,26 +164,26 @@
       ],
       "matrix": [
         [
-          1579,
-          1979,
-          1002
+          6218,
+          3541,
+          9030
         ],
         [
-          4621,
-          9926,
-          3506
+          2130,
+          1939,
+          2991
         ],
         [
-          1235,
-          1953,
-          979
+          5619,
+          3044,
+          8178
         ]
       ]
     },
-    "holdout_accuracy": 0.6788,
-    "holdout_balanced_accuracy": 0.3333,
-    "holdout_brier": 0.4878,
-    "holdout_ece": 0.0368,
+    "holdout_accuracy": 0.437,
+    "holdout_balanced_accuracy": 0.3513,
+    "holdout_brier": 0.6138,
+    "holdout_ece": 0.0396,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -192,21 +192,21 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "073eeb61"
+    "git_sha": "db6b44dd"
   },
   "barrier_config": {
-    "tp_mult_trending": 3.255402275988839,
-    "tp_mult_ranging": 2.441160805844495,
-    "sl_mult": 0.6355101040963669,
+    "tp_mult_trending": 1.4,
+    "tp_mult_ranging": 1.2,
+    "sl_mult": 1.0,
     "lookahead": 10,
     "regime_adx_enter": 22.0
   },
   "label_distribution": [
-    5505,
-    21675,
-    4960
+    22362,
+    8750,
+    20121
   ],
-  "promoted": true,
-  "evaluation_timestamp": "2026-08-09T12:01:40.367809+00:00",
-  "hmac_signature": "73789786185532e69b94e22c15ed380d5a270aacedb224b09dee41f4093040b2"
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-10T13:29:38.409784+00:00",
+  "hmac_signature": "eb2a8b505e2ab7f06d772c6136b3cf112b282259ff5f99df3e83e28ec989a365"
 }
