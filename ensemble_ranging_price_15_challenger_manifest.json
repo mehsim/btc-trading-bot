@@ -2,82 +2,33 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_price_15",
-  "timestamp": "2026-08-10T12:57:43.854096+00:00",
-  "model_version": "v7.2.0-466774c6-202608072131",
+  "timestamp": "2026-08-07T15:59:29.505768+00:00",
+  "model_version": "v7.2.0-d4f022fd-202608061753",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "9aa1aeb6",
-  "feature_count": 22,
-  "feature_names": [
-    "open_interest",
-    "funding_rate",
-    "fear_greed",
-    "oi_change_1h",
-    "oi_change_4h",
-    "RSI",
-    "MACD_diff",
-    "EMA_9",
-    "EMA_21",
-    "EMA_50",
-    "EMA_200",
-    "BB_high",
-    "BB_low",
-    "BB_mid",
-    "MFI",
-    "ATR_norm",
-    "close_to_EMA9",
-    "close_to_EMA21",
-    "close_to_EMA50",
-    "close_to_EMA200",
-    "EMA9_to_EMA21",
-    "BB_pct"
-  ],
-  "surviving_features": [
-    "open_interest",
-    "funding_rate",
-    "fear_greed",
-    "oi_change_1h",
-    "oi_change_4h",
-    "RSI",
-    "MACD_diff",
-    "EMA_9",
-    "EMA_21",
-    "EMA_50",
-    "EMA_200",
-    "BB_high",
-    "BB_low",
-    "BB_mid",
-    "MFI",
-    "ATR_norm",
-    "close_to_EMA9",
-    "close_to_EMA21",
-    "close_to_EMA50",
-    "close_to_EMA200",
-    "EMA9_to_EMA21",
-    "BB_pct"
-  ],
+  "git_sha": "14f5b4ed",
+  "feature_count": 0,
+  "feature_names": [],
+  "surviving_features": [],
   "vif_values": {},
-  "feature_contract_hash": "44acc0809fe0",
-  "feature_pipeline_hash": "e8505f8ea0a0",
-  "training_data_hash": "c4ef630762f4ff0a70220f5789b416ee0b58388a4fd9f49751fff08b74a239fa",
+  "feature_contract_hash": "e3b0c44298fc",
+  "feature_pipeline_hash": "205b80ae1fe5",
+  "training_data_hash": "132c59e0557e213f176cd6b46e8bdbd1b79704070affcf05f41f42313a13281f",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "fa423d8a09b2a6fbb1aba9f3bfb0f70d076e127221eb6f3d0b1dd1a3ac46abca",
   "promotion_reason": "Initial deployment / benchmark promotion",
   "replaced_model_hash": "fa423d8a09b2a6fbb1aba9f3bfb0f70d076e127221eb6f3d0b1dd1a3ac46abca",
   "rollback_reference": "ensemble_ranging_price_15_backup",
   "governance_policy": {
-    "version": "v2.5",
+    "version": "v2.4",
     "max_ece": 0.08,
     "max_brier": 0.5,
     "min_oos_sharpe": 0.5,
     "min_sharpe_delta": 0.1,
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
-    "enforce_stability_gate": true,
-    "min_samples": 20,
-    "min_mcc": 0.05,
-    "min_balanced_accuracy": 0.36,
-    "mcc_regression_tolerance": 0.01
+    "enforce_stability_gate": false,
+    "min_samples": 20
   },
   "dependencies": {
     "python": "3.14.4",
@@ -88,58 +39,47 @@
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
-  "promotion_metrics": {
-    "uniqueness_ratio": 0.0833,
-    "effective_sample_size": 416.67,
-    "raw_sample_size": 5000
-  },
+  "promotion_metrics": {},
   "metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 3628.85,
-    "raw_sample_size": 47169
-  },
-  "barrier_config": {
-    "tp_mult_trending": 1.65,
-    "tp_mult_ranging": 1.35,
-    "sl_mult": 1.25,
-    "lookahead": 12,
-    "regime_adx_enter": 32.0
+    "effective_sample_size": 3653.23,
+    "raw_sample_size": 47486
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3539,
-      "median": 0.3523,
-      "std": 0.01,
-      "min": 0.3454,
-      "max": 0.3727
+      "mean": 0.4059,
+      "median": 0.4124,
+      "std": 0.0126,
+      "min": 0.3844,
+      "max": 0.4197
     },
     "macro_f1": {
-      "mean": 0.2798,
-      "median": 0.2638,
-      "std": 0.0241,
-      "min": 0.2554,
-      "max": 0.3165
+      "mean": 0.4053,
+      "median": 0.412,
+      "std": 0.0136,
+      "min": 0.3848,
+      "max": 0.4209
     },
     "mcc": {
-      "mean": 0.0239,
-      "median": 0.0295,
-      "std": 0.0141,
-      "min": -0.0019,
-      "max": 0.0399
+      "mean": 0.1067,
+      "median": 0.117,
+      "std": 0.0203,
+      "min": 0.0711,
+      "max": 0.128
     },
-    "mean_kappa": 0.016301142974148863,
-    "mean_pr_auc_bear": 0.4646099562444266,
-    "mean_pr_auc_bull": 0.45399477635306396,
-    "mean_raw_accuracy": 0.3772,
-    "mean_mae": 0.006521,
-    "label_dist_bearish_pct": 45.92,
-    "label_dist_neutral_pct": 11.86,
-    "label_dist_bullish_pct": 42.22,
-    "n_training_samples": 47169,
-    "n_holdout_samples": 7771,
-    "effective_sample_size": 3628.85,
-    "raw_sample_size": 47169,
+    "mean_kappa": 0.1054951644601558,
+    "mean_pr_auc_bear": 0.406425554982116,
+    "mean_pr_auc_bull": 0.3721501872756363,
+    "mean_raw_accuracy": 0.4069,
+    "mean_mae": 0.006506,
+    "label_dist_bearish_pct": 36.63,
+    "label_dist_neutral_pct": 30.35,
+    "label_dist_bullish_pct": 33.02,
+    "n_training_samples": 47486,
+    "n_holdout_samples": 7823,
+    "effective_sample_size": 3653.23,
+    "raw_sample_size": 47486,
     "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
@@ -154,26 +94,26 @@
       ],
       "matrix": [
         [
-          11306,
-          4488,
-          2171
+          5974,
+          2900,
+          5585
         ],
         [
-          2906,
-          1367,
-          494
+          3742,
+          4698,
+          3667
         ],
         [
-          10769,
-          3652,
-          2152
+          5099,
+          2474,
+          5431
         ]
       ]
     },
-    "holdout_accuracy": 0.4467,
-    "holdout_balanced_accuracy": 0.3319,
-    "holdout_brier": 0.5838,
-    "holdout_ece": 0.0111,
+    "holdout_accuracy": 0.4036,
+    "holdout_balanced_accuracy": 0.3892,
+    "holdout_brier": 0.6507,
+    "holdout_ece": 0.0186,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -182,14 +122,16 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "9aa1aeb6"
+    "git_sha": "14f5b4ed"
   },
-  "label_distribution": [
-    21541,
-    5821,
-    19807
-  ],
+  "barrier_config": {
+    "tp_mult_trending": 1.65,
+    "tp_mult_ranging": 1.35,
+    "sl_mult": 1.25,
+    "lookahead": 12,
+    "regime_adx_enter": 32.0
+  },
   "promoted": false,
-  "evaluation_timestamp": "2026-08-10T12:57:43.854096+00:00",
-  "hmac_signature": "95126c8ede0908b188ab7f04b855c2bda61d1a863aa9e85573f67bcce54084b0"
+  "evaluation_timestamp": "2026-08-07T15:59:29.505768+00:00",
+  "hmac_signature": "f97ed4d17348848a4701b3e6537a17a93d749950ad4b83347d4277ae1e57a737"
 }
