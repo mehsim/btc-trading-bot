@@ -4687,7 +4687,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 import math
                 cfg = TIMEFRAME_CONFIG.get(str(iv), {})
                 target_rr = cfg.get("tp_mult_trending", 1.85) / max(1e-9, cfg.get("sl_mult", 0.8))
-                new_tp_dist = raw_sl_dist * target_rr
+                final_sl_dist = abs(entry_price - stop_loss_price)
+                new_tp_dist = final_sl_dist * target_rr
                 
                 lookahead = cfg.get("lookahead", 10)
                 reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 0.90)
