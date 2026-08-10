@@ -6262,7 +6262,12 @@ def main():
                         meta_adjustment = 0.0
                         if ml_trend in ["Bullish", "Bearish"] and active_meta_model is not None:
                             try:
-                                X_meta_live = latest_candle_weighted[features].to_frame().T if isinstance(latest_candle_weighted[features], pd.Series) else latest_candle_weighted[features]
+                                _exp_meta_names = get_model_feature_names(active_meta_model)
+                                if _exp_meta_names and not all(str(n).startswith("Column_") for n in _exp_meta_names):
+                                    _meta_feats_to_use = [f for f in _exp_meta_names if f in latest_candle_weighted.index]
+                                else:
+                                    _meta_feats_to_use = features
+                                X_meta_live = latest_candle_weighted[_meta_feats_to_use].to_frame().T if isinstance(latest_candle_weighted[_meta_feats_to_use], pd.Series) else latest_candle_weighted[_meta_feats_to_use]
                                 X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
                                 meta_pred = int(active_meta_model.predict(X_meta_input)[0])
                                 if meta_pred == 1:
