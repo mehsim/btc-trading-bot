@@ -3373,7 +3373,7 @@ def get_news_sentiment():
 
     if not cleaned_titles:
         print("[News/Sentiment] No content found across any source. Sentiment defaults to Neutral.")
-        return "Neutral", []
+        return "Neutral", [], "NO_NEWS"
 
     try:
         token = os.environ.get("HF_TOKEN") or os.environ.get("token")
@@ -3406,7 +3406,7 @@ def get_news_sentiment():
                 elif avg_score < -0.15:
                     sentiment = "Bearish"
                 print(f"[News/Sentiment Serverless] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
-                return sentiment, cleaned_titles
+                return sentiment, cleaned_titles, "FINBERT_SERVERLESS"
 
         # Local pipeline fallback if HF_TOKEN is missing
         if sentiment_pipeline is None:
@@ -3461,7 +3461,7 @@ def get_news_sentiment():
                 elif avg_score < -0.10:
                     sentiment = "Bearish"
                 print(f"[News/Sentiment Lexicon Local] Analyzed {len(cleaned_titles)} titles via local financial lexicon. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
-                return sentiment, cleaned_titles
+                return sentiment, cleaned_titles, "KEYWORD"
 
         print(f"[News/Sentiment Local] Running local FinBERT pipeline on {len(cleaned_titles)} inputs...")
         results = sentiment_pipeline(cleaned_titles)
@@ -3484,20 +3484,21 @@ def get_news_sentiment():
             sentiment = "Bearish"
             
         print(f"[News/Sentiment Local] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
-        return sentiment, cleaned_titles
+        return sentiment, cleaned_titles, "FINBERT_LOCAL"
     except Exception as e:
         print(f"[News/Sentiment] Error executing FinBERT analysis: {e}")
-    return "Neutral", []
+    return "Neutral", [], "ERROR_FALLBACK"
 
 def run_news_sentiment_updater():
-    global cached_news_sentiment, cached_news_titles
+    global cached_news_sentiment, cached_news_titles, cached_news_source
     print("[News/Sentiment] Background updater thread started.")
     try:
-        sentiment, titles = get_news_sentiment()
+        sentiment, titles, source = get_news_sentiment()
         with news_sentiment_lock:
             cached_news_sentiment = sentiment
             cached_news_titles = titles
-        print(f"[News/Sentiment] Startup background update success: {sentiment} (based on {len(titles)} inputs).")
+            cached_news_source = source
+        print(f"[News/Sentiment] Startup background update success: {sentiment} ({source}, based on {len(titles)} inputs).")
     except Exception as e:
         print(f"[News/Sentiment] Startup background update error: {e}")
         
@@ -6239,23 +6240,7 @@ def main():
                                     adjustments_applied.append(("performance_decay", perf_delta))
                                     print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
                             
-                            # Sentiment-Adaptive Adjustment
-                            with news_sentiment_lock:
-                                current_sentiment = cached_news_sentiment
-                            if current_sentiment == "Bullish":
-                                if ml_trend == "Bullish":
-                                    dynamic_conf_threshold -= 0.03
-                                    adjustments_applied.append(("sentiment_align_bull", -0.03))
-                                elif ml_trend == "Bearish":
-                                    dynamic_conf_threshold += 0.05
-                                    adjustments_applied.append(("sentiment_oppose_bear", 0.05))
-                            elif current_sentiment == "Bearish":
-                                if ml_trend == "Bearish":
-                                    dynamic_conf_threshold -= 0.03
-                                    adjustments_applied.append(("sentiment_align_bear", -0.03))
-                                elif ml_trend == "Bullish":
-                                    dynamic_conf_threshold += 0.05
-                                    adjustments_applied.append(("sentiment_oppose_bull", 0.05))
+
 
                             # Asian Market Session Awareness (00:00 - 08:00 UTC)
                             utc_hour_now = datetime.now(timezone.utc).hour
@@ -6289,6 +6274,8 @@ def main():
                                 adjustments_applied.append(("bayesian_cold_start", b_boost))
                                 print(f"[{symbol} {iv}m] {bayesian_res['note']} -> Threshold: {dynamic_conf_threshold*100:.2f}%")
 
+                            with news_sentiment_lock:
+                                current_sentiment = cached_news_sentiment
                             print(f"[{iv}m] Dynamic Confidence Threshold: {dynamic_conf_threshold * 100:.2f}% (Economic Base: {economic_base_threshold*100:.2f}%, Regime: {regime_name}, Volatility: {atr_norm_val * 100:.3f}%, Sentiment: {current_sentiment})")
 
                             # Meta-Classifier: Use as confidence MODIFIER instead of hard gate
