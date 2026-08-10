@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_trend_240",
-  "timestamp": "2026-08-07T11:28:58.904733+00:00",
+  "timestamp": "2026-08-09T13:36:27.700376+00:00",
   "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "6b9f3216",
+  "git_sha": "073eeb61",
   "feature_count": 26,
   "feature_names": [
     "open_interest",
@@ -96,44 +96,44 @@
   "promotion_metrics": {},
   "metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 3328.08,
-    "raw_sample_size": 43259
+    "effective_sample_size": 2121.08,
+    "raw_sample_size": 27568
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3823,
-      "median": 0.3848,
-      "std": 0.0167,
-      "min": 0.3524,
-      "max": 0.3989
+      "mean": 0.3586,
+      "median": 0.3677,
+      "std": 0.0245,
+      "min": 0.3263,
+      "max": 0.3881
     },
     "macro_f1": {
-      "mean": 0.3207,
-      "median": 0.3331,
-      "std": 0.0261,
-      "min": 0.2708,
-      "max": 0.3414
+      "mean": 0.3016,
+      "median": 0.3273,
+      "std": 0.0603,
+      "min": 0.2262,
+      "max": 0.3677
     },
     "mcc": {
-      "mean": 0.0408,
-      "median": 0.0278,
-      "std": 0.0205,
-      "min": 0.0229,
-      "max": 0.0774
+      "mean": 0.0517,
+      "median": 0.0693,
+      "std": 0.0439,
+      "min": -0.0099,
+      "max": 0.1002
     },
-    "mean_kappa": 0.03252321901260495,
-    "mean_pr_auc_bear": 0.05991803068052652,
-    "mean_pr_auc_bull": 0.04702473588769616,
-    "mean_raw_accuracy": 0.6797,
-    "mean_mae": 0.035542,
-    "label_dist_bearish_pct": 3.89,
-    "label_dist_neutral_pct": 92.51,
-    "label_dist_bullish_pct": 3.59,
-    "n_training_samples": 43259,
-    "n_holdout_samples": 7126,
-    "effective_sample_size": 3328.08,
-    "raw_sample_size": 43259,
+    "mean_kappa": 0.04793165398336152,
+    "mean_pr_auc_bear": 0.26827739630378006,
+    "mean_pr_auc_bull": 0.26690337533823205,
+    "mean_raw_accuracy": 0.3833,
+    "mean_mae": 0.036609,
+    "label_dist_bearish_pct": 25.33,
+    "label_dist_neutral_pct": 51.62,
+    "label_dist_bullish_pct": 23.05,
+    "n_training_samples": 27568,
+    "n_holdout_samples": 4542,
+    "effective_sample_size": 2121.08,
+    "raw_sample_size": 27568,
     "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
@@ -148,26 +148,26 @@
       ],
       "matrix": [
         [
-          422,
-          902,
-          95
+          3042,
+          2242,
+          455
         ],
         [
-          5973,
-          23908,
-          3406
+          5801,
+          5251,
+          748
         ],
         [
-          246,
-          923,
-          170
+          3037,
+          1882,
+          512
         ]
       ]
     },
-    "holdout_accuracy": 0.9387,
-    "holdout_balanced_accuracy": 0.3333,
-    "holdout_brier": 0.1174,
-    "holdout_ece": 0.02,
+    "holdout_accuracy": 0.5101,
+    "holdout_balanced_accuracy": 0.3359,
+    "holdout_brier": 0.6125,
+    "holdout_ece": 0.0292,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -176,15 +176,21 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "6b9f3216"
+    "git_sha": "073eeb61"
   },
   "barrier_config": {
-    "tp_mult_trending": 3.3,
-    "tp_mult_ranging": 2.7,
-    "sl_mult": 1.5,
-    "lookahead": 12
+    "tp_mult_trending": 3.1212702584162257,
+    "tp_mult_ranging": 2.48095530922963,
+    "sl_mult": 1.0389865068320767,
+    "lookahead": 12,
+    "regime_adx_enter": 28.0
   },
+  "label_distribution": [
+    6854,
+    14263,
+    6451
+  ],
   "promoted": false,
-  "evaluation_timestamp": "2026-08-07T11:28:58.904733+00:00",
-  "hmac_signature": "a092f155c1983026b85e3c47a9a3884e264502fd6be6fea16b92a45dcc93c050"
+  "evaluation_timestamp": "2026-08-09T13:36:27.700376+00:00",
+  "hmac_signature": "6614b124fe2c8eb94d3bff7e7adae299a4b146ecd25152dc23dec3bac122906c"
 }

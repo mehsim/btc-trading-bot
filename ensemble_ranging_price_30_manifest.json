@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_price_30",
-  "timestamp": "2026-08-06T10:21:44.652534+00:00",
+  "timestamp": "2026-08-09T11:00:48.870502+00:00",
   "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "f2b1393a",
+  "git_sha": "073eeb61",
   "feature_count": 25,
   "feature_names": [
     "open_interest",
@@ -92,6 +92,101 @@
     "catboost": "1.2.10"
   },
   "promotion_metrics": {},
-  "metrics": {},
-  "hmac_signature": "3fc98acf49d193efb2982d2727d9ce71e3bf2e6af474b738e02098af7d04352d"
+  "metrics": {
+    "uniqueness_ratio": 0.0769,
+    "effective_sample_size": 2349.15,
+    "raw_sample_size": 30533
+  },
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.365,
+      "median": 0.353,
+      "std": 0.0205,
+      "min": 0.3415,
+      "max": 0.392
+    },
+    "macro_f1": {
+      "mean": 0.3106,
+      "median": 0.3187,
+      "std": 0.0241,
+      "min": 0.2654,
+      "max": 0.3367
+    },
+    "mcc": {
+      "mean": 0.0372,
+      "median": 0.0354,
+      "std": 0.0319,
+      "min": -0.0038,
+      "max": 0.075
+    },
+    "mean_kappa": 0.03056852479924075,
+    "mean_pr_auc_bear": 0.43109424341989316,
+    "mean_pr_auc_bull": 0.4487956918380741,
+    "mean_raw_accuracy": 0.3796,
+    "mean_mae": 0.008685,
+    "label_dist_bearish_pct": 42.97,
+    "label_dist_neutral_pct": 16.88,
+    "label_dist_bullish_pct": 40.15,
+    "n_training_samples": 30533,
+    "n_holdout_samples": 5031,
+    "effective_sample_size": 2349.15,
+    "raw_sample_size": 30533,
+    "uniqueness_ratio": 0.0769,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          5308,
+          2586,
+          3118
+        ],
+        [
+          1750,
+          1302,
+          1025
+        ],
+        [
+          5254,
+          2049,
+          3048
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.4329,
+    "holdout_balanced_accuracy": 0.3255,
+    "holdout_brier": 0.6356,
+    "holdout_ece": 0.0137,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "073eeb61"
+  },
+  "label_distribution": [
+    13040,
+    5091,
+    12402
+  ],
+  "barrier_config": {
+    "tp_mult_trending": 1.75,
+    "tp_mult_ranging": 1.45,
+    "sl_mult": 1.2,
+    "lookahead": 12,
+    "regime_adx_enter": 32.0
+  },
+  "hmac_signature": "eee6ec7a558d8e30814124c3445c293d50fa0455a4fa49cbcbbff7bbc899d293"
 }

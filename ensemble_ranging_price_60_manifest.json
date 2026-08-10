@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_price_60",
-  "timestamp": "2026-08-07T18:06:02.639553+00:00",
-  "model_version": "v7.2.0-103fb6c7-202608071806",
+  "timestamp": "2026-08-10T12:29:58.556892+00:00",
+  "model_version": "v7.2.0-9aa1aeb6-202608101229",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "103fb6c7",
+  "git_sha": "9aa1aeb6",
   "feature_count": 34,
   "feature_names": [
     "open_interest",
@@ -83,7 +83,7 @@
   "vif_values": {},
   "feature_contract_hash": "385dc46c98e7",
   "feature_pipeline_hash": "a4068d4eae16",
-  "training_data_hash": "8c79b679cbf7242275bd035a8bddcdf4d18cf0a08215f39d5c0952eefc403e29",
+  "training_data_hash": "60607d5d119e814b98e213506b4d6d9a23d0881378f9261b325d275652083332",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "9025162cc1bb5da4a6642073d79ae518e60e550eb146f6b6d68a34b2514f756f",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -114,49 +114,49 @@
   },
   "promotion_metrics": {
     "uniqueness_ratio": 0.0909,
-    "effective_sample_size": 2326.55,
-    "raw_sample_size": 25587
+    "effective_sample_size": 2922.27,
+    "raw_sample_size": 32140
   },
   "metrics": {
     "uniqueness_ratio": 0.0909,
-    "effective_sample_size": 2326.55,
-    "raw_sample_size": 25587
+    "effective_sample_size": 2922.27,
+    "raw_sample_size": 32140
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3917,
-      "median": 0.3958,
-      "std": 0.0154,
-      "min": 0.3709,
-      "max": 0.4111
+      "mean": 0.3753,
+      "median": 0.3679,
+      "std": 0.0178,
+      "min": 0.3569,
+      "max": 0.4087
     },
     "macro_f1": {
-      "mean": 0.3694,
-      "median": 0.3603,
-      "std": 0.0291,
-      "min": 0.3284,
-      "max": 0.4082
+      "mean": 0.3538,
+      "median": 0.3461,
+      "std": 0.0211,
+      "min": 0.3315,
+      "max": 0.393
     },
     "mcc": {
-      "mean": 0.1026,
-      "median": 0.1099,
-      "std": 0.0201,
-      "min": 0.0702,
-      "max": 0.1233
+      "mean": 0.0713,
+      "median": 0.0611,
+      "std": 0.0298,
+      "min": 0.0419,
+      "max": 0.1282
     },
-    "mean_kappa": 0.09793671459664555,
-    "mean_pr_auc_bear": 0.2757754595653027,
-    "mean_pr_auc_bull": 0.2870063047505208,
-    "mean_raw_accuracy": 0.4317,
-    "mean_mae": 0.011839,
-    "label_dist_bearish_pct": 23.58,
-    "label_dist_neutral_pct": 53.2,
-    "label_dist_bullish_pct": 23.22,
-    "n_training_samples": 25587,
-    "n_holdout_samples": 4215,
-    "effective_sample_size": 2326.55,
-    "raw_sample_size": 25587,
+    "mean_kappa": 0.06602462120401216,
+    "mean_pr_auc_bear": 0.21171646393215635,
+    "mean_pr_auc_bull": 0.19323674501497723,
+    "mean_raw_accuracy": 0.4662,
+    "mean_mae": 0.012326,
+    "label_dist_bearish_pct": 17.15,
+    "label_dist_neutral_pct": 67.52,
+    "label_dist_bullish_pct": 15.33,
+    "n_training_samples": 32140,
+    "n_holdout_samples": 5295,
+    "effective_sample_size": 2922.27,
+    "raw_sample_size": 32140,
     "uniqueness_ratio": 0.0909,
     "confusion_matrix": {
       "labels": [
@@ -171,26 +171,26 @@
       ],
       "matrix": [
         [
-          2340,
-          1939,
-          733
+          1579,
+          1979,
+          1002
         ],
         [
-          3988,
-          5933,
-          1374
+          4621,
+          9926,
+          3506
         ],
         [
-          2199,
-          1884,
-          930
+          1235,
+          1953,
+          979
         ]
       ]
     },
-    "holdout_accuracy": 0.5423,
-    "holdout_balanced_accuracy": 0.3353,
-    "holdout_brier": 0.5912,
-    "holdout_ece": 0.0273,
+    "holdout_accuracy": 0.6788,
+    "holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.4878,
+    "holdout_ece": 0.0368,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -199,7 +199,7 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "103fb6c7"
+    "git_sha": "073eeb61"
   },
   "barrier_config": {
     "tp_mult_trending": 1.4,
@@ -208,5 +208,5 @@
     "lookahead": 10,
     "regime_adx_enter": 22.0
   },
-  "hmac_signature": "24657afd15146d47988736b14d0aef6ca08a43f2d474c0910a5392262dbaad2b"
+  "hmac_signature": "cab71c830b21394733d87d5cadcab07d9170c0844e85b4dacb0244781f4e5e79"
 }

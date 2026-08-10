@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_120",
-  "timestamp": "2026-08-06T17:07:22.098702+00:00",
-  "model_version": "v7.2.0-1d32800d-202608061707",
+  "timestamp": "2026-08-10T12:30:32.047907+00:00",
+  "model_version": "v7.2.0-9aa1aeb6-202608101230",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "1d32800d",
+  "git_sha": "9aa1aeb6",
   "feature_count": 46,
   "feature_names": [
     "open_interest",
@@ -107,22 +107,25 @@
   "vif_values": {},
   "feature_contract_hash": "32797452e60e",
   "feature_pipeline_hash": "c9e4a2b6bbb3",
-  "training_data_hash": "695f36ba0da7b60f70d5744375d35a1b1a920d49e0df7d2a531080dccf25303d",
+  "training_data_hash": "f3258c3edf5067d900dd18d4e8382af542d4893b6a3a5e5dab539f7501522186",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "3d164880d0ff08adf80c904fc743492878fc4796c71ed3dea8f0004cb6920988",
   "promotion_reason": "Initial deployment / benchmark promotion",
   "replaced_model_hash": "3d164880d0ff08adf80c904fc743492878fc4796c71ed3dea8f0004cb6920988",
   "rollback_reference": "ensemble_trending_price_120_backup",
   "governance_policy": {
-    "version": "v2.4",
+    "version": "v2.5",
     "max_ece": 0.08,
     "max_brier": 0.5,
     "min_oos_sharpe": 0.5,
     "min_sharpe_delta": 0.1,
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
-    "enforce_stability_gate": false,
-    "min_samples": 20
+    "enforce_stability_gate": true,
+    "min_samples": 20,
+    "min_mcc": 0.05,
+    "min_balanced_accuracy": 0.36,
+    "mcc_regression_tolerance": 0.01
   },
   "dependencies": {
     "python": "3.14.4",
@@ -133,7 +136,101 @@
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
-  "promotion_metrics": {},
-  "metrics": {},
-  "hmac_signature": "72e12a4e571bd834f1d992595ba8a27635b23011bf0f10bde2deefd8821e2c78"
+  "promotion_metrics": {
+    "uniqueness_ratio": 0.077,
+    "effective_sample_size": 544.92,
+    "raw_sample_size": 7078
+  },
+  "metrics": {
+    "uniqueness_ratio": 0.077,
+    "effective_sample_size": 544.92,
+    "raw_sample_size": 7078
+  },
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.4607,
+      "median": 0.4306,
+      "std": 0.0763,
+      "min": 0.3755,
+      "max": 0.5925
+    },
+    "macro_f1": {
+      "mean": 0.3654,
+      "median": 0.3626,
+      "std": 0.0398,
+      "min": 0.3076,
+      "max": 0.4328
+    },
+    "mcc": {
+      "mean": 0.1382,
+      "median": 0.1314,
+      "std": 0.0726,
+      "min": 0.0502,
+      "max": 0.2561
+    },
+    "mean_kappa": 0.11124622644205809,
+    "mean_pr_auc_bear": 0.2747483539897443,
+    "mean_pr_auc_bull": 0.16539598545467624,
+    "mean_raw_accuracy": 0.4936,
+    "mean_mae": 0.028172,
+    "label_dist_bearish_pct": 14.04,
+    "label_dist_neutral_pct": 75.88,
+    "label_dist_bullish_pct": 10.08,
+    "n_training_samples": 7078,
+    "n_holdout_samples": 1168,
+    "effective_sample_size": 544.92,
+    "raw_sample_size": 7078,
+    "uniqueness_ratio": 0.077,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          253,
+          344,
+          229
+        ],
+        [
+          787,
+          2352,
+          1349
+        ],
+        [
+          102,
+          174,
+          305
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.8074,
+    "holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.3134,
+    "holdout_ece": 0.0577,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "073eeb61"
+  },
+  "barrier_config": {
+    "tp_mult_trending": 2.7,
+    "tp_mult_ranging": 2.16,
+    "sl_mult": 1.2,
+    "lookahead": 12,
+    "regime_adx_enter": 28.0
+  },
+  "hmac_signature": "a718ebc58244db0daaa58cfce08b802db85cab8777691369bee1a21d57d1219d"
 }

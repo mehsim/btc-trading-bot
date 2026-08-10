@@ -1,0 +1,103 @@
+{
+  "cv_metrics": {
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.428,
+      "median": 0.4307,
+      "std": 0.0137,
+      "min": 0.4066,
+      "max": 0.4424
+    },
+    "macro_f1": {
+      "mean": 0.4184,
+      "median": 0.4161,
+      "std": 0.0158,
+      "min": 0.3957,
+      "max": 0.4379
+    },
+    "mcc": {
+      "mean": 0.147,
+      "median": 0.1425,
+      "std": 0.0179,
+      "min": 0.1276,
+      "max": 0.1719
+    },
+    "mean_kappa": 0.14378676146581587,
+    "mean_pr_auc_bear": 0.3272671375832501,
+    "mean_pr_auc_bull": 0.2796982227755077,
+    "mean_raw_accuracy": 0.4628,
+    "mean_mae": 0.046985,
+    "label_dist_bearish_pct": 22.24,
+    "label_dist_neutral_pct": 55.09,
+    "label_dist_bullish_pct": 22.67,
+    "n_training_samples": 27074,
+    "n_holdout_samples": 4462,
+    "effective_sample_size": 1593.06,
+    "raw_sample_size": 27074,
+    "uniqueness_ratio": 0.0588,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          1576,
+          1704,
+          1773
+        ],
+        [
+          1980,
+          6629,
+          3740
+        ],
+        [
+          974,
+          1949,
+          2235
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.5495,
+    "holdout_balanced_accuracy": 0.3644,
+    "holdout_brier": 0.5894,
+    "holdout_ece": 0.0432,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "073eeb61"
+  },
+  "git_sha": "073eeb61",
+  "timestamp": "2026-08-09T14:05:16.770060+00:00",
+  "metrics": {
+    "uniqueness_ratio": 0.0588,
+    "effective_sample_size": 1593.06,
+    "raw_sample_size": 27074
+  },
+  "label_distribution": [
+    5990,
+    14924,
+    6160
+  ],
+  "barrier_config": {
+    "tp_mult_trending": 3.6880903646791636,
+    "tp_mult_ranging": 3.134689166122144,
+    "sl_mult": 0.8006662535676013,
+    "lookahead": 16,
+    "regime_adx_enter": 28.0
+  },
+  "promoted": true,
+  "evaluation_timestamp": "2026-08-09T14:05:16.770060+00:00",
+  "hmac_signature": "675d8f242bee73cd07b916808dd8e77a604c8a370f2a382481c86ebe44409e04"
+}
