@@ -328,28 +328,28 @@ def add_features(df, fetch_calendar_callback=None):
             df["ob_spread_L2"] = df["_ts"].map(merged_of["ob_spread_L2"])
             df["liq_long_1h"] = df["_ts"].map(merged_of["liq_long_1h"])
             df["liq_short_1h"] = df["_ts"].map(merged_of["liq_short_1h"])
-            # Fill NaN with proxy values where real data not yet available
+            # Fill NaN with proxy / NaN where real data not yet available
             df["CVD_true"] = df["CVD_true"].fillna(df["CVD_rolling_1h"])
-            df["OFI_true"] = df["OFI_true"].fillna(0.0)
-            df["ob_imbalance_L2"] = df["ob_imbalance_L2"].fillna(0.0)
-            df["ob_spread_L2"] = df["ob_spread_L2"].fillna(0.0)
-            df["liq_long_1h"] = df["liq_long_1h"].fillna(0.0)
-            df["liq_short_1h"] = df["liq_short_1h"].fillna(0.0)
+            df["ob_imbalance_L2"] = df["ob_imbalance_L2"].where(df["cvd_is_real"] == 1, np.nan)
+            df["ob_spread_L2"]    = df["ob_spread_L2"].where(df["cvd_is_real"] == 1, np.nan)
+            df["OFI_true"]        = df["OFI_true"].where(df["cvd_is_real"] == 1, np.nan)
+            df["liq_long_1h"]     = df["liq_long_1h"].fillna(0.0)
+            df["liq_short_1h"]    = df["liq_short_1h"].fillna(0.0)
             df.drop(columns=["_ts"], inplace=True, errors="ignore")
         else:
             raise ValueError("Empty order flow table")
     except Exception:
         df["cvd_is_real"] = 0
         df["CVD_true"] = df["CVD_rolling_1h"]
-        df["OFI_true"] = 0.0
-        df["ob_imbalance_L2"] = 0.0
-        df["ob_spread_L2"] = 0.0
+        df["OFI_true"] = np.nan
+        df["ob_imbalance_L2"] = np.nan
+        df["ob_spread_L2"] = np.nan
         df["liq_long_1h"] = 0.0
         df["liq_short_1h"] = 0.0
 
     _vol_ma = df["volume"].rolling(60, min_periods=20).mean().replace(0, np.nan)
     df["CVD_norm"] = (df["CVD_true"] / _vol_ma).fillna(0.0)
-    df["OFI_norm"] = (df["OFI_true"] / _vol_ma).fillna(0.0)
+    df["OFI_norm"] = (df["OFI_true"] / _vol_ma)
     
     # Wick Volume (Liquidation & Stop-Loss Sweep Proxies)
     upper_wick = df["high"] - df[["open", "close"]].max(axis=1)
