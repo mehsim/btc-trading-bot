@@ -257,6 +257,13 @@ for lag in [1, 2]:
     features.append(f"lead_lag_diff_4h_lag{lag}")
     features.append(f"volume_ratio_to_btc_lag{lag}")
 
+NON_STATIONARY_EXCLUDE = [
+    "EMA_9", "EMA_21", "EMA_50", "EMA_200",
+    "BB_high", "BB_mid", "BB_low",
+    "VWAP", "timestamp", "_ts",
+]
+features = [f for f in features if f not in NON_STATIONARY_EXCLUDE]
+
 def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
     global economic_calendar_cache
     with economic_calendar_lock:
@@ -809,14 +816,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
             live_df = live_df[shared_cols]
             df = pd.concat([df, live_df], ignore_index=True)
             print(f"[Live Feedback] Training dataset expanded to {len(df)} rows.")
-
-
-    NON_STATIONARY_EXCLUDE = [
-        "EMA_9", "EMA_21", "EMA_50", "EMA_200",
-        "BB_high", "BB_mid", "BB_low",
-        "VWAP", "timestamp", "_ts",
-    ]
-    features = [f for f in features if f not in NON_STATIONARY_EXCLUDE]
 
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
