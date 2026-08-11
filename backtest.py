@@ -547,13 +547,14 @@ def run_backtest():
     
     fee_results = []
     for structure_name, rate in fee_structures.items():
-        t_count, win_rate, pf, mdd, ret = run_single_backtest(
+        res_fee = run_single_backtest(
             df, models_trending, models_ranging, p95, max_conf,
             min_confidence=0.70,
             use_regressor_fee_check=False,
             require_trend_alignment=True,
             fee_rate=rate
         )
+        t_count, win_rate, pf, mdd, ret = res_fee[:5]
         fee_results.append({
             "Fee Structure": structure_name,
             "Trades": t_count,
