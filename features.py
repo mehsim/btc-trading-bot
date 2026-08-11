@@ -176,7 +176,19 @@ def add_features(df, fetch_calendar_callback=None):
     cov = rets_tmp.rolling(30, min_periods=10).cov(btc_rets)
     var = btc_rets.rolling(30, min_periods=10).var()
     df["sym_beta_btc"] = (cov / var.replace(0, np.nan)).fillna(1.0)
-        
+
+    if "close_btc" in df.columns:
+        _r  = df["close"].pct_change()
+        _rb = df["close_btc"].pct_change()
+        df["eth_btc_ratio"]  = df["close"] / df["close_btc"].replace(0, np.nan)
+        df["corr_to_btc_60"] = _r.rolling(60, min_periods=20).corr(_rb)
+        df["beta_to_btc_30"] = (_r.rolling(30, min_periods=10).cov(_rb) /
+                                _rb.rolling(30, min_periods=10).var().replace(0, np.nan))
+        df["btc_lead_1"]     = _rb.shift(1)
+        df["btc_lead_2"]     = _rb.shift(2)
+        df["rel_strength"]   = _r.rolling(20, min_periods=5).mean() - _rb.rolling(20, min_periods=5).mean()
+
+
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
     macd = MACD(df["close"])
     df["MACD_diff"] = macd.macd_diff() / (df["close"] + 1e-8)
