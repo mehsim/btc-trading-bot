@@ -320,7 +320,9 @@ def add_features(df, fetch_calendar_callback=None):
             merged_of = pd.merge_asof(df_sorted, of_df_sorted, left_on="_ts", right_on="datetime", direction="backward")
             merged_of.set_index("_ts", inplace=True)
             
-            df["CVD_true"] = df["_ts"].map(merged_of["cvd"])
+            real_cvd_map = df["_ts"].map(merged_of["cvd"])
+            df["cvd_is_real"] = real_cvd_map.notna().astype(int)
+            df["CVD_true"] = real_cvd_map
             df["OFI_true"] = df["_ts"].map(merged_of["ofi"])
             df["ob_imbalance_L2"] = df["_ts"].map(merged_of["ob_imbalance_L2"])
             df["ob_spread_L2"] = df["_ts"].map(merged_of["ob_spread_L2"])
@@ -337,12 +339,17 @@ def add_features(df, fetch_calendar_callback=None):
         else:
             raise ValueError("Empty order flow table")
     except Exception:
+        df["cvd_is_real"] = 0
         df["CVD_true"] = df["CVD_rolling_1h"]
         df["OFI_true"] = 0.0
         df["ob_imbalance_L2"] = 0.0
         df["ob_spread_L2"] = 0.0
         df["liq_long_1h"] = 0.0
         df["liq_short_1h"] = 0.0
+
+    _vol_ma = df["volume"].rolling(60, min_periods=20).mean().replace(0, np.nan)
+    df["CVD_norm"] = (df["CVD_true"] / _vol_ma).fillna(0.0)
+    df["OFI_norm"] = (df["OFI_true"] / _vol_ma).fillna(0.0)
     
     # Wick Volume (Liquidation & Stop-Loss Sweep Proxies)
     upper_wick = df["high"] - df[["open", "close"]].max(axis=1)
@@ -441,8 +448,14 @@ def add_features(df, fetch_calendar_callback=None):
         new_lag_cols[f"bid_ask_imbalance_ohlc_lag{lag}"] = bid_ask_imb_series.shift(lag)
         if "CVD_true" in df.columns:
             new_lag_cols[f"CVD_true_lag{lag}"] = df["CVD_true"].shift(lag)
+        if "CVD_norm" in df.columns:
+            new_lag_cols[f"CVD_norm_lag{lag}"] = df["CVD_norm"].shift(lag)
         if "OFI_true" in df.columns:
             new_lag_cols[f"OFI_true_lag{lag}"] = df["OFI_true"].shift(lag)
+        if "OFI_norm" in df.columns:
+            new_lag_cols[f"OFI_norm_lag{lag}"] = df["OFI_norm"].shift(lag)
+        if "cvd_is_real" in df.columns:
+            new_lag_cols[f"cvd_is_real_lag{lag}"] = df["cvd_is_real"].shift(lag)
         if "ob_imbalance_L2" in df.columns:
             new_lag_cols[f"ob_imbalance_L2_lag{lag}"] = df["ob_imbalance_L2"].shift(lag)
         if "ob_spread_L2" in df.columns:
