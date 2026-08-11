@@ -263,19 +263,21 @@ class SignalEvaluator:
                     p_star = sl_m / (actual_tp_m + sl_m)
                     eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (actual_tp_m + sl_m))), 4)
 
+                    from ensemble import resolve_direction
+                    _top_trend, _top_conf = resolve_direction(probs)
                     dir_total = prob_bearish + prob_bullish
                     if str(interval) in ["15", "30"] and dir_total >= 0.15:
                         norm_bear = prob_bearish / max(1e-9, dir_total)
                         norm_bull = prob_bullish / max(1e-9, dir_total)
                         if norm_bull >= eval_threshold:
                             direction = "Bullish"
-                            raw_conf = min(0.95, max(0.55, norm_bull * (1.0 - prob_neutral * 0.2)))
+                            raw_conf = norm_bull
                         elif norm_bear >= eval_threshold:
                             direction = "Bearish"
-                            raw_conf = min(0.95, max(0.55, norm_bear * (1.0 - prob_neutral * 0.2)))
+                            raw_conf = norm_bear
                         else:
                             direction = "Neutral"
-                            raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
+                            raw_conf = _top_conf
                     else:
                         if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= eval_threshold:
                             direction = "Bullish"
@@ -285,7 +287,7 @@ class SignalEvaluator:
                             raw_conf = prob_bearish
                         else:
                             direction = "Neutral"
-                            raw_conf = max(prob_bullish, prob_bearish, prob_neutral)
+                            raw_conf = _top_conf
 
                     if direction in ["Bullish", "Bearish"]:
                         from meta_labeler import evaluate_meta_filter

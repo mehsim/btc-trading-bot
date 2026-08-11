@@ -102,20 +102,12 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         pred_change = pred_pct * close_price
 
         winning_class = int(np.argmax(probs))
-        prob_bearish = float(probs[0])
-        prob_neutral = float(probs[1])
-        prob_bullish = float(probs[2])
-
-        neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.20)
-        if winning_class == 2:
-            ml_trend = "Bullish"
-            ml_confidence = min(0.95, prob_bullish * (1.0 - prob_neutral * neutral_coeff))
-        elif winning_class == 0:
-            ml_trend = "Bearish"
-            ml_confidence = min(0.95, prob_bearish * (1.0 - prob_neutral * neutral_coeff))
-        else:
-            ml_trend = "Neutral"
-            ml_confidence = prob_neutral
+        from ensemble import resolve_direction
+        ml_trend, ml_confidence = resolve_direction(probs)
+        prob_neutral = float(probs[1]) if len(probs) >= 2 else 0.0
+        neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
+        if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
+            ml_confidence = min(0.95, ml_confidence * (1.0 - prob_neutral * neutral_coeff))
 
         # B-3: Live Isotonic calibration alignment
         calibrated_confidence = ml_confidence

@@ -12,6 +12,30 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 from xgboost import XGBClassifier, XGBRegressor
 
+def resolve_direction(probs):
+    """
+    Resolves directional class ("Bullish", "Bearish", "Neutral") and raw confidence score.
+    Handles 1, 2, or 3-class probability arrays seamlessly without indexing assumptions.
+    """
+    if len(probs) >= 3:
+        prob_bearish = float(probs[0])
+        prob_neutral = float(probs[1])
+        prob_bullish = float(probs[2])
+    elif len(probs) == 2:
+        prob_bearish = float(probs[0])
+        prob_neutral = 0.0
+        prob_bullish = float(probs[1])
+    else:
+        val = float(probs[0])
+        prob_bearish = val if val < 0.5 else 0.0
+        prob_neutral = 0.0
+        prob_bullish = val if val >= 0.5 else 0.0
+
+    _p = {"Bearish": prob_bearish, "Neutral": prob_neutral, "Bullish": prob_bullish}
+    trend = max(_p, key=_p.get)
+    confidence = float(_p[trend])
+    return trend, confidence
+
 def get_model_feature_names(model):
     """Extracts expected feature names list from LightGBM, XGBoost, CatBoost, or scikit-learn estimators."""
     if model is None:

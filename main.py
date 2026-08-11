@@ -6104,21 +6104,13 @@ def main():
                                 prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
                                 prob_neutral = 0.0
                                 prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
-                        
-                            winning_class = int(np.argmax(probs))
-                            dir_total = prob_bearish + prob_bullish
-                        
-                            # B-2: Uniform raw model class probability trend assignment across all timeframes
-                            neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.20)
-                            if winning_class == 2:
-                                ml_trend = "Bullish"
-                                ml_confidence = min(0.95, prob_bullish * (1.0 - prob_neutral * neutral_coeff))
-                            elif winning_class == 0:
-                                ml_trend = "Bearish"
-                                ml_confidence = min(0.95, prob_bearish * (1.0 - prob_neutral * neutral_coeff))
-                            else:
-                                ml_trend = "Neutral"
-                                ml_confidence = prob_neutral
+
+                            _p = {"Bearish": prob_bearish, "Neutral": prob_neutral, "Bullish": prob_bullish}
+                            ml_trend = max(_p, key=_p.get)
+                            ml_confidence = _p[ml_trend]
+                            neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
+                            if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
+                                ml_confidence = min(0.95, ml_confidence * (1.0 - prob_neutral * neutral_coeff))
 
                             # Apply Isotonic Regression probability calibration if available
                             calibrated_confidence = ml_confidence
