@@ -6173,6 +6173,8 @@ def main():
                             rec.directional_mass_passed = 1 if str(iv) not in ["15", "30"] or ml_trend in ["Bullish", "Bearish"] else 0
                             rec.is_calibrated = 1 if (active_calibrator is not None and ml_trend in ["Bullish", "Bearish"]) else 0
                             rec.is_floor_scaled = 1 if (locals().get('is_floor_scaled', False)) else 0
+                            rec._inputs["predicted_change"] = float(pred_change)
+                            rec._inputs["expected_pct_change"] = float(pred_change)
 
                             log_event("INFO", f"[{symbol} {iv}m] probs=[{prob_bearish:.4f}, {prob_neutral:.4f}, {prob_bullish:.4f}] ml_conf={ml_confidence:.4f} cal={calibrated_confidence:.4f}")
 
@@ -6479,6 +6481,7 @@ def main():
                                 bot_state[f"latest_prediction_{tf}"]["threshold_base"] = economic_base_threshold
                                 bot_state[f"latest_prediction_{tf}"]["threshold_adjustments"] = adjustments_applied
                                 bot_state[f"latest_prediction_{tf}"]["dynamic_threshold"] = dynamic_conf_threshold
+                            rec._inputs["dynamic_threshold"] = float(dynamic_conf_threshold)
                         
                             status_msg = "Pending"
                             active_trade_key = f"active_trade_{tf}"

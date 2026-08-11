@@ -522,7 +522,7 @@ def api_status():
             c = conn.cursor()
             c.execute("""
                 SELECT ts, datetime(ts,'unixepoch') AS t, symbol, interval, direction,
-                       calibrated_conf, outcome, reject_reason, signal_source
+                       calibrated_conf, outcome, reject_reason, signal_source, inputs_json
                 FROM decision_journal
                 ORDER BY ts DESC LIMIT 50
             """)
@@ -531,6 +531,14 @@ def api_status():
             journal_preds = []
             for r in rows:
                 ts_val = float(r[0]) if r[0] else 0.0
+                inp = {}
+                if r[9]:
+                    try:
+                        inp = json.loads(r[9]) if isinstance(r[9], str) else (r[9] if isinstance(r[9], dict) else {})
+                    except Exception:
+                        inp = {}
+                pred_chg = inp.get("predicted_change", inp.get("expected_pct_change", inp.get("pred_pct_change", 0.0)))
+                dyn_thresh = inp.get("dynamic_threshold", inp.get("threshold_base", None))
                 journal_preds.append({
                     "timestamp": ts_val,
                     "candle_timestamp": ts_val,
@@ -540,6 +548,8 @@ def api_status():
                     "direction": r[4],
                     "calibrated_confidence": r[5],
                     "confidence": r[5],
+                    "predicted_change": pred_chg,
+                    "dynamic_threshold": dyn_thresh,
                     "outcome": r[6],
                     "status": r[7] if r[7] else r[6],
                     "reject_reason": r[7],
