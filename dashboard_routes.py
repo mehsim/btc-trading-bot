@@ -521,7 +521,7 @@ def api_status():
             conn = get_db_connection()
             c = conn.cursor()
             c.execute("""
-                SELECT datetime(ts,'unixepoch') AS t, symbol, interval, direction,
+                SELECT ts, datetime(ts,'unixepoch') AS t, symbol, interval, direction,
                        calibrated_conf, outcome, reject_reason, signal_source
                 FROM decision_journal
                 ORDER BY ts DESC LIMIT 50
@@ -530,18 +530,20 @@ def api_status():
             conn.close()
             journal_preds = []
             for r in rows:
+                ts_val = float(r[0]) if r[0] else 0.0
                 journal_preds.append({
-                    "timestamp": r[0],
-                    "datetime": r[0],
-                    "symbol": r[1],
-                    "interval": r[2],
-                    "direction": r[3],
-                    "calibrated_confidence": r[4],
-                    "confidence": r[4],
-                    "outcome": r[5],
-                    "status": r[6] if r[6] else r[5],
-                    "reject_reason": r[6],
-                    "signal_source": r[7]
+                    "timestamp": ts_val,
+                    "candle_timestamp": ts_val,
+                    "datetime": r[1],
+                    "symbol": r[2],
+                    "interval": r[3],
+                    "direction": r[4],
+                    "calibrated_confidence": r[5],
+                    "confidence": r[5],
+                    "outcome": r[6],
+                    "status": r[7] if r[7] else r[6],
+                    "reject_reason": r[7],
+                    "signal_source": r[8]
                 })
             status_data["prediction_history"] = journal_preds
         except Exception as ex_j:
