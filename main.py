@@ -7270,6 +7270,8 @@ def main():
                         
                     finally:
                         rec.status_msg = status_msg
+                        if not getattr(rec, "reject_reason", None) and status_msg not in ("Pending", ""):
+                            rec.reject_reason = status_msg
                         if not hasattr(rec, "outcome") or not rec.outcome or rec.outcome == "ERROR":
                             rec.outcome = "EXECUTED" if placed else ("REJECTED" if status_msg.startswith("REJECTED") else "SKIPPED")
                         write_decision(rec)
