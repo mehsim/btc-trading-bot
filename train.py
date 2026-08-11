@@ -838,8 +838,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         
         # Subsample data for feature selection to accelerate training times (Pros: 5x speedup)
         if len(df) > 40000:
-            df_sub = df.sample(n=40000, random_state=42)
-            print(f"[Training Optimization] Subsampled RFECV training set from {len(df)} to {len(df_sub)} rows.")
+            df_sub = df.iloc[-40000:]
+            print(f"[Training Optimization] Selected last {len(df_sub)} rows for RFECV training set (out of {len(df)} total).")
         else:
             df_sub = df
             
@@ -848,14 +848,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
         
         from config import CV_N_SPLITS
         cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
-        estimator = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
+        estimator = XGBClassifier(n_estimators=200, max_depth=5, random_state=42, n_jobs=1)
         
         selector = RFECV(
             estimator=estimator,
-            step=5, # Dropping 5 features at a time (Pros: 2.5x speedup)
+            step=1,
             cv=cv_selector,
-            scoring="accuracy",
-            min_features_to_select=20,
+            scoring="balanced_accuracy",
+            min_features_to_select=10,
             n_jobs=1
         )
         
@@ -965,13 +965,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             X_rfecv_prelim = df_regime[features]
             
             if len(df_regime) > 10000:
-                df_sub = df_regime.sample(n=10000, random_state=42)
+                df_sub = df_regime.iloc[-10000:]
                 X_rfecv_prelim = df_sub[features]
                 y_rfecv = df_sub["target_trend"]
                 
             estimator = XGBClassifier(
-                n_estimators=30,
-                max_depth=3,
+                n_estimators=200,
+                max_depth=5,
                 learning_rate=0.1,
                 random_state=42,
                 tree_method="hist",
@@ -981,10 +981,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
             cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
             selector = RFECV(
                 estimator=estimator,
-                step=2,
+                step=1,
                 cv=cv_rfecv,
-                scoring="accuracy",
-                min_features_to_select=15,
+                scoring="balanced_accuracy",
+                min_features_to_select=10,
                 n_jobs=1
             )
             selector.fit(X_rfecv_prelim.values, y_rfecv.values)
@@ -994,9 +994,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
             for pf in required_price_features:
                 if pf not in regime_features and pf in df_regime.columns:
                     regime_features.append(pf)
-                    
-            if len(regime_features) > 22:
-                regime_features = regime_features[:22]
                 
             with open(features_filename, "w") as f:
                 json.dump(regime_features, f)
