@@ -811,6 +811,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"[Live Feedback] Training dataset expanded to {len(df)} rows.")
 
 
+    NON_STATIONARY_EXCLUDE = [
+        "EMA_9", "EMA_21", "EMA_50", "EMA_200",
+        "BB_high", "BB_mid", "BB_low",
+        "VWAP", "timestamp", "_ts",
+    ]
+    features = [f for f in features if f not in NON_STATIONARY_EXCLUDE]
+
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
     # ==========================================
