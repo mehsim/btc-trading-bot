@@ -1575,8 +1575,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 git_sha=_chal_git_sha
             )
 
-            # Step 3: Evaluate MLflow Model Registry Promotion Gate with actual integer version
-            promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver)
+            # Step 3: Evaluate MLflow Model Registry Promotion Gate with actual integer version and OOF probabilities
+            cand_eval = {
+                "mcc": chal_mcc_mean,
+                "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
+            }
+            champ_eval = {"mcc": champ_mcc_val} if champ_mcc_val is not None else None
+            promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
+            if not promoted:
+                print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
+                should_save = False
             # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
             from oos_validation import validate_out_of_sample_performance
             oos_passed, oos_reason = validate_out_of_sample_performance(interval=str(interval), challenger_mcc=chal_mcc_mean)

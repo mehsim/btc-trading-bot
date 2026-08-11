@@ -36,6 +36,31 @@ def resolve_direction(probs):
     confidence = float(_p[trend])
     return trend, confidence
 
+def verify_model_responsiveness(probs_or_shares):
+    """
+    Validates model prediction responsiveness (B-4 & B-5 gates).
+    Returns (is_responsive: bool, reason: str).
+    """
+    if probs_or_shares is None:
+        return True, "OK"
+    arr = np.asarray(probs_or_shares)
+    if arr.ndim == 2 and len(arr) > 0:
+        counts = np.bincount(arr.argmax(axis=1), minlength=3)
+        shares = counts / len(arr)
+    elif arr.ndim == 1 and len(arr) == 3:
+        total = float(np.sum(arr))
+        shares = arr / total if total > 0 else np.array([1.0/3.0, 1.0/3.0, 1.0/3.0])
+    else:
+        return True, "OK"
+
+    dominant = float(shares.max())
+    min_share = float(shares.min())
+    if dominant > 0.90:
+        return False, f"REJECTED: B-4 one-sided predictor — {dominant:.1%} dominant class share exceeds 90.0% ceiling"
+    if min_share < 0.02 and len(shares) == 3:
+        return False, f"REJECTED: B-5 unresponsive model — minimum class share {min_share:.1%} below 2.0% responsiveness floor"
+    return True, "OK"
+
 def get_model_feature_names(model):
     """Extracts expected feature names list from LightGBM, XGBoost, CatBoost, or scikit-learn estimators."""
     if model is None:
@@ -662,6 +687,11 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
                     feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
                 if n_features is None and feature_names:
                     n_features = len(feature_names)
+                label_dist = m_data.get("label_distribution")
+                if label_dist:
+                    is_resp, resp_msg = verify_model_responsiveness(label_dist)
+                    if not is_resp:
+                        log_event("WARNING", f"[Model Governance Notice] '{prefix}' manifest label distribution: {resp_msg}")
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
 

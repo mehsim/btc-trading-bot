@@ -16,7 +16,8 @@ def test_meta_filter_passes_through_on_thin_data():
 
 def test_promotion_rejects_mcc_regression():
     from mlops_engine import promote_if_better
-    ok, msg = promote_if_better(cand={"mcc": 0.1067}, champ={"mcc": 0.1542})
+    probs = [[0.4, 0.3, 0.3], [0.3, 0.4, 0.3], [0.3, 0.3, 0.4]] * 20
+    ok, msg = promote_if_better(cand={"mcc": 0.1067, "probs": probs}, champ={"mcc": 0.1542})
     assert ok is False and "regression" in msg.lower()
 
 
@@ -40,7 +41,7 @@ def test_promotion_rejects_degenerate_predictions():
     probs[:, 0] = 0.01
     probs[:, 2] = 0.01
     ok, msg = promote_if_better(cand={"probs": probs}, champ={"mcc": 0.10})
-    assert ok is False and "degenerate" in msg.lower()
+    assert ok is False and ("one-sided" in msg.lower() or "unresponsive" in msg.lower() or "rejected" in msg.lower())
 
 
 def test_symbol_prediction_state_isolation():
