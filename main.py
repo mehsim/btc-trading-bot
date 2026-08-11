@@ -2760,7 +2760,6 @@ def on_open(ws):
         args.append(f"tickers.{s}")
         args.append(f"publicTrade.{s}")
         args.append(f"orderbook.50.{s}")
-        args.append(f"liquidation.{s}")
         
     chunk_size = 10
     for i in range(0, len(args), chunk_size):
