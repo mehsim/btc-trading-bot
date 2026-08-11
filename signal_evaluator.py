@@ -230,7 +230,7 @@ class SignalEvaluator:
 
                     _model_key = f"ensemble_{_regime_key}_trend_{interval}"
                     _recent_argmax[_model_key].append(int(np.argmax(probs)))
-                    if len(_recent_argmax[_model_key]) >= 20:
+                    if len(_recent_argmax[_model_key]) >= 5:
                         shares = np.bincount(_recent_argmax[_model_key], minlength=3) / len(_recent_argmax[_model_key])
                         if shares.max() > 0.95:
                             log_event("WARNING", f"[{_model_key}] degenerate: {shares.round(3)} over "
