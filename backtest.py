@@ -63,17 +63,26 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     import json
     feat_trending = None
     feat_ranging = None
+    trending_file = f"selected_features_{interval}_trending.json"
+    ranging_file = f"selected_features_{interval}_ranging.json"
     selected_features_filename = f"selected_features_{interval}.json"
-    if os.path.exists(selected_features_filename):
+
+    if os.path.exists(trending_file):
+        with open(trending_file, "r") as f:
+            feat_trending = json.load(f)
+    elif os.path.exists(selected_features_filename):
         with open(selected_features_filename, "r") as f:
             feat_dict = json.load(f)
-            if isinstance(feat_dict, dict):
-                feat_trending = feat_dict.get("trending")
-                feat_ranging = feat_dict.get("ranging")
-            elif isinstance(feat_dict, list):
-                feat_trending = feat_dict
-                feat_ranging = feat_dict
-                
+            feat_trending = feat_dict.get("trending") if isinstance(feat_dict, dict) else feat_dict
+
+    if os.path.exists(ranging_file):
+        with open(ranging_file, "r") as f:
+            feat_ranging = json.load(f)
+    elif os.path.exists(selected_features_filename):
+        with open(selected_features_filename, "r") as f:
+            feat_dict = json.load(f)
+            feat_ranging = feat_dict.get("ranging") if isinstance(feat_dict, dict) else feat_dict
+
     if feat_trending is None:
         feat_trending = features
     if feat_ranging is None:
@@ -347,23 +356,40 @@ def run_backtest():
     try:
         from ensemble import load_ensemble_classifier, load_ensemble_regressor
         import json
+        trending_file = f"selected_features_{INTERVAL}_trending.json"
+        ranging_file = f"selected_features_{INTERVAL}_ranging.json"
         selected_features_filename = f"selected_features_{INTERVAL}.json"
-        n_features = len(features)
-        if os.path.exists(selected_features_filename):
+
+        feat_tr = None
+        feat_rn = None
+        if os.path.exists(trending_file):
+            with open(trending_file, "r") as f:
+                feat_tr = json.load(f)
+        elif os.path.exists(selected_features_filename):
             with open(selected_features_filename, "r") as f:
-                f_data = json.load(f)
-                if isinstance(f_data, dict):
-                    n_features = len(f_data.get("trending", features))
-                elif isinstance(f_data, list):
-                    n_features = len(f_data)
+                d_f = json.load(f)
+                feat_tr = d_f.get("trending") if isinstance(d_f, dict) else d_f
+
+        if os.path.exists(ranging_file):
+            with open(ranging_file, "r") as f:
+                feat_rn = json.load(f)
+        elif os.path.exists(selected_features_filename):
+            with open(selected_features_filename, "r") as f:
+                d_f = json.load(f)
+                feat_rn = d_f.get("ranging") if isinstance(d_f, dict) else d_f
+
+        if feat_tr is None:
+            feat_tr = features
+        if feat_rn is None:
+            feat_rn = features
 
         models_trending = {
-            "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", n_features),
-            "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", n_features)
+            "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
+            "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", len(feat_tr), feature_names=feat_tr)
         }
         models_ranging = {
-            "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", n_features),
-            "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", n_features)
+            "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
+            "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", len(feat_rn), feature_names=feat_rn)
         }
         print("Models loaded successfully.")
     except Exception as e:
