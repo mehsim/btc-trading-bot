@@ -2767,6 +2767,7 @@ def on_open(ws):
             "op": "subscribe",
             "args": chunk
         }))
+        time.sleep(0.2)
         
     # Heartbeat Daemon Thread to send custom text pings every 20 seconds
     def send_heartbeat():
