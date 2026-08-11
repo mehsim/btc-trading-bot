@@ -32,16 +32,17 @@ def test_tiny_negative_pred_change_does_not_invalidate():
     assert strong_conflict is False, f"Noise pred_change={pred_change} should not conflict (pred_pct={pred_pct:.4f}%)"
 
 
-def test_promotion_rejects_degenerate_predictions():
+def test_promotion_rejects_degenerate_candidate():
     from mlops_engine import promote_if_better
-    import numpy as np
-    # 98% predictions in class 1 (degenerate)
-    probs = np.zeros((100, 3))
-    probs[:, 1] = 0.98
-    probs[:, 0] = 0.01
-    probs[:, 2] = 0.01
-    ok, msg = promote_if_better(cand={"probs": probs}, champ={"mcc": 0.10})
+    cand = {"mcc": 0.12, "probs": [[0.1, 0.8, 0.1]] * 100}   # 100% neutral argmax
+    ok, msg = promote_if_better(cand=cand, champ={"mcc": 0.05})
     assert ok is False and ("one-sided" in msg.lower() or "unresponsive" in msg.lower() or "rejected" in msg.lower())
+
+def test_promotion_rejects_missing_probs():
+    from mlops_engine import promote_if_better
+    cand = {"mcc": 0.12}                                      # no probs key
+    ok, msg = promote_if_better(cand=cand, champ={"mcc": 0.05})
+    assert ok is False
 
 
 def test_symbol_prediction_state_isolation():
@@ -70,7 +71,9 @@ if __name__ == "__main__":
     print("✅ test_promotion_rejects_mcc_regression PASSED")
     test_tiny_negative_pred_change_does_not_invalidate()
     print("✅ test_tiny_negative_pred_change_does_not_invalidate PASSED")
-    test_promotion_rejects_degenerate_predictions()
-    print("✅ test_promotion_rejects_degenerate_predictions PASSED")
+    test_promotion_rejects_degenerate_candidate()
+    print("✅ test_promotion_rejects_degenerate_candidate PASSED")
+    test_promotion_rejects_missing_probs()
+    print("✅ test_promotion_rejects_missing_probs PASSED")
     test_symbol_prediction_state_isolation()
     print("✅ test_symbol_prediction_state_isolation PASSED")
