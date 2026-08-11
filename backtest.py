@@ -497,7 +497,7 @@ def run_backtest():
     results = []
     for name, cfg in scenarios.items():
         # Execute pessimistic (realistic) run
-        t_count_p, win_rate_p, pf_p, mdd_p, ret_p = run_single_backtest(
+        res_p = run_single_backtest(
             df, models_trending, models_ranging, p95, max_conf,
             min_confidence=cfg["min_confidence"],
             use_regressor_fee_check=cfg["use_regressor_fee_check"],
@@ -506,9 +506,10 @@ def run_backtest():
             interval=INTERVAL,
             pessimistic_mode=True
         )
+        t_count_p, win_rate_p, pf_p, mdd_p, ret_p = res_p[:5]
 
         # Execute optimistic (signal close) run for comparison
-        t_count_o, win_rate_o, pf_o, mdd_o, ret_o = run_single_backtest(
+        res_o = run_single_backtest(
             df, models_trending, models_ranging, p95, max_conf,
             min_confidence=cfg["min_confidence"],
             use_regressor_fee_check=cfg["use_regressor_fee_check"],
@@ -517,6 +518,7 @@ def run_backtest():
             interval=INTERVAL,
             pessimistic_mode=False
         )
+        t_count_o, win_rate_o, pf_o, mdd_o, ret_o = res_o[:5]
 
         results.append({
             "Scenario": name,
