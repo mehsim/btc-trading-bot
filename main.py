@@ -2614,6 +2614,8 @@ def on_message(ws, message):
     last_ws_update_time = time.time()
     try:
         data = json.loads(message)
+        if "op" in data or "success" in data:
+            log_event("INFO", f"[WS] control message: {data}")
         topic = data.get("topic", "")
         
         # 1. Price Tickers Handler
