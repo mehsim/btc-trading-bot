@@ -478,6 +478,7 @@ def add_features(df, fetch_calendar_callback=None):
             new_lag_cols[f"liq_short_1h_lag{lag}"] = df["liq_short_1h"].shift(lag)
 
     df = pd.concat([df, pd.DataFrame(new_lag_cols, index=df.index)], axis=1)
+    df = df.loc[:, ~df.columns.duplicated()]
     df = add_candlestick_patterns(df)
     try:
         from high_alpha_feature_engine import high_alpha_feature_engine
