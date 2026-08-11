@@ -819,8 +819,9 @@ cached_news_titles = []
 news_sentiment_lock = threading.Lock()
 
 # Thread-safe real-time Order Flow (CVD & OFI)
+from config import SUPPORTED_SYMBOLS
 order_flow_lock = threading.Lock()
-order_flow_data = {} # {symbol: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, ...}}
+order_flow_data = {s: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0} for s in SUPPORTED_SYMBOLS}
 
 # Thread-safe active background order execution guard
 active_execution_lock = threading.Lock()
