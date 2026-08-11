@@ -516,11 +516,37 @@ def api_status():
                     dedup_dict[k] = t
         status_data["trade_history"] = list(dedup_dict.values())[-50:]
         
-        pred_hist = state_manager.get("prediction_history", [])
-        if not pred_hist:
-            import database
-            pred_hist = database.get_prediction_history(limit=100)
-        status_data["prediction_history"] = pred_hist[-100:] if isinstance(pred_hist, list) else []
+        try:
+            from database import get_db_connection
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("""
+                SELECT datetime(ts,'unixepoch') AS t, symbol, interval, direction,
+                       calibrated_conf, outcome, reject_reason, signal_source
+                FROM decision_journal
+                ORDER BY ts DESC LIMIT 50
+            """)
+            rows = c.fetchall()
+            conn.close()
+            journal_preds = []
+            for r in rows:
+                journal_preds.append({
+                    "timestamp": r[0],
+                    "datetime": r[0],
+                    "symbol": r[1],
+                    "interval": r[2],
+                    "direction": r[3],
+                    "calibrated_confidence": r[4],
+                    "confidence": r[4],
+                    "outcome": r[5],
+                    "status": r[6] if r[6] else r[5],
+                    "reject_reason": r[6],
+                    "signal_source": r[7]
+                })
+            status_data["prediction_history"] = journal_preds
+        except Exception as ex_j:
+            pred_hist = state_manager.get("prediction_history", [])
+            status_data["prediction_history"] = pred_hist[-50:] if isinstance(pred_hist, list) else []
 
         # Model Governance Summary for Frontend Inspector Modals
         gov_summary = {}
