@@ -3593,8 +3593,13 @@
                 });
             }
 
-            // Sort chronologically by timestamp
-            filtered.sort((a, b) => (parseFloat(a.timestamp || a.candle_timestamp || 0) - parseFloat(b.timestamp || b.candle_timestamp || 0)));
+            // Sort chronologically by normalized timestamp in seconds
+            const getNormSec = (p) => {
+                let t = p.timestamp || p.candle_timestamp || 0;
+                t = parseFloat(t);
+                return t > 1e11 ? t / 1000 : t;
+            };
+            filtered.sort((a, b) => getNormSec(a) - getNormSec(b));
 
             const latest10 = filtered.slice(-10).reverse();
 
