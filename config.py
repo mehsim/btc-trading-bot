@@ -240,6 +240,7 @@ ENABLE_DYNAMIC_TRAILING_STOP = True
 ENABLE_EXPLAINABLE_TRADE_LOG = True
 
 import os
+import json
 
 def _get_tf_env(key: str, default: float) -> float:
     try:
@@ -255,7 +256,7 @@ TIMEFRAME_CONFIG = {
         "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.25),
         "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.68),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.40),
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.35),
         "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.40)
     },
     "30": {   # 30M Timeframe - Short Swing
@@ -289,6 +290,23 @@ TIMEFRAME_CONFIG = {
         "tp_mult_trending": _get_tf_env("TF_360M_TP_TRENDING", 3.30)
     }
 }
+
+# Auto-sync TIMEFRAME_CONFIG with optimized_barriers_{tf}.json if present
+for _tf in list(TIMEFRAME_CONFIG.keys()):
+    _opt_path = f"optimized_barriers_{_tf}.json"
+    if os.path.exists(_opt_path):
+        try:
+            with open(_opt_path, "r") as _f:
+                _opt_data = json.load(_f)
+            if isinstance(_opt_data, dict):
+                for _k in ["lookahead", "sl_mult", "tp_mult_ranging", "tp_mult_trending"]:
+                    if _k in _opt_data:
+                        if _k == "lookahead":
+                            TIMEFRAME_CONFIG[_tf][_k] = int(_opt_data[_k])
+                        else:
+                            TIMEFRAME_CONFIG[_tf][_k] = float(_opt_data[_k])
+        except Exception:
+            pass
 
 # Learnable EQS Weights Dictionary (Bayesian Optimization Ready)
 EQS_WEIGHTS = {
