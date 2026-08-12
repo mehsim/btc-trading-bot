@@ -2451,7 +2451,6 @@
                     const displayPnLPct = t.change_pct !== undefined && t.change_pct !== null && !isNaN(parseFloat(t.change_pct)) ? parseFloat(t.change_pct) : (posSize > 0 ? (rawPnL / posSize * 100) : 0);
                     const displayPnLPctStr = displayPnLPct >= 0 ? `+${displayPnLPct.toFixed(2)}%` : `${displayPnLPct.toFixed(2)}%`;
                     
-                    const entryPrice = parseFloat(t.entry_price) || 0.0;
                     const originalQty = parseFloat(t.original_qty) || parseFloat(t.qty) || 0.0;
                     const currentQty = parseFloat(t.qty) || 0.0;
                     let fillPct = originalQty > 0 ? (currentQty / originalQty) * 100.0 : 100.0;

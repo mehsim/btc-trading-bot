@@ -2546,8 +2546,6 @@
                     const exitPrice = parseFloat(t.exit_price) || 0.0;
                     const dirStr = String(t.direction || 'BULLISH').toUpperCase();
                     const isBull = dirStr === 'BUY' || dirStr === 'LONG' || dirStr === 'BULLISH';
-
-                    const pnlClass = exitPrice >= entryPrice ? (isBull ? "color-bullish" : "color-bearish") : (isBull ? "color-bearish" : "color-bullish");
                     const isSucc = isTradeSuccess(t);
                     const successStr = isSucc ? "CORRECT ✓" : "INCORRECT ✗";
                     const successClass = isSucc ? "color-bullish" : "color-bearish";
