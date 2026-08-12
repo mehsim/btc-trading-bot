@@ -445,19 +445,23 @@ def save_completed_trade(trade) -> bool:
             
             # Deduplication Guard: Check if matching trade already exists in DB
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT trade_id FROM completed_trades 
-                WHERE symbol = ? AND abs(exit_time - ?) < 60.0 AND abs(entry_price - ?) < 0.0005 AND abs(exit_price - ?) < 0.0005;
-            """, (sym, exit_ts, entry_p, exit_p))
-            dup = cursor.fetchone()
-            if dup:
-                print(f"[Database] Skipped duplicate completed trade insert for {sym} at exit_time {exit_ts}.")
+            cursor.execute("SELECT trade_id FROM completed_trades WHERE trade_id = ?;", (t_id,))
+            if cursor.fetchone():
                 conn.close()
                 return True
 
+            if entry_p is not None and exit_p is not None:
+                cursor.execute("""
+                    SELECT trade_id FROM completed_trades 
+                    WHERE symbol = ? AND abs(exit_time - ?) < 60.0 AND abs(entry_price - ?) < 0.0005 AND abs(exit_price - ?) < 0.0005;
+                """, (sym, exit_ts, entry_p, exit_p))
+                if cursor.fetchone():
+                    conn.close()
+                    return True
+
             try:
                 conn.execute("""
-                    INSERT INTO completed_trades (
+                    INSERT OR IGNORE INTO completed_trades (
                         trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
                         change_pct, success, reason, position_size_usd, intended_size_usd, original_size, pnl_usd,
                         balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct,
@@ -481,34 +485,7 @@ def save_completed_trade(trade) -> bool:
                 ))
                 conn.commit()
                 success = True
-            except sqlite3.IntegrityError as ie:
-                new_id = f"tr_{trade.get('symbol')}_{exit_ts}_{uuid.uuid4()}"
-                trade["trade_id"] = new_id
-                print(f"[Database Warning] Duplicate trade_id '{t_id}' detected. Retrying with fresh UUID '{new_id}': {ie}")
-                conn.execute("""
-                    INSERT INTO completed_trades (
-                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                        change_pct, success, reason, position_size_usd, intended_size_usd, original_size, pnl_usd,
-                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct,
-                        venue_closed_pnl, venue_qty, venue_entry_value, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """, (
-                    new_id, trade.get("symbol"), trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
-                    entry_p, exit_p,
-                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
-                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4),
-                    round_monetary(trade.get("intended_size_usd", trade.get("position_size_usd")), 4),
-                    round_monetary(trade.get("original_size"), 4),
-                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
-                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
-                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
-                    round_monetary(trade.get("fill_pct"), 2),
-                    round_monetary(trade.get("venue_closed_pnl"), 4) if trade.get("venue_closed_pnl") is not None else None,
-                    round_monetary(trade.get("venue_qty"), 4) if trade.get("venue_qty") is not None else None,
-                    round_monetary(trade.get("venue_entry_value"), 4) if trade.get("venue_entry_value") is not None else None,
-                    json.dumps(trade)
-                ))
-                conn.commit()
+            except sqlite3.IntegrityError:
                 success = True
         except Exception as e:
             try:
