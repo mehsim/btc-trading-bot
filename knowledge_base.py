@@ -13,6 +13,7 @@ import threading
 from typing import Dict, Any, List
 
 from database import db_lock, get_db_connection
+from trade_calculators import safe_float
 
 _db_initialized = False
 
@@ -79,16 +80,16 @@ def save_rule(rule_dict: Dict[str, Any]) -> bool:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 rule_dict.get("rule_id"), rule_dict.get("cluster_key"),
-                rule_dict.get("sample_size", 0), rule_dict.get("win_rate", 0.0),
-                rule_dict.get("avg_r", 0.0), rule_dict.get("ci_lower", 0.0),
-                rule_dict.get("ci_upper", 0.0), rule_dict.get("evidence_score", 50.0),
-                rule_dict.get("counter_evidence_count", 0), rule_dict.get("status", "VALIDATED"),
-                rule_dict.get("recommendation", ""), trade_ids_json, rule_dict.get("created_at", now), now
+                int(safe_float(rule_dict.get("sample_size", 0))), safe_float(rule_dict.get("win_rate", 0.0)),
+                safe_float(rule_dict.get("avg_r", 0.0)), safe_float(rule_dict.get("ci_lower", 0.0)),
+                safe_float(rule_dict.get("ci_upper", 0.0)), safe_float(rule_dict.get("evidence_score", 50.0)),
+                int(safe_float(rule_dict.get("counter_evidence_count", 0))), rule_dict.get("status", "VALIDATED"),
+                rule_dict.get("recommendation", ""), trade_ids_json, safe_float(rule_dict.get("created_at"), now), now
             ))
             conn.commit()
             return True
         except Exception as e:
-            print(f"[knowledge_base Error] Save failed: {e}")
+            print(f"[knowledge_base Error] Save rule failed: {e}")
             return False
         finally:
             conn.close()

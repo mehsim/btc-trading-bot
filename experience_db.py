@@ -14,6 +14,8 @@ import threading
 
 from database import db_lock, get_db_connection
 
+from trade_calculators import safe_float
+
 def init_experience_db():
     with db_lock:
         conn = get_db_connection()
@@ -143,23 +145,23 @@ def save_trade_experience(record: dict) -> bool:
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 );
             """, (
-                t_id, record.get("symbol"), record.get("timestamp", time.time()),
+                t_id, record.get("symbol"), safe_float(record.get("timestamp"), time.time()),
                 record.get("feature_pipeline_version", "v1.0"), record.get("model_version", "v2.4_prod"),
                 record.get("ensemble_version", "v1.0"), record.get("normalizer_version", "v1.0"),
                 decision_json, record.get("market_regime", "TRENDING"), record.get("regime_id"),
-                record.get("signal_direction"), record.get("confidence", 0.0),
+                record.get("signal_direction"), safe_float(record.get("confidence", 0.0)),
                 record.get("tf_4h"), record.get("tf_1h"), record.get("tf_15m"),
-                1 if record.get("ltf_conflict") else 0, record.get("adx", 0.0), record.get("adx_slope", 0.0),
-                record.get("atr_pct", 0.0), record.get("atr_percentile", 50.0), record.get("ema_distance_pct", 0.0),
-                record.get("vwap_distance_pct", 0.0), record.get("rsi", 50.0), record.get("volume_percentile", 50.0),
-                record.get("volume_expansion_pct", 0.0), record.get("funding_rate", 0.0), record.get("oi_z_score", 0.0),
-                record.get("entry_price", 0.0), record.get("exit_price", 0.0), record.get("stop_loss", 0.0),
-                record.get("take_profit", 0.0), record.get("leverage", 1.0), record.get("position_size_usd", 0.0),
-                record.get("slippage_bps", 0.0), record.get("execution_latency_ms", 0.0), record.get("entry_type", "TREND"),
-                record.get("exit_reason", "MANUAL"), record.get("realized_r", 0.0), record.get("pnl_usd", 0.0),
-                record.get("mae_pct", 0.0), record.get("mfe_pct", 0.0), record.get("time_in_trade_min", 0.0),
-                record.get("individual_brier_loss", 0.0), record.get("trade_outcome", "LOSS" if record.get("pnl_usd", 0) < 0 else "WIN"),
-                failure_json, replay_json, record.get("learning_score", 0.0), record.get("research_priority", 0)
+                1 if record.get("ltf_conflict") else 0, safe_float(record.get("adx", 0.0)), safe_float(record.get("adx_slope", 0.0)),
+                safe_float(record.get("atr_pct", 0.0)), safe_float(record.get("atr_percentile", 50.0), 50.0), safe_float(record.get("ema_distance_pct", 0.0)),
+                safe_float(record.get("vwap_distance_pct", 0.0)), safe_float(record.get("rsi", 50.0), 50.0), safe_float(record.get("volume_percentile", 50.0), 50.0),
+                safe_float(record.get("volume_expansion_pct", 0.0)), safe_float(record.get("funding_rate", 0.0)), safe_float(record.get("oi_z_score", 0.0)),
+                safe_float(record.get("entry_price", 0.0)), safe_float(record.get("exit_price", 0.0)), safe_float(record.get("stop_loss", 0.0)),
+                safe_float(record.get("take_profit", 0.0)), safe_float(record.get("leverage", 1.0), 1.0), safe_float(record.get("position_size_usd", 0.0)),
+                safe_float(record.get("slippage_bps", 0.0)), safe_float(record.get("execution_latency_ms", 0.0)), record.get("entry_type", "TREND"),
+                record.get("exit_reason", "MANUAL"), safe_float(record.get("realized_r", 0.0)), safe_float(record.get("pnl_usd", 0.0)),
+                safe_float(record.get("mae_pct", 0.0)), safe_float(record.get("mfe_pct", 0.0)), safe_float(record.get("time_in_trade_min", 0.0)),
+                safe_float(record.get("individual_brier_loss", 0.0)), record.get("trade_outcome", "LOSS" if safe_float(record.get("pnl_usd", 0.0)) < 0 else "WIN"),
+                failure_json, replay_json, safe_float(record.get("learning_score", 0.0)), int(safe_float(record.get("research_priority", 0)))
             ))
             conn.commit()
             return True
