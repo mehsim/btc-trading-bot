@@ -233,9 +233,15 @@ def _slice_model_input(model, X):
         if n_expected:
             n_cols = X_arr.shape[1] if X_arr.ndim == 2 else X_arr.shape[0]
             if n_cols != n_expected:
-                raise RuntimeError(
-                    f"[Feature Shape Coercion Error] Array shape ({n_cols}) does not match model expected features ({n_expected})."
-                )
+                if n_cols > n_expected:
+                    if X_arr.ndim == 2:
+                        return X_arr[:, :n_expected]
+                    else:
+                        return X_arr[:n_expected]
+                else:
+                    raise RuntimeError(
+                        f"[Feature Shape Coercion Error] Array shape ({n_cols}) does not match model expected features ({n_expected})."
+                    )
         return X
 
 class PurgedEmbargoTimeSeriesSplit:
