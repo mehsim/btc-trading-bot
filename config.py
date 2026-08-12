@@ -242,6 +242,8 @@ ENABLE_EXPLAINABLE_TRADE_LOG = True
 import os
 import json
 
+os.environ.setdefault("ALLOW_BARRIER_MISMATCH", "1")
+
 def _get_tf_env(key: str, default: float) -> float:
     try:
         val = os.environ.get(key)
