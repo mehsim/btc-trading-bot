@@ -2462,8 +2462,8 @@
                         <tr onclick="showTradeDetails(${allTrades.indexOf(t)})" style="cursor: pointer;" title="Click to view details" class="hover-row">
                             <td style="font-weight: 700; color: var(--accent-purple);">${tfLabel}</td>
                             <td class="hide-mobile">${exitTimeStr}</td>
-                            <td class="${t.direction === 'Bullish' ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">
-                                <div>${(t.symbol || 'BTCUSDT').replace('USDT', '')} ${t.direction.toUpperCase()}</div>
+                            <td class="${isBull ? 'color-bullish' : 'color-bearish'}" style="font-weight:700; font-family: 'Outfit', sans-serif;">
+                                <div>${(t.symbol || 'BTCUSDT').replace('USDT', '')}&nbsp;${dirStr}</div>
                                 ${t.bybit_order_id && t.bybit_order_id !== 'N/A' ? `
                                 <div style="font-size: 8px; color: var(--text-secondary); font-weight: normal; margin-top: 2px; font-family: monospace;">
                                     Entry ID: ${t.bybit_order_id}
@@ -2473,16 +2473,16 @@
                                     Scale ID: ${t.bybit_scale_out_order_id}
                                 </div>` : ''}
                             </td>
-                            <td>$${t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                            <td>$${t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td>$${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td>$${exitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                             <td class="hide-mobile" style="color: var(--accent-orange); font-weight: 600;">
                                 <div>$${investedVal}</div>
                                 <div style="font-size: 10px; color: var(--text-secondary); font-weight: normal; margin-top: 2px;">Leveraged: $${leveragedVal}</div>
                                 <div style="font-size: 9px; color: var(--accent-purple); font-weight: normal; margin-top: 1px;">Filled Margin: $${posSize.toFixed(2)}</div>
                             </td>
                             <td class="hide-mobile" style="color: var(--accent-purple); font-weight: 600;">${leverageStr}</td>
-                            <td class="${pnlClass}" style="font-weight: 800;">${displayPnLPct >= 0 ? '+' : ''}${displayPnLPct.toFixed(3)}%</td>
-                            <td class="${pnlClass}" style="font-weight: 800;">$${formattedRealizedPnL}</td>
+                            <td class="${pnlClass}" style="font-weight: 800;">${displayPnLPctStr}</td>
+                            <td class="${pnlClass}" style="font-weight: 800;">${formattedRealizedPnL}</td>
 
                             <td class="hide-mobile ${successClass}" style="font-weight: 700;">${successStr}</td>
                             <td class="hide-mobile" style="color: var(--text-secondary); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${getFormattedReason(t)}</td>
