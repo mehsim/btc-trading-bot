@@ -261,7 +261,9 @@ NON_STATIONARY_EXCLUDE = [
     "EMA_9", "EMA_21", "EMA_50", "EMA_200",
     "BB_high", "BB_mid", "BB_low",
     "VWAP", "timestamp", "_ts",
+    "open_interest", "open_interest_lag1", "open_interest_lag2",
     "btc_close", "btc_close_lag1", "btc_close_lag2", "close_btc",
+    "btc_volume", "btc_volume_lag1", "btc_volume_lag2",
 ]
 features = [f for f in features if f not in NON_STATIONARY_EXCLUDE]
 
