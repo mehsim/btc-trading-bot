@@ -6064,14 +6064,21 @@ def main():
                             from ensemble import get_model_feature_names
                             _exp_names = get_model_feature_names(active_model_trend)
                             if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
-                                _features_to_use = [f for f in _exp_names if f in latest_candle_weighted.index]
+                                _features_to_use = _exp_names
+                                if isinstance(latest_candle_weighted, pd.Series):
+                                    X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=_exp_names, fill_value=0.0)
+                                else:
+                                    X_live_full = latest_candle_weighted.reindex(columns=_exp_names, fill_value=0.0)
                             elif feat_list is not None:
                                 _features_to_use = feat_list
+                                _avail = [f for f in _features_to_use if f in latest_candle_weighted.index]
+                                X_live_full = latest_candle_weighted[_avail].to_frame().T if isinstance(latest_candle_weighted[_avail], pd.Series) else latest_candle_weighted[_avail]
                             else:
                                 from core import features as master_features
                                 _features_to_use = master_features
+                                _avail = [f for f in _features_to_use if f in latest_candle_weighted.index]
+                                X_live_full = latest_candle_weighted[_avail].to_frame().T if isinstance(latest_candle_weighted[_avail], pd.Series) else latest_candle_weighted[_avail]
 
-                            X_live_full = latest_candle_weighted[_features_to_use].to_frame().T if isinstance(latest_candle_weighted[_features_to_use], pd.Series) else latest_candle_weighted[_features_to_use]
                             X_live = _slice_model_input(active_model_trend, X_live_full)
 
                             # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
@@ -6503,10 +6510,20 @@ def main():
                                 already_active = True
                                 active_on_tf = "current_cycle"
                             else:
-                                for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"]:
-                                    if any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{tf_key}", [])):
-                                        already_active = True
-                                        active_on_tf = tf_key
+                                for check_tf in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                                    # Normalize timeframe keys to check both active_trade_15m and active_trade_15
+                                    keys_to_check = [f"active_trade_{check_tf}", f"active_trade_{check_tf.replace('m','').replace('h','0')}"]
+                                    if check_tf == "1h": keys_to_check.append("active_trade_60")
+                                    elif check_tf == "2h": keys_to_check.append("active_trade_120")
+                                    elif check_tf == "4h": keys_to_check.append("active_trade_240")
+                                    elif check_tf == "6h": keys_to_check.append("active_trade_360")
+                                    
+                                    for k in keys_to_check:
+                                        if any(t.get("symbol") == symbol for t in bot_state.get(k, [])):
+                                            already_active = True
+                                            active_on_tf = check_tf
+                                            break
+                                    if already_active:
                                         break
                         
                             # Session Filter: temporarily allow 24-hour trading
