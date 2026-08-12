@@ -171,7 +171,7 @@
     "git_sha": "c53a7e59"
   },
   "barrier_config": {
-    "tp_mult_trending": 1.65,
+    "tp_mult_trending": 1.40,
     "tp_mult_ranging": 1.35,
     "sl_mult": 1.25,
     "lookahead": 12,
