@@ -333,7 +333,6 @@ class SignalEvaluator:
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
                         
-                        # Append to prediction_history for dashboard and telemetry
                         history = self.bot_state.get("prediction_history", [])
                         if isinstance(history, list):
                             c_ts = int(time.time() * 1000)
@@ -347,8 +346,15 @@ class SignalEvaluator:
                                         c_ts = int(pd.to_datetime(raw_t).timestamp() * 1000)
                                 except (ValueError, TypeError, KeyError, AttributeError):
                                     pass
-                            exists = any(p.get("candle_timestamp") == c_ts and p.get("interval") == str(interval) and p.get("symbol") == str(symbol) for p in history if isinstance(p, dict))
-                            if not exists:
+                            
+                            existing_p = next((p for p in history if isinstance(p, dict) and p.get("candle_timestamp") == c_ts and str(p.get("interval")) == str(interval) and str(p.get("symbol")) == str(symbol)), None)
+                            if existing_p is not None:
+                                existing_p["timestamp"] = float(time.time())
+                                existing_p["direction"] = str(direction)
+                                existing_p["calibrated_confidence"] = float(calibrated_conf)
+                                existing_p["raw_confidence"] = float(raw_conf)
+                                existing_p["dynamic_threshold"] = float(eval_threshold)
+                            else:
                                 history.append({
                                     "symbol": str(symbol),
                                     "timestamp": float(time.time()),

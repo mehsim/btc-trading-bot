@@ -7230,6 +7230,7 @@ def main():
                                     break
 
                             if matched_pred is not None:
+                                matched_pred["timestamp"] = float(time.time())
                                 matched_pred["status"] = str(status_msg)
                                 matched_pred["direction"] = str(ml_trend)
                                 matched_pred["ref_price"] = float(latest_candle["close"])
