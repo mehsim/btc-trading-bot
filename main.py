@@ -841,25 +841,25 @@ def save_history():
         # Deduplicate completed trades
         trades = bot_state.get("trade_history", [])
         if trades:
-            sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0)))
+            try:
+                import database
+                db_trades = database.get_trade_history(limit=500)
+                if db_trades:
+                    trades.extend(db_trades)
+            except Exception:
+                pass
+            
+            seen_keys = set()
             deduped = []
-            for t in sorted_trades:
-                duplicate = False
-                t_exit = float(t.get("exit_time", 0.0))
-                t_entry_p = round(float(t.get("entry_price", 0.0)), 4)
-                t_exit_p = round(float(t.get("exit_price", 0.0)), 4)
-                t_sym = t.get("symbol")
-                t_iv = str(t.get("interval"))
-                t_dir = t.get("direction")
-                for existing in deduped:
-                    if (t_sym == existing.get("symbol") and str(t_iv) == str(existing.get("interval")) and 
-                        t_dir == existing.get("direction") and 
-                        abs(t_entry_p - round(float(existing.get("entry_price", 0.0)), 4)) < 1e-4 and 
-                        abs(t_exit_p - round(float(existing.get("exit_price", 0.0)), 4)) < 1e-4 and 
-                        abs(t_exit - float(existing.get("exit_time", 0.0))) < 43200):
-                        duplicate = True
-                        break
-                if not duplicate:
+            for t in sorted(trades, key=lambda x: float(x.get("exit_time") or 0.0)):
+                sym = t.get("symbol")
+                dir_str = str(t.get("direction", "")).lower()
+                entry_p = round(float(t.get("entry_price") or 0.0), 2)
+                exit_p = round(float(t.get("exit_price") or 0.0), 2)
+                exit_t = int(float(t.get("exit_time") or 0.0) // 60)
+                key = (sym, dir_str, entry_p, exit_p, exit_t)
+                if key not in seen_keys:
+                    seen_keys.add(key)
                     deduped.append(t)
             bot_state["trade_history"] = deduped[-1000:]
 
