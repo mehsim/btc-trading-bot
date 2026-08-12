@@ -334,16 +334,16 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     stats = calculate_replay_statistics(returns, initial_equity=100.0)
     
     return (
-        stats["total_trades"],
-        stats["win_rate"],
-        stats["profit_factor"],
-        stats["max_drawdown_pct"],
-        stats["ending_return_pct"],
-        stats["expectancy_r"],
-        stats["sharpe_ratio"],
-        stats["sortino_ratio"],
-        stats["calmar_ratio"],
-        stats["recovery_factor"]
+        stats.get("total_trades", 0),
+        stats.get("win_rate", 0.0),
+        stats.get("profit_factor", 0.0),
+        stats.get("max_drawdown_pct", 0.0),
+        stats.get("ending_return_pct", 0.0),
+        stats.get("expectancy_r", 0.0),
+        stats.get("sharpe_ratio", 0.0),
+        stats.get("sortino_ratio", 0.0),
+        stats.get("calmar_ratio", 0.0),
+        stats.get("recovery_factor", 0.0)
     )
 
 def run_backtest():
