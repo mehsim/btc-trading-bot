@@ -169,7 +169,8 @@ class ContinuousLearningEngine:
             print(f"[LearningEngine] Processed trade {trade_id} (Score: {learning_score:.0f}/100 | Ver: {LEARNING_ENGINE_VERSION})")
             
         except Exception as e:
-            print(f"[LearningEngine Error] Non-critical ingest error for trade {trade.get('trade_id')}: {e}")
+            import traceback
+            print(f"[LearningEngine Error] Non-critical ingest error for trade {trade.get('trade_id')}: {e}\n{traceback.format_exc()}")
 
 
     def on_trade_closed(self, trade_record: dict):

@@ -71,11 +71,11 @@ class FailureAttributionEngine:
         if factor == "ltf_reversal":
             return "15M timeframe counter-trend alignment" if record.get("ltf_conflict") else "15M timeframe aligned"
         elif factor == "high_volatility":
-            return f"ATR percentile at {record.get('atr_percentile', 50):.1f}th"
+            return f"ATR percentile at {safe_float(record.get('atr_percentile', 50), 50.0):.1f}th"
         elif factor == "poor_entry_timing":
-            return f"Execution latency {record.get('execution_latency_ms', 0):.0f}ms"
+            return f"Execution latency {safe_float(record.get('execution_latency_ms', 0)):.0f}ms"
         elif factor == "high_funding":
-            return f"Funding rate {record.get('funding_rate', 0)*100:.4f}%"
+            return f"Funding rate {safe_float(record.get('funding_rate', 0))*100:.4f}%"
         else:
             return "Unexplained market noise"
 

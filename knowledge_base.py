@@ -116,10 +116,11 @@ def get_rule_lifecycle_status(sample_size: int) -> str:
     - 50 <= sample_size < 75: VALIDATED
     - sample_size >= 75: ACTIVE
     """
-    if sample_size >= 75:
+    n = int(safe_float(sample_size, 0))
+    if n >= 75:
         return "ACTIVE"
-    elif sample_size >= 50:
+    elif n >= 50:
         return "VALIDATED"
-    elif sample_size >= 20:
+    elif n >= 20:
         return "HYPOTHESIS"
     return "DRAFT"

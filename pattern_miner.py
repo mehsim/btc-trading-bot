@@ -53,11 +53,11 @@ class RuleBasedPatternMiner:
                 
             clusters[key]["total"] += 1
             clusters[key]["weighted_total"] += weight
-            is_win = (t.get("trade_outcome") == "WIN" or t.get("pnl_usd", 0.0) > 0)
+            is_win = (t.get("trade_outcome") == "WIN" or safe_float(t.get("pnl_usd", 0.0)) > 0)
             if is_win:
                 clusters[key]["wins"] += 1
                 clusters[key]["weighted_wins"] += weight
-            clusters[key]["sum_r"] += t.get("realized_r", 0.0) * weight
+            clusters[key]["sum_r"] += safe_float(t.get("realized_r", 0.0)) * weight
             clusters[key]["trades"].append(t.get("trade_id"))
             
         results = []
