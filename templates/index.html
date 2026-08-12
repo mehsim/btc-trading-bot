@@ -3593,6 +3593,9 @@
                 });
             }
 
+            // Sort chronologically by timestamp
+            filtered.sort((a, b) => (parseFloat(a.timestamp || a.candle_timestamp || 0) - parseFloat(b.timestamp || b.candle_timestamp || 0)));
+
             const latest10 = filtered.slice(-10).reverse();
 
             if (latest10.length === 0) {
@@ -3606,10 +3609,14 @@
 
             let html = "";
             latest10.forEach((p) => {
-                const tsVal = p.candle_timestamp || p.timestamp || Date.now() / 1000;
+                const tsVal = p.timestamp || p.candle_timestamp || Date.now() / 1000;
                 const tsSec = tsVal > 1e11 ? tsVal / 1000 : tsVal;
                 const dateObj = new Date(tsSec * 1000);
-                const timeStr = dateObj.toUTCString().split(' ')[4] + ' UTC';
+                const nowObj = new Date();
+                const isToday = dateObj.getUTCDate() === nowObj.getUTCDate() && dateObj.getUTCMonth() === nowObj.getUTCMonth();
+                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                const datePrefix = isToday ? '' : `${monthNames[dateObj.getUTCMonth()]} ${dateObj.getUTCDate()} `;
+                const timeStr = `${datePrefix}${dateObj.toUTCString().split(' ')[4]} UTC`;
 
                 const sym = p.symbol || "BTCUSDT";
                 const ivStr = String(p.interval || "15").replace('m', '') + 'M';
