@@ -836,35 +836,47 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"[Warning] Failed to load {features_filename}: {e}. Running RFECV.")
 
     if not skip_rfecv:
-        from sklearn.feature_selection import RFECV
         print("\nRunning advanced feature selection via RFECV with Purged CV...")
         
-        # Subsample data for feature selection to accelerate training times (Pros: 5x speedup)
+        # preserve chronological order — no random sampling
         if len(df) > 40000:
             df_sub = df.iloc[-40000:]
-            print(f"[Training Optimization] Selected last {len(df_sub)} rows for RFECV training set (out of {len(df)} total).")
+            print(f"[Training] Using most recent 40,000 rows for feature selection.")
         else:
             df_sub = df
-            
+
         X_prelim = df_sub[features]
         y_prelim = df_sub["target_trend"]
-        
+
         from config import CV_N_SPLITS
         cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
-        estimator = XGBClassifier(n_estimators=200, max_depth=5, random_state=42, n_jobs=1)
-        
+
+        # ---- Stage 1: cheap importance prefilter ----
+        from xgboost import XGBClassifier
+        import numpy as np
+
+        prefilter = XGBClassifier(n_estimators=50, max_depth=3, random_state=42, n_jobs=1)
+        prefilter.fit(X_prelim, y_prelim)
+
+        n_keep = min(60, X_prelim.shape[1])
+        top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
+        top_feats = list(X_prelim.columns[top_idx])
+        print(f"[Stage 1] Prefiltered {X_prelim.shape[1]} → {len(top_feats)} candidates.")
+
+        # ---- Stage 2: proper RFECV on survivors ----
+        from sklearn.feature_selection import RFECV
+
         selector = RFECV(
-            estimator=estimator,
+            estimator=XGBClassifier(n_estimators=200, max_depth=5, random_state=42, n_jobs=1),
             step=1,
             cv=cv_selector,
             scoring="balanced_accuracy",
             min_features_to_select=10,
-            n_jobs=1
+            n_jobs=1,
         )
-        
-        print("Fitting RFECV model (this may take a few seconds)...")
-        selector.fit(X_prelim, y_prelim)
-        selected_features = [f for f, support in zip(features, selector.support_) if support]
+        selector.fit(X_prelim[top_feats], y_prelim)
+        selected_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
+        print(f"[Stage 2] RFECV selected {len(selected_features)} of {len(top_feats)}.")
         from feature_pipeline import filter_multicollinear_features
         selected_features = filter_multicollinear_features(df_sub, selected_features, vif_threshold=10.0)
         print(f"[Correlation Filter] Retained {len(selected_features)} uncorrelated features (VIF <= 10.0).")
@@ -971,7 +983,19 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 df_sub = df_regime.iloc[-10000:]
                 X_rfecv_prelim = df_sub[features]
                 y_rfecv = df_sub["target_trend"]
-                
+
+            # ---- Stage 1: cheap importance prefilter ----
+            from xgboost import XGBClassifier
+            import numpy as np
+
+            prefilter = XGBClassifier(n_estimators=50, max_depth=3, random_state=42, n_jobs=1)
+            prefilter.fit(X_rfecv_prelim, y_rfecv)
+
+            n_keep = min(60, X_rfecv_prelim.shape[1])
+            top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
+            top_feats = list(X_rfecv_prelim.columns[top_idx])
+            print(f"[Regime {name.upper()} Stage 1] Prefiltered {X_rfecv_prelim.shape[1]} → {len(top_feats)} candidates.")
+
             estimator = XGBClassifier(
                 n_estimators=200,
                 max_depth=5,
@@ -990,12 +1014,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 min_features_to_select=10,
                 n_jobs=1
             )
-            selector.fit(X_rfecv_prelim.values, y_rfecv.values)
-            regime_features = [f for f, support in zip(features, selector.support_) if support]
+            selector.fit(X_rfecv_prelim[top_feats], y_rfecv)
+            regime_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
             
-            required_price_features = ["close_to_Kalman", "close_btc", "btc_rsi", "ADX", "ATR_norm", "open_interest"]
+            required_price_features = ["close_to_Kalman", "btc_rsi", "ADX", "ATR_norm"]
             for pf in required_price_features:
-                if pf not in regime_features and pf in df_regime.columns:
+                if pf not in regime_features and pf in df_regime.columns and pf not in NON_STATIONARY_EXCLUDE:
                     regime_features.append(pf)
                 
             with open(features_filename, "w") as f:
