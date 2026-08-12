@@ -6,14 +6,15 @@ Generates institutional Markdown/Text research summaries for completed trades.
 """
 
 from typing import Dict, Any
+from trade_calculators import safe_float
 
 def generate_trade_learning_report(record: Dict[str, Any]) -> str:
     trade_id = record.get("trade_id", "UNKNOWN")
     symbol = record.get("symbol", "UNKNOWN")
     outcome = record.get("trade_outcome", "UNKNOWN")
-    pnl = record.get("pnl_usd", 0.0)
-    realized_r = record.get("realized_r", 0.0)
-    conf = record.get("confidence", 0.0) * 100.0
+    pnl = safe_float(record.get("pnl_usd", 0.0))
+    realized_r = safe_float(record.get("realized_r", 0.0))
+    conf = safe_float(record.get("confidence", 0.0)) * 100.0
     regime = record.get("market_regime", "TRENDING")
     
     snap = record.get("decision_snapshot", {})
@@ -48,7 +49,8 @@ def generate_trade_learning_report(record: Dict[str, Any]) -> str:
         else:
             report += "    • Diagnostic analysis pending sample aggregation.\n"
             
-    brier = record.get("individual_brier_loss", 0.0)
+    brier = safe_float(record.get("individual_brier_loss", 0.0))
     report += f"\n  Individual Brier Loss: {brier:.4f}\n"
     report += "===================================================================\n"
     return report
+
