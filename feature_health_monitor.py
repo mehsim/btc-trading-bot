@@ -8,6 +8,7 @@ to prevent pipeline contamination.
 
 import math
 from typing import Dict, Any, List, Tuple
+from trade_calculators import safe_float
 
 class FeatureHealthMonitor:
     def __init__(self, constant_lookback: int = 20):
@@ -30,15 +31,15 @@ class FeatureHealthMonitor:
                 issues.append(f"Invalid NaN/Inf in field: {field}")
                 
         # Check indicator domain bounds
-        adx_val = record.get("adx", 0.0)
+        adx_val = safe_float(record.get("adx", 0.0))
         if adx_val < 0 or adx_val > 100:
             issues.append(f"Out of bounds ADX: {adx_val}")
             
-        rsi_val = record.get("rsi", 50.0)
+        rsi_val = safe_float(record.get("rsi", 50.0), 50.0)
         if rsi_val < 0 or rsi_val > 100:
             issues.append(f"Out of bounds RSI: {rsi_val}")
             
-        conf_val = record.get("confidence", 0.5)
+        conf_val = safe_float(record.get("confidence", 0.5), 0.5)
         if conf_val < 0.0 or conf_val > 1.0:
             issues.append(f"Out of bounds confidence: {conf_val}")
 
