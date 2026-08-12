@@ -12,6 +12,7 @@ import threading
 from typing import Dict, Any, List
 
 from database import db_lock, get_db_connection
+from trade_calculators import safe_float
 
 def init_calibration_db():
     with db_lock:
@@ -40,7 +41,7 @@ def init_calibration_db():
             conn.close()
 
 def get_bucket_label(confidence: float) -> str:
-    c = max(0.50, min(1.00, float(confidence)))
+    c = max(0.50, min(1.00, safe_float(confidence, 0.60)))
     if c < 0.60:
         return "50-60%"
     elif c < 0.70:

@@ -9,6 +9,7 @@ sample sizes, Wilson 95% confidence intervals, and average R.
 import math
 from typing import Dict, Any, List, Tuple
 from experience_db import get_recent_experiences
+from trade_calculators import safe_float
 
 def wilson_score_interval(wins: int, n: int, confidence_level: float = 0.95) -> Tuple[float, float]:
     """
@@ -30,11 +31,12 @@ class RuleBasedPatternMiner:
         self.min_sample_size = min_sample_size
 
     def generate_cluster_key(self, record: Dict[str, Any]) -> str:
-        regime = record.get("market_regime", "TRENDING")
+        regime = str(record.get("market_regime", "TRENDING"))
         ltf_conf = "CONFLICT" if record.get("ltf_conflict") else "ALIGNED"
-        conf = record.get("confidence", 0.5)
+        conf = safe_float(record.get("confidence", 0.5), 0.5)
         conf_bucket = "HIGH" if conf >= 0.80 else ("MED" if conf >= 0.65 else "LOW")
-        vol = "HIGH_VOL" if record.get("atr_percentile", 50.0) >= 75.0 else "NORM_VOL"
+        atr_p = safe_float(record.get("atr_percentile", 50.0), 50.0)
+        vol = "HIGH_VOL" if atr_p >= 75.0 else "NORM_VOL"
         
         return f"{regime}|{ltf_conf}|{conf_bucket}|{vol}"
 

@@ -11,14 +11,15 @@ Evaluates 5 core alternative scenarios for every closed trade using actual trade
 """
 
 from typing import Dict, Any, List
+from trade_calculators import safe_float
 
 class SimplifiedCounterfactualEngine:
     def evaluate_scenarios(self, record: Dict[str, Any]) -> List[Dict[str, Any]]:
-        actual_r = record.get("realized_r", 0.0)
-        pnl = record.get("pnl_usd", 0.0)
-        exit_reason = record.get("exit_reason", "MANUAL")
-        mae = record.get("mae_pct", 0.0)
-        atr_pct = record.get("atr_pct", 0.01)
+        actual_r = safe_float(record.get("realized_r", 0.0))
+        pnl = safe_float(record.get("pnl_usd", 0.0))
+        exit_reason = str(record.get("exit_reason", "MANUAL"))
+        mae = safe_float(record.get("mae_pct", 0.0))
+        atr_pct = safe_float(record.get("atr_pct", 0.01), 0.01)
         
         # 1. Actual
         scenarios = [{

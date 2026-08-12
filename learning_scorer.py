@@ -13,6 +13,7 @@ import threading
 from typing import Dict, Any, List
 
 from database import db_lock, get_db_connection
+from trade_calculators import safe_float
 
 def init_research_queue_db():
     with db_lock:
@@ -37,10 +38,10 @@ def init_research_queue_db():
             conn.close()
 
 def calculate_learning_score(record: Dict[str, Any], cf_scenarios: List[Dict[str, Any]] = None) -> float:
-    brier = record.get("individual_brier_loss", 0.0)
-    conf = record.get("confidence", 0.5)
-    pnl = record.get("pnl_usd", 0.0)
-    ltf_conflict = record.get("ltf_conflict", 0)
+    brier = safe_float(record.get("individual_brier_loss", 0.0))
+    conf = safe_float(record.get("confidence", 0.5), 0.5)
+    pnl = safe_float(record.get("pnl_usd", 0.0))
+    ltf_conflict = bool(record.get("ltf_conflict", False))
     
     score = 20.0  # Base score
     

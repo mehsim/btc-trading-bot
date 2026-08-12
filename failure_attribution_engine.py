@@ -11,18 +11,19 @@ Calculates weighted percentage attribution across 5 core failure factors for los
 """
 
 from typing import Dict, Any
+from trade_calculators import safe_float
 
 class FailureAttributionEngine:
     def diagnose_loss(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        pnl = record.get("pnl_usd", 0.0)
+        pnl = safe_float(record.get("pnl_usd", 0.0))
         if pnl >= 0:
             return {}  # No loss to diagnose
             
-        ltf_conflict = record.get("ltf_conflict", 0)
-        atr_pct = record.get("atr_pct", 1.0)
-        atr_percentile = record.get("atr_percentile", 50.0)
-        funding = record.get("funding_rate", 0.0)
-        latency = record.get("execution_latency_ms", 0.0)
+        ltf_conflict = bool(record.get("ltf_conflict", False))
+        atr_pct = safe_float(record.get("atr_pct", 1.0), 1.0)
+        atr_percentile = safe_float(record.get("atr_percentile", 50.0), 50.0)
+        funding = safe_float(record.get("funding_rate", 0.0))
+        latency = safe_float(record.get("execution_latency_ms", 0.0))
         
         scores = {}
         
