@@ -7,11 +7,12 @@ Reason Error, and Feature Error.
 """
 
 from typing import Dict, Any
+from trade_calculators import safe_float
 
 class DecisionOutcomeReplay:
     def replay_trade(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        conf = record.get("confidence", 0.5)
-        pnl = record.get("pnl_usd", 0.0)
+        conf = safe_float(record.get("confidence", 0.5), 0.5)
+        pnl = safe_float(record.get("pnl_usd", 0.0))
         direction = record.get("signal_direction", "LONG")
         outcome = "WIN" if pnl >= 0 else "LOSS"
         
@@ -24,7 +25,7 @@ class DecisionOutcomeReplay:
         reason_error = "HTF/LTF Conflict" if (outcome == "LOSS" and ltf_conflict) else "None"
         
         # 3. Feature Error: Was volatility higher than expected?
-        atr_pct = record.get("atr_pct", 0.01)
+        atr_pct = safe_float(record.get("atr_pct", 0.01), 0.01)
         feature_error = "Vol Spike (>2%)" if atr_pct > 0.02 else "Nominal"
         
         return {
