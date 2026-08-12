@@ -864,6 +864,12 @@ def save_history():
             bot_state["trade_history"] = deduped[-1000:]
 
 
+        # Filter out temporary Abstain/NaN entries from prediction_history
+        bot_state["prediction_history"] = [
+            p for p in bot_state.get("prediction_history", [])
+            if p.get("status") != "Abstain" and p.get("calibrated_confidence") is not None and str(p.get("direction")) != "None"
+        ]
+
         # Cap prediction history at 500 entries
         if len(bot_state["prediction_history"]) > 500:
             bot_state["prediction_history"] = bot_state["prediction_history"][-500:]
@@ -1092,7 +1098,10 @@ def load_history():
                 for t in bot_state["trade_history"]:
                     if "interval" not in t:
                         t["interval"] = "60"
-                bot_state["prediction_history"] = [p for p in data.get("prediction_history", []) if str(p.get("interval", "60")) != "5"]
+                bot_state["prediction_history"] = [
+                    p for p in data.get("prediction_history", [])
+                    if str(p.get("interval", "60")) != "5" and p.get("status") != "Abstain" and p.get("calibrated_confidence") is not None and str(p.get("direction")) != "None"
+                ]
                 for p in bot_state["prediction_history"]:
                     if "interval" not in p:
                         p["interval"] = "60"

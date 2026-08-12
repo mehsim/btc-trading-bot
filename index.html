@@ -3585,7 +3585,7 @@
             const tbody = document.getElementById("combined-predictions-rows");
             if (!tbody) return;
 
-            let filtered = (allPredictions || []).slice();
+            let filtered = (allPredictions || []).slice().filter(p => p.status !== 'Abstain' && p.calibrated_confidence !== null && p.calibrated_confidence !== undefined && !isNaN(p.calibrated_confidence) && String(p.direction) !== 'None');
             if (currentPredTfFilter !== 'all') {
                 filtered = filtered.filter(p => {
                     const iv = String(p.interval || '').replace('m', '');
