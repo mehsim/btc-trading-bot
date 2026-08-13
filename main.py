@@ -678,18 +678,26 @@ def execute_telegram_api_call(method: str, payload: dict) -> dict:
             return {}
 
 def send_telegram_alert(message: str):
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        return
-        
     def _post():
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "Markdown"
-        }
-        execute_telegram_api_call("sendMessage", payload)
+        try:
+            import telegram_bot
+            if hasattr(telegram_bot, "send_telegram_alert"):
+                telegram_bot.send_telegram_alert(message)
+                return
+        except Exception:
+            pass
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        raw_ids = os.environ.get("TELEGRAM_CHAT_IDS") or os.environ.get("TELEGRAM_CHAT_ID") or ""
+        chat_ids = [cid.strip() for cid in raw_ids.split(",") if cid.strip()]
+        if not token or not chat_ids:
+            return
+        for cid in chat_ids:
+            payload = {
+                "chat_id": cid,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            execute_telegram_api_call("sendMessage", payload)
         
     threading.Thread(target=_post, daemon=True).start()
         
