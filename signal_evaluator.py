@@ -396,11 +396,10 @@ class SignalEvaluator:
                                     regime=regime_str,
                                     adx=adx_val,
                                     outcome="SKIPPED" if direction == "Neutral" else "EVALUATED",
-                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Active Signal ({direction})",
-                                    inputs_json=json.dumps({
-                                        "predicted_change": float(pred_pct * float(last_row["close"])),
-                                        "dynamic_threshold": float(eval_threshold)
-                                    })
+                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Active Signal ({direction})"
+                                ).snapshot(
+                                    predicted_change=float(pred_pct * float(last_row["close"])),
+                                    dynamic_threshold=float(eval_threshold)
                                 )
                                 write_decision(rec)
                             except Exception as ex_dj:
@@ -493,10 +492,9 @@ class SignalEvaluator:
                                     regime=regime_str,
                                     adx=adx_val,
                                     outcome="SKIPPED" if direction == "Neutral" else "FALLBACK",
-                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Fallback ({direction})",
-                                    inputs_json=json.dumps({
-                                        "predicted_change": float(change_val)
-                                    })
+                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Fallback ({direction})"
+                                ).snapshot(
+                                    predicted_change=float(change_val)
                                 )
                                 write_decision(rec)
                             except Exception as ex_dj:
