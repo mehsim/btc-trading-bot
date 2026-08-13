@@ -384,6 +384,22 @@ def api_status():
             except Exception as ex_dashboard_routes:
                 log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
+        # Map symbol-specific predictions, regime, adx, and confluence to default UI keys
+        active_sym = request.args.get("symbol") or status_data.get("active_symbol", "BTCUSDT")
+        for tf in ["15m", "30m", "1h", "2h", "4h"]:
+            sym_pred = status_data.get(f"latest_prediction_{active_sym}_{tf}") or status_data.get(f"latest_prediction_BTCUSDT_{tf}")
+            if sym_pred:
+                status_data[f"latest_prediction_{tf}"] = sym_pred
+            sym_regime = status_data.get(f"regime_{active_sym}_{tf}") or status_data.get(f"regime_BTCUSDT_{tf}")
+            if sym_regime:
+                status_data[f"regime_{tf}"] = sym_regime
+            sym_adx = status_data.get(f"adx_{active_sym}_{tf}") if status_data.get(f"adx_{active_sym}_{tf}") is not None else status_data.get(f"adx_BTCUSDT_{tf}")
+            if sym_adx is not None:
+                status_data[f"adx_{tf}"] = sym_adx
+            sym_conf = status_data.get(f"confluence_results_{active_sym}_{tf}") or status_data.get(f"confluence_results_BTCUSDT_{tf}")
+            if sym_conf:
+                status_data[f"confluence_results_{tf}"] = sym_conf
+
         # Timeframe defaults for UI rendering
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
             if not status_data.get(f"regime_{tf}") or status_data.get(f"regime_{tf}") == "Unknown":

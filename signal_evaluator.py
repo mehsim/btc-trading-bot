@@ -177,6 +177,9 @@ class SignalEvaluator:
             with self.state_lock:
                 self.bot_state[f"regime_{symbol}_{tf_key}"] = regime_str
                 self.bot_state[f"adx_{symbol}_{tf_key}"] = adx_val
+                if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                    self.bot_state[f"regime_{tf_key}"] = regime_str
+                    self.bot_state[f"adx_{tf_key}"] = adx_val
 
             # Lazy model evaluation
             model_eval_success = False
@@ -332,6 +335,8 @@ class SignalEvaluator:
                     }
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
+                        if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                            self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
                         
                         history = self.bot_state.get("prediction_history", [])
                         if isinstance(history, list):
@@ -416,6 +421,8 @@ class SignalEvaluator:
                         "is_fallback": True
                     }
                     self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = fallback_dict
+                    if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                        self.bot_state[f"latest_prediction_{tf_key}"] = fallback_dict
                     history = self.bot_state.get("prediction_history", [])
                     if isinstance(history, list):
                         c_ts = int(time.time() * 1000)
