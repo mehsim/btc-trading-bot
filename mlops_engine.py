@@ -248,6 +248,7 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         probs_arr = np.asarray(probs)
         if len(probs_arr) > 0:
             counts = np.bincount(probs_arr.argmax(axis=1), minlength=3)
+            class_shares = counts / counts.sum()
             dominant = class_shares.max()
             min_dir_share = class_shares[[0, 2]].min() if len(class_shares) >= 3 else class_shares.min()
             if dominant > 0.90:
