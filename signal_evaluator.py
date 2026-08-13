@@ -360,7 +360,7 @@ class SignalEvaluator:
                                 existing_p["raw_confidence"] = float(raw_conf)
                                 existing_p["dynamic_threshold"] = float(eval_threshold)
                             else:
-                                history.append({
+                                new_pred = {
                                     "symbol": str(symbol),
                                     "timestamp": float(time.time()),
                                     "candle_timestamp": c_ts,
@@ -369,12 +369,18 @@ class SignalEvaluator:
                                     "ref_price": float(last_row["close"]),
                                     "predicted_change": float(pred_pct * float(last_row["close"])),
                                     "predicted_price": float(last_row["close"]) * (1.0 + pred_pct),
-                                    "status": f"Pending Gate Checks ({direction})",
+                                    "status": f"Skipped (Neutral)" if direction == "Neutral" else f"Active Signal ({direction})",
                                     "calibrated_confidence": float(calibrated_conf),
                                     "raw_confidence": float(raw_conf),
                                     "dynamic_threshold": float(eval_threshold),
                                     "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
-                                })
+                                }
+                                history.append(new_pred)
+                                try:
+                                    from database import save_prediction as db_save_pred
+                                    db_save_pred(new_pred)
+                                except Exception as ex_save:
+                                    log_event("WARNING", f"[SignalEvaluator] Failed saving prediction to DB: {ex_save}")
                                 if len(history) > 200:
                                     self.bot_state["prediction_history"] = history[-200:]
                     model_eval_success = True
@@ -428,7 +434,7 @@ class SignalEvaluator:
                         c_ts = int(time.time() * 1000)
                         exists = any(p.get("candle_timestamp") == c_ts and p.get("interval") == str(interval) and p.get("symbol") == str(symbol) for p in history if isinstance(p, dict))
                         if not exists:
-                            history.append({
+                            new_pred = {
                                 "symbol": str(symbol),
                                 "timestamp": float(time.time()),
                                 "candle_timestamp": c_ts,
@@ -437,12 +443,18 @@ class SignalEvaluator:
                                 "ref_price": float(close_p),
                                 "predicted_change": float(change_val),
                                 "predicted_price": float(close_p + change_val),
-                                "status": f"Fallback ({direction})",
+                                "status": f"Skipped (Neutral)" if direction == "Neutral" else f"Fallback ({direction})",
                                 "calibrated_confidence": float(conf),
                                 "raw_confidence": float(conf),
                                 "dynamic_threshold": None,
                                 "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
-                            })
+                            }
+                            history.append(new_pred)
+                            try:
+                                from database import save_prediction as db_save_pred
+                                db_save_pred(new_pred)
+                            except Exception as ex_save:
+                                log_event("WARNING", f"[SignalEvaluator] Failed saving fallback prediction to DB: {ex_save}")
                             if len(history) > 200:
                                 self.bot_state["prediction_history"] = history[-200:]
 
