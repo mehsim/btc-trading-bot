@@ -947,6 +947,14 @@ def get_manifest_hmac_secret() -> bytes:
     return secret.encode("utf-8")
 
 
+def _json_safe_verify(o):
+    """Match the serializer used during manifest signing."""
+    import numpy as np
+    if isinstance(o, (np.integer,)): return int(o)
+    if isinstance(o, (np.floating,)): return float(o)
+    if isinstance(o, np.ndarray): return o.tolist()
+    raise TypeError(f"Unserialisable: {type(o)}")
+
 def verify_manifest_hmac_signature(manifest: dict) -> bool:
     """Verifies manifest HMAC signature against secret key before trusting feature contract."""
     sig = manifest.get("hmac_signature")
@@ -954,7 +962,7 @@ def verify_manifest_hmac_signature(manifest: dict) -> bool:
         raise RuntimeError("Manifest signature missing — refusing to load")
     manifest_copy = dict(manifest)
     manifest_copy.pop("hmac_signature", None)
-    canonical = json.dumps(manifest_copy, sort_keys=True).encode("utf-8")
+    canonical = json.dumps(manifest_copy, sort_keys=True, default=_json_safe_verify).encode("utf-8")
     expected_sig = hmac.new(get_manifest_hmac_secret(), canonical, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected_sig):
         raise RuntimeError("Manifest signature invalid — refusing to load")
