@@ -888,9 +888,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print("\nRunning advanced feature selection via RFECV with Purged CV...")
         
         # preserve chronological order — no random sampling
-        if len(df) > 40000:
-            df_sub = df.iloc[-40000:]
-            print(f"[Training] Using most recent 40,000 rows for feature selection.")
+        import gc
+        gc.collect()
+        if len(df) > 20000:
+            df_sub = df.iloc[-20000:]
+            print(f"[Training] Using most recent 20,000 rows for feature selection.")
         else:
             df_sub = df
 
@@ -901,18 +903,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
         cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
 
         # ---- Stage 1: cheap importance prefilter ----
-        prefilter = XGBClassifier(n_estimators=50, max_depth=3, random_state=42, n_jobs=1)
+        prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
         prefilter.fit(X_prelim, y_prelim)
 
-        n_keep = min(60, X_prelim.shape[1])
+        n_keep = min(45, X_prelim.shape[1])
         top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
         top_feats = list(X_prelim.columns[top_idx])
         print(f"[Stage 1] Prefiltered {X_prelim.shape[1]} → {len(top_feats)} candidates.")
 
         # ---- Stage 2: proper RFECV on survivors ----
         selector = RFECV(
-            estimator=XGBClassifier(n_estimators=200, max_depth=5, random_state=42, n_jobs=1),
-            step=1,
+            estimator=XGBClassifier(n_estimators=60, max_depth=4, random_state=42, n_jobs=1),
+            step=3,
             cv=cv_selector,
             scoring="balanced_accuracy",
             min_features_to_select=10,
@@ -920,6 +922,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         )
         selector.fit(X_prelim[top_feats], y_prelim)
         selected_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
+        gc.collect()
         print(f"[Stage 2] RFECV selected {len(selected_features)} of {len(top_feats)}.")
         from feature_pipeline import filter_multicollinear_features
         selected_features = filter_multicollinear_features(df_sub, selected_features, vif_threshold=10.0)
