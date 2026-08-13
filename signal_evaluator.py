@@ -381,6 +381,29 @@ class SignalEvaluator:
                                     db_save_pred(new_pred)
                                 except Exception as ex_save:
                                     log_event("WARNING", f"[SignalEvaluator] Failed saving prediction to DB: {ex_save}")
+                                try:
+                                    from decision_journal import DecisionRecord, write_decision
+                                    rec = DecisionRecord(
+                                        ts=float(time.time()),
+                                        candle_timestamp=c_ts,
+                                        symbol=str(symbol),
+                                        interval=str(interval),
+                                        signal_source="ML_ENSEMBLE",
+                                        direction=str(direction),
+                                        raw_confidence=float(raw_conf),
+                                        calibrated_conf=float(calibrated_conf),
+                                        regime=regime_str,
+                                        adx=adx_val,
+                                        outcome="SKIPPED" if direction == "Neutral" else "EVALUATED",
+                                        reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Active Signal ({direction})",
+                                        inputs_json=json.dumps({
+                                            "predicted_change": float(pred_pct * float(last_row["close"])),
+                                            "dynamic_threshold": float(eval_threshold)
+                                        })
+                                    )
+                                    write_decision(rec)
+                                except Exception as ex_dj:
+                                    log_event("WARNING", f"[SignalEvaluator] Decision journal write notice: {ex_dj}")
                                 if len(history) > 200:
                                     self.bot_state["prediction_history"] = history[-200:]
                     model_eval_success = True
@@ -455,6 +478,28 @@ class SignalEvaluator:
                                 db_save_pred(new_pred)
                             except Exception as ex_save:
                                 log_event("WARNING", f"[SignalEvaluator] Failed saving fallback prediction to DB: {ex_save}")
+                            try:
+                                from decision_journal import DecisionRecord, write_decision
+                                rec = DecisionRecord(
+                                    ts=float(time.time()),
+                                    candle_timestamp=c_ts,
+                                    symbol=str(symbol),
+                                    interval=str(interval),
+                                    signal_source="RULE_BASED_FALLBACK",
+                                    direction=str(direction),
+                                    raw_confidence=float(conf),
+                                    calibrated_conf=float(conf),
+                                    regime=regime_str,
+                                    adx=adx_val,
+                                    outcome="SKIPPED" if direction == "Neutral" else "FALLBACK",
+                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Fallback ({direction})",
+                                    inputs_json=json.dumps({
+                                        "predicted_change": float(change_val)
+                                    })
+                                )
+                                write_decision(rec)
+                            except Exception as ex_dj:
+                                log_event("WARNING", f"[SignalEvaluator] Decision journal fallback write notice: {ex_dj}")
                             if len(history) > 200:
                                 self.bot_state["prediction_history"] = history[-200:]
 
