@@ -414,8 +414,14 @@ def api_status():
             if not status_data.get(f"confluence_results_{tf}"):
                 status_data[f"confluence_results_{tf}"] = get_default_confluence_checks()
 
+        try:
+            import main
+            active_logs = main.bot_logs if hasattr(main, "bot_logs") and main.bot_logs else bot_logs
+        except Exception:
+            active_logs = bot_logs
+
         with logs_lock:
-            status_data["logs"] = list(bot_logs)
+            status_data["logs"] = list(active_logs)
 
         # Fetch real Bybit balance first to avoid UnboundLocalError
         real_bal = None

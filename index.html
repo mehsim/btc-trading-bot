@@ -3168,44 +3168,51 @@
                     renderCombinedPredictionsTable();
 
                     // 8. Update Terminal Console logs
+                    const logTimeElem = document.getElementById("log-time");
+                    if (logTimeElem) {
+                        const nowUtc = new Date();
+                        logTimeElem.innerText = (nowUtc.toUTCString().split(" ")[4] || "") + " UTC";
+                    }
+
                     const logs = data.logs || [];
                     const logContainer = document.getElementById("terminal-console-logs");
-                    if (logs.length > loggedLinesCount) {
-                        // Append new lines
-                        for (let k = loggedLinesCount; k < logs.length; k++) {
-                            const lineText = logs[k];
-                            const lineDiv = document.createElement("div");
-                            lineDiv.className = "terminal-line";
-
-                            // Check line type to color it differently
-                            if (lineText.includes("APPROVED") || lineText.includes("[PASS]")) {
-                                lineDiv.style.color = "var(--accent-green)";
-                            } else if (lineText.includes("REJECTED") || lineText.includes("[FAIL]") || lineText.includes("Error")) {
-                                lineDiv.style.color = "var(--accent-red)";
-                            } else if (lineText.includes("New completed 1-hour candle") || lineText.includes("Trade Opened")) {
-                                lineDiv.style.color = "var(--accent-orange)";
-                            } else if (lineText.includes("TRADE EXITED")) {
-                                lineDiv.style.color = "var(--accent-purple)";
+                    if (logContainer && logs.length > 0) {
+                        if (logs.length > loggedLinesCount || logContainer.children.length <= 2) {
+                            const startIdx = (logs.length > loggedLinesCount && loggedLinesCount > 0) ? loggedLinesCount : Math.max(0, logs.length - 30);
+                            if (logContainer.children.length <= 2) {
+                                logContainer.innerHTML = "";
                             }
+                            for (let k = startIdx; k < logs.length; k++) {
+                                const lineText = logs[k];
+                                const lineDiv = document.createElement("div");
+                                lineDiv.className = "terminal-line";
 
-                            // Match brackets for timestamps and highlight them gray
-                            const timestampMatch = lineText.match(/^\[(.*?)\]/);
-                            if (timestampMatch) {
-                                const ts = timestampMatch[0];
-                                const rest = lineText.substring(ts.length);
-                                lineDiv.innerHTML = `<span class="terminal-timestamp">${ts}</span>${rest}`;
-                            } else {
-                                lineDiv.innerText = lineText;
+                                if (lineText.includes("APPROVED") || lineText.includes("[PASS]")) {
+                                    lineDiv.style.color = "var(--accent-green)";
+                                } else if (lineText.includes("REJECTED") || lineText.includes("[FAIL]") || lineText.includes("Error") || lineText.includes("WARNING")) {
+                                    lineDiv.style.color = "var(--accent-red)";
+                                } else if (lineText.includes("New completed") || lineText.includes("Trade Opened")) {
+                                    lineDiv.style.color = "var(--accent-orange)";
+                                } else if (lineText.includes("TRADE EXITED")) {
+                                    lineDiv.style.color = "var(--accent-purple)";
+                                }
+
+                                const timestampMatch = lineText.match(/^\[(.*?)\]/);
+                                if (timestampMatch) {
+                                    const ts = timestampMatch[0];
+                                    const rest = lineText.substring(ts.length);
+                                    lineDiv.innerHTML = `<span class="terminal-timestamp">${ts}</span>${rest}`;
+                                } else {
+                                    lineDiv.innerText = lineText;
+                                }
+                                logContainer.appendChild(lineDiv);
                             }
-                            logContainer.appendChild(lineDiv);
+                            loggedLinesCount = logs.length;
+                            while (logContainer.children.length > 40) {
+                                logContainer.removeChild(logContainer.firstChild);
+                            }
+                            logContainer.scrollTop = logContainer.scrollHeight;
                         }
-                        loggedLinesCount = logs.length;
-                        // Prune older DOM lines to keep maximum 40 lines displayed
-                        while (logContainer.children.length > 40) {
-                            logContainer.removeChild(logContainer.firstChild);
-                        }
-                        // Scroll to bottom
-                        logContainer.scrollTop = logContainer.scrollHeight;
                     }
 
                     // Update header log clock
