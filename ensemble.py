@@ -233,15 +233,10 @@ def _slice_model_input(model, X):
         if n_expected:
             n_cols = X_arr.shape[1] if X_arr.ndim == 2 else X_arr.shape[0]
             if n_cols != n_expected:
-                if n_cols > n_expected:
-                    if X_arr.ndim == 2:
-                        return X_arr[:, :n_expected]
-                    else:
-                        return X_arr[:n_expected]
-                else:
-                    raise RuntimeError(
-                        f"[Feature Shape Coercion Error] Array shape ({n_cols}) does not match model expected features ({n_expected})."
-                    )
+                raise RuntimeError(
+                    f"[Feature Shape Mismatch Error (H-04/F-12)] Input vector feature count ({n_cols}) does not match model expected features ({n_expected}). "
+                    f"Silent truncation or zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
+                )
         return X
 
 class PurgedEmbargoTimeSeriesSplit:

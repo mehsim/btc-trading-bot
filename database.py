@@ -445,18 +445,17 @@ def save_completed_trade(trade) -> bool:
             sym = trade.get("symbol")
             
             # Deduplication Guard: Check if matching trade already exists in DB
-            cursor = conn.cursor()
-            cursor.execute("SELECT trade_id FROM completed_trades WHERE trade_id = ?;", (t_id,))
-            if cursor.fetchone():
+            c1 = conn.execute("SELECT trade_id FROM completed_trades WHERE trade_id = ?;", (t_id,))
+            if c1.fetchone():
                 conn.close()
                 return True
 
             if entry_p is not None and exit_p is not None:
-                cursor.execute("""
+                c2 = conn.execute("""
                     SELECT trade_id FROM completed_trades 
                     WHERE symbol = ? AND abs(exit_time - ?) < 60.0 AND abs(entry_price - ?) < 0.0005 AND abs(exit_price - ?) < 0.0005;
                 """, (sym, exit_ts, entry_p, exit_p))
-                if cursor.fetchone():
+                if c2.fetchone():
                     conn.close()
                     return True
 

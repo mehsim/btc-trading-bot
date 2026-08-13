@@ -635,6 +635,7 @@ class SignalEvaluator:
                 }
             }
             self.bot_state[f"confluence_results_{symbol}_{tf_key}"] = confl_dict
+            self.bot_state[f"confluence_results_{tf_key}"] = confl_dict
 
 
 def verify_manifest_health():

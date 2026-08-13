@@ -64,7 +64,7 @@ def test_all_admin_endpoints_require_header_auth(client, monkeypatch):
     monkeypatch.setenv("DASHBOARD_API_KEY", "secret_test_key_123")
     
     admin_routes = [
-        '/api/terminate',
+        '/killswitch',
         '/api/retrain',
         '/api/close_trade',
         '/api/partial_exit_trade',
