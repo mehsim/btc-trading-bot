@@ -400,36 +400,37 @@ def add_triple_barrier_labels(df, interval):
             
         tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
         
-        # Symmetric threshold modeling
-        upper_barrier = p_t + tp_mult * atr_t
-        lower_barrier = p_t - tp_mult * atr_t
-        
-        upper_stop = p_t + sl_mult * atr_t
-        lower_stop = p_t - sl_mult * atr_t
-        
+        tp_dist = tp_mult * atr_t
+        sl_dist = sl_mult * atr_t
+
+        long_tp,  long_sl  = p_t + tp_dist, p_t - sl_dist
+        short_tp, short_sl = p_t - tp_dist, p_t + sl_dist
+
+        long_res = short_res = None
         for step in range(1, lookahead + 1):
             if i + step >= n_samples:
                 break
-            h = highs[i + step]
-            l = lows[i + step]
-            
-            # Symmetric checking (hit target before stop)
-            hit_bullish = h >= upper_barrier and l > lower_stop
-            hit_bearish = l <= lower_barrier and h < upper_stop
-            
-            if hit_bullish and not hit_bearish:
-                labels[i] = 2  # Bullish
+            h, l = highs[i + step], lows[i + step]
+
+            if long_res is None:
+                if l <= long_sl:
+                    long_res = 0
+                elif h >= long_tp:
+                    long_res = 1
+            if short_res is None:
+                if h >= short_sl:
+                    short_res = 0
+                elif l <= short_tp:
+                    short_res = 1
+            if long_res is not None and short_res is not None:
                 break
-            elif hit_bearish and not hit_bullish:
-                labels[i] = 0  # Bearish
-                break
-            elif str(interval) not in ("60", "120", "240"):
-                if l <= lower_stop:
-                    labels[i] = 0  # Bearish stop hit
-                    break
-                elif h >= upper_stop:
-                    labels[i] = 2  # Bullish stop hit
-                    break
+
+        if long_res == 1:
+            labels[i] = 2
+        elif short_res == 1:
+            labels[i] = 0
+        else:
+            labels[i] = 1
     df["target_trend"] = labels
     return df
 
