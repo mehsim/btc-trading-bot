@@ -4053,9 +4053,10 @@ def sync_active_positions_from_bybit():
             if qty_val > 0:
                 open_positions[pos.get("symbol")] = pos
 
-        # Re-sync bot_state active trades
-        with active_trades_lock:
-            matched_symbols = set()
+        # Re-sync bot_state active trades with unified lock acquisition hierarchy
+        with active_execution_lock:
+            with active_trades_lock:
+                matched_symbols = set()
             
             for tf_key in ACTIVE_TRADE_TF_KEYS:
                 current_trades = bot_state.get(f"active_trade_{tf_key}", [])
@@ -7272,7 +7273,10 @@ def main():
                                     p_c_ts = p.get("candle_timestamp") or p.get("timestamp") or 0
                                     p_c_ts_conv = int(p_c_ts * 1000) if p_c_ts < 1e11 else int(p_c_ts)
                                     if abs(p_c_ts_conv - c_ts_target) <= window_ms:
-                                        matched_pred = p
+                                        if p.get("status") == "Pending Risk Evaluation" or matched_pred is None:
+                                            matched_pred = p
+                                            if p.get("status") == "Pending Risk Evaluation":
+                                                break
                                         break
 
                             if matched_pred is None:

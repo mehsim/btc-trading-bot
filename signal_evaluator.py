@@ -397,7 +397,8 @@ class SignalEvaluator:
                                     adx=adx_val,
                                     outcome="SKIPPED" if direction == "Neutral" else "EVALUATED",
                                     reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation"
-                                ).snapshot(
+                                )
+                                rec.snapshot(
                                     predicted_change=float(pred_pct * float(last_row["close"])),
                                     dynamic_threshold=float(eval_threshold)
                                 )

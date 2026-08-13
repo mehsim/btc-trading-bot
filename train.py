@@ -488,21 +488,32 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             for step in range(1, _look + 1):
                 if i + step >= n_samples: break
                 h, l = highs[i + step], lows[i + step]
-                hit_bull = h >= upper_b and l > lower_s
-                hit_bear = l <= lower_b and h < upper_s
-                if hit_bull and not hit_bear:
+                long_tp = h >= upper_b
+                long_sl = l <= lower_s
+                short_tp = l <= lower_b
+                short_sl = h >= upper_s
+                
+                if long_tp and not long_sl:
                     labels[i] = 2
                     hit = True
                     break
-                elif hit_bear and not hit_bull:
+                elif short_tp and not short_sl:
                     labels[i] = 0
                     hit = True
                     break
-                elif l <= lower_s:
+                elif long_sl and not long_tp:
                     labels[i] = 0
                     hit = True
                     break
-                elif h >= upper_s:
+                elif short_sl and not short_tp:
+                    labels[i] = 2
+                    hit = True
+                    break
+                elif long_sl and long_tp:
+                    labels[i] = 0
+                    hit = True
+                    break
+                elif short_sl and short_tp:
                     labels[i] = 2
                     hit = True
                     break
@@ -549,9 +560,13 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 scores.append(fold_score)
                 optuna_fold_scores.append(fold_score)
 
+            import gc
+            gc.collect()
             return safe_mean(scores) if scores else 0.0
         except Exception as ex_train:
             log_event("WARNING", f"train notice: {ex_train}")
+            import gc
+            gc.collect()
             return 0.0
 
     study = optuna.create_study(direction="maximize")

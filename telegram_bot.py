@@ -55,6 +55,15 @@ def execute_telegram_api_call(method: str, payload: Dict[str, Any]) -> Dict[str,
             resp = requests.post(url, json=payload, headers=headers, timeout=15, proxies=proxies_dict)
             if resp.status_code == 200:
                 return resp.json()
+            elif resp.status_code == 400 and payload.get("parse_mode"):
+                plain_payload = dict(payload)
+                plain_payload.pop("parse_mode", None)
+                try:
+                    resp_plain = requests.post(url, json=plain_payload, headers=headers, timeout=15, proxies=proxies_dict)
+                    if resp_plain.status_code == 200:
+                        return resp_plain.json()
+                except Exception:
+                    pass
         except Exception as ex_telegram_bot:
             log_event("WARNING", f"telegram_bot notice: {ex_telegram_bot}")
             if attempt < 2:

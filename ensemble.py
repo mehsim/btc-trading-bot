@@ -406,9 +406,11 @@ class EnsembleClassifier:
                 cat_prob = None
 
         if xgb_prob is None and lgb_prob is None and cat_prob is None:
+            self.is_fallback = True
             raise RuntimeError("All ensemble base models failed predict_proba")
 
         if lgb_prob is None or cat_prob is None or getattr(self, "meta_coef_", None) is None:
+            self.is_fallback = True
             w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
             w = np.array(w_to_use, dtype=float)
             w = w / np.sum(w)
@@ -419,6 +421,8 @@ class EnsembleClassifier:
             elif lgb_prob is None and cat_prob is not None:
                 return (xgb_prob * 0.5 + cat_prob * 0.5)
             return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+        else:
+            self.is_fallback = False
             
         # Stack probabilities for prediction
         X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])

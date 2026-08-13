@@ -25,7 +25,8 @@ class CircuitBreaker:
         Returns (is_healthy, reason).
         """
         now = time.time()
-        balance_age = now - last_balance_sync_ts if last_balance_sync_ts > 0 else 999.0
+        ts_sec = last_balance_sync_ts / 1000.0 if last_balance_sync_ts > 1e11 else last_balance_sync_ts
+        balance_age = now - ts_sec if ts_sec > 0 else 999.0
 
         if not db_healthy:
             self.is_circuit_active = True
