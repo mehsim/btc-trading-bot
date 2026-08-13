@@ -7258,13 +7258,21 @@ def main():
                             # Update existing prediction from SignalEvaluator or append new entry with final live gate status
                             matched_pred = None
                             c_ts_target = int(latest_completed_ts * 1000) if latest_completed_ts < 1e11 else int(latest_completed_ts)
-                            window_ms = int(iv) * 60 * 1000
+                            window_ms = max(int(iv) * 60 * 1000 * 3, 1800000)
                             for p in reversed(bot_state.get("prediction_history", [])):
-                                p_c_ts = p.get("candle_timestamp", 0)
-                                p_c_ts_conv = int(p_c_ts * 1000) if p_c_ts < 1e11 else int(p_c_ts)
-                                if abs(p_c_ts_conv - c_ts_target) <= window_ms and str(p.get("interval")) == str(iv) and str(p.get("symbol")) == str(symbol):
-                                    matched_pred = p
-                                    break
+                                if str(p.get("symbol")) == str(symbol) and str(p.get("interval")) == str(iv):
+                                    p_c_ts = p.get("candle_timestamp") or p.get("timestamp") or 0
+                                    p_c_ts_conv = int(p_c_ts * 1000) if p_c_ts < 1e11 else int(p_c_ts)
+                                    if abs(p_c_ts_conv - c_ts_target) <= window_ms:
+                                        matched_pred = p
+                                        break
+
+                            if matched_pred is None:
+                                for p in reversed(bot_state.get("prediction_history", [])):
+                                    if str(p.get("symbol")) == str(symbol) and str(p.get("interval")) == str(iv):
+                                        if abs(float(time.time()) - float(p.get("timestamp", 0))) <= 1800:
+                                            matched_pred = p
+                                            break
 
                             if matched_pred is not None:
                                 matched_pred["timestamp"] = float(time.time())

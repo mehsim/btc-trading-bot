@@ -369,7 +369,7 @@ class SignalEvaluator:
                                     "ref_price": float(last_row["close"]),
                                     "predicted_change": float(pred_pct * float(last_row["close"])),
                                     "predicted_price": float(last_row["close"]) * (1.0 + pred_pct),
-                                    "status": f"Skipped (Neutral)" if direction == "Neutral" else f"Active Signal ({direction})",
+                                    "status": f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation",
                                     "calibrated_confidence": float(calibrated_conf),
                                     "raw_confidence": float(raw_conf),
                                     "dynamic_threshold": float(eval_threshold),
@@ -396,7 +396,7 @@ class SignalEvaluator:
                                     regime=regime_str,
                                     adx=adx_val,
                                     outcome="SKIPPED" if direction == "Neutral" else "EVALUATED",
-                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else f"Active Signal ({direction})"
+                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation"
                                 ).snapshot(
                                     predicted_change=float(pred_pct * float(last_row["close"])),
                                     dynamic_threshold=float(eval_threshold)
