@@ -1,0 +1,19 @@
+{
+  "feature_names": [
+    "ADX",
+    "day_of_week_cos",
+    "funding_rate",
+    "fear_greed",
+    "open_interest_lag1",
+    "funding_rate_lag1",
+    "fear_greed_lag1",
+    "funding_rate_lag2",
+    "fear_greed_lag2",
+    "btc_close",
+    "close_to_Kalman",
+    "close_btc",
+    "btc_rsi",
+    "ATR_norm",
+    "open_interest"
+  ]
+}

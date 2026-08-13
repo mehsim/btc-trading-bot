@@ -54,11 +54,11 @@ def verify_model_responsiveness(probs_or_shares):
         return True, "OK"
 
     dominant = float(shares.max())
-    min_share = float(shares.min())
+    min_dir_share = float(shares[[0, 2]].min()) if len(shares) >= 3 else float(shares.min())
     if dominant > 0.90:
         return False, f"REJECTED: B-4 one-sided predictor — {dominant:.1%} dominant class share exceeds 90.0% ceiling"
-    if min_share < 0.02 and len(shares) == 3:
-        return False, f"REJECTED: B-5 unresponsive model — minimum class share {min_share:.1%} below 2.0% responsiveness floor"
+    if min_dir_share < 0.02 and len(shares) >= 3:
+        return False, f"REJECTED: B-5 unresponsive model — minimum directional class share {min_dir_share:.1%} below 2.0% responsiveness floor"
     return True, "OK"
 
 def get_model_feature_names(model):

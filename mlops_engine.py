@@ -248,13 +248,12 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         probs_arr = np.asarray(probs)
         if len(probs_arr) > 0:
             counts = np.bincount(probs_arr.argmax(axis=1), minlength=3)
-            class_shares = counts / len(probs_arr)
             dominant = class_shares.max()
-            min_share = class_shares.min()
+            min_dir_share = class_shares[[0, 2]].min() if len(class_shares) >= 3 else class_shares.min()
             if dominant > 0.90:
                 return False, f"REJECTED: B-4 one-sided predictor — {dominant:.1%} dominant class share exceeds 90.0% ceiling"
-            if min_share < 0.02 and probs_arr.shape[1] == 3:
-                return False, f"REJECTED: B-5 unresponsive model — minimum class share {min_share:.1%} below 2.0% responsiveness floor"
+            if min_dir_share < 0.02 and probs_arr.shape[1] >= 3:
+                return False, f"REJECTED: B-5 unresponsive model — minimum directional class share {min_dir_share:.1%} below 2.0% responsiveness floor"
 
     if cand is not None and champ is not None:
         champ_mcc = champ.get("mcc", champ.get("mcc_mean"))

@@ -1,0 +1,24 @@
+[MLflow] Initialized experiment 'BTC_Trading_Bot' with tracking URI 'sqlite:///mlflow.db'
+{"timestamp_utc": "2026-08-12T15:31:31.939607+00:00", "level": "WARNING", "logger": "trading_bot", "message": "train notice: Invalid classes inferred from unique values of `y`.  Expected: [0], got [1]", "correlation_id": "88cdffdf-af5b-419b-8831-3eeb77c02828", "module": "logger", "line_no": 47}
+{"timestamp_utc": "2026-08-12T15:31:31.987987+00:00", "level": "WARNING", "logger": "trading_bot", "message": "train notice: Found array with 1 sample(s) (shape=(1, 2)) while a minimum of 2 is required by LGBMClassifier.", "correlation_id": "8cb2f3c5-c10a-4cf1-b460-194a49867937", "module": "logger", "line_no": 47}
+{"timestamp_utc": "2026-08-12T15:31:32.064940+00:00", "level": "WARNING", "logger": "trading_bot", "message": "train notice: catboost/cuda/cuda_lib/cuda_base.h:265: CUDA error 35: CUDA driver version is insufficient for CUDA runtime version", "correlation_id": "1716e303-f35e-4ea5-bc76-3b559b3f1eec", "module": "logger", "line_no": 47}
+🛡️ [Risk Governance] Startup assertion passed: all active parameters comply with hard safety limits.
+🛡️ [Risk Governance] Startup assertion passed: all active parameters comply with hard safety limits.
+{"timestamp_utc": "2026-08-12T15:31:32.068652+00:00", "level": "INFO", "logger": "trading_bot", "message": "\u2705 [Config Verifier M-2] All cross-file train.py vs config.py constants strictly verified.", "correlation_id": "a63fe489-68fe-4076-a6eb-7b677cf306ba", "module": "logger", "line_no": 47}
+[System Debug] os imported.
+[System Debug] Thread env vars set.
+[StateManager] Connected to Redis server with authentication.
+[Database] SQLite integrity check passed.
+[System Debug] Importing websocket...
+[System Debug] websocket imported.
+[System Debug] Importing pandas/numpy/joblib...
+[System Debug] pandas/numpy/joblib imported.
+[System Debug] Importing ta...
+[System Debug] ta imported.
+[System Debug] Importing data.py...
+[System Debug] Importing Flask...
+1. Fetching historical candle dataset...
+{"timestamp_utc": "2026-08-12T15:31:37.298145+00:00", "level": "WARNING", "logger": "trading_bot", "message": "data notice: duplicate column name: ob_imbalance_L2", "correlation_id": "c300f372-4a2e-48fb-bfe8-3f077ef4185b", "module": "logger", "line_no": 47}
+{"timestamp_utc": "2026-08-12T15:31:37.298280+00:00", "level": "WARNING", "logger": "trading_bot", "message": "data notice: duplicate column name: ob_spread_L2", "correlation_id": "d3cc4c86-8686-45c2-b4cf-d03582aa5605", "module": "logger", "line_no": 47}
+{"timestamp_utc": "2026-08-12T15:31:37.298367+00:00", "level": "WARNING", "logger": "trading_bot", "message": "data notice: duplicate column name: liq_long_1h", "correlation_id": "a47d3c01-16b1-4e74-8ddf-7dd4044d3bdb", "module": "logger", "line_no": 47}
+{"timestamp_utc": "2026-08-12T15:31:37.298445+00:00", "level": "WARNING", "logger": "trading_bot", "message": "data notice: duplicate column name: liq_short_1h", "correlation_id": "9d0040fc-d1d6-45fe-a738-d6dd9781c0c3", "module": "logger", "line_no": 47}

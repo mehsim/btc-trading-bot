@@ -41,6 +41,15 @@ MODEL_GOVERNANCE = {
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
 CONSERVATIVE_LEVERAGE_CAPS = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "default": 3.0}
 MIN_SL_PCT_CONFIG = {"15": 0.006, "30": 0.008, "60": 0.010, "120": 0.012, "240": 0.015, "360": 0.015, "default": 0.008}
+
+def resolve_min_sl_pct(symbol: str = "BTCUSDT", interval: str = "60") -> float:
+    iv_str = str(interval).replace("m", "").replace("h", "0")
+    if interval == "1h": iv_str = "60"
+    elif interval == "2h": iv_str = "120"
+    elif interval == "4h": iv_str = "240"
+    elif interval == "6h": iv_str = "360"
+    val = MIN_SL_PCT_CONFIG.get(iv_str, MIN_SL_PCT_CONFIG.get("default", 0.008))
+    return float(val) * 100.0
 HORIZON_REACHABILITY_FACTOR = 0.90  # F-2: Arbitrary horizon reachability scale factor (lookahead^0.5 * ATR * factor)
 MIN_LEVERAGE_RAMP_START = 1.5       # B-1: Leverage starts at 1.5x to eliminate deadband below validation floor
 NEUTRAL_PENALTY_COEFFICIENT = 0.20  # B-9: Neutral probability penalty coefficient
@@ -256,10 +265,10 @@ def _get_tf_env(key: str, default: float) -> float:
 TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe - Hardened Institutional Scalp
         "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.25),
+        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.0),
         "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.52),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.35),
-        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.40)
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 2.2),
+        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 2.5)
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),

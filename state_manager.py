@@ -41,7 +41,7 @@ class StateManager:
             redis_pass = os.environ.get("REDIS_PASSWORD", None)
             redis_host = os.environ.get("REDIS_HOST", "localhost")
             redis_port = int(os.environ.get("REDIS_PORT", 6379))
-            self._redis = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_pass, decode_responses=True)
+            self._redis = redis.Redis(host=redis_host, port=redis_port, db=0, password=redis_pass, decode_responses=True, socket_timeout=3.0, socket_connect_timeout=3.0)
             self._redis.ping()
             print("[StateManager] Connected to Redis server with authentication.")
         except Exception as e:
@@ -98,30 +98,44 @@ class StateManager:
             "win_rate_by_tf": {"15": None, "30": None, "60": None, "120": None}
         }
         database.init_db()
+        import sys
+        sys.stderr.write("[StateManager Debug] database.init_db() done.\n")
+        sys.stderr.flush()
         
         # Load settings from db or use default
         self._cache["simulated_balance"] = float(database.get_setting("simulated_balance", 80.0))
         self._cache["bot_running"] = database.get_setting("bot_running", "True") == "True"
         self._cache["fresh_reset_v3"] = database.get_setting("fresh_reset_v3", "False") == "True"
+        sys.stderr.write("[StateManager Debug] Settings loaded from DB.\n")
+        sys.stderr.flush()
         
         # Load trade history and predictions into cache
         raw_trades = database.get_trade_history()
         raw_preds = database.get_prediction_history()
+        sys.stderr.write(f"[StateManager Debug] raw_trades ({len(raw_trades)}), raw_preds ({len(raw_preds)}) loaded.\n")
+        sys.stderr.flush()
         self._cache["trade_history"] = ObservedList(raw_trades, lambda lst, item: self._on_mutate_trade(item))
         self._cache["prediction_history"] = ObservedList(raw_preds, lambda lst, item: self._on_mutate_prediction(item))
+        sys.stderr.write("[StateManager Debug] ObservedList wrappers attached.\n")
+        sys.stderr.flush()
         
         for tf in ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]:
             self._cache[f"active_trade_{tf}"] = database.get_active_trades(tf)
+        sys.stderr.write("[StateManager Debug] Active trades loaded.\n")
+        sys.stderr.flush()
 
         # Initialize defaults to Redis
         if self._redis:
+            print("[StateManager Debug] Starting Redis default keys sync...", flush=True)
             for k, v in self._cache.items():
                 try:
+                    print(f"[StateManager Debug] Syncing key: {k}...", flush=True)
                     if not self._redis.exists(f"bot_state:{k}"):
                         raw_v = list(v) if isinstance(v, ObservedList) else v
                         self._redis.set(f"bot_state:{k}", json.dumps(raw_v))
                 except Exception as e:
-                    print(f"[StateManager Redis Init Error] Failed to write {k} to Redis: {e}")
+                    print(f"[StateManager Redis Init Error] Failed to write {k} to Redis: {e}", flush=True)
+            print("[StateManager Debug] Redis default keys sync completed.", flush=True)
 
     def _on_mutate_trade(self, *args):
         item = args[-1] if args else None

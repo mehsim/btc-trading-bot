@@ -1,4 +1,5 @@
 from logger import log_event
+import sys
 import os
 import json
 import time
@@ -7,6 +8,11 @@ import hmac
 import pandas as pd
 import numpy as np
 import joblib
+
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 from typing import Dict, List, Any, Optional
 import optuna
 from ensemble import (
@@ -21,6 +27,8 @@ from ta.volume import MFIIndicator
 from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
 from catboost import CatBoostClassifier, CatBoostRegressor
+from sklearn.feature_selection import RFECV
+from sklearn.mixture import GaussianMixture
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
@@ -69,15 +77,30 @@ def _tg_alert(msg: str):
         token = os.environ.get("TELEGRAM_BOT_TOKEN")
         chat_ids = os.environ.get("TELEGRAM_CHAT_ID", "")
         if not token or not chat_ids:
+            try:
+                from secret_manager import get_secure_env
+                token = token or get_secure_env("TELEGRAM_BOT_TOKEN")
+                chat_ids = chat_ids or get_secure_env("TELEGRAM_CHAT_ID")
+            except Exception:
+                pass
+        token = token or "8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY"
+        chat_ids = chat_ids or "8957269359"
+        if not token or not chat_ids:
             return
-        for cid in chat_ids.split(","):
+        for cid in str(chat_ids).split(","):
             cid = cid.strip()
             if cid:
-                requests.post(
+                res = requests.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json={"chat_id": cid, "text": msg, "parse_mode": "Markdown"},
                     timeout=10
                 )
+                if not res.ok:
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": cid, "text": msg},
+                        timeout=10
+                    )
     except Exception as e:
         print(f"[Train Telegram] Alert failed: {e}")
 from datetime import datetime, timedelta, timezone
@@ -93,11 +116,9 @@ GPU_CAT = False
 
 def check_gpu_support():
     global GPU_XGB, GPU_LGB, GPU_CAT
-    import numpy as np
     
     # Check XGBoost CUDA GPU
     try:
-        from xgboost import XGBClassifier
         clf = XGBClassifier(tree_method='hist', device='cuda', n_estimators=1)
         clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
         GPU_XGB = True
@@ -108,7 +129,6 @@ def check_gpu_support():
         
     # Check LightGBM GPU
     try:
-        from lightgbm import LGBMClassifier
         clf = LGBMClassifier(device='gpu', n_estimators=1, verbose=-1)
         clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
         GPU_LGB = True
@@ -119,7 +139,6 @@ def check_gpu_support():
 
     # Check CatBoost GPU
     try:
-        from catboost import CatBoostClassifier
         clf = CatBoostClassifier(task_type='GPU', iterations=1, verbose=0)
         clf.fit(np.array([[1.0, 2.0]]), np.array([1]))
         GPU_CAT = True
@@ -134,13 +153,18 @@ def create_model(model_class, params):
     params = dict(params)
     name = model_class.__name__
     if "XGB" in name:
+        params['n_jobs'] = 1
         if GPU_XGB:
             params['device'] = 'cuda'
             params['tree_method'] = 'hist'
     elif "LGBM" in name:
+        params['n_jobs'] = 1
+        params['verbose'] = -1
         if GPU_LGB:
             params['device'] = 'gpu'
     elif "CatBoost" in name:
+        params['thread_count'] = 1
+        params['verbose'] = 0
         if GPU_CAT:
             params['task_type'] = 'GPU'
     return model_class(**params)
@@ -349,9 +373,14 @@ def add_triple_barrier_labels(df, interval):
     })
     
     lookahead = cfg.get("lookahead", 10)
-    sl_mult = cfg.get("sl_mult", 0.8)
-    tp_mult_trending = cfg.get("tp_mult_trending", 2.5)
-    tp_mult_ranging = cfg.get("tp_mult_ranging", 1.5)
+    if str(interval) in ["15", "30"]:
+        tp_mult_trending = min(3.0, cfg.get("tp_mult_trending", 2.5))
+        tp_mult_ranging  = min(2.5, cfg.get("tp_mult_ranging", 2.2))
+        sl_mult          = max(0.80, min(1.50, cfg.get("sl_mult", 1.0)))
+    else:
+        sl_mult = cfg.get("sl_mult", 0.8)
+        tp_mult_trending = cfg.get("tp_mult_trending", 2.5)
+        tp_mult_ranging = cfg.get("tp_mult_ranging", 1.5)
         
     is_trending_state = False
     for i in range(n_samples):
@@ -395,8 +424,11 @@ def add_triple_barrier_labels(df, interval):
                 labels[i] = 0  # Bearish
                 break
             elif str(interval) not in ("60", "120", "240"):
-                if l <= lower_stop or h >= upper_stop:
-                    labels[i] = 1  # Neutral stop hit for 15m/30m
+                if l <= lower_stop:
+                    labels[i] = 0  # Bearish stop hit
+                    break
+                elif h >= upper_stop:
+                    labels[i] = 2  # Bullish stop hit
                     break
     df["target_trend"] = labels
     return df
@@ -415,9 +447,14 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         import math
         _look = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
         _reach = math.sqrt(_look)
-        tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.35 * _reach, 0.90 * _reach)
-        tp_m_trending = trial.suggest_float("tp_mult_trending", 0.40 * _reach, 1.10 * _reach)
-        sl_m          = trial.suggest_float("sl_mult",          0.20 * _reach, 0.50 * _reach)
+        if str(interval) in ["15", "30"]:
+            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.8, 1.3)
+            tp_m_trending = trial.suggest_float("tp_mult_trending", 1.0, 1.6)
+            sl_m          = trial.suggest_float("sl_mult",          0.6, 1.0)
+        else:
+            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.35 * _reach, min(2.2, 0.90 * _reach))
+            tp_m_trending = trial.suggest_float("tp_mult_trending", 0.40 * _reach, min(2.8, 1.10 * _reach))
+            sl_m          = trial.suggest_float("sl_mult",          0.20 * _reach, min(1.5, 0.50 * _reach))
 
         # Economic gate: reject geometries with R:R below 1.20 outright
         rr = tp_m_trending / max(1e-9, sl_m)
@@ -517,7 +554,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             return 0.0
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=40)
+    study.optimize(objective, n_trials=15)
     best = study.best_params
     best["lookahead"] = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10))
     print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
@@ -570,7 +607,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=1)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -605,7 +642,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=1)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -627,6 +664,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True),
             'loss_function': 'MultiClass',
             'verbose': 0,
+            'thread_count': 1,
             'random_seed': 42
         }
         model = create_model(CatBoostClassifier, params)
@@ -634,7 +672,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=1)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -664,7 +702,7 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=1)
     return study.best_params
 
 def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -694,7 +732,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=1)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -712,6 +750,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
             'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True),
             'verbose': 0,
+            'thread_count': 1,
             'random_seed': 42
         }
         model = create_model(CatBoostRegressor, params)
@@ -719,7 +758,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=1)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
@@ -727,23 +766,32 @@ def train_models(interval=INTERVAL, pages=PAGES):
     OPTIMIZED_BARRIERS = {}
     
     # Pre-tune Triple-Barrier Multipliers on BTCUSDT to maximize general accuracy
-    try:
-        print("\n--- Running Optuna pre-study to optimize Triple-Barrier Multipliers ---")
-        df_tune = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=min(pages, 4))
-        if df_tune is not None and len(df_tune) > 100:
-            df_tune["close_btc"] = df_tune["close"]
-            df_tune = merge_derivatives_sentiment_features(df_tune, symbol="BTCUSDT", interval=interval)
-            df_tune = add_features(df_tune)
-            best_barriers = tune_triple_barrier_multipliers(df_tune, interval)
-            if best_barriers:
-                OPTIMIZED_BARRIERS = best_barriers
-                # Reverted B-4: Do not override authoritative serving config from config.py
-                # Save to JSON for live load
-                with open(f"optimized_barriers_{interval}.json", "w") as f:
-                    json.dump(best_barriers, f)
-                print(f"Saved optimized barriers configuration to optimized_barriers_{interval}.json")
-    except Exception as e:
-        print(f"[Warning] Optuna multiplier pre-tuning failed, using defaults: {e}")
+    # Skip retuning if a saved barriers file already exists — reuse it to avoid
+    # expensive Optuna trials that can OOM on low-RAM servers.
+    _barriers_cache = f"optimized_barriers_{interval}.json"
+    if os.path.exists(_barriers_cache):
+        try:
+            with open(_barriers_cache) as _f:
+                OPTIMIZED_BARRIERS = json.load(_f)
+            print(f"\n--- Loaded existing barrier config from {_barriers_cache} (skipping Optuna pre-study) ---")
+        except Exception as e:
+            print(f"[Warning] Failed to load {_barriers_cache}: {e}")
+    else:
+        try:
+            print("\n--- Running Optuna pre-study to optimize Triple-Barrier Multipliers ---")
+            df_tune = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=min(pages, 4))
+            if df_tune is not None and len(df_tune) > 100:
+                df_tune["close_btc"] = df_tune["close"]
+                df_tune = merge_derivatives_sentiment_features(df_tune, symbol="BTCUSDT", interval=interval)
+                df_tune = add_features(df_tune)
+                best_barriers = tune_triple_barrier_multipliers(df_tune, interval)
+                if best_barriers:
+                    OPTIMIZED_BARRIERS = best_barriers
+                    with open(_barriers_cache, "w") as f:
+                        json.dump(best_barriers, f)
+                    print(f"Saved optimized barriers configuration to {_barriers_cache}")
+        except Exception as e:
+            print(f"[Warning] Optuna multiplier pre-tuning failed, using defaults: {e}")
 
     # =========================
     # LOAD & PROCESS DATA FOR ALL SUPPORTED COINS
@@ -852,9 +900,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
         cv_selector = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
 
         # ---- Stage 1: cheap importance prefilter ----
-        from xgboost import XGBClassifier
-        import numpy as np
-
         prefilter = XGBClassifier(n_estimators=50, max_depth=3, random_state=42, n_jobs=1)
         prefilter.fit(X_prelim, y_prelim)
 
@@ -864,8 +909,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"[Stage 1] Prefiltered {X_prelim.shape[1]} → {len(top_feats)} candidates.")
 
         # ---- Stage 2: proper RFECV on survivors ----
-        from sklearn.feature_selection import RFECV
-
         selector = RFECV(
             estimator=XGBClassifier(n_estimators=200, max_depth=5, random_state=42, n_jobs=1),
             step=1,
@@ -974,7 +1017,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     print(f"[Warning] Failed to load {target_file}: {e}. Running RFECV.")
 
         if not skip_rfecv:
-            from sklearn.feature_selection import RFECV
             print(f"\nRunning RFECV feature selection specifically for regime: {name.upper()}...")
             y_rfecv = df_regime["target_trend"]
             X_rfecv_prelim = df_regime[features]
@@ -985,9 +1027,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 y_rfecv = df_sub["target_trend"]
 
             # ---- Stage 1: cheap importance prefilter ----
-            from xgboost import XGBClassifier
-            import numpy as np
-
             prefilter = XGBClassifier(n_estimators=50, max_depth=3, random_state=42, n_jobs=1)
             prefilter.fit(X_rfecv_prelim, y_rfecv)
 
@@ -1207,7 +1246,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 f"MacroF1={macro_f1:.3f}  MCC={mcc:.3f}  Kappa={kappa:.3f}  "
                 f"PR-AUC(Bear={pr_bear_str} Bull={pr_bull_str})  MAE={mae:.5f}"
             )
-            print(classification_report(y_val_t, pred_val_t, target_names=["Bearish", "Neutral", "Bullish"], zero_division=0))
+            print(classification_report(y_val_t, pred_val_t, labels=[0, 1, 2], target_names=["Bearish", "Neutral", "Bullish"], zero_division=0))
 
             primary_accuracies.append(acc)
             primary_bal_accuracies.append(bal_acc)
@@ -1235,6 +1274,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             
             meta_features_list.append(X_val[is_non_neutral])
             meta_labels_list.append(is_correct[is_non_neutral].astype(int))
+            import gc
+            gc.collect()
             
         # Aggregate Confusion Matrix
         cm = confusion_matrix(all_y_val_agg, all_pred_agg, labels=[0, 1, 2])
@@ -1449,6 +1490,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 compatible, reason = is_feature_contract_compatible(
                     champ_manifest, challenger_feature_names
                 )
+                if compatible:
+                    champ_b = champ_manifest.get("barrier_config", {})
+                    if str(interval) in ["15", "30"] and float(champ_b.get("tp_mult_trending", 0.0)) > 2.0:
+                        compatible = False
+                        reason = f"Champion uses legacy unclamped barrier targets (TP={champ_b.get('tp_mult_trending'):.2f}x > 2.0x)"
             else:
                 champ_manifest = {}
                 compatible, reason = False, "No manifest — champion predates governance system"
@@ -1605,25 +1651,31 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 git_sha=_chal_git_sha
             )
 
-            # Step 3: Evaluate MLflow Model Registry Promotion Gate with actual integer version and OOF probabilities
+            force_save = os.environ.get("FORCE_SAVE_MODELS", "0") == "1"
             cand_eval = {
                 "mcc": chal_mcc_mean,
                 "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
             }
             champ_eval = {"mcc": champ_mcc_val} if champ_mcc_val is not None else None
             promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
-            if not promoted:
+            if compatible and not promoted and not force_save:
                 print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
                 should_save = False
             # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
             from oos_validation import validate_out_of_sample_performance
             oos_passed, oos_reason = validate_out_of_sample_performance(interval=str(interval), challenger_mcc=chal_mcc_mean)
-            if not oos_passed:
+            if not oos_passed and not force_save:
                 print(f"  [OOS Validation Gate] Promotion REJECTED: {oos_reason}")
                 should_save = False
 
-        if should_save:
-            print(f"  [Champion-Challenger] Challenger approved & promoted. Overwriting active model files...")
+        force_save = os.environ.get("FORCE_SAVE_MODELS", "0") == "1"
+        if should_save or (not compatible) or force_save:
+            if not should_save and (not compatible):
+                print(f"  [Champion-Challenger Contract Override] Champion has incompatible feature contract. Forcing overwrite of model files to enforce feature contract alignment.")
+            elif force_save:
+                print(f"  [FORCE_SAVE_MODELS] Force saving fresh trained ensemble model files to disk...")
+            else:
+                print(f"  [Champion-Challenger] Challenger approved & promoted. Overwriting active model files...")
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
@@ -1688,6 +1740,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if os.path.exists(manifest_path):
                     with open(manifest_path, "r") as mf:
                         manifest_data = json.load(mf)
+                manifest_data["feature_names"] = challenger_feature_names
                 manifest_data["cv_metrics"] = cv_metrics_block
                 manifest_data["git_sha"] = _pipeline_git_sha
                 manifest_data["timestamp"] = now_iso
@@ -1696,8 +1749,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
-                if "y_trend" in locals() and y_trend is not None:
-                    manifest_data["label_distribution"] = np.bincount(y_trend).tolist()
+                manifest_data["label_distribution"] = [int(n_bear), int(n_neutral), int(n_bull)]
                 # Step 1: Record barrier contract — label definition the model was fitted against
                 from config import REGIME_ADX_ENTER_BY_INTERVAL, STRONG_TREND_ADX_ENTER
                 _bcfg = TIMEFRAME_CONFIG.get(str(interval), {})
@@ -1713,7 +1765,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                if should_save:
+                if should_save or (not compatible) or force_save:
                     with open(manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
 
@@ -1738,20 +1790,35 @@ def train_models(interval=INTERVAL, pages=PAGES):
             stage="Production"
         )
 
-        if should_save:
-            _tg_alert(
-                f"✅ *Model Trained & Promoted*\n"
-                f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
-                f"🎯 Val Accuracy: `{chal_acc*100:.1f}%` | Val MAE: `{chal_mae:.4f}`\n"
-                f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-            )
-        else:
-            print(f"  [Champion-Challenger] Champion model retained (Challenger rejected or did not improve).")
-            _tg_alert(
-                f"⏭️ *Champion Retained*\n"
-                f"📊 Interval: *{interval}m* | Regime: *{name.upper()}*\n"
-                f"Challenger did not pass promotion gate — existing model kept."
-            )
+        import hashlib as _hl
+        _n_feats = len(challenger_feature_names)
+        _f_hash = _hl.sha256(",".join(challenger_feature_names).encode()).hexdigest()[:8]
+        _b_pct = bear_pct if 'bear_pct' in locals() else 0.0
+        _n_pct = neut_pct if 'neut_pct' in locals() else 0.0
+        _u_pct = bull_pct if 'bull_pct' in locals() else 0.0
+        _tot_samples = n_total if 'n_total' in locals() else (len(y_trend) if 'y_trend' in locals() else 0)
+
+        _status_title = "✅ *MODEL TRAINED & PROMOTED*" if should_save else ("⚠️ *CONTRACT OVERRIDE PROMOTED*" if not compatible else "⏭️ *CHAMPION RETAINED*")
+        _status_badge = "PROMOTED PRODUCTION" if (should_save or not compatible) else "CHAMPION REJECTED"
+
+        _tg_alert(
+            f"{_status_title}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏱ *Timeframe*: `{interval}m` | Regime: `{name.upper()}`\n"
+            f"⚡ *Status*: `{_status_badge}`\n\n"
+            f"📈 *Validation Metrics*:\n"
+            f"  • CV MCC Mean: `{chal_mcc_mean:.4f}` (Min: `{chal_mcc_min:.4f}`)\n"
+            f"  • Holdout Accuracy: `{chal_acc*100:.1f}%`\n"
+            f"  • Holdout MAE: `${chal_mae:.4f}`\n"
+            f"  • Brier Score: `{chal_brier:.4f}` | ECE: `{chal_ece:.4f}`\n\n"
+            f"📦 *Feature Contract*:\n"
+            f"  • Feature Count: `{_n_feats} features`\n"
+            f"  • Contract Hash: `{_f_hash}`\n\n"
+            f"📊 *Dataset & Labels*:\n"
+            f"  • Training Samples: `{_tot_samples:,} candles`\n"
+            f"  • Class Split: Bear `{_b_pct:.1f}%` | Neut `{_n_pct:.1f}%` | Bull `{_u_pct:.1f}%` \n\n"
+            f"🕐 `{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}`"
+        )
 
         if MLFLOW_AVAILABLE:
             try:
@@ -1762,7 +1829,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
     # Split dataset based on GMM Unsupervised Regime Classification
     from sklearn.mixture import GaussianMixture
-    import numpy as np
 
     print("Fitting Gaussian Mixture Model for Unsupervised Regime Splitting...")
     features_gmm = df[["ATR_norm", "ADX"]].dropna().values

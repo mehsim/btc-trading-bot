@@ -1,0 +1,26 @@
+{
+  "feature_names": [
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "BB_pct",
+    "BB_width",
+    "MACD_diff_diff",
+    "ADX",
+    "ADX_neg",
+    "close_to_VWAP",
+    "btc_return_5m",
+    "RSI_24",
+    "volatility_24h",
+    "hour_sin",
+    "hour_cos",
+    "day_of_week_sin",
+    "ADX_z",
+    "MACD_diff_lag1",
+    "RSI_lag2",
+    "MACD_diff_lag2",
+    "open_interest"
+  ]
+}

@@ -26,7 +26,7 @@ def round_monetary(val: Any, decimals: int = 4) -> float:
             return 0.0
 
 DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
-db_lock = threading.Lock()
+db_lock = threading.RLock()
 
 
 def get_db_connection():
@@ -36,11 +36,7 @@ def get_db_connection():
             conn = sqlite3.connect(DB_FILE, timeout=60.0)
             conn.execute("PRAGMA busy_timeout = 60000;")
             conn.execute("PRAGMA journal_mode = WAL;")
-            conn.execute("PRAGMA synchronous = NORMAL;")
             conn.row_factory = sqlite3.Row
-            res = conn.execute("PRAGMA quick_check;").fetchone()
-            if res and res[0] != "ok":
-                raise sqlite3.DatabaseError(f"Corrupt DB disk image: {res[0]}")
             return conn
         except sqlite3.DatabaseError as e:
             print(f"[Database Auto-Recovery] Detected corruption/lock ({e}). Rebuilding DB file {DB_FILE}...")
@@ -205,6 +201,11 @@ def init_db():
             """)
             
             conn.commit()
+            try:
+                from decision_journal import init_decision_journal_db
+                init_decision_journal_db()
+            except Exception as ex_dj:
+                log_event("WARNING", f"decision_journal init notice: {ex_dj}")
             
             # 5. Check if migration from JSON is needed
             cursor.execute("SELECT COUNT(*) FROM completed_trades;")

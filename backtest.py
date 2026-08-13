@@ -195,11 +195,8 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             i += 1
             continue
 
-        # 9. Volatility Guard
+        # 9. Volatility Guard (Removed ATR percentile filter to mirror production live behavior)
         atr_norm = df.loc[i, "ATR_norm"]
-        if not (df.loc[i, "p10_atr"] <= atr_norm <= df.loc[i, "p90_atr"]):
-            i += 1
-            continue
 
         # 10. ADX (Decoupled to allow routing to models_ranging)
         # if df.loc[i, "ADX"] < 20.0:
@@ -241,15 +238,30 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         
         # Regime-Adaptive Take-Profit & Stop-Loss Multipliers from TIMEFRAME_CONFIG
         cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+        adx_enter_map = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
+        adx_enter = adx_enter_map.get(str(interval), 22.0)
+
         sl_mult = cfg.get("sl_mult", 1.5)
-        tp_multiplier = cfg.get("tp_mult_trending", 2.5) if adx_val >= 20.0 else cfg.get("tp_mult_ranging", 1.5)
+        tp_multiplier = cfg.get("tp_mult_trending", 2.5) if adx_val >= adx_enter else cfg.get("tp_mult_ranging", 1.5)
+
+        raw_sl_dist = sl_mult * atr_dollars
+        min_sl_pct = config.resolve_min_sl_pct(SYMBOL, interval)
+        min_sl_dist = entry_price * (min_sl_pct / 100.0)
+        sl_dist = max(raw_sl_dist, min_sl_dist)
             
         if ml_trend == "Bullish":
-            stop_loss = entry_price - sl_mult * atr_dollars
+            stop_loss = entry_price - sl_dist
             take_profit = entry_price + tp_multiplier * atr_dollars
         else:
-            stop_loss = entry_price + sl_mult * atr_dollars
+            stop_loss = entry_price + sl_dist
             take_profit = entry_price - tp_multiplier * atr_dollars
+
+        # Post-floor economic gate (mirrors live production abort)
+        final_rr = abs(take_profit - entry_price) / max(1e-9, sl_dist)
+        required_p = 1.0 / (1.0 + final_rr) + 0.0016
+        if calibrated_confidence < required_p:
+            i += 1
+            continue
 
         # Look up to lookahead candles
         cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10})

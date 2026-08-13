@@ -1,0 +1,26 @@
+{
+  "feature_names": [
+    "RSI",
+    "MACD_diff",
+    "MFI",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct",
+    "BB_width",
+    "volatility_10m",
+    "volume_ratio",
+    "MACD_diff_diff",
+    "ROC_5",
+    "ADX",
+    "ADX_pos",
+    "ADX_neg",
+    "close_to_VWAP",
+    "btc_return_5m",
+    "btc_return_5m_lag2",
+    "RSI_24",
+    "ROC_24",
+    "volatility_24h"
+  ]
+}

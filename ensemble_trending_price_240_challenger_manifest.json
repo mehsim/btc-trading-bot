@@ -2,18 +2,72 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_price_240",
-  "timestamp": "2026-08-09T13:29:00.312873+00:00",
-  "model_version": "v7.2.0-073eeb61-202608091329",
+  "timestamp": "2026-08-12T22:44:23.340630+00:00",
+  "model_version": "v7.2.0-9aa1aeb6-202608101230",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "073eeb61",
-  "feature_count": 0,
-  "feature_names": [],
-  "surviving_features": [],
+  "git_sha": "9e86f616",
+  "feature_count": 26,
+  "feature_names": [
+    "open_interest",
+    "funding_rate",
+    "fear_greed",
+    "oi_change_1h",
+    "oi_change_4h",
+    "RSI",
+    "MACD_diff",
+    "EMA_9",
+    "EMA_21",
+    "EMA_50",
+    "EMA_200",
+    "BB_high",
+    "BB_low",
+    "BB_mid",
+    "MFI",
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct",
+    "BB_width",
+    "return_5m",
+    "volatility_10m",
+    "volume_ratio"
+  ],
+  "surviving_features": [
+    "open_interest",
+    "funding_rate",
+    "fear_greed",
+    "oi_change_1h",
+    "oi_change_4h",
+    "RSI",
+    "MACD_diff",
+    "EMA_9",
+    "EMA_21",
+    "EMA_50",
+    "EMA_200",
+    "BB_high",
+    "BB_low",
+    "BB_mid",
+    "MFI",
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct",
+    "BB_width",
+    "return_5m",
+    "volatility_10m",
+    "volume_ratio"
+  ],
   "vif_values": {},
-  "feature_contract_hash": "e3b0c44298fc",
-  "feature_pipeline_hash": "205b80ae1fe5",
-  "training_data_hash": "562a866f727cbaff404c14678beb49ff737e8899154df59e95a043587f08f177",
+  "feature_contract_hash": "29d018979028",
+  "feature_pipeline_hash": "499fdd9b615f",
+  "training_data_hash": "b1386d3690c9885f22a33154c86e45642cdc2321e9ddc08c898ba1109f3dfa4c",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "c1d8d1f56169d501a49ba7e6fb87bcd0de0856aa8d2e0e1c70df48a097ec6f5e",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -43,51 +97,51 @@
     "catboost": "1.2.10"
   },
   "promotion_metrics": {
-    "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 1371.77,
-    "raw_sample_size": 17827
-  },
-  "metrics": {
     "uniqueness_ratio": 0.077,
     "effective_sample_size": 825.62,
     "raw_sample_size": 10727
   },
+  "metrics": {
+    "uniqueness_ratio": 0.0769,
+    "effective_sample_size": 1353.31,
+    "raw_sample_size": 17587
+  },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3811,
-      "median": 0.3836,
-      "std": 0.039,
-      "min": 0.3362,
-      "max": 0.4447
+      "mean": 0.3824,
+      "median": 0.3942,
+      "std": 0.0352,
+      "min": 0.3211,
+      "max": 0.4274
     },
     "macro_f1": {
-      "mean": 0.2903,
-      "median": 0.3192,
-      "std": 0.0707,
-      "min": 0.1994,
-      "max": 0.3845
+      "mean": 0.3299,
+      "median": 0.3572,
+      "std": 0.0639,
+      "min": 0.2155,
+      "max": 0.3983
     },
     "mcc": {
-      "mean": 0.0729,
-      "median": 0.0734,
-      "std": 0.0425,
-      "min": 0.0186,
-      "max": 0.1419
+      "mean": 0.0823,
+      "median": 0.0805,
+      "std": 0.0548,
+      "min": -0.0125,
+      "max": 0.1537
     },
-    "mean_kappa": 0.05676659960417183,
-    "mean_pr_auc_bear": 0.20665096682573295,
-    "mean_pr_auc_bull": 0.1572898181011283,
-    "mean_raw_accuracy": 0.339,
-    "mean_mae": 0.048378,
-    "label_dist_bearish_pct": 15.74,
-    "label_dist_neutral_pct": 69.61,
-    "label_dist_bullish_pct": 14.65,
-    "n_training_samples": 10727,
-    "n_holdout_samples": 1769,
-    "effective_sample_size": 825.62,
-    "raw_sample_size": 10727,
-    "uniqueness_ratio": 0.077,
+    "mean_kappa": 0.07445138178769392,
+    "mean_pr_auc_bear": 0.2161522217201089,
+    "mean_pr_auc_bull": 0.23296159758550142,
+    "mean_raw_accuracy": 0.4129,
+    "mean_mae": 0.047862,
+    "label_dist_bearish_pct": 16.39,
+    "label_dist_neutral_pct": 65.93,
+    "label_dist_bullish_pct": 17.68,
+    "n_training_samples": 17587,
+    "n_holdout_samples": 2898,
+    "effective_sample_size": 1353.31,
+    "raw_sample_size": 17587,
+    "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
         "Bearish",
@@ -101,26 +155,26 @@
       ],
       "matrix": [
         [
-          764,
-          235,
-          409
+          837,
+          932,
+          711
         ],
         [
-          2640,
-          1813,
-          1728
+          2938,
+          4283,
+          2265
         ],
         [
-          581,
-          313,
-          452
+          835,
+          923,
+          931
         ]
       ]
     },
-    "holdout_accuracy": 0.7462,
-    "holdout_balanced_accuracy": 0.3333,
-    "holdout_brier": 0.4091,
-    "holdout_ece": 0.0187,
+    "holdout_accuracy": 0.6763,
+    "holdout_balanced_accuracy": 0.3373,
+    "holdout_brier": 0.471,
+    "holdout_ece": 0.0774,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -129,21 +183,21 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "073eeb61"
+    "git_sha": "9e86f616"
   },
   "barrier_config": {
-    "tp_mult_trending": 3.1212702584162257,
-    "tp_mult_ranging": 2.48095530922963,
-    "sl_mult": 1.0389865068320767,
+    "tp_mult_trending": 3.1771312581464772,
+    "tp_mult_ranging": 1.5505352298551256,
+    "sl_mult": 0.750920565664214,
     "lookahead": 12,
     "regime_adx_enter": 28.0
   },
   "label_distribution": [
-    1712,
-    7362,
-    1653
+    2844,
+    11501,
+    3242
   ],
-  "promoted": true,
-  "evaluation_timestamp": "2026-08-09T13:29:00.312873+00:00",
-  "hmac_signature": "1c5c3e5601f0011ff74d6a05bb11fc4a2a64ccbc4acbe1aacdc5ee29aa50b709"
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-12T22:44:23.340630+00:00",
+  "hmac_signature": "ec4a1fecd429c305513a10711ad2dbf7f35cbfc0a31cb74145701d5475e91a6b"
 }

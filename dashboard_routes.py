@@ -81,8 +81,8 @@ HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.
 import sys
 
 class StdoutRedirector:
-    def __init__(self, original_stdout):
-        self.original_stdout = original_stdout
+    def __init__(self, original_stdout=None):
+        self.original_stdout = original_stdout or sys.__stdout__ or sys.stdout
 
     def write(self, text):
         if isinstance(text, bytes):
@@ -90,28 +90,35 @@ class StdoutRedirector:
                 text = text.decode("utf-8", errors="replace")
             except Exception:
                 text = str(text)
-        try:
-            self.original_stdout.write(text)
-        except Exception as ex_dashboard_routes:
-            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
+        if self.original_stdout is not None:
+            try:
+                self.original_stdout.write(text)
+                if hasattr(self.original_stdout, "flush"):
+                    self.original_stdout.flush()
+            except Exception:
+                pass
         if text and text.strip():
-            msg = text.strip()
-            if not msg.startswith("["):
-                ts = time.strftime('%H:%M:%S')
-                msg = f"[{ts}] {msg}"
-            with logs_lock:
-                bot_logs.append(msg)
-                if len(bot_logs) > 80:
-                    bot_logs.pop(0)
+            try:
+                msg = text.strip()
+                if not msg.startswith("["):
+                    ts = time.strftime('%H:%M:%S')
+                    msg = f"[{ts}] {msg}"
+                with logs_lock:
+                    bot_logs.append(msg)
+                    if len(bot_logs) > 80:
+                        bot_logs.pop(0)
+            except Exception:
+                pass
 
     def flush(self):
-        try:
-            self.original_stdout.flush()
-        except Exception as ex_dashboard_routes:
-            log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
+        if self.original_stdout is not None:
+            try:
+                if hasattr(self.original_stdout, "flush"):
+                    self.original_stdout.flush()
+            except Exception:
+                pass
 
-if not isinstance(sys.stdout, StdoutRedirector):
-    sys.stdout = StdoutRedirector(sys.stdout)
+# stdout redirection is handled natively by CircularLogBuffer in main.py
 
 
 import hmac
@@ -514,7 +521,11 @@ def api_status():
                 k = (t.get("symbol"), round(float(t.get("exit_time", 0) or 0) / 60), round(float(t.get("entry_price", 0) or 0), 4), round(float(t.get("exit_price", 0) or 0), 4))
                 if k not in dedup_dict:
                     dedup_dict[k] = t
-        status_data["trade_history"] = list(dedup_dict.values())[-50:]
+        sorted_trades = sorted(
+            dedup_dict.values(),
+            key=lambda t: float(t.get("exit_time") or 0),
+        )
+        status_data["trade_history"] = sorted_trades[-50:]
         
         try:
             from database import get_db_connection
@@ -524,7 +535,7 @@ def api_status():
                 SELECT ts, datetime(ts,'unixepoch') AS t, symbol, interval, direction,
                        calibrated_conf, outcome, reject_reason, signal_source, inputs_json
                 FROM decision_journal
-                ORDER BY ts DESC LIMIT 50
+                ORDER BY ts DESC LIMIT 300
             """)
             rows = c.fetchall()
             conn.close()
@@ -568,12 +579,24 @@ def api_status():
                 if os.path.exists(fn):
                     try:
                         m_data = json.load(open(fn))
+                        ld = m_data.get("label_distribution")
+                        if not ld or not isinstance(ld, list) or len(ld) < 3 or sum(ld) == 0:
+                            cv = m_data.get("cv_metrics", {})
+                            n_tot = cv.get("n_training_samples", 0)
+                            if n_tot > 0:
+                                b_pct = cv.get("label_dist_bearish_pct", 0) / 100.0
+                                n_pct = cv.get("label_dist_neutral_pct", 0) / 100.0
+                                u_pct = cv.get("label_dist_bullish_pct", 0) / 100.0
+                                ld = [int(n_tot * b_pct), int(n_tot * n_pct), int(n_tot * u_pct)]
+                            else:
+                                ld = [0, 0, 0]
+
                         gov_summary[f"{iv}_{rg}"] = {
                             "manifest_version": m_data.get("manifest_version", "3.0"),
                             "mcc_mean": m_data.get("cv_metrics", {}).get("mcc", {}).get("mean"),
                             "mcc_min": m_data.get("cv_metrics", {}).get("mcc", {}).get("min"),
                             "mcc_std": m_data.get("cv_metrics", {}).get("mcc", {}).get("std"),
-                            "label_distribution": m_data.get("label_distribution"),
+                            "label_distribution": ld,
                             "barrier_config": m_data.get("barrier_config"),
                             "feature_count": len(m_data.get("feature_names", []))
                         }

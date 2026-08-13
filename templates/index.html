@@ -3595,9 +3595,23 @@
 
             // Sort chronologically by normalized timestamp in seconds
             const getNormSec = (p) => {
-                let t = p.timestamp || p.candle_timestamp || 0;
-                t = parseFloat(t);
-                return t > 1e11 ? t / 1000 : t;
+                let t = p.timestamp || p.candle_timestamp || p.datetime || 0;
+                if (typeof t === 'string') {
+                    const strVal = t.trim();
+                    if (strVal.includes('-') || strVal.includes(':')) {
+                        const parsed = Date.parse(strVal.endsWith('Z') ? strVal : strVal.replace(' ', 'T') + 'Z');
+                        if (!isNaN(parsed)) return parsed / 1000;
+                    }
+                }
+                let num = parseFloat(t);
+                if (isNaN(num) || num < 1e8) {
+                    if (p.datetime) {
+                        const dtParsed = Date.parse(String(p.datetime).replace(' ', 'T') + 'Z');
+                        if (!isNaN(dtParsed)) return dtParsed / 1000;
+                    }
+                    return 0;
+                }
+                return num > 1e11 ? num / 1000 : num;
             };
             filtered.sort((a, b) => getNormSec(a) - getNormSec(b));
 

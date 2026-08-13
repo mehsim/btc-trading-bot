@@ -290,21 +290,24 @@ class CircularLogBuffer:
     def __init__(self, capacity=100):
         self.capacity = capacity
         self.logs_list = []
-        self.original_stdout = sys.stdout
+        self.original_stdout = sys.__stdout__
         
     def write(self, message):
         try:
             self.original_stdout.write(message)
+            self.original_stdout.flush()
         except Exception:
             try:
                 if hasattr(self.original_stdout, "buffer"):
                     msg_str = str(message) if not isinstance(message, str) else message
                     self.original_stdout.buffer.write(msg_str.encode("utf-8", errors="replace"))
+                    self.original_stdout.buffer.flush()
                 else:
                     enc = getattr(self.original_stdout, "encoding", "ascii") or "ascii"
                     msg_str = str(message) if not isinstance(message, str) else message
                     safe_str = msg_str.encode(enc, errors="replace").decode(enc, errors="replace")
                     self.original_stdout.write(safe_str)
+                    self.original_stdout.flush()
             except Exception:
                 pass
 
@@ -330,7 +333,7 @@ class CircularLogBuffer:
         return getattr(self.original_stdout, name)
 
 log_buffer = CircularLogBuffer(capacity=100)
-sys.stdout = log_buffer
+# sys.stdout = log_buffer
 
 import os
 print("[System Debug] os imported.")
@@ -2191,15 +2194,23 @@ def run_rolling_retrain_scheduler():
         # Sleep for 15 minutes before checking time again
         time.sleep(900)
 
+import logging
+import wsgiref.simple_server
+from werkzeug.serving import run_simple
+
 def run_flask():
-    import logging
-    import os
-    # Mute default werkzeug request logs to prevent console pollution
+    import sys
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5001))
-    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")  # nosec B104 — intentional, overridable via FLASK_HOST env var
-    app.run(host=flask_host, port=port, debug=False, use_reloader=False)
+    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")
+    sys.stderr.write(f"[Flask] Starting server on {flask_host}:{port}...\n")
+    sys.stderr.flush()
+    try:
+        run_simple(flask_host, port, app, use_reloader=False, threaded=True)
+    except Exception as e:
+        sys.stderr.write(f"[Flask Error] Failed starting Flask server: {e}\n")
+        sys.stderr.flush()
 
 
 
@@ -7436,11 +7447,23 @@ def safe_main():
 
 if __name__ == "__main__":
     import threading
+    print("[SYSTEM] Entered main execution block.", flush=True)
+    print("[SYSTEM] Launching Flask dashboard thread on port 5001...", flush=True)
+    t_flask = threading.Thread(target=run_flask, name="flask-dashboard", daemon=True)
+    t_flask.start()
+    print("[SYSTEM] Flask dashboard thread launched.", flush=True)
+    
     # Start main bot loop in background thread
+    print("[SYSTEM] Launching safe_main bot loop thread...", flush=True)
     threading.Thread(target=safe_main, name="main-bot-loop", daemon=True).start()
     # Start background Telegram command listener thread
     threading.Thread(target=start_telegram_command_listener, args=(bot_state, bot_state_lock), name="telegram-listener", daemon=True).start()
-    send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")
+    
+    try:
+        send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")
+    except Exception as ex_tg:
+        print(f"[Telegram Notice] Could not send startup alert: {ex_tg}")
+
     # Start background news sentiment updater thread
     threading.Thread(target=run_news_sentiment_updater, name="news-sentiment", daemon=True).start()
     # Start background Bybit balance updater thread
@@ -7463,5 +7486,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_summary_scheduler, name="daily-summary-scheduler", daemon=True).start()
     from signal_evaluator import run_signal_evaluator_loop
     threading.Thread(target=run_signal_evaluator_loop, args=(bot_state,), name="signal-evaluator", daemon=True).start()
-    # Run Flask on main thread so HF health check passes immediately
-    run_flask()
+
+    # Keep main thread alive
+    while True:
+        time.sleep(1)

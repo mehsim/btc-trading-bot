@@ -1,0 +1,26 @@
+{
+  "feature_names": [
+    "close_to_VWAP",
+    "volatility_gk",
+    "close_to_EMA200",
+    "fear_greed_lag2",
+    "day_of_week_cos",
+    "volatility_gk_lag2",
+    "roll_spread_lag2",
+    "fear_greed_lag1",
+    "fear_greed",
+    "roll_spread_lag1",
+    "volatility_gk_lag1",
+    "volatility_24h",
+    "ATR_norm",
+    "funding_rate_lag2",
+    "ADX",
+    "close_to_EMA50",
+    "hour_sin",
+    "volatility_10m",
+    "day_of_week_sin",
+    "hour_cos",
+    "close_to_Kalman",
+    "btc_rsi"
+  ]
+}

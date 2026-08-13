@@ -30,7 +30,7 @@ def safe_get_sqlite_conn(db_path=DB_PATH, timeout=60.0):
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
             conn.row_factory = sqlite3.Row
-            res = conn.execute("PRAGMA quick_check;").fetchone()
+            res = conn.execute("PRAGMA quick_check(1);").fetchone()
             if res and res[0] != "ok":
                 raise sqlite3.DatabaseError(f"Corrupt DB disk image: {res[0]}")
             return conn
