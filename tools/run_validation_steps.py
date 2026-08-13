@@ -11,8 +11,12 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ensemble import load_ensemble_classifier
-from train import get_history, calculate_atr
+from train import get_history
 from features import add_features
+
+def compute_atr(df, period=14):
+    tr = np.maximum(df['high'] - df['low'], np.maximum(abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))))
+    return tr.rolling(period).mean()
 
 def run_step_4_responsiveness(model_trending, feat_trending):
     print("\n" + "="*50)
@@ -50,7 +54,7 @@ def simulate_walk_forward(symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], n_windows=1
     for symbol in symbols:
         try:
             df = add_features(get_history(symbol, '15', limit=3000))
-            df['atr'] = calculate_atr(df, period=14)
+            df['atr'] = compute_atr(df, period=14)
             df = df.dropna().reset_index(drop=True)
             
             if len(df) < 500:
