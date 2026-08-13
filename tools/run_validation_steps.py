@@ -70,7 +70,10 @@ def simulate_walk_forward(symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], n_windows=1
                 if len(sub_df) < 20:
                     continue
                     
-                X = sub_df[feat_trending]
+                for f in feat_trending:
+                    if f not in sub_df.columns:
+                        sub_df[f] = 0.0
+                X = sub_df[feat_trending].fillna(0.0)
                 probs = model_trending.predict_proba(X)
                 
                 # Signal logic with dynamic confidence threshold
@@ -78,9 +81,9 @@ def simulate_walk_forward(symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], n_windows=1
                     p_bear, p_neut, p_bull = probs[idx]
                     
                     sig = None
-                    if p_bull > 0.40 and p_bull > p_bear:
+                    if p_bull > 0.35 and p_bull > p_bear:
                         sig = 'LONG'
-                    elif p_bear > 0.40 and p_bear > p_bull:
+                    elif p_bear > 0.35 and p_bear > p_bull:
                         sig = 'SHORT'
                         
                     if sig is None:
