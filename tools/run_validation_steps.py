@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ensemble import load_ensemble_classifier
 from train import get_history, calculate_atr
