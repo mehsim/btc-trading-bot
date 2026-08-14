@@ -5542,7 +5542,8 @@ def main():
                                 direction=direction,
                                 realized_pnl=total_pnl,
                                 planned_rr=float(active_trade.get("initial_planned_rr", 1.4)),
-                                actual_r=actual_r_val,
+                                actual_r=actual_r_val
+                            )
                             
                             best_cf = cf_res.get("best_scenario", {})
                             decision_outcome_db.update_outcome_and_regret(
