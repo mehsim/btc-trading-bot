@@ -119,9 +119,11 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_hof_sym_ts ON historical_order_flow(symbol, timestamp DESC);")
         
         # Migration for existing databases (C11: SQL injection pattern prevention)
+        cursor = conn.execute("PRAGMA table_info(historical_order_flow)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
         import re
         for col in ["ob_imbalance_L2", "ob_spread_L2", "liq_long_1h", "liq_short_1h"]:
-            if re.match(r'^[a-zA-Z0-9_]+$', col):
+            if col not in existing_cols and re.match(r'^[a-zA-Z0-9_]+$', col):
                 try:
                     conn.execute(f"ALTER TABLE historical_order_flow ADD COLUMN {col} REAL DEFAULT 0.0")
                 except Exception as ex_data:
