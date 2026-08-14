@@ -7,7 +7,8 @@ warnings.filterwarnings('ignore')
 
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features
-from ensemble import load_ensemble_classifier, get_model_feature_names, _slice_model_input
+from main import load_model_weights, models_by_interval
+from ensemble import get_model_feature_names, _slice_model_input
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 INTERVAL = 60
@@ -20,12 +21,16 @@ eval_threshold = 0.52
 
 print(f"=== 60M CONTROL WALK-FORWARD BACKTEST (TP={TP_MULT}, SL={SL_MULT}, CONF_THRESH={eval_threshold}) ===")
 
-# Load active 60m models
-model_ranging = load_ensemble_classifier("ensemble_ranging_trend_60")
-model_trending = load_ensemble_classifier("ensemble_trending_trend_60")
+# Load active 60m models via main loader
+load_model_weights("60")
+load_model_weights(60)
+models_60 = models_by_interval.get("60") or models_by_interval.get(60) or {}
 
-feats_ranging = json.load(open("selected_features_60_ranging.json")) if os.path.exists("selected_features_60_ranging.json") else []
-feats_trending = json.load(open("selected_features_60_trending.json")) if os.path.exists("selected_features_60_trending.json") else []
+model_trending = models_60.get("trending", {}).get("trend") or models_60.get("ranging", {}).get("trend")
+model_ranging = models_60.get("ranging", {}).get("trend") or model_trending
+
+feat_trending = models_60.get("selected_features_trending") or models_60.get("selected_features_ranging") or models_60.get("selected_features")
+feat_ranging = models_60.get("selected_features_ranging") or feat_trending
 
 symbol_dfs = {}
 print("Loading 60m candle history across 9 symbols...")
@@ -41,19 +46,21 @@ for s in SUPPORTED_SYMBOLS:
         exp_t = get_model_feature_names(model_trending) if model_trending else None
         if exp_t and not all(str(n).startswith("Column_") for n in exp_t):
             X_full_t = df_s.reindex(columns=exp_t, fill_value=0.0)
-        elif feats_trending:
-            X_full_t = df_s[[f for f in feats_trending if f in df_s.columns]]
+        elif feat_trending:
+            X_full_t = df_s[[f for f in feat_trending if f in df_s.columns]]
         else:
-            X_full_t = df_s
+            from core import features as master_features
+            X_full_t = df_s[[f for f in master_features if f in df_s.columns]]
 
         # Prepare ranging feature matrix
         exp_r = get_model_feature_names(model_ranging) if model_ranging else None
         if exp_r and not all(str(n).startswith("Column_") for n in exp_r):
             X_full_r = df_s.reindex(columns=exp_r, fill_value=0.0)
-        elif feats_ranging:
-            X_full_r = df_s[[f for f in feats_ranging if f in df_s.columns]]
+        elif feat_ranging:
+            X_full_r = df_s[[f for f in feat_ranging if f in df_s.columns]]
         else:
-            X_full_r = df_s
+            from core import features as master_features
+            X_full_r = df_s[[f for f in master_features if f in df_s.columns]]
 
         X_trend = _slice_model_input(model_trending, X_full_t)
         X_rang = _slice_model_input(model_ranging, X_full_r)
