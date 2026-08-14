@@ -333,18 +333,18 @@ EQS_WEIGHTS = {
 
 # v2 & v3 Quant Thresholds & Bounds (Per-Interval Regime ADX Hysteresis)
 REGIME_ADX_ENTER_BY_INTERVAL = {
-    "15": 22.0,   # Restored 15m ADX enter threshold to 22.0
-    "30": 32.0,
-    "60": 22.0,   # Matches 60m training labeller threshold (routes 60m ADX 22.4 to MCC 0.0646)
+    "15": 28.0,
+    "30": 28.0,
+    "60": 28.0,
     "120": 28.0,
-    "240": 28.0,  # 240m ADX 20.7 stays Ranging & abstains (MCC 0.0408 < 0.05 floor)
+    "240": 28.0,
     "360": 28.0,
 }
 
 REGIME_ADX_EXIT_BY_INTERVAL = {
-    "15": 28.0,
-    "30": 28.0,
-    "60": 18.0,
+    "15": 24.0,
+    "30": 24.0,
+    "60": 24.0,
     "120": 24.0,
     "240": 24.0,
     "360": 24.0,
