@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import warnings
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
+from features import sanitize_feature_matrix as _canon_sanitize
 
 from xgboost import XGBClassifier, XGBRegressor
 
@@ -109,14 +110,26 @@ def get_model_feature_names(model):
 
 def sanitize_feature_matrix(X):
     """
-    Sanitizes feature matrix X by delegating to the canonical sanitize_feature_matrix in features.py.
+    Sanitizes feature matrix X by delegating to canonical features.py sanitization with a fail-safe fallback.
     """
+    if X is None:
+        return X
     try:
-        from features import sanitize_feature_matrix as _canon_sanitize
         return _canon_sanitize(X)
     except Exception as ex_ens:
-        log_event("WARNING", f"Ensemble notice: {ex_ens}")
-        return X
+        log_event("WARNING", f"Ensemble sanitization fallback notice: {ex_ens}")
+        try:
+            if isinstance(X, pd.DataFrame):
+                return X.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            elif isinstance(X, pd.Series):
+                return X.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+            elif isinstance(X, dict):
+                return {k: (0.0 if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))) else float(v)) for k, v in X.items()}
+            else:
+                arr = np.asarray(X, dtype=float)
+                return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+        except Exception:
+            return X
 
 def _slice_model_input(model, X):
     """
@@ -727,9 +740,10 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         _pfx_parts = prefix.rsplit("_", 1)
         _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
         if _pfx_interval:
-            from config import REGIME_ADX_ENTER_BY_INTERVAL as _R_ADX_MAP, STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER
+            from config import REGIME_ADX_ENTER_BY_INTERVAL as _R_ADX_MAP, STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL as _R_ADX_EXIT_MAP, STRONG_TREND_ADX_EXIT as _ST_ADX_EXIT
             _live_cfg = dict(_TFC.get(_pfx_interval, {}))
             _live_cfg["regime_adx_enter"] = float(_R_ADX_MAP.get(str(_pfx_interval), _ST_ADX_ENTER))
+            _live_cfg["regime_adx_exit"] = float(_R_ADX_EXIT_MAP.get(str(_pfx_interval), _ST_ADX_EXIT))
             _live_barriers = {k: _live_cfg[k] for k in _saved_barriers if k in _live_cfg}
             _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
             if _mismatched and os.environ.get("ALLOW_BARRIER_MISMATCH") != "1":

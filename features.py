@@ -641,5 +641,10 @@ def sanitize_feature_matrix(X):
             return X_clean
     except Exception as ex:
         log_event("WARNING", f"Feature sanitization notice: {ex}")
+        try:
+            arr = np.asarray(X, dtype=float)
+            return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+        except Exception:
+            return X
     return X
 

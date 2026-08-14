@@ -98,7 +98,7 @@ def evaluate_expectancy_gate(historical_win_rate: float, avg_win_pct: float, avg
 
 
 
-def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58, get_history_fn=None, get_orderbook_fn=None, choppiness_fn=None, bot_state_dict=None, global_htf_cache=None):
+def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, expected_pct_change, interval="60", symbol=None, htf_cache=None, calibrated_confidence=0.5, dynamic_conf_threshold=0.58, get_history_fn=None, get_orderbook_fn=None, choppiness_fn=None, bot_state_dict=None, global_htf_cache=None, current_regime=None):
     """
     Runs pre-trade confluence checks using a WEIGHTED SCORING SYSTEM.
     Critical checks are hard gates (instant reject if failed).
@@ -119,7 +119,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     total_score = 0
     max_score = 0
 
-    current_regime = detect_market_regime_with_hysteresis(df_1h, symbol=symbol, interval=str(interval))
+    if current_regime is None:
+        current_regime = detect_market_regime_with_hysteresis(df_1h, symbol=symbol, interval=str(interval))
     is_ranging_regime = "ranging" in str(current_regime).lower()
 
     # CHECK 1: 1-Day Structural Trend
@@ -230,7 +231,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
 
         if not trend_4h_pass and not is_ranging_regime:
             hard_gate_failed = True
-        if not rsi_4h_pass:
+        if not rsi_4h_pass and not is_ranging_regime:
             hard_gate_failed = True
 
         results["4h_Trend"] = {
@@ -240,7 +241,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         }
         results["4h_RSI"] = {
             "pass": rsi_4h_pass,
-            "detail": f"4h RSI is {rsi_4h:.1f} [HARD GATE]",
+            "detail": f"4h RSI is {rsi_4h:.1f} [{'SOFT GATE (Ranging)' if is_ranging_regime else 'HARD GATE'}]",
             "weight": weight_4h
         }
         max_score += weight_4h * 2

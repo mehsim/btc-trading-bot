@@ -10,6 +10,7 @@ import time
 import json
 import gzip
 import io
+import re
 import threading
 from functools import wraps
 from flask import Blueprint, jsonify, request, render_template, make_response
@@ -327,8 +328,17 @@ bot_logs = [
     f"[{time.strftime('%H:%M:%S')}] [System] Main monitoring loop active. Monitoring 9 assets across all timeframes..."
 ]
 
+def sanitize_log_line(line_str: str) -> str:
+    """Scrub sensitive API keys, secrets, hashes, auth headers, and tokens from log lines."""
+    if not line_str:
+        return ""
+    scrubbed = re.sub(r'(?i)(api[_-]?key|secret|token|auth|password|signature)\s*[:=]\s*[\'"][^\'",\s]+[\'"]', r'\1="[REDACTED]"', line_str)
+    scrubbed = re.sub(r'(?i)(api[_-]?key|secret|token|auth|password|signature)\s*[:=]\s*([a-zA-Z0-9_\-]{8,})', r'\1=[REDACTED]', scrubbed)
+    scrubbed = re.sub(r'Bearer\s+[a-zA-Z0-9_\-\.]+', 'Bearer [REDACTED]', scrubbed)
+    return scrubbed
+
 def get_live_bot_logs(max_lines=40):
-    """Read latest live log lines directly from bot.log file or memory buffer."""
+    """Read latest live log lines directly from bot.log file or memory buffer with sensitive data scrubbed."""
     lines = []
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")
     if not os.path.exists(log_file):
@@ -351,21 +361,21 @@ def get_live_bot_logs(max_lines=40):
                             ts = item.get("timestamp_utc", "")[:19].split("T")[-1]
                             lvl = item.get("level", "INFO")
                             msg = item.get("message", "")
-                            lines.append(f"[{ts}] [{lvl}] {msg}")
+                            lines.append(sanitize_log_line(f"[{ts}] [{lvl}] {msg}"))
                             continue
                         except (ValueError, TypeError, KeyError) as ex_parse:
                             log_event("WARNING", f"dashboard_routes log json parse notice: {ex_parse}")
-                    lines.append(l_str)
+                    lines.append(sanitize_log_line(l_str))
         except (IOError, OSError) as ex_file:
             log_event("WARNING", f"dashboard_routes log read notice: {ex_file}")
             
     if not lines:
         try:
             import main
-            lines = list(main.bot_logs) if hasattr(main, "bot_logs") and main.bot_logs else list(bot_logs)
+            lines = [sanitize_log_line(l) for l in (list(main.bot_logs) if hasattr(main, "bot_logs") and main.bot_logs else list(bot_logs))]
         except Exception as ex_main_logs:
             log_event("WARNING", f"dashboard_routes main logs notice: {ex_main_logs}")
-            lines = list(bot_logs)
+            lines = [sanitize_log_line(l) for l in list(bot_logs)]
             
     return lines[-max_lines:]
 
@@ -452,12 +462,8 @@ def api_status():
             if not status_data.get(f"confluence_results_{tf}"):
                 status_data[f"confluence_results_{tf}"] = get_default_confluence_checks()
 
-        # Provide sanitized high-level activity status logs
-        status_data["logs"] = [
-            f"[{time.strftime('%H:%M:%S')}] [System] Main monitoring loop active. Monitoring 9 assets across all timeframes...",
-            f"[{time.strftime('%H:%M:%S')}] [Engine] Multi-timeframe ML ensemble active (15m, 30m, 60m, 120m, 240m).",
-            f"[{time.strftime('%H:%M:%S')}] [Risk] Position & Drawdown risk guard operational."
-        ]
+        # Stream real live bot logs (sanitized against sensitive data)
+        status_data["logs"] = get_live_bot_logs(40)
 
         # Fetch real Bybit balance first to avoid UnboundLocalError
         real_bal = None
