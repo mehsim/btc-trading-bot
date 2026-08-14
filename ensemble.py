@@ -128,7 +128,8 @@ def sanitize_feature_matrix(X):
             else:
                 arr = np.asarray(X, dtype=float)
                 return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-        except Exception:
+        except Exception as ex_inner:
+            log_event("WARNING", f"Ensemble array conversion notice: {ex_inner}")
             return X
 
 def _slice_model_input(model, X):
