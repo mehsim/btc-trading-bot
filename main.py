@@ -445,7 +445,7 @@ def is_news_blackout(now_utc, interval):
     minute = now_utc.minute
     hour = now_utc.hour
     if hour in [13, 14, 18, 19]:
-        if 45 <= minute or minute <= 30:
+        if 45 <= minute or minute <= 15:
             return True
     return False
 
@@ -3171,7 +3171,7 @@ def build_df(current_price):
 
 def get_local_time_str(t):
     # Pakistan timezone is UTC + 5 hours (18000 seconds)
-    return datetime.utcfromtimestamp(t + 18000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.fromtimestamp(t + 18000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 def evaluate_predictions(df_completed, interval, symbol):
     if not bot_state["prediction_history"]:
@@ -3557,12 +3557,12 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
             from datetime import datetime, timedelta
             now = datetime.now(timezone.utc)
             if start_ts_ms:
-                from_dt = datetime.utcfromtimestamp(start_ts_ms / 1000.0)
+                from_dt = datetime.fromtimestamp(start_ts_ms / 1000.0, tz=timezone.utc)
             else:
                 from_dt = now - timedelta(days=60)
                 
             if end_ts_ms:
-                to_dt = datetime.utcfromtimestamp(end_ts_ms / 1000.0) + timedelta(days=2)
+                to_dt = datetime.fromtimestamp(end_ts_ms / 1000.0, tz=timezone.utc) + timedelta(days=2)
             else:
                 to_dt = now + timedelta(days=7)
                 
@@ -5138,13 +5138,12 @@ def main():
                     current_move = abs(current_price - entry_price)
                     progress_pct = (current_move / total_tp_range) if total_tp_range > 0 else 0.0
                     
+                    fib_locks = getattr(config, "FIBONACCI_STEP_LOCKS", {0.618: 0.55, 0.50: 0.40, 0.382: 0.25})
                     locked_pct = 0.0
-                    if progress_pct >= 0.618:
-                        locked_pct = 0.55
-                    elif progress_pct >= 0.50:
-                        locked_pct = 0.40
-                    elif progress_pct >= 0.382:
-                        locked_pct = 0.25
+                    for threshold in sorted(fib_locks.keys(), reverse=True):
+                        if progress_pct >= threshold:
+                            locked_pct = fib_locks[threshold]
+                            break
                         
                     if locked_pct > 0.0:
                         if direction == "Bullish":
@@ -5995,6 +5994,18 @@ def main():
                         print(f"[Parallel Fetch] Error fetching {sym} {iv}: {type(e).__name__} {e}")
             print(f"[Parallel Fetch] Completed in {time.time() - t_start:.2f} seconds.")
  
+        # Update peak_balance dynamically for accurate real-time drawdown tracking (M-1)
+        try:
+            curr_equity = float(bot_state.get("simulated_balance", 80.0))
+            if TRADE_MODE != "simulation":
+                real_bal_val = get_real_bybit_balance_cached()
+                if isinstance(real_bal_val, (int, float)) and real_bal_val > 0:
+                    curr_equity = float(real_bal_val)
+            if curr_equity > float(bot_state.get("peak_balance", 0.0)):
+                bot_state["peak_balance"] = curr_equity
+        except Exception:
+            pass
+
         # Circuit Breaker Halt Guard (Micro-Trading Run Scoped)
         try:
             micro_ts_str = database.get_setting("micro_run_start_ts", "0")
@@ -7005,7 +7016,7 @@ def main():
                                                 lev_cap = min(lev_cap, vol_lev_cap)
                                                 print(f"[{symbol} {iv}m Volatility-Scaled Leverage] Extreme Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Capped leverage to {lev_cap}x.")
                                             elif atr_pct_of_price > 1.5:
-                                                lev_cap = min(lev_cap, lev_cap * 0.5)
+                                                lev_cap = lev_cap * 0.5
                                                 print(f"[{symbol} {iv}m Volatility-Scaled Leverage] High Volatility Detected (ATR = {atr_pct_of_price:.2f}% of price). Halved leverage cap to {lev_cap}x.")
                                         
                                             # F-4: Apply Golden Hour multiplier before final lev_cap and max_safe_lev single clamp
@@ -7016,7 +7027,6 @@ def main():
                                             # Sharpe-Adaptive Leverage Multiplier (Dynamic drawdown safety)
                                             sharpe_mult = calculate_recent_performance_leverage_multiplier(days=7)
                                             leverage_val = leverage_val * sharpe_mult
-                                            lev_cap = lev_cap * sharpe_mult
                                             
                                             leverage_val = round(max(1.0, min(lev_cap, min(leverage_val, max_safe_lev))), 1)
 
@@ -7059,8 +7069,8 @@ def main():
                                             original_risk_usd = (original_notional / entry_price) * original_stop_dist
                                             is_oversized_trade = False
 
-                                            # Enforce minimum order value of 5.0 USDT (using 5.1 USDT as buffer)
-                                            min_order_value = 5.1
+                                            # Enforce minimum order value from config (default 5.1 USDT)
+                                            min_order_value = getattr(config, "MIN_ORDER_VALUE_USDT", 5.1)
                                             if qty_val * entry_price < min_order_value:
                                                 step = get_bybit_min_qty_step(symbol)
                                                 required_qty = min_order_value / entry_price
@@ -7384,8 +7394,9 @@ def main():
                                     }
                                 })
                             
-                                if len(bot_state["prediction_history"]) > 200:
-                                    bot_state["prediction_history"] = bot_state["prediction_history"][-200:]
+                                max_pred_cap = getattr(config, "MAX_PREDICTION_HISTORY_MEMORY", 500)
+                                if len(bot_state["prediction_history"]) > max_pred_cap:
+                                    bot_state["prediction_history"] = bot_state["prediction_history"][-max_pred_cap:]
                         
                             evaluate_predictions(df_completed, iv, symbol)
                             save_history()
@@ -7416,8 +7427,9 @@ def main():
         if check_queue:
             fetched_data.clear()
             htf_cache.clear()
-            if len(bot_state.get("prediction_history", [])) > 150:
-                bot_state["prediction_history"] = bot_state["prediction_history"][-150:]
+            max_pred_cap = getattr(config, "MAX_PREDICTION_HISTORY_MEMORY", 500)
+            if len(bot_state.get("prediction_history", [])) > max_pred_cap:
+                bot_state["prediction_history"] = bot_state["prediction_history"][-max_pred_cap:]
             try:
                 import gc, ctypes
                 gc.collect()

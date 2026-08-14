@@ -958,15 +958,27 @@ def calculate_adaptive_structural_stop(
         final_sl = min(entry_price - (0.5 * atr_val), structural_sl)
     else:
         structural_sl = swing_price + (0.20 * atr_val) if recency_passed else (entry_price + 1.25 * atr_val)
-        final_sl = max(entry_price + (0.5 * atr_val), structural_sl)
+    # Compute liquidity sweep and volume confirmation
+    has_sweep = False
+    if len(df_recent) >= 3:
+        if is_long:
+            has_sweep = bool(df_recent["low"].iloc[-1] < df_recent["low"].iloc[-3:-1].min() and df_recent["close"].iloc[-1] > df_recent["low"].iloc[-3:-1].min())
+        else:
+            has_sweep = bool(df_recent["high"].iloc[-1] > df_recent["high"].iloc[-3:-1].max() and df_recent["close"].iloc[-1] < df_recent["high"].iloc[-3:-1].max())
+
+    vol_confirmed = True
+    if "volume" in df_recent.columns and len(df_recent) >= 5:
+        vol_confirmed = bool(df_recent["volume"].iloc[-1] >= 0.9 * df_recent["volume"].tail(10).mean())
 
     sl_dist_pct = abs(entry_price - final_sl) / entry_price * 100.0
-    quality_score = calculate_structural_quality_score(bars_ago, recency_passed, True, "TRENDING" in regime_upper)
+    quality_score = calculate_structural_quality_score(bars_ago, has_sweep, vol_confirmed, "TRENDING" in regime_upper)
 
     return round(final_sl, 6), round(sl_dist_pct, 3), {
         "window": window,
         "bars_ago": bars_ago,
         "recency_passed": recency_passed,
+        "has_liquidity_sweep": has_sweep,
+        "volume_confirmed": vol_confirmed,
         "quality_score": quality_score
     }
 
