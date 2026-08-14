@@ -1602,7 +1602,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_pred_p = final_ensemble_p.predict(X_holdout)
         chal_acc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_t))
         chal_mae = float(mean_absolute_error(y_holdout_price, chal_pred_p))
-        from sklearn.metrics import accuracy_score, matthews_corrcoef
         holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
         holdout_mcc = float(matthews_corrcoef(y_holdout_trend, chal_pred_t))
 
