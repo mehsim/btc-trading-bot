@@ -6,6 +6,7 @@ import pandas as pd
 from typing import Dict, Any, Tuple
 from ta.trend import EMAIndicator
 from ta.momentum import RSIIndicator
+from cycle_detector import detect_market_regime_with_hysteresis
 
 
 def get_valid_htf_cache(htf_cache: dict, key: tuple, ttl_seconds: float = 900.0):
@@ -118,6 +119,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     total_score = 0
     max_score = 0
 
+    current_regime = detect_market_regime_with_hysteresis(df_1h, symbol=symbol, interval=str(interval))
+    is_ranging_regime = "ranging" in str(current_regime).lower()
+
     # CHECK 1: 1-Day Structural Trend
     df_1d = get_valid_htf_cache(htf_cache, (symbol, "D"))
     if df_1d is None and get_history_fn:
@@ -159,11 +163,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         ema21_1d = EMAIndicator(df_1d_completed["close"], window=21).ema_indicator().iloc[-1]
         trend_1d = "Bullish" if ema9_1d > ema21_1d else "Bearish"
         trend_1d_pass = (ml_trend == "Bullish" and trend_1d == "Bullish") or (ml_trend == "Bearish" and trend_1d == "Bearish")
-        if not trend_1d_pass:
+        if not trend_1d_pass and not is_ranging_regime:
             hard_gate_failed = True
         results["1d_Trend"] = {
             "pass": trend_1d_pass,
-            "detail": f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f}) [HARD GATE]",
+            "detail": f"1d Trend is {trend_1d} (EMA9: {ema9_1d:.2f}, EMA21: {ema21_1d:.2f}) [{'SOFT GATE (Ranging)' if is_ranging_regime else 'HARD GATE'}]",
             "weight": weight_1d
         }
         max_score += weight_1d
@@ -183,10 +187,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             trend_1h_pass = (ml_trend == "Bullish" and trend_1h == "Bullish") or (ml_trend == "Bearish" and trend_1h == "Bearish")
             results["1h_Trend"] = {
                 "pass": trend_1h_pass,
-                "detail": f"1h Trend is {trend_1h} (EMA9: {ema9_1h:.2f}, EMA21: {ema21_1h:.2f}) [HARD GATE]",
+                "detail": f"1h Trend is {trend_1h} (EMA9: {ema9_1h:.2f}, EMA21: {ema21_1h:.2f}) [{'SOFT GATE (Ranging)' if is_ranging_regime else 'HARD GATE'}]",
                 "weight": 1
             }
-            if not trend_1h_pass:
+            if not trend_1h_pass and not is_ranging_regime:
                 hard_gate_failed = True
             max_score += 1
             if trend_1h_pass:
@@ -205,9 +209,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             df_4h = None
 
     if df_4h is None or len(df_4h) < 21:
-        results["4h_Trend"] = {"pass": False, "detail": "Could not fetch 4h data [HARD GATE]", "weight": weight_4h}
+        results["4h_Trend"] = {"pass": False, "detail": f"Could not fetch 4h data [{'SOFT GATE (Ranging)' if is_ranging_regime else 'HARD GATE'}]", "weight": weight_4h}
         results["4h_RSI"] = {"pass": False, "detail": "Could not fetch 4h data [HARD GATE]", "weight": weight_4h}
-        hard_gate_failed = True
+        if not is_ranging_regime:
+            hard_gate_failed = True
         max_score += weight_4h * 2
     else:
         df_4h_completed = df_4h.iloc[:-1].copy()
@@ -223,14 +228,14 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         trend_4h_pass = (ml_trend == "Bullish" and trend_4h == "Bullish") or (ml_trend == "Bearish" and trend_4h == "Bearish")
         rsi_4h_pass = (rsi_4h < 75.0) if ml_trend == "Bullish" else (rsi_4h > 25.0)
 
-        if not trend_4h_pass:
+        if not trend_4h_pass and not is_ranging_regime:
             hard_gate_failed = True
         if not rsi_4h_pass:
             hard_gate_failed = True
 
         results["4h_Trend"] = {
             "pass": trend_4h_pass,
-            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f}) [HARD GATE]",
+            "detail": f"4h Trend is {trend_4h} (EMA9: {ema9_4h:.2f}, EMA21: {ema21_4h:.2f}) [{'SOFT GATE (Ranging)' if is_ranging_regime else 'HARD GATE'}]",
             "weight": weight_4h
         }
         results["4h_RSI"] = {

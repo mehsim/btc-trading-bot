@@ -428,10 +428,11 @@ SCALE_OUT_CONFIG = {
     "position_portion": 0.50,
 }
 
-# Fibonacci Step-Lock Levels
+# Fibonacci Step-Lock Levels (progress threshold -> locked profit portion)
 FIBONACCI_STEP_LOCKS = {
-    "levels": [0.382, 0.50, 0.618],
-    "locks": [0.25, 0.40, 0.55]
+    0.618: 0.55,
+    0.50: 0.40,
+    0.382: 0.25
 }
 
 # Micro-Trading Run Risk Bounds & Circuit Breakers

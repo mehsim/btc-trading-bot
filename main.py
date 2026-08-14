@@ -4723,18 +4723,18 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             preflight_sl = stop_loss_price
             preflight_sl_dist = abs(entry_price - float(preflight_sl)) if preflight_sl is not None else 0.0
 
-            if preflight_sl_dist > 0:
-                raw_sl_dist = max(preflight_sl_dist, min_sl_dist)
-                sl_source = "PREFLIGHT_APPROVED"
-                sl_override_reason = "Pre-flight Approved SL Preserved"
-            elif atr_sl_dist >= min_sl_dist:
-                raw_sl_dist = atr_sl_dist
-                sl_source = "ATR"
-                sl_override_reason = "ATR Multiplier Applied"
-            else:
+            if min_sl_dist > max(preflight_sl_dist, atr_sl_dist):
                 raw_sl_dist = min_sl_dist
                 sl_source = "MIN_FLOOR"
                 sl_override_reason = f"Minimum Risk Floor ({min_sl_pct:.2f}%) Triggered"
+            elif preflight_sl_dist > 0:
+                raw_sl_dist = preflight_sl_dist
+                sl_source = "PREFLIGHT_APPROVED"
+                sl_override_reason = "Pre-flight Approved SL Preserved"
+            else:
+                raw_sl_dist = atr_sl_dist
+                sl_source = "ATR"
+                sl_override_reason = "ATR Multiplier Applied"
             
             # Institutional Meta Exit Policy & Unified Target Generator
             current_regime = "STRONG_TREND" if tp_multiplier_adjusted > 1.8 else "RANGING"
@@ -5198,7 +5198,14 @@ def main():
                     current_move = abs(current_price - entry_price)
                     progress_pct = (current_move / total_tp_range) if total_tp_range > 0 else 0.0
                     
-                    fib_locks = getattr(config, "FIBONACCI_STEP_LOCKS", {0.618: 0.55, 0.50: 0.40, 0.382: 0.25})
+                    raw_fib = getattr(config, "FIBONACCI_STEP_LOCKS", {0.618: 0.55, 0.50: 0.40, 0.382: 0.25})
+                    if isinstance(raw_fib, dict) and "levels" in raw_fib and "locks" in raw_fib:
+                        fib_locks = {float(k): float(v) for k, v in zip(raw_fib["levels"], raw_fib["locks"])}
+                    elif isinstance(raw_fib, dict):
+                        fib_locks = {float(k): float(v) for k, v in raw_fib.items() if not isinstance(k, str) or k.replace('.', '', 1).isdigit()}
+                    else:
+                        fib_locks = {0.618: 0.55, 0.50: 0.40, 0.382: 0.25}
+
                     locked_pct = 0.0
                     for threshold in sorted(fib_locks.keys(), reverse=True):
                         if progress_pct >= threshold:

@@ -28,10 +28,14 @@ class CounterfactualReplayEngine:
         interval: str,
         entry_price: float,
         exit_price: float,
-        actual_sl: float,
-        actual_tp: float,
-        actual_r: float,
-        risk_usd: float = 1.89
+        actual_sl: float = 0.0,
+        actual_tp: float = 0.0,
+        actual_r: float = 0.0,
+        risk_usd: float = 1.89,
+        direction: str = "Bullish",
+        realized_pnl: float = 0.0,
+        planned_rr: float = 1.4,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Runs 81 parallel counterfactual scenario simulations for a single completed trade.

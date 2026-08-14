@@ -958,6 +958,7 @@ def calculate_adaptive_structural_stop(
         final_sl = min(entry_price - (0.5 * atr_val), structural_sl)
     else:
         structural_sl = swing_price + (0.20 * atr_val) if recency_passed else (entry_price + 1.25 * atr_val)
+        final_sl = max(entry_price + (0.5 * atr_val), structural_sl)
     # Compute liquidity sweep and volume confirmation
     has_sweep = False
     if len(df_recent) >= 3:
