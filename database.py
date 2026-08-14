@@ -653,16 +653,19 @@ def get_trade_history(limit=500):
         finally:
             conn.close()
 
-def get_active_trades(tf):
+def get_active_trades(tf=None):
     with db_lock:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT raw_data FROM active_trades WHERE tf = ?;", (tf,))
+            if tf is not None:
+                cursor.execute("SELECT raw_data FROM active_trades WHERE tf = ?;", (tf,))
+            else:
+                cursor.execute("SELECT raw_data FROM active_trades;")
             rows = cursor.fetchall()
             return [json.loads(row[0]) for row in rows]
         except Exception as e:
-            print(f"[Database Error] Failed to fetch active trades for {tf}: {e}")
+            print(f"[Database Error] Failed to fetch active trades: {e}")
             return []
         finally:
             conn.close()
