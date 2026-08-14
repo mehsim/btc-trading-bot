@@ -70,6 +70,7 @@ def get_live_bybit_wallet_details():
 
 def get_live_trades_report(bot_state=None, bot_state_lock=None):
     from bybit_client import bybit_get_request
+    import database
     
     active_map = {}
     if bot_state and bot_state_lock:
@@ -82,7 +83,7 @@ def get_live_trades_report(bot_state=None, bot_state_lock=None):
                         if sym:
                             active_map[sym] = (tf, t)
 
-    pos_res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT"})
+    pos_res = bybit_get_request("/v5/position/list", {"category": "linear", "settleCoin": "USDT", "limit": 50})
     bybit_positions = []
     if isinstance(pos_res, dict) and pos_res.get("retCode") == 0:
         raw_list = pos_res.get("result", {}).get("list", [])
@@ -90,7 +91,34 @@ def get_live_trades_report(bot_state=None, bot_state_lock=None):
             if float(p.get("size", "0") or 0.0) > 0:
                 bybit_positions.append(p)
 
-    if not bybit_positions and not active_map:
+    if not bybit_positions:
+        # Fallback to database active trades
+        try:
+            db_trades = database.get_active_trades()
+            if db_trades:
+                report_lines = [f"📈 *ACTIVE OPEN POSITIONS ({len(db_trades)})*\n"]
+                for t in db_trades:
+                    sym = t.get("symbol", "N/A")
+                    direction = t.get("direction", "Bullish")
+                    entry_p = float(t.get("entry_price", 0.0) or 0.0)
+                    sl_p = float(t.get("stop_loss", 0.0) or 0.0)
+                    tp_p = float(t.get("take_profit", 0.0) or 0.0)
+                    lev = float(t.get("leverage", 1.0) or 1.0)
+                    pos_val_usd = float(t.get("position_size_usd", 0.0) or 0.0)
+                    upnl = float(t.get("bybit_unrealized_pnl", 0.0) or 0.0)
+                    pnl_icon = "🟢" if upnl >= 0 else "🔴"
+                    block = (
+                        f"{pnl_icon} *{sym}* ({t.get('tf', '15m')}) | *{direction}*\n"
+                        f"• *Entry*: `${entry_p:.4f}`\n"
+                        f"• *Stop Loss*: `${sl_p:.4f}` | *Take Profit*: `${tp_p:.4f}`\n"
+                        f"• *Leverage*: `{lev:.1f}x` | *Margin*: `${pos_val_usd:.2f}`\n"
+                        f"• *Unrealized PnL*: *${upnl:+.2f} USDT*\n"
+                    )
+                    report_lines.append(block)
+                return "\n".join(report_lines)
+        except Exception as ex_db:
+            log_event("WARNING", f"db active trades fallback error: {ex_db}")
+
         return "📈 *ACTIVE OPEN POSITIONS*\n\nℹ️ *No active positions open currently.*"
 
     report_lines = [f"📈 *ACTIVE OPEN POSITIONS ({len(bybit_positions)})*\n"]
@@ -110,7 +138,7 @@ def get_live_trades_report(bot_state=None, bot_state_lock=None):
         margin_usd = pos_val_usd / lev if lev > 0 else pos_val_usd
         upnl_pct = (upnl / margin_usd * 100.0) if margin_usd > 0 else 0.0
 
-        tf_str = "1h"
+        tf_str = "15m"
         if sym in active_map:
             tf_str = active_map[sym][0]
 
