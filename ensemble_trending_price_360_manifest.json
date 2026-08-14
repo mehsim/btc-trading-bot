@@ -49,11 +49,12 @@
     "raw_sample_size": 11023
   },
   "barrier_config": {
-    "tp_mult_trending": 3.3,
-    "tp_mult_ranging": 2.7,
-    "sl_mult": 1.5,
+    "tp_mult_trending": 3.6880903646791636,
+    "tp_mult_ranging": 3.134689166122144,
+    "sl_mult": 0.8006662535676013,
     "lookahead": 16,
-    "regime_adx_enter": 28.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -139,5 +140,5 @@
     7838,
     1689
   ],
-  "hmac_signature": "75844328e64ffc45b30ea43355aad43fa76a39d26b35cc2d2adff9084e1010fb"
+  "hmac_signature": "a25009a8c3329f78aafd9ae4df7783cbf46adec243e5a37f0cba3d505427e252"
 }

@@ -101,11 +101,12 @@
     "raw_sample_size": 8172
   },
   "barrier_config": {
-    "tp_mult_trending": 2.669747374931687,
-    "tp_mult_ranging": 1.2577259322277912,
-    "sl_mult": 1.0696289494410745,
+    "tp_mult_trending": 2.8909683078238504,
+    "tp_mult_ranging": 1.3620801690780144,
+    "sl_mult": 1.0565524801510242,
     "lookahead": 12,
-    "regime_adx_enter": 32.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -193,5 +194,5 @@
   ],
   "promoted": true,
   "evaluation_timestamp": "2026-08-09T10:52:37.656286+00:00",
-  "hmac_signature": "6a6c7bf53a2e99f3f86c8d1bf6ddcb8211b1d313bbe630631dd2338836c2d45c"
+  "hmac_signature": "f34f1cb56cbb166efc70d70bf07f2465490f31cb7e752a04ecbdaec5f8603e0d"
 }

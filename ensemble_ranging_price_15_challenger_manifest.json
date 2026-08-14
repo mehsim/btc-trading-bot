@@ -177,7 +177,8 @@
     "tp_mult_ranging": 2.2,
     "sl_mult": 1.0,
     "lookahead": 12,
-    "regime_adx_enter": 22.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "label_distribution": [
     10111,
@@ -188,5 +189,5 @@
   "evaluation_timestamp": "2026-08-13T12:27:54.720140+00:00",
   "manifest_mcc": 0.125,
   "manifest_bal_acc": 0.421,
-  "hmac_signature": "f82d9f38a8151f7db4db264b6c8773b84391255957669eda0943e376abdef554"
+  "hmac_signature": "2366049c73b521cddf63cd43b47e25e5468eea9d5778aeeb880b35f88460146c"
 }

@@ -53,7 +53,8 @@
     "tp_mult_ranging": 3.134689166122144,
     "sl_mult": 0.8006662535676013,
     "lookahead": 16,
-    "regime_adx_enter": 28.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -141,5 +142,5 @@
   ],
   "promoted": true,
   "evaluation_timestamp": "2026-08-09T13:56:56.004492+00:00",
-  "hmac_signature": "9ca952698c022c6f8aea89c491968afb786d46c5620bca1c8de63226f585a733"
+  "hmac_signature": "0f29871678a500df9a2f2ee670e9a3d5664a559c4f704847fac33635741082e2"
 }

@@ -190,7 +190,8 @@
     "tp_mult_ranging": 1.783121353301515,
     "sl_mult": 0.7692996169158203,
     "lookahead": 12,
-    "regime_adx_enter": 28.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
-  "hmac_signature": "9e9e4d5ba097449f1b74e5d9c7dc754ae0daaf0181ef3f6213c09e9fff337aca"
+  "hmac_signature": "6ae9ad01d534151aa285fe7ea6bac7ec17bf294757739e428b3438945415319a"
 }

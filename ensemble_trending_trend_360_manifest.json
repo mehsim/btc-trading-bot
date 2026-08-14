@@ -91,11 +91,12 @@
     1689
   ],
   "barrier_config": {
-    "tp_mult_trending": 3.3,
-    "tp_mult_ranging": 2.7,
-    "sl_mult": 1.5,
-    "lookahead": 16,
-    "regime_adx_enter": 28.0
+    "tp_mult_trending": 2.5,
+    "tp_mult_ranging": 2.2,
+    "sl_mult": 1.0,
+    "lookahead": 12,
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
-  "hmac_signature": "c4791fb993fb1741e9d5bcf84a4e7b0fa8679b0a475371fae151f7f78add9cab"
+  "hmac_signature": "05b84dc392df57c0153af4ec91be41c1caa7fa7709a997dce66a2810e93fbf00"
 }

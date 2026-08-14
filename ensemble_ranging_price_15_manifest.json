@@ -177,9 +177,10 @@
     "tp_mult_ranging": 2.2,
     "sl_mult": 1.0,
     "lookahead": 12,
-    "regime_adx_enter": 28.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "manifest_mcc": 0.125,
   "manifest_bal_acc": 0.421,
-  "hmac_signature": "97b4df2917683dbbb57fe5fca5a59dc807b9ff70d19044ab21953bf20d32f6e0"
+  "hmac_signature": "68f086d83dcf7947caecb7a98b875009e1b2e0186b3c7a920783543166a3501b"
 }

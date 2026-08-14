@@ -202,11 +202,12 @@
     "git_sha": "9e86f616"
   },
   "barrier_config": {
-    "tp_mult_trending": 1.3185756772914532,
-    "tp_mult_ranging": 1.3073900701629055,
-    "sl_mult": 0.7328107350394132,
+    "tp_mult_trending": 1.4746788008303522,
+    "tp_mult_ranging": 1.258257285199672,
+    "sl_mult": 0.6585006543095501,
     "lookahead": 10,
-    "regime_adx_enter": 22.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "label_distribution": [
     22487,
@@ -215,5 +216,5 @@
   ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-12T22:35:22.677436+00:00",
-  "hmac_signature": "6ac2e63348251a1a69ee91b3535a26ce49ab9ec1f688a79170c228494c1a75b9"
+  "hmac_signature": "d3224e4c1d9ec211a9bcccc6d9dfec5df16154ca4c9a7fd77fb23674d984cd61"
 }

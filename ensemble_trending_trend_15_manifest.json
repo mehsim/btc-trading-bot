@@ -106,12 +106,13 @@
     "tp_mult_ranging": 2.2,
     "sl_mult": 1.0,
     "lookahead": 12,
-    "regime_adx_enter": 28.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "stage": "Production",
   "manifest_mcc": 0.125,
   "manifest_mcc_min": 0.08,
   "manifest_bal_acc": 0.421,
   "manifest_hmac": "f88cb88d59693cdab433b31eb5a7d1fc7c9e315ae651b705a04a3a07ee934686",
-  "hmac_signature": "69e7d4928ccef64fd96191cdc98f6574847b890c89b9884763ffc84ee9bc9174"
+  "hmac_signature": "a1cdf1c039562740279e0a850ebfabc10ff79440362a980d3e08a92b1a07233e"
 }

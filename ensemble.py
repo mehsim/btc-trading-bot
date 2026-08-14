@@ -897,7 +897,7 @@ def write_model_manifest(
         _pfx_parts = prefix.rsplit("_", 1)
         _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
         if _pfx_interval:
-            from config import TIMEFRAME_CONFIG as _TFC
+            from config import TIMEFRAME_CONFIG as _TFC, REGIME_ADX_ENTER_BY_INTERVAL as _R_ADX_MAP, STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL as _R_ADX_EXIT_MAP, STRONG_TREND_ADX_EXIT as _ST_ADX_EXIT
             _bcfg = _TFC.get(_pfx_interval, {})
             if _bcfg:
                 manifest["barrier_config"] = {
@@ -905,7 +905,8 @@ def write_model_manifest(
                     "tp_mult_ranging":  float(_bcfg.get("tp_mult_ranging", 0.0)),
                     "sl_mult":          float(_bcfg.get("sl_mult", 0.0)),
                     "lookahead":        int(_bcfg.get("lookahead", 0)),
-                    "regime_adx_enter": float(_bcfg.get("regime_adx_enter", 28.0))
+                    "regime_adx_enter": float(_R_ADX_MAP.get(str(_pfx_interval), _ST_ADX_ENTER)),
+                    "regime_adx_exit":  float(_R_ADX_EXIT_MAP.get(str(_pfx_interval), _ST_ADX_EXIT))
                 }
 
         def _json_safe(o):

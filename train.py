@@ -1781,8 +1781,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
                 manifest_data["label_distribution"] = [int(n_bear), int(n_neutral), int(n_bull)]
-                # Step 1: Record barrier contract — label definition the model was fitted against
-                from config import REGIME_ADX_ENTER_BY_INTERVAL, STRONG_TREND_ADX_ENTER
+                from config import REGIME_ADX_ENTER_BY_INTERVAL, STRONG_TREND_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL, STRONG_TREND_ADX_EXIT
                 _bcfg = TIMEFRAME_CONFIG.get(str(interval), {})
                 manifest_data["barrier_config"] = {
                     "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 0.0)),
@@ -1790,6 +1789,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     "sl_mult":          float(_bcfg.get("sl_mult", 0.0)),
                     "lookahead":        int(_bcfg.get("lookahead", 0)),
                     "regime_adx_enter": float(REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)),
+                    "regime_adx_exit":  float(REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)),
                 }
 
                 manifest_data.pop("hmac_signature", None)

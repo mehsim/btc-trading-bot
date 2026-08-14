@@ -182,13 +182,14 @@
     1761
   ],
   "barrier_config": {
-    "tp_mult_trending": 2.669747374931687,
-    "tp_mult_ranging": 1.2577259322277912,
-    "sl_mult": 1.0696289494410745,
+    "tp_mult_trending": 2.8909683078238504,
+    "tp_mult_ranging": 1.3620801690780144,
+    "sl_mult": 1.0565524801510242,
     "lookahead": 12,
-    "regime_adx_enter": 32.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "promoted": true,
   "evaluation_timestamp": "2026-08-09T10:52:37.656286+00:00",
-  "hmac_signature": "44699d0edf067a83fec4a2280c3e993e53108faa017e93e56128fa7ff5083968"
+  "hmac_signature": "4a3a3c41a04f599751fd4c62825464ebdb99ca5edffffcbf9008437defc31edd"
 }

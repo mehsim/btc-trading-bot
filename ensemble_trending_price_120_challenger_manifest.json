@@ -147,7 +147,8 @@
     "tp_mult_ranging": 2.3502696284633258,
     "sl_mult": 0.9961627467784075,
     "lookahead": 12,
-    "regime_adx_enter": 28.0
+    "regime_adx_enter": 28.0,
+    "regime_adx_exit": 24.0
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -235,5 +236,5 @@
   ],
   "promoted": true,
   "evaluation_timestamp": "2026-08-09T12:40:44.520126+00:00",
-  "hmac_signature": "d5b9605d407e41876a8a0498e6be00001ea99c73198b7494e62d5121f84f3dd5"
+  "hmac_signature": "067c8973c162670aaf8451a7d21bfb573f7486f71031fa3b3fa47574c222bf1a"
 }
