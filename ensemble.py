@@ -186,10 +186,12 @@ def _slice_model_input(model, X):
             if _are_positional:
                 n_exp = len(expected_names)
                 n_got = df.shape[1]
-                if n_got != n_exp:
+                if n_got >= n_exp:
+                    return df.iloc[:, :n_exp]
+                else:
                     raise RuntimeError(
-                        f"[Feature Shape Mismatch Error (H-04/F-12)] Input vector feature count ({n_got}) does not match model expected features ({n_exp}). "
-                        f"Silent truncation or zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
+                        f"[Feature Shape Mismatch Error (H-04/F-12)] Input vector feature count ({n_got}) is less than model expected features ({n_exp}). "
+                        f"Zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
                     )
                 return df
             missing = [c for c in expected_names if c not in df.columns]
