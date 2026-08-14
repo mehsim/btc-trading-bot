@@ -4677,7 +4677,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             atr_sl_dist = sl_multiplier_adjusted * atr_dollars
             
             # Preserve approved pre-flight stop loss if provided
-            preflight_sl = trade_details.get("stop_loss") if isinstance(trade_details, dict) else None
+            preflight_sl = stop_loss_price
             preflight_sl_dist = abs(entry_price - float(preflight_sl)) if preflight_sl is not None else 0.0
 
             if preflight_sl_dist > 0:
