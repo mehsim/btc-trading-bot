@@ -4388,6 +4388,11 @@ def sync_active_positions_from_bybit():
                         active_trades_list = []
                     active_trades_list.append(recovered_trade)
                     bot_state[f"active_trade_{tf_key}"] = active_trades_list
+                    try:
+                        import database
+                        database.save_active_trade(recovered_trade, tf_key)
+                    except Exception as ex_db_save:
+                        print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
                     recovered += 1
                     print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
                     
