@@ -1074,14 +1074,12 @@ def load_history():
                     bot_state["simulated_balance"] = remote_balance
                     bot_state["trade_history"] = remote_trades
                     bot_state["prediction_history"] = remote_predictions
-                    bot_state["active_trade_15m"] = data.get("active_trade_15m", [])
-                    bot_state["active_trade_30m"] = data.get("active_trade_30m", [])
-                    bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
-                    bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
-                    bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
-                    bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
+                    # NOTE: Do NOT overwrite active_trade_* keys from the API response.
+                    # StateManager already loads active trades from SQLite on startup.
+                    # The API response may lag behind (Redis caching) and overwriting
+                    # would wipe valid trades recovered from the DB.
                     
-                    # Migrate legacy active trades
+                    # Migrate legacy active trades from DB-loaded state
                     for tf_key in ACTIVE_TRADE_TF_KEYS:
                         migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                         
