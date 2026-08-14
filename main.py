@@ -4778,7 +4778,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 from config import TIMEFRAME_CONFIG
                 import math
                 cfg = TIMEFRAME_CONFIG.get(str(iv), {})
-                tp_key = "tp_mult_ranging" if "ranging" in str(regime_name).lower() else "tp_mult_trending"
+                regime_detected = bot_state.get(f"regime_{symbol}_{iv}") or bot_state.get(f"regime_{symbol}") or "Trending"
+                tp_key = "tp_mult_ranging" if "ranging" in str(regime_detected).lower() else "tp_mult_trending"
                 target_rr = cfg.get(tp_key, 1.85) / max(1e-9, cfg.get("sl_mult", 0.8))
                 final_sl_dist = abs(entry_price - stop_loss_price)
                 new_tp_dist = final_sl_dist * target_rr
