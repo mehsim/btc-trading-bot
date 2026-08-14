@@ -6,7 +6,7 @@ warnings.filterwarnings('ignore')
 
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features
-from ensemble import load_ensemble_classifier, _slice_model_input
+from ensemble import load_ensemble_models, get_selected_features, _slice_model_input
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 INTERVAL = 60
@@ -19,14 +19,12 @@ eval_threshold = 0.52
 
 print(f"=== 60M CONTROL WALK-FORWARD BACKTEST (TP={TP_MULT}, SL={SL_MULT}, CONF_THRESH={eval_threshold}) ===")
 
-# Load 60m models
-model_ranging = load_ensemble_classifier("ensemble_ranging_trend_60")
-model_trending = load_ensemble_classifier("ensemble_trending_trend_60")
+# Load active 60m models
+model_ranging, _ = load_ensemble_models("ranging", "60")
+model_trending, _ = load_ensemble_models("trending", "60")
 
-with open("selected_features_60_ranging.json") as f:
-    feats_ranging = json.load(f)
-with open("selected_features_60_trending.json") as f:
-    feats_trending = json.load(f)
+feats_ranging = get_selected_features("ranging", "60")
+feats_trending = get_selected_features("trending", "60")
 
 symbol_dfs = {}
 print("Loading 60m candle history across 9 symbols...")
@@ -38,8 +36,11 @@ for s in SUPPORTED_SYMBOLS:
         df_s = merge_derivatives_sentiment_features(df_s, symbol=s, interval=INTERVAL)
         df_s = add_features(df_s)
         
-        X_rang = _slice_model_input(model_ranging, df_s[feats_ranging])
-        X_trend = _slice_model_input(model_trending, df_s[feats_trending])
+        _avail_r = [f for f in feats_ranging if f in df_s.columns] if feats_ranging else df_s.columns
+        _avail_t = [f for f in feats_trending if f in df_s.columns] if feats_trending else df_s.columns
+        
+        X_rang = _slice_model_input(model_ranging, df_s[_avail_r])
+        X_trend = _slice_model_input(model_trending, df_s[_avail_t])
 
         p_rang = model_ranging.predict_proba(X_rang)
         p_trend = model_trending.predict_proba(X_trend)
