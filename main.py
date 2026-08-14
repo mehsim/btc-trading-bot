@@ -2063,8 +2063,9 @@ def run_funding_rate_arbitrage_monitor():
                     # High positive funding — shorts earn. Open small short.
                     print(f"[Funding Arb] {sym} funding rate {rate*100:.4f}% > 0.1%. Opening arb short.")
                     if TRADE_MODE == "live":
-                        qty_str = format_bybit_qty(sym, FUNDING_ARB_SIZE_USD / (bot_state.get(f"live_price_{sym}") or live_price))
-                        res = execute_bybit_order_ws_or_rest(sym, "Sell", "Market", qty_str, reduce_only=False)
+                        curr_sym_price = bot_state.get(f"live_price_{sym}") or get_fallback_price(sym) or 1.0
+                        qty_str = format_bybit_qty(sym, FUNDING_ARB_SIZE_USD / max(1e-6, curr_sym_price))
+                        res = place_bybit_order(symbol=sym, side="Sell", qty=qty_str, reduce_only=False)
                         if res and res.get("retCode") == 0:
                             bot_state[arb_key] = {"qty": qty_str, "open_rate": rate}
                             send_telegram_alert(
@@ -2079,7 +2080,7 @@ def run_funding_rate_arbitrage_monitor():
                     print(f"[Funding Arb] {sym} funding rate normalized ({rate*100:.4f}%). Closing arb short.")
                     if TRADE_MODE == "live":
                         qty_str = existing["qty"]
-                        res = execute_bybit_order_ws_or_rest(sym, "Buy", "Market", qty_str, reduce_only=True)
+                        res = place_bybit_order(symbol=sym, side="Buy", qty=qty_str, reduce_only=True)
                         if res and res.get("retCode") == 0:
                             bot_state.pop(arb_key, None)
                             send_telegram_alert(
@@ -3535,11 +3536,12 @@ def run_news_sentiment_updater():
         time.sleep(15 * 60)
         try:
             print("[News/Sentiment] Triggering periodic background news sentiment update...")
-            sentiment, titles = get_news_sentiment()
+            sentiment, titles, source = get_news_sentiment()
             with news_sentiment_lock:
                 cached_news_sentiment = sentiment
                 cached_news_titles = titles
-            print(f"[News/Sentiment] Background update success: {sentiment} (based on {len(titles)} inputs).")
+                cached_news_source = source
+            print(f"[News/Sentiment] Background update success: {sentiment} ({source}, based on {len(titles)} inputs).")
         except Exception as e:
             print(f"[News/Sentiment] Error in background news sentiment update: {e}")
 
@@ -4722,6 +4724,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 if new_tp_dist > max_reachable:
                     log_event("WARNING", f"[{symbol} {iv}m F-2 Reachability Guard] Floor-scaled TP distance (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}). Aborting trade entry.")
                     send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — floor-scaled TP target (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}).")
+                    opp_side = "Sell" if side == "Buy" else "Buy"
+                    try:
+                        place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+                    except Exception as ex_flat:
+                        log_event("ERROR", f"[{symbol} {iv}m Emergency Flatten Error] {ex_flat}")
                     return
                 
                 take_profit_price = (entry_price + new_tp_dist) if ml_trend == "Bullish" else (entry_price - new_tp_dist)
@@ -4733,15 +4740,26 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol)
             except ValueError as geo_err:
                 log_event("WARNING", f"[{symbol} {iv}m] Geometry assertion failed: {geo_err}. Aborting.")
+                opp_side = "Sell" if side == "Buy" else "Buy"
+                try:
+                    place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+                except Exception as ex_flat:
+                    log_event("ERROR", f"[{symbol} {iv}m Emergency Flatten Error] {ex_flat}")
                 return
 
             if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
                 _sl_dist = abs(entry_price - stop_loss_price)
                 _tp_dist = abs(take_profit_price - entry_price)
-                _rr = _tp_dist / max(1e-9, _sl_dist)
-                _required_p = (1.0 / (1.0 + max(1e-9, _rr))) + 0.0016
-                log_event("WARNING", f"[{symbol} {iv}m] MIN_FLOOR widened SL to {min_sl_pct:.2f}%: R:R {_rr:.2f} requires {_required_p:.3f}, have {calibrated_confidence:.3f}. Aborting.")
-                send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — post-floor R:R {_rr:.2f} (requires {_required_p:.3f}, have {calibrated_confidence:.3f})")
+                _sl_frac = _sl_dist / max(1e-9, entry_price)
+                _tp_frac = _tp_dist / max(1e-9, entry_price)
+                _required_p = (_sl_frac + 0.0016) / max(1e-9, (_sl_frac + _tp_frac))
+                log_event("WARNING", f"[{symbol} {iv}m] MIN_FLOOR widened SL to {min_sl_pct:.2f}%: R:R {_tp_dist/_sl_dist:.2f} requires {_required_p:.3f}, have {calibrated_confidence:.3f}. Aborting.")
+                send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — post-floor R:R {_tp_dist/_sl_dist:.2f} (requires {_required_p:.3f}, have {calibrated_confidence:.3f})")
+                opp_side = "Sell" if side == "Buy" else "Buy"
+                try:
+                    place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+                except Exception as ex_flat:
+                    log_event("ERROR", f"[{symbol} {iv}m Emergency Flatten Error] {ex_flat}")
                 return
 
             # 4. Set SL/TP on active position on Bybit
@@ -5040,6 +5058,7 @@ def main():
                     bybit_scaled_out = False
                     bybit_exit_price = None
                     bybit_realized_pnl = None
+                    bybit_pnl_data = None
                     
                     if TRADE_MODE != "simulation":
                         if active_trade.get("bybit_closed", False):
@@ -5549,9 +5568,9 @@ def main():
                             "confidence": active_trade.get("confidence") if active_trade.get("confidence") == "MT" else float(active_trade.get("confidence") or 0.0),
                             "take_profit": float(active_trade.get("take_profit", 0.0)),
                             "stop_loss": float(active_trade.get("stop_loss", 0.0)),
-                            "venue_closed_pnl": float(bybit_pnl_data["total_pnl"]) if (bybit_pnl_data and bybit_pnl_data.get("total_pnl") is not None) else None,
-                            "venue_qty": float(bybit_pnl_data["total_qty"]) if (bybit_pnl_data and bybit_pnl_data.get("total_qty") is not None) else None,
-                            "venue_entry_value": float(bybit_pnl_data["total_entry_value"]) if (bybit_pnl_data and bybit_pnl_data.get("total_entry_value") is not None) else None,
+                            "venue_closed_pnl": float(bybit_pnl_data.get("total_pnl")) if (isinstance(bybit_pnl_data, dict) and bybit_pnl_data.get("total_pnl") is not None) else None,
+                            "venue_qty": float(bybit_pnl_data.get("total_qty")) if (isinstance(bybit_pnl_data, dict) and bybit_pnl_data.get("total_qty") is not None) else None,
+                            "venue_entry_value": float(bybit_pnl_data.get("total_entry_value")) if (isinstance(bybit_pnl_data, dict) and bybit_pnl_data.get("total_entry_value") is not None) else None,
                             "stop_state": active_trade.get("stop_state", "INITIAL"),
                             "stop_state_meta": active_trade.get("stop_state_meta", {}),
                             "atr_dollars": float(active_trade.get("atr_dollars", 0.0)),
@@ -5978,12 +5997,11 @@ def main():
  
         # Circuit Breaker Halt Guard (Micro-Trading Run Scoped)
         try:
-            settings_db = database.get_all_settings() if hasattr(database, "get_all_settings") else {}
-            micro_ts = float(settings_db.get("micro_run_start_ts", 0))
-            if micro_ts == 0:
+            micro_ts_str = database.get_setting("micro_run_start_ts", "0")
+            micro_ts = float(micro_ts_str) if micro_ts_str else 0.0
+            if micro_ts == 0.0:
                 micro_ts = time.time()
-                if hasattr(database, "save_setting"):
-                    database.save_setting("micro_run_start_ts", str(micro_ts))
+                database.set_setting("micro_run_start_ts", str(micro_ts))
             
             closed_all = database.get_completed_trades(limit=1000) if hasattr(database, "get_completed_trades") else []
             micro_trades = [t for t in closed_all if float(t.get("exit_time", 0)) >= micro_ts]
@@ -5996,9 +6014,8 @@ def main():
             if closed_trade_count >= max_trades_cap or cumulative_loss >= max_loss_cap:
                 bot_state["bot_running"] = False
                 bot_state["bot_stopped"] = True
-                if hasattr(database, "save_setting"):
-                    database.save_setting("bot_running", "False")
-                    database.save_setting("bot_stopped", "True")
+                database.set_setting("bot_running", "False")
+                database.set_setting("bot_stopped", "True")
                 log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}) — bot halted.")
                 print(f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}) — bot halted.")
                 return
@@ -6670,7 +6687,8 @@ def main():
                                     latest_titles = cached_news_titles
                                     all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
                                         latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
-                                        calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold, get_history_fn=get_history
+                                        calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold, get_history_fn=get_history,
+                                        get_orderbook_fn=get_orderbook_imbalance, choppiness_fn=choppiness_index, bot_state_dict=bot_state
                                     )
 
                                     # Update global confluence status
@@ -6955,8 +6973,13 @@ def main():
                                             else:
                                                 leverage_val = min_lev_start
                                         
-                                            # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, with absolute limit based on symbol volatility profile
-                                            stop_loss_pct = (sl_multiplier * atr_dollars / entry_price) * 100
+                                            # Base continuous leverage from confidence ramp
+                                            if 'scaled_lev' in locals() and str(iv) == "15" and scaled_lev is not None and scaled_lev > 0:
+                                                leverage_val = min(leverage_val, float(scaled_lev))
+
+                                            # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, based on ACTUAL stop distance
+                                            actual_sl_dist = abs(entry_price - stop_loss_price)
+                                            stop_loss_pct = (actual_sl_dist / max(1e-9, entry_price)) * 100.0
                                             max_safe_lev = 90.0 / stop_loss_pct if stop_loss_pct > 0 else 100.0
                                         
                                             if symbol == "BTCUSDT":

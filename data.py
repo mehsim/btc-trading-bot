@@ -511,7 +511,19 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         except Exception as e:
             print(f"[Cache Write Error] {e}")
 
-    return df_history.iloc[-target_count:].reset_index(drop=True)
+    # Validate candle continuity (H-8)
+    final_df = df_history.iloc[-target_count:].reset_index(drop=True)
+    if len(final_df) > 1:
+        try:
+            expected_step_ms = int(interval) * 60 * 1000 if str(interval).isdigit() else 3600 * 1000
+            diffs = final_df["timestamp"].diff().dropna()
+            gaps = diffs[diffs > expected_step_ms * 1.5]
+            if len(gaps) > 0:
+                log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} gap(s) in candle series. Max gap: {gaps.max()/expected_step_ms:.1f}x bars.")
+        except Exception:
+            pass
+
+    return final_df
 
 def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_ts_ms=None):
     # Load cache from CSV

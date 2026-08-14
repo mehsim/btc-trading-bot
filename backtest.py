@@ -255,8 +255,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             take_profit = entry_price - tp_multiplier * atr_dollars
 
         # Post-floor economic gate (mirrors live production abort)
-        final_rr = abs(take_profit - entry_price) / max(1e-9, sl_dist)
-        required_p = 1.0 / (1.0 + final_rr) + 0.0016
+        _sl_frac = sl_dist / max(1e-9, entry_price)
+        _tp_frac = abs(take_profit - entry_price) / max(1e-9, entry_price)
+        required_p = (_sl_frac + 0.0016) / max(1e-9, (_sl_frac + _tp_frac))
         if calibrated_confidence < required_p:
             i += 1
             continue
@@ -272,46 +273,30 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
 
         for step in range(start_step, lookahead + 1):
             if i + step >= total_candles:
-                candles_elapsed = step - 1
                 break
-            
-            next_high = df.iloc[i + step]["high"]
-            next_low = df.iloc[i + step]["low"]
-            
+            high = df.iloc[i + step]["high"]
+            low = df.iloc[i + step]["low"]
+
             if ml_trend == "Bullish":
-                sl_hit = (next_low <= stop_loss)
-                tp_hit = (next_high >= take_profit)
-                if sl_hit and tp_hit:
+                if low <= stop_loss:
                     exit_price = stop_loss
-                    exit_reason = "Stop Loss Hit"
+                    exit_reason = "Stop Loss"
                     candles_elapsed = step
                     break
-                elif sl_hit:
-                    exit_price = stop_loss
-                    exit_reason = "Stop Loss Hit"
-                    candles_elapsed = step
-                    break
-                elif tp_hit:
+                elif high >= take_profit:
                     exit_price = take_profit
-                    exit_reason = "Take Profit Hit"
+                    exit_reason = "Take Profit"
                     candles_elapsed = step
                     break
             else:
-                sl_hit = (next_high >= stop_loss)
-                tp_hit = (next_low <= take_profit)
-                if sl_hit and tp_hit:
+                if high >= stop_loss:
                     exit_price = stop_loss
-                    exit_reason = "Stop Loss Hit"
+                    exit_reason = "Stop Loss"
                     candles_elapsed = step
                     break
-                elif sl_hit:
-                    exit_price = stop_loss
-                    exit_reason = "Stop Loss Hit"
-                    candles_elapsed = step
-                    break
-                elif tp_hit:
+                elif low <= take_profit:
                     exit_price = take_profit
-                    exit_reason = "Take Profit Hit"
+                    exit_reason = "Take Profit"
                     candles_elapsed = step
                     break
 
@@ -321,9 +306,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             gross_return = (entry_price - exit_price) / entry_price
             
         if pessimistic_mode:
-            # Exit leg taker fee + half spread
-            exit_cost = taker_fee + half_spread
-            net_return = gross_return - exit_cost
+            # Full round-trip taker fee (entry + exit) + half spread
+            total_trading_cost = (2.0 * taker_fee) + half_spread
+            net_return = gross_return - total_trading_cost
         else:
             net_return = gross_return - fee_rate - vol_slippage
         

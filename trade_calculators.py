@@ -38,12 +38,14 @@ def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
 def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: float = 0.0016) -> bool:
     """
     Evaluates whether calibrated confidence meets the required win rate for the given entry, TP, and SL.
+    Formula: p* = (sl_frac + cost_frac) / (sl_frac + tp_frac)
     Returns True if conf >= required_p, False otherwise.
     """
     sl_dist = abs(entry - sl)
     tp_dist = abs(tp - entry)
-    rr = tp_dist / max(1e-9, sl_dist)
-    required_p = (1.0 / (1.0 + max(1e-9, rr))) + cost_frac
+    sl_frac = sl_dist / max(1e-9, entry)
+    tp_frac = tp_dist / max(1e-9, entry)
+    required_p = (sl_frac + cost_frac) / max(1e-9, (sl_frac + tp_frac))
     return conf >= required_p
 
 MAX_RR_RATIO = {

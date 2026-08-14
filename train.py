@@ -407,6 +407,7 @@ def add_triple_barrier_labels(df, interval):
         short_tp, short_sl = p_t - tp_dist, p_t + sl_dist
 
         long_res = short_res = None
+        long_step = short_step = None
         for step in range(1, lookahead + 1):
             if i + step >= n_samples:
                 break
@@ -415,17 +416,28 @@ def add_triple_barrier_labels(df, interval):
             if long_res is None:
                 if l <= long_sl:
                     long_res = 0
+                    long_step = step
                 elif h >= long_tp:
                     long_res = 1
+                    long_step = step
             if short_res is None:
                 if h >= short_sl:
                     short_res = 0
+                    short_step = step
                 elif l <= short_tp:
                     short_res = 1
+                    short_step = step
             if long_res is not None and short_res is not None:
                 break
 
-        if long_res == 1:
+        if long_res == 1 and short_res == 1:
+            if long_step < short_step:
+                labels[i] = 2 # Bullish barrier reached first
+            elif short_step < long_step:
+                labels[i] = 0 # Bearish barrier reached first
+            else:
+                labels[i] = 1 # Whipsawed within same bar -> Neutral
+        elif long_res == 1:
             labels[i] = 2
         elif short_res == 1:
             labels[i] = 0
