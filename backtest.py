@@ -91,9 +91,13 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     X_matrix_trending = df[feat_trending].values
     X_matrix_ranging = df[feat_ranging].values
 
+    active_until_idx = -1
     i = 3
     total_candles = len(df)
     while i < total_candles - 1:
+        if i <= active_until_idx:
+            i += 1
+            continue
         adx_val = df.loc[i, "ADX"]
         close_price = df.loc[i, "close"]
         
@@ -124,12 +128,6 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
         calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
-        # Skip Neutral trades
-        if ml_trend == "Neutral":
-            i += 1
-            continue
-
-        calibrated_confidence = calibrate_confidence(ml_confidence)
         expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
 
         # 1. Confidence threshold
@@ -329,6 +327,15 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         else:
             net_return = gross_return - fee_rate - vol_slippage
         
+        # Deduct 8h perpetual funding rate for holds >= 8 hours
+        try:
+            iv_num = int(str(interval).replace("m", "").replace("h", "0")) if str(interval).isdigit() else 60
+        except Exception:
+            iv_num = 60
+        hours_held = (candles_elapsed * iv_num) / 60.0
+        funding_cost = (hours_held / 8.0) * 0.0001 if hours_held >= 8.0 else 0.0
+        net_return = net_return - funding_cost
+        
         equity_compounded = equity_compounded * (1.0 + net_return)
         equity_simple += net_return
         
@@ -339,7 +346,8 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         trades.append({
             "net_return": net_return
         })
-        i += max(1, candles_elapsed)
+        active_until_idx = i + max(1, candles_elapsed)
+        i = active_until_idx
 
     returns = [t["net_return"] for t in trades]
     from trade_calculators import calculate_replay_statistics
@@ -395,13 +403,17 @@ def run_backtest():
         if feat_rn is None:
             feat_rn = features
 
+        weights_tr = [0.10, 0.45, 0.45] if str(INTERVAL) == "15" else ([0.15, 0.42, 0.43] if str(INTERVAL) == "30" else [0.30, 0.20, 0.50])
+        weights_rn = [0.10, 0.45, 0.45] if str(INTERVAL) == "15" else ([0.15, 0.42, 0.43] if str(INTERVAL) == "30" else [0.30, 0.50, 0.20])
         models_trending = {
             "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
-            "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", len(feat_tr), feature_names=feat_tr)
+            "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
+            "weights": weights_tr
         }
         models_ranging = {
             "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
-            "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", len(feat_rn), feature_names=feat_rn)
+            "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
+            "weights": weights_rn
         }
         print("Models loaded successfully.")
     except Exception as e:

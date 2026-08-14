@@ -5978,6 +5978,35 @@ def main():
                         print(f"[Parallel Fetch] Error fetching {sym} {iv}: {type(e).__name__} {e}")
             print(f"[Parallel Fetch] Completed in {time.time() - t_start:.2f} seconds.")
  
+        # Circuit Breaker Halt Guard (Micro-Trading Run Scoped)
+        try:
+            settings_db = database.get_all_settings() if hasattr(database, "get_all_settings") else {}
+            micro_ts = float(settings_db.get("micro_run_start_ts", 0))
+            if micro_ts == 0:
+                micro_ts = time.time()
+                if hasattr(database, "save_setting"):
+                    database.save_setting("micro_run_start_ts", str(micro_ts))
+            
+            closed_all = database.get_completed_trades(limit=1000) if hasattr(database, "get_completed_trades") else []
+            micro_trades = [t for t in closed_all if float(t.get("exit_time", 0)) >= micro_ts]
+            closed_trade_count = len(micro_trades)
+            cumulative_loss = -sum(float(t.get("venue_closed_pnl", t.get("pnl_usd", 0.0))) for t in micro_trades if float(t.get("venue_closed_pnl", t.get("pnl_usd", 0.0))) < 0)
+            
+            max_trades_cap = getattr(config, "MAX_LIVE_TRADES_CAP", 60)
+            max_loss_cap = getattr(config, "MAX_LIVE_LOSS_CAP", 15.0)
+            
+            if closed_trade_count >= max_trades_cap or cumulative_loss >= max_loss_cap:
+                bot_state["bot_running"] = False
+                bot_state["bot_stopped"] = True
+                if hasattr(database, "save_setting"):
+                    database.save_setting("bot_running", "False")
+                    database.save_setting("bot_stopped", "True")
+                log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}) — bot halted.")
+                print(f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}) — bot halted.")
+                return
+        except Exception as ex_cb:
+            log_event("WARNING", f"[TRADING_LOOP] Circuit breaker check exception: {ex_cb}")
+
         just_opened_symbols = set()  # Symbols opened this cycle — block duplicates regardless of Bybit sync latency
         for symbol, iv in check_queue:
             # Global active execution guard check
@@ -6831,6 +6860,17 @@ def main():
                                         vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
                                         position_size_usd = position_size_usd * vol_regime_mult
                                         print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
+
+                                        # Phase 1 Continuous Learning Engine Risk Multiplier (Enforces >= 50 closed trades floor)
+                                        from learning_engine import continuous_learning_engine
+                                        learning_risk_mult = continuous_learning_engine.get_risk_multiplier({
+                                            "symbol": symbol,
+                                            "interval": str(iv),
+                                            "confidence": calibrated_confidence,
+                                            "regime": regime_name
+                                        })
+                                        position_size_usd = position_size_usd * learning_risk_mult
+                                        print(f"[{symbol} {iv}m Learning Engine Sizing] Multiplier: {learning_risk_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
                                     
                                         # CVaR (Expected Shortfall) Risk Constraint
                                         try:
@@ -7005,7 +7045,7 @@ def main():
                                                 required_qty = min_order_value / entry_price
                                                 import math
                                                 if step > 0:
-                                                    qty_val = math.ceil(required_qty / step) * step
+                                                    qty_val = round(required_qty / step) * step
                                                     qty_str = format_bybit_qty(symbol, qty_val)
                                                     qty_val = float(qty_str)
                                                     raw_qty = qty_val
@@ -7032,7 +7072,7 @@ def main():
                                                     new_sl_price = entry_price + new_stop_dist
 
                                                 
-                                                scaled_risk_usd = (scaled_notional / entry_price) * new_stop_dist
+                                                scaled_risk_usd = (scaled_notional / max(1e-8, entry_price)) * new_stop_dist
                                             
                                                 # Priority 2: Hard Cap - Never exceed 110% of approved original risk
                                                 if scaled_risk_usd > original_risk_usd * 1.10:
@@ -7045,7 +7085,7 @@ def main():
                                                     print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Tightened SL from ${original_stop_dist:.2f} to ${new_stop_dist:.2f} to keep risk constant at ${scaled_risk_usd:.2f}.")
 
                                             # Priority 3: Balance Guard - Remove auto-leverage escalation. If margin doesn't fit within 90% of balance, reject trade.
-                                            required_margin = (qty_val * entry_price) / leverage_val
+                                            required_margin = (qty_val * entry_price) / max(1e-8, leverage_val)
                                         
                                             # Post-Floor Geometry & Economic Viability Recheck
                                             all_pass = True

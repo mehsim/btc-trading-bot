@@ -28,6 +28,9 @@ last_private_ws_update_time = 0.0
 ws_retry_delay = 3
 private_ws_retry_delay = 5
 
+_public_heartbeat_thread = None
+_private_heartbeat_thread = None
+
 order_flow_lock = threading.Lock()
 order_flow_data = {}
 _ws_responses = {}
@@ -77,6 +80,9 @@ def on_message(ws, message, bot_state=None):
     last_ws_update_time = time.time()
     try:
         data = json.loads(message)
+        op = data.get("op")
+        if op == "subscribe":
+            log_event("INFO", f"[WEBSOCKET] subscribe response: {data}")
         topic = data.get("topic", "")
         
         # 1. Price Tickers Handler
@@ -213,12 +219,12 @@ def on_open(ws):
     ws_retry_delay = 3
     print("Connected to Bybit WebSocket for multi-asset prices and order flow")
     
+    # 1. Primary Core Channels (Tickers, CVD Trades, Orderbook)
     args = []
     for s in SUPPORTED_SYMBOLS:
         args.append(f"tickers.{s}")
         args.append(f"publicTrade.{s}")
         args.append(f"orderbook.50.{s}")
-        args.append(f"liquidation.{s}")
         
     chunk_size = 10
     for i in range(0, len(args), chunk_size):
@@ -227,16 +233,29 @@ def on_open(ws):
             "op": "subscribe",
             "args": chunk
         }))
+
+    # 2. Isolated Liquidation Channels (Bybit V5 allliquidation / liquidation)
+    try:
+        liq_args = [f"allliquidation.{s}" for s in SUPPORTED_SYMBOLS]
+        ws.send(json.dumps({
+            "op": "subscribe",
+            "args": liq_args
+        }))
+    except Exception as ex_liq:
+        log_event("WARNING", f"[WEBSOCKET] Liquidation subscription attempt failed: {ex_liq}")
         
-    def send_heartbeat():
-        while ws_connected:
-            try:
-                ws.send(json.dumps({"op": "ping"}))
-            except Exception as ex_websocket_client:
-                log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
-                break
-            time.sleep(20)
-    threading.Thread(target=send_heartbeat, daemon=True).start()
+    global _public_heartbeat_thread
+    if _public_heartbeat_thread is None or not _public_heartbeat_thread.is_alive():
+        def send_heartbeat():
+            while ws_connected:
+                try:
+                    ws.send(json.dumps({"op": "ping"}))
+                except Exception as ex_websocket_client:
+                    log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
+                    break
+                time.sleep(20)
+        _public_heartbeat_thread = threading.Thread(target=send_heartbeat, daemon=True)
+        _public_heartbeat_thread.start()
 
 
 def on_close(ws, close_status_code, close_msg):

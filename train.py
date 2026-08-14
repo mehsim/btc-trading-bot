@@ -449,18 +449,17 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         _look = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
         _reach = math.sqrt(_look)
         if str(interval) in ["15", "30"]:
-            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.8, 1.3)
-            tp_m_trending = trial.suggest_float("tp_mult_trending", 1.0, 1.6)
-            sl_m          = trial.suggest_float("sl_mult",          0.6, 1.0)
+            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  1.2, 2.0)
+            tp_m_trending = trial.suggest_float("tp_mult_trending", 1.5, 3.0)
+            sl_m          = trial.suggest_float("sl_mult",          1.00, 2.00)
         else:
-            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.35 * _reach, min(2.2, 0.90 * _reach))
-            tp_m_trending = trial.suggest_float("tp_mult_trending", 0.40 * _reach, min(2.8, 1.10 * _reach))
-            sl_m          = trial.suggest_float("sl_mult",          0.20 * _reach, min(1.5, 0.50 * _reach))
+            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  1.2, 2.5)
+            tp_m_trending = trial.suggest_float("tp_mult_trending", 1.5, 3.5)
+            sl_m          = trial.suggest_float("sl_mult",          1.00, 2.00)
 
-        # Economic gate: reject geometries with R:R below 1.20 outright
-        rr = tp_m_trending / max(1e-9, sl_m)
-        if rr < 1.20:
-            return 0.0
+        # Economic R:R gate: reject geometries with R:R below 1.20
+        if tp_m_trending < 1.20 * sl_m or tp_m_ranging < 1.20 * sl_m:
+            raise optuna.TrialPruned()
         
         atr_vals = (df_clean["ATR_norm"] * df_clean["close"]).values
         prices = df_clean["close"].values
@@ -555,6 +554,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 w_ece = MODEL_SELECTION.get("ece_penalty_weight", 0.20)
                 w_imb = MODEL_SELECTION.get("imbalance_penalty_weight", 0.40)
 
+                rr = tp_m_trending / max(1e-9, sl_m)
                 econ_penalty = 0.30 * max(0.0, 1.50 - rr)  # taper toward sensible R:R
                 fold_score = (w_bal * bal_acc) + (w_f1 * macro_f1) - (w_ece * ece) - (w_imb * imbalance_pen) - econ_penalty
                 scores.append(fold_score)

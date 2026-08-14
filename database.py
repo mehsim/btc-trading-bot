@@ -129,7 +129,7 @@ def init_db():
                 ("venue_closed_pnl", "REAL"), ("venue_qty", "REAL"), ("venue_entry_value", "REAL"),
                 ("intended_size_usd", "REAL"), ("initial_stop_loss", "REAL"), ("initial_take_profit", "REAL"),
                 ("initial_rr", "REAL"), ("kelly_size_usd", "REAL"), ("clamped_size_usd", "REAL"),
-                ("final_size_usd", "REAL")
+                ("final_size_usd", "REAL"), ("mae", "REAL"), ("mfe", "REAL")
             ]:
                 if col_name not in cols:
                     try:

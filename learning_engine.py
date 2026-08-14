@@ -183,7 +183,8 @@ class ContinuousLearningEngine:
             learning_event_queue.put_nowait({"type": "TRADE_CLOSED", "trade": trade_record})
         except queue.Full:
             t_id = trade_record.get('trade_id') if isinstance(trade_record, dict) else 'unknown'
-            print(f"[LearningEngine Queue Full] Learning event queue saturated; non-blockingly dropped event for trade {t_id}")
+            log_learning_action("QUEUE_FULL_DROPPED", "learning_engine", trade_id=t_id, details={"trade": trade_record})
+            print(f"[LearningEngine Queue Full] Learning event queue saturated; logged fallback drop for trade {t_id}")
         except Exception as e:
             t_id = trade_record.get('trade_id') if isinstance(trade_record, dict) else 'unknown'
             print(f"[LearningEngine Queue Error] Failed to enqueue learning event for trade {t_id}: {e}")
@@ -191,12 +192,17 @@ class ContinuousLearningEngine:
     def get_risk_multiplier(self, signal_context: dict) -> float:
         """
         Public risk multiplier query for position sizer.
-        Returns float in range [0.50, 1.00]. Fails safe to 0.75 on exception.
+        Enforces a minimum sample floor of 50 closed trades before applying dynamic risk scaling.
+        Returns float in range [0.50, 1.00]. Fails safe to 1.0 if < 50 trades exist.
         """
         try:
+            from database import get_completed_trades
+            trades = get_completed_trades(limit=100)
+            if not trades or len(trades) < 50:
+                return 1.0
             return risk_multiplier_engine.get_risk_multiplier(signal_context)
         except Exception as e:
-            print(f"[LearningEngine RiskMult Fail-Safe] Exception evaluating risk multiplier: {e}. Falling back to 0.75.")
-            return 0.75
+            print(f"[LearningEngine RiskMult Fail-Safe] Exception evaluating risk multiplier: {e}. Falling back to 1.0.")
+            return 1.0
 
 continuous_learning_engine = ContinuousLearningEngine()

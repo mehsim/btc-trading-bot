@@ -127,14 +127,15 @@ class StateManager:
         # Initialize defaults to Redis
         if self._redis:
             print("[StateManager Debug] Starting Redis default keys sync...", flush=True)
-            for k, v in self._cache.items():
-                try:
-                    print(f"[StateManager Debug] Syncing key: {k}...", flush=True)
-                    if not self._redis.exists(f"bot_state:{k}"):
-                        raw_v = list(v) if isinstance(v, ObservedList) else v
-                        self._redis.set(f"bot_state:{k}", json.dumps(raw_v))
-                except Exception as e:
-                    print(f"[StateManager Redis Init Error] Failed to write {k} to Redis: {e}", flush=True)
+            try:
+                with self._redis.pipeline() as pipe:
+                    for k, v in self._cache.items():
+                        if not self._redis.exists(f"bot_state:{k}"):
+                            raw_v = list(v) if isinstance(v, ObservedList) else v
+                            pipe.set(f"bot_state:{k}", json.dumps(raw_v))
+                    pipe.execute()
+            except Exception as e:
+                print(f"[StateManager Redis Init Error] Failed to batch write Redis: {e}", flush=True)
             print("[StateManager Debug] Redis default keys sync completed.", flush=True)
 
     def _on_mutate_trade(self, *args):

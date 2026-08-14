@@ -367,8 +367,9 @@ def add_features(df, fetch_calendar_callback=None):
     upper_wick = df["high"] - df[["open", "close"]].max(axis=1)
     lower_wick = df[["open", "close"]].min(axis=1) - df["low"]
     
-    upper_wick_vol = df["volume"] * (upper_wick / high_low_range)
-    lower_wick_vol = df["volume"] * (lower_wick / high_low_range)
+    high_low_range_safe = np.where(high_low_range > 1e-8, high_low_range, 1e-8)
+    upper_wick_vol = df["volume"] * (upper_wick / high_low_range_safe)
+    lower_wick_vol = df["volume"] * (lower_wick / high_low_range_safe)
     
     df["upper_wick_volume_ratio"] = upper_wick_vol / (upper_wick_vol.rolling(20).mean() + 1e-8)
     df["lower_wick_volume_ratio"] = lower_wick_vol / (lower_wick_vol.rolling(20).mean() + 1e-8)

@@ -41,6 +41,7 @@ MODEL_GOVERNANCE = {
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
 CONSERVATIVE_LEVERAGE_CAPS = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "default": 3.0}
 MIN_SL_PCT_CONFIG = {"15": 0.006, "30": 0.008, "60": 0.010, "120": 0.012, "240": 0.015, "360": 0.015, "default": 0.008}
+MIN_TARGET_ATR_MULT = {"15": 1.50, "60": 1.50, "default": 1.50}  # Enforces tp_mult >= 1.50 ATR
 
 def resolve_min_sl_pct(symbol: str = "BTCUSDT", interval: str = "60") -> float:
     iv_str = str(interval).replace("m", "").replace("h", "0")
@@ -434,13 +435,15 @@ FIBONACCI_STEP_LOCKS = {
     "locks": [0.25, 0.40, 0.55]
 }
 
-# Sizing Bounds and CVaR Risk Limits
+# Micro-Trading Run Risk Bounds & Circuit Breakers
 MIN_POSITION_BALANCE_FRAC = 0.02
-MAX_POSITION_BALANCE_FRAC = 0.15
+MAX_POSITION_BALANCE_FRAC = 0.05
 CVAR_TAIL_PERCENTILE = 0.05
 CVAR_FALLBACK = 0.03
 DAILY_LOSS_BUDGET_FRAC = 0.05
-MAX_CONCURRENT_POSITIONS = 3
+MAX_CONCURRENT_POSITIONS = 1
+MAX_LIVE_TRADES_CAP = 60
+MAX_LIVE_LOSS_CAP = 15.0
 
 
 

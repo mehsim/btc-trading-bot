@@ -40,26 +40,28 @@ def run_60m_grid_backtest():
         all_dfs.append(df_sym)
         print(f"   • Loaded {sym}: {len(df_sym)} candles", flush=True)
 
-    load_model_weights("60")
-    load_model_weights(60)
-    models_60 = models_by_interval.get("60") or models_by_interval.get(60) or {}
+    from ensemble import load_ensemble_models, get_selected_features
+    m_trend, _ = load_ensemble_models("trending", "60")
+    m_ranging, _ = load_ensemble_models("ranging", "60")
     
-    m_trend = models_60.get("trending", {}).get("trend") or models_60.get("ranging", {}).get("trend")
-    if m_trend is None:
+    if m_trend is None and m_ranging is None:
         print("❌ Error: 60m model weights not found!", flush=True)
         return
 
-    _exp_names = get_model_feature_names(m_trend)
-    feat_list = models_60.get("selected_features_trending") or models_60.get("selected_features_ranging") or models_60.get("selected_features")
+    feat_trending = get_selected_features("trending", "60")
+    feat_ranging = get_selected_features("ranging", "60")
 
     # Generate predictions for each asset
     dataset_preds = []
     for df in all_dfs:
         sym = df["symbol"].iloc[0]
+        
+        # Evaluate trending model predictions
+        _exp_names = get_model_feature_names(m_trend) if m_trend else None
         if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
             X_full = df.reindex(columns=_exp_names, fill_value=0.0)
-        elif feat_list:
-            _avail = [f for f in feat_list if f in df.columns]
+        elif feat_trending:
+            _avail = [f for f in feat_trending if f in df.columns]
             X_full = df[_avail]
         else:
             from core import features as master_features
@@ -67,8 +69,24 @@ def run_60m_grid_backtest():
             X_full = df[_avail]
 
         X_input = _slice_model_input(m_trend, X_full)
-        probs_all = m_trend.predict_proba(X_input)
-        dataset_preds.append((df, probs_all))
+        probs_trending = m_trend.predict_proba(X_input)
+
+        # Evaluate ranging model predictions
+        _exp_names_r = get_model_feature_names(m_ranging) if m_ranging else None
+        if _exp_names_r and not all(str(n).startswith("Column_") for n in _exp_names_r):
+            X_full_r = df.reindex(columns=_exp_names_r, fill_value=0.0)
+        elif feat_ranging:
+            _avail_r = [f for f in feat_ranging if f in df.columns]
+            X_full_r = df[_avail_r]
+        else:
+            from core import features as master_features
+            _avail_r = [f for f in master_features if f in df.columns]
+            X_full_r = df[_avail_r]
+
+        X_input_r = _slice_model_input(m_ranging, X_full_r)
+        probs_ranging = m_ranging.predict_proba(X_input_r)
+
+        dataset_preds.append((df, probs_trending, probs_ranging))
 
     print("\n2. Sweeping TP / SL Multiplier Grid & Evaluating System Expectancy...", flush=True)
     
