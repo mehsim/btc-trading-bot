@@ -1820,6 +1820,24 @@ def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only
     res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
 
+def emergency_flatten_position(symbol, opp_side, qty_str, max_retries=2):
+    """
+    Executes a verified emergency flatten order with reduce_only=True and retries.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            res = place_bybit_taker_ioc_order(symbol, opp_side, qty_str, reduce_only=True)
+            ret_code = res.get("retCode", -1) if isinstance(res, dict) else -1
+            if ret_code == 0:
+                log_event("INFO", f"[{symbol} Emergency Flatten] Successfully executed {opp_side} IOC (Qty: {qty_str}, Attempt {attempt}).")
+                return True
+            else:
+                log_event("WARNING", f"[{symbol} Emergency Flatten] Attempt {attempt} returned {res.get('retMsg', res)}")
+        except Exception as ex:
+            log_event("ERROR", f"[{symbol} Emergency Flatten] Exception on attempt {attempt}: {ex}")
+        time.sleep(0.5)
+    return False
+
 def get_bybit_bid_ask(symbol):
     res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
     if res.get("retCode") == 0:
@@ -4046,6 +4064,13 @@ def load_initial_prices():
                         bot_state["live_price"] = val
                         last_ws_update_time = time.time()
                         bot_state["last_update"] = last_ws_update_time
+
+        # Pre-warm instrument precision cache to ensure 0-latency live order paths
+        for sym in SUPPORTED_SYMBOLS:
+            try:
+                get_bybit_min_qty_step(sym)
+            except Exception as ex_spec:
+                log_event("DEBUG", f"Pre-warm spec notice for {sym}: {ex_spec}")
     except Exception as e:
         print(f"[Initial Prices] Error loading prices at startup: {e}")
 
@@ -4708,7 +4733,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             log_event("WARNING", f"[{symbol} {iv}m API] Fill ratio {fill_ratio*100:.1f}% below {min_fill_pct*100:.0f}% threshold. Reversing partial fill...")
             if getattr(config, "RESIDUAL_ACTION", "CLOSE") == "CLOSE":
                 opp_side = "Sell" if side == "Buy" else "Buy"
-                place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+                emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
                 bybit_success = False
 
         if bybit_success:
@@ -4785,10 +4810,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     log_event("WARNING", f"[{symbol} {iv}m F-2 Reachability Guard] Floor-scaled TP distance (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}). Aborting trade entry.")
                     send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — floor-scaled TP target (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}).")
                     opp_side = "Sell" if side == "Buy" else "Buy"
-                    try:
-                        place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                    except Exception as ex_flat:
-                        log_event("ERROR", f"[{symbol} {iv}m Emergency Flatten Error] {ex_flat}")
+                    emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
                     return
                 
                 take_profit_price = (entry_price + new_tp_dist) if ml_trend == "Bullish" else (entry_price - new_tp_dist)
@@ -4801,10 +4823,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             except ValueError as geo_err:
                 log_event("WARNING", f"[{symbol} {iv}m] Geometry assertion failed: {geo_err}. Aborting.")
                 opp_side = "Sell" if side == "Buy" else "Buy"
-                try:
-                    place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                except Exception as ex_flat:
-                    log_event("ERROR", f"[{symbol} {iv}m Emergency Flatten Error] {ex_flat}")
+                emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
                 return
 
             if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
@@ -4816,10 +4835,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 log_event("WARNING", f"[{symbol} {iv}m] MIN_FLOOR widened SL to {min_sl_pct:.2f}%: R:R {_tp_dist/_sl_dist:.2f} requires {_required_p:.3f}, have {calibrated_confidence:.3f}. Aborting.")
                 send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — post-floor R:R {_tp_dist/_sl_dist:.2f} (requires {_required_p:.3f}, have {calibrated_confidence:.3f})")
                 opp_side = "Sell" if side == "Buy" else "Buy"
-                try:
-                    place_bybit_taker_ioc_order(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                except Exception as ex_flat:
-                    log_event("ERROR", f"[{symbol} {iv}m Emergency Flatten Error] {ex_flat}")
+                emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
                 return
 
             # 4. Set SL/TP on active position on Bybit
@@ -6861,6 +6877,7 @@ def main():
                                             sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
                                         
                                         # Refinements 3, 4, 7: Adaptive Structural Swing Stop & Recency Guard for 15m
+                                        scaled_lev = None
                                         if str(iv) == "15":
                                             struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
                                                 df_recent=df_completed,
@@ -7041,7 +7058,7 @@ def main():
                                                 leverage_val = min_lev_start
                                         
                                             # Base continuous leverage from confidence ramp
-                                            if 'scaled_lev' in locals() and str(iv) == "15" and scaled_lev is not None and scaled_lev > 0:
+                                            if scaled_lev is not None and scaled_lev > 0 and str(iv) == "15":
                                                 leverage_val = min(leverage_val, float(scaled_lev))
 
                                             # Risk check: cap leverage so stop loss doesn't exceed 90% of capital, based on ACTUAL stop distance

@@ -109,44 +109,11 @@ def get_model_feature_names(model):
 
 def sanitize_feature_matrix(X):
     """
-    Sanitizes feature matrix X by replacing NaN, Inf, -Inf, and None with context-appropriate neutral baselines
-    (1.0 for ratio features, 0.0 for z-scores, returns, and deltas).
+    Sanitizes feature matrix X by delegating to the canonical sanitize_feature_matrix in features.py.
     """
-    if X is None:
-        return X
     try:
-        ratio_cols = {"volume_ratio", "vol_ratio", "oi_ratio", "mfe_ratio", "atr_ratio"}
-        if isinstance(X, pd.DataFrame):
-            df = X.copy()
-            df = df.replace([np.inf, -np.inf], np.nan)
-            for c in df.columns:
-                fill_val = 1.0 if any(rc in c.lower() for rc in ratio_cols) else 0.0
-                df[c] = df[c].fillna(fill_val)
-            return df.astype(float)
-        elif isinstance(X, pd.Series):
-            s = X.copy()
-            s = s.replace([np.inf, -np.inf], np.nan)
-            s_name = str(s.name or "").lower()
-            fill_val = 1.0 if any(rc in s_name for rc in ratio_cols) else 0.0
-            s = s.fillna(fill_val)
-            return s.astype(float)
-        elif isinstance(X, dict):
-            clean_dict = {}
-            for k, v in X.items():
-                k_lower = str(k).lower()
-                fill_val = 1.0 if any(rc in k_lower for rc in ratio_cols) else 0.0
-                if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-                    clean_dict[k] = fill_val
-                else:
-                    try:
-                        clean_dict[k] = float(v)
-                    except Exception as ex_ens:
-                        log_event("WARNING", f"Ensemble notice: {ex_ens}")
-                        clean_dict[k] = fill_val
-            return clean_dict
-        else:
-            arr = np.asarray(X, dtype=float)
-            return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+        from features import sanitize_feature_matrix as _canon_sanitize
+        return _canon_sanitize(X)
     except Exception as ex_ens:
         log_event("WARNING", f"Ensemble notice: {ex_ens}")
         return X

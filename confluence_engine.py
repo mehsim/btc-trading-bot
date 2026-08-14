@@ -254,7 +254,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     _ob_fn = get_orderbook_fn
     if _ob_fn is None:
         try:
-            from bybit_client import get_orderbook_imbalance
+            from data import get_orderbook_imbalance
             _ob_fn = get_orderbook_imbalance
         except Exception:
             _ob_fn = None
@@ -270,13 +270,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
                 total_score += weight_ob
         except Exception as ex_confluence_engine:
             log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
-            results["Orderbook_L2"] = {"pass": True, "detail": f"Orderbook check fallback ({ex_confluence_engine}) [OPTIONAL]", "weight": weight_ob}
-            max_score += weight_ob
-            total_score += weight_ob
+            results["Orderbook_L2"] = {"pass": True, "detail": f"Orderbook check fallback ({ex_confluence_engine}) [EXCLUDED]", "weight": 0}
     else:
-        results["Orderbook_L2"] = {"pass": True, "detail": "Orderbook unavailable [NEUTRAL PASS]", "weight": weight_ob}
-        max_score += weight_ob
-        total_score += weight_ob
+        results["Orderbook_L2"] = {"pass": True, "detail": "Orderbook unavailable [EXCLUDED]", "weight": 0}
 
     # CHECK 4: Choppiness Index Gate
     weight_chop = 1
@@ -298,13 +294,9 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
                 total_score += weight_chop
         except Exception as ex_confluence_engine:
             log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
-            results["Choppiness_Gate"] = {"pass": True, "detail": f"Choppiness check fallback ({ex_confluence_engine}) [OPTIONAL]", "weight": weight_chop}
-            max_score += weight_chop
-            total_score += weight_chop
+            results["Choppiness_Gate"] = {"pass": True, "detail": f"Choppiness check fallback ({ex_confluence_engine}) [EXCLUDED]", "weight": 0}
     else:
-        results["Choppiness_Gate"] = {"pass": True, "detail": "Choppiness check unavailable [NEUTRAL PASS]", "weight": weight_chop}
-        max_score += weight_chop
-        total_score += weight_chop
+        results["Choppiness_Gate"] = {"pass": True, "detail": "Choppiness check unavailable [EXCLUDED]", "weight": 0}
 
     # CHECK 5: News Blackout & Sentiment Check
     weight_news = 1
@@ -359,9 +351,6 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     rsi_val = 50.0
     if df_1h is not None and "RSI" in df_1h.columns and len(df_1h) > 0:
         rsi_val = float(df_1h["RSI"].iloc[-1])
-    
-    from cycle_detector import detect_market_regime_with_hysteresis
-    current_regime = detect_market_regime_with_hysteresis(df_1h, symbol=symbol, interval=str(interval))
     
     from production_regime_engine import production_regime_engine
     macro_blackout = (news_sentiment == "BLACKOUT" or (isinstance(news_sentiment, dict) and news_sentiment.get("blackout")))

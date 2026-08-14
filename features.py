@@ -1,6 +1,7 @@
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore")
+from logger import log_event
 
 import numpy as np
 import bisect
@@ -569,4 +570,75 @@ def add_candlestick_patterns(df):
     if df_out.columns.duplicated().any():
         df_out = df_out.loc[:, ~df_out.columns.duplicated()].copy()
     return df_out
+
+
+def sanitize_feature_matrix(X):
+    """
+    Canonical feature matrix sanitization shared identically across training and serving.
+    Replaces NaN, Inf, -Inf, and None with context-appropriate neutral baselines:
+      - 1.0 for self-normalized ratio features (e.g. volume_ratio, atr_ratio, upper_wick_volume_ratio)
+      - 50.0 for RSI
+      - 72.0 for hours_to_news
+      - 0.0 for z-scores, returns, and deltas
+    """
+    if X is None:
+        return X
+    import math
+    ratio_cols = ("volume_ratio", "vol_ratio", "oi_ratio", "mfe_ratio", "atr_ratio", "wick_volume_ratio")
+    try:
+        if isinstance(X, pd.DataFrame):
+            df = X.copy()
+            df = df.replace([np.inf, -np.inf], np.nan)
+            for c in df.columns:
+                c_low = str(c).lower()
+                if "hours_to_news" in c_low:
+                    fill_val = 72.0
+                elif "rsi" in c_low:
+                    fill_val = 50.0
+                elif any(rc in c_low for rc in ratio_cols) and "to_btc" not in c_low:
+                    fill_val = 1.0
+                else:
+                    fill_val = 0.0
+                df[c] = df[c].fillna(fill_val)
+            return df.astype(float)
+        elif isinstance(X, pd.Series):
+            s = X.copy()
+            s = s.replace([np.inf, -np.inf], np.nan)
+            s_name = str(s.name or "").lower()
+            if "hours_to_news" in s_name:
+                fill_val = 72.0
+            elif "rsi" in s_name:
+                fill_val = 50.0
+            elif any(rc in s_name for rc in ratio_cols) and "to_btc" not in s_name:
+                fill_val = 1.0
+            else:
+                fill_val = 0.0
+            s = s.fillna(fill_val)
+            return s.astype(float)
+        elif isinstance(X, dict):
+            clean_dict = {}
+            for k, v in X.items():
+                k_lower = str(k).lower()
+                if "hours_to_news" in k_lower:
+                    fill_val = 72.0
+                elif "rsi" in k_lower:
+                    fill_val = 50.0
+                elif any(rc in k_lower for rc in ratio_cols) and "to_btc" not in k_lower:
+                    fill_val = 1.0
+                else:
+                    fill_val = 0.0
+                if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+                    clean_dict[k] = fill_val
+                else:
+                    try:
+                        clean_dict[k] = float(v)
+                    except Exception:
+                        clean_dict[k] = fill_val
+            return clean_dict
+        elif isinstance(X, np.ndarray):
+            X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+            return X_clean
+    except Exception as ex:
+        log_event("WARNING", f"Feature sanitization notice: {ex}")
+    return X
 
