@@ -39,7 +39,7 @@ for s in SUPPORTED_SYMBOLS:
         
         # Prepare trending feature matrix
         exp_t = get_model_feature_names(model_trending) if model_trending else None
-        if exp_t:
+        if exp_t and not all(str(n).startswith("Column_") for n in exp_t):
             X_full_t = df_s.reindex(columns=exp_t, fill_value=0.0)
         elif feats_trending:
             X_full_t = df_s[[f for f in feats_trending if f in df_s.columns]]
@@ -48,7 +48,7 @@ for s in SUPPORTED_SYMBOLS:
 
         # Prepare ranging feature matrix
         exp_r = get_model_feature_names(model_ranging) if model_ranging else None
-        if exp_r:
+        if exp_r and not all(str(n).startswith("Column_") for n in exp_r):
             X_full_r = df_s.reindex(columns=exp_r, fill_value=0.0)
         elif feats_ranging:
             X_full_r = df_s[[f for f in feats_ranging if f in df_s.columns]]
