@@ -43,24 +43,28 @@ for s in SUPPORTED_SYMBOLS:
         df_s = add_features(df_s)
         
         # Prepare trending feature matrix
-        exp_t = get_model_feature_names(model_trending) if model_trending else None
-        if exp_t and not all(str(n).startswith("Column_") for n in exp_t):
-            X_full_t = df_s.reindex(columns=exp_t, fill_value=0.0)
+        _exp_names_t = get_model_feature_names(model_trending) if model_trending else None
+        if _exp_names_t and not all(str(n).startswith("Column_") for n in _exp_names_t):
+            X_full_t = df_s.reindex(columns=_exp_names_t, fill_value=0.0)
         elif feat_trending:
-            X_full_t = df_s[[f for f in feat_trending if f in df_s.columns]]
+            _avail_t = [f for f in feat_trending if f in df_s.columns]
+            X_full_t = df_s[_avail_t]
         else:
             from core import features as master_features
-            X_full_t = df_s[[f for f in master_features if f in df_s.columns]]
+            _avail_t = [f for f in master_features if f in df_s.columns]
+            X_full_t = df_s[_avail_t]
 
         # Prepare ranging feature matrix
-        exp_r = get_model_feature_names(model_ranging) if model_ranging else None
-        if exp_r and not all(str(n).startswith("Column_") for n in exp_r):
-            X_full_r = df_s.reindex(columns=exp_r, fill_value=0.0)
+        _exp_names_r = get_model_feature_names(model_ranging) if model_ranging else None
+        if _exp_names_r and not all(str(n).startswith("Column_") for n in _exp_names_r):
+            X_full_r = df_s.reindex(columns=_exp_names_r, fill_value=0.0)
         elif feat_ranging:
-            X_full_r = df_s[[f for f in feat_ranging if f in df_s.columns]]
+            _avail_r = [f for f in feat_ranging if f in df_s.columns]
+            X_full_r = df_s[_avail_r]
         else:
             from core import features as master_features
-            X_full_r = df_s[[f for f in master_features if f in df_s.columns]]
+            _avail_r = [f for f in master_features if f in df_s.columns]
+            X_full_r = df_s[_avail_r]
 
         X_trend = _slice_model_input(model_trending, X_full_t)
         X_rang = _slice_model_input(model_ranging, X_full_r)
