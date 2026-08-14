@@ -357,17 +357,18 @@ def get_live_bot_logs(max_lines=40):
                             msg = item.get("message", "")
                             lines.append(f"[{ts}] [{lvl}] {msg}")
                             continue
-                        except Exception:
-                            pass
+                        except (ValueError, TypeError, KeyError) as ex_parse:
+                            log_event("WARNING", f"dashboard_routes log json parse notice: {ex_parse}")
                     lines.append(l_str)
-        except Exception:
-            pass
+        except (IOError, OSError) as ex_file:
+            log_event("WARNING", f"dashboard_routes log read notice: {ex_file}")
             
     if not lines:
         try:
             import main
             lines = list(main.bot_logs) if hasattr(main, "bot_logs") and main.bot_logs else list(bot_logs)
-        except Exception:
+        except Exception as ex_main_logs:
+            log_event("WARNING", f"dashboard_routes main logs notice: {ex_main_logs}")
             lines = list(bot_logs)
             
     return lines[-max_lines:]
