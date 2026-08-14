@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import json
@@ -6,7 +7,7 @@ warnings.filterwarnings('ignore')
 
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features
-from ensemble import load_ensemble_models, get_selected_features, _slice_model_input
+from ensemble import load_ensemble_classifier, get_model_feature_names, _slice_model_input
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 INTERVAL = 60
@@ -20,11 +21,11 @@ eval_threshold = 0.52
 print(f"=== 60M CONTROL WALK-FORWARD BACKTEST (TP={TP_MULT}, SL={SL_MULT}, CONF_THRESH={eval_threshold}) ===")
 
 # Load active 60m models
-model_ranging, _ = load_ensemble_models("ranging", "60")
-model_trending, _ = load_ensemble_models("trending", "60")
+model_ranging = load_ensemble_classifier("ensemble_ranging_trend_60")
+model_trending = load_ensemble_classifier("ensemble_trending_trend_60")
 
-feats_ranging = get_selected_features("ranging", "60")
-feats_trending = get_selected_features("trending", "60")
+feats_ranging = json.load(open("selected_features_60_ranging.json")) if os.path.exists("selected_features_60_ranging.json") else []
+feats_trending = json.load(open("selected_features_60_trending.json")) if os.path.exists("selected_features_60_trending.json") else []
 
 symbol_dfs = {}
 print("Loading 60m candle history across 9 symbols...")
@@ -36,14 +37,30 @@ for s in SUPPORTED_SYMBOLS:
         df_s = merge_derivatives_sentiment_features(df_s, symbol=s, interval=INTERVAL)
         df_s = add_features(df_s)
         
-        _avail_r = [f for f in feats_ranging if f in df_s.columns] if feats_ranging else df_s.columns
-        _avail_t = [f for f in feats_trending if f in df_s.columns] if feats_trending else df_s.columns
-        
-        X_rang = _slice_model_input(model_ranging, df_s[_avail_r])
-        X_trend = _slice_model_input(model_trending, df_s[_avail_t])
+        # Prepare trending feature matrix
+        exp_t = get_model_feature_names(model_trending) if model_trending else None
+        if exp_t and not all(str(n).startswith("Column_") for n in exp_t):
+            X_full_t = df_s.reindex(columns=exp_t, fill_value=0.0)
+        elif feats_trending:
+            X_full_t = df_s[[f for f in feats_trending if f in df_s.columns]]
+        else:
+            X_full_t = df_s
 
-        p_rang = model_ranging.predict_proba(X_rang)
+        # Prepare ranging feature matrix
+        exp_r = get_model_feature_names(model_ranging) if model_ranging else None
+        if exp_r and not all(str(n).startswith("Column_") for n in exp_r):
+            X_full_r = df_s.reindex(columns=exp_r, fill_value=0.0)
+        elif feats_ranging:
+            X_full_r = df_s[[f for f in feats_ranging if f in df_s.columns]]
+        else:
+            X_full_r = df_s
+
+        X_trend = _slice_model_input(model_trending, X_full_t)
+        X_rang = _slice_model_input(model_ranging, X_full_r)
+
         p_trend = model_trending.predict_proba(X_trend)
+        p_rang = model_ranging.predict_proba(X_rang)
+
         adxs = df_s["ADX"].values
         df_s["p_bear"] = np.where(adxs >= 25.0, p_trend[:, 0], p_rang[:, 0])
         df_s["p_bull"] = np.where(adxs >= 25.0, p_trend[:, 2], p_rang[:, 2])
