@@ -1390,7 +1390,35 @@ def format_bybit_price(symbol, price):
     p = price_precisions.get(symbol, 2)
     return str(round(price, p))
 
+_instrument_info_cache = {}
+_instrument_info_cache_lock = threading.Lock()
+
 def get_bybit_min_qty_step(symbol):
+    now_t = time.time()
+    with _instrument_info_cache_lock:
+        if symbol in _instrument_info_cache:
+            cached_step, exp_t = _instrument_info_cache[symbol]
+            if now_t < exp_t:
+                return cached_step
+
+    # Try fetching dynamically from Bybit REST API
+    try:
+        url = f"{BYBIT_BASE_URL}/v5/market/instruments-info"
+        res = requests.get(url, params={"category": "linear", "symbol": symbol}, proxies=get_bybit_proxies(), timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            items = data.get("result", {}).get("list", [])
+            if items:
+                lot_info = items[0].get("lotSizeFilter", {})
+                qty_step = float(lot_info.get("qtyStep", 0.0) or lot_info.get("minOrderQty", 0.0))
+                if qty_step > 0:
+                    with _instrument_info_cache_lock:
+                        _instrument_info_cache[symbol] = (qty_step, now_t + 3600.0)
+                    return qty_step
+    except Exception:
+        pass
+
+    # Static Fallback
     min_limits = {
         "BTCUSDT": 0.001,
         "ETHUSDT": 0.01,
@@ -1407,7 +1435,10 @@ def get_bybit_min_qty_step(symbol):
         "SUIUSDT": 1.0,
         "APTUSDT": 0.1
     }
-    return min_limits.get(symbol, 0.1)
+    fallback_step = min_limits.get(symbol, 0.1)
+    with _instrument_info_cache_lock:
+        _instrument_info_cache[symbol] = (fallback_step, now_t + 300.0)
+    return fallback_step
 
 _ws_responses = {}
 _ws_responses_lock = threading.Lock()
@@ -3746,63 +3777,57 @@ def calibrate_confidence(raw_conf, eps=1e-3):
     """
     return float(np.clip(raw_conf, eps, 1.0 - eps))
 
+_funding_rate_cache = {}
+_funding_rate_cache_lock = threading.Lock()
+
 def get_funding_rate(symbol=SYMBOL):
+    now_t = time.time()
+    with _funding_rate_cache_lock:
+        if symbol in _funding_rate_cache:
+            rate_val, exp_t = _funding_rate_cache[symbol]
+            if now_t < exp_t:
+                return rate_val
     try:
         url = f"{BYBIT_BASE_URL}/v5/market/tickers"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         response = requests.get(url, params={"category": "linear", "symbol": symbol}, headers=headers, proxies=get_bybit_proxies(), timeout=5)
-        if response.status_code != 200:
-            print(f"Error fetching funding rate: HTTP status {response.status_code}")
-            return 0.0
-        res = response.json()
-        if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
-            rate_str = res["result"]["list"][0].get("fundingRate")
-            if rate_str:
-                return float(rate_str)
+        if response.status_code == 200:
+            res = response.json()
+            if "result" in res and "list" in res["result"] and len(res["result"]["list"]) > 0:
+                rate_str = res["result"]["list"][0].get("fundingRate")
+                if rate_str:
+                    rate_val = float(rate_str)
+                    with _funding_rate_cache_lock:
+                        _funding_rate_cache[symbol] = (rate_val, now_t + 60.0)
+                    return rate_val
     except Exception as e:
         print(f"Error fetching funding rate: {e}")
     return 0.0
 
-# ==========================================
-# PORTFOLIO COVARIANCE CONSTRAINTS
-# ==========================================
+def get_rolling_correlation(symbol_a: str, symbol_b: str, interval: str = "60", window: int = 30) -> float:
+    if symbol_a == symbol_b:
+        return 1.0
+    try:
+        df_a = get_history(symbol=symbol_a, interval=interval, limit=window)
+        df_b = get_history(symbol=symbol_b, interval=interval, limit=window)
+        if df_a is not None and df_b is not None and len(df_a) >= 15 and len(df_b) >= 15:
+            merged = pd.merge(df_a[["timestamp", "close"]], df_b[["timestamp", "close"]], on="timestamp", suffixes=("_a", "_b"))
+            if len(merged) >= 10:
+                corr = merged["close_a"].corr(merged["close_b"])
+                if not math.isnan(corr):
+                    return float(np.clip(corr, -1.0, 1.0))
+    except Exception:
+        pass
+    return 0.70
+
 def calculate_covariance_multiplier(new_symbol, new_direction):
     """
-    Calculates a position sizing multiplier based on portfolio covariance.
+    Calculates a position sizing multiplier based on empirical rolling portfolio covariance.
     Penalizes highly correlated assets in the same direction.
     Allows offsetting/hedging for assets in opposite directions.
     """
-    CORRELATION_MAP = {
-        ("BTCUSDT", "BTCUSDT"): 1.0,
-        ("ETHUSDT", "ETHUSDT"): 1.0,
-        ("SOLUSDT", "SOLUSDT"): 1.0,
-        ("BNBUSDT", "BNBUSDT"): 1.0,
-        ("ADAUSDT", "ADAUSDT"): 1.0,
-        ("XRPUSDT", "XRPUSDT"): 1.0,
-        
-        ("BTCUSDT", "ETHUSDT"): 0.85,
-        ("BTCUSDT", "SOLUSDT"): 0.75,
-        ("BTCUSDT", "BNBUSDT"): 0.70,
-        ("BTCUSDT", "ADAUSDT"): 0.70,
-        ("BTCUSDT", "XRPUSDT"): 0.65,
-        
-        ("ETHUSDT", "SOLUSDT"): 0.80,
-        ("ETHUSDT", "BNBUSDT"): 0.75,
-        ("ETHUSDT", "ADAUSDT"): 0.75,
-        ("ETHUSDT", "XRPUSDT"): 0.65,
-        
-        ("SOLUSDT", "BNBUSDT"): 0.70,
-        ("SOLUSDT", "ADAUSDT"): 0.70,
-        ("SOLUSDT", "XRPUSDT"): 0.60,
-        
-        ("BNBUSDT", "ADAUSDT"): 0.70,
-        ("BNBUSDT", "XRPUSDT"): 0.60,
-        
-        ("ADAUSDT", "XRPUSDT"): 0.65
-    }
-
     is_stressed = False
     try:
         df_vol = get_history(symbol=new_symbol, interval="60", limit=30)
@@ -3814,15 +3839,15 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
             is_stressed = vol_z_score > 2.0
             if is_stressed:
                 print(f"[Stress Covariance] Volatility Z-score: {vol_z_score:.2f} > 2.0. Stressed correlation mode active.")
-    except Exception as e:
-        print(f"[Stress Covariance Warning] Could not calculate volatility z-score: {e}")
+    except Exception:
+        pass
 
     def get_correlation(s1, s2):
         if s1 == s2:
             return 1.0
         if is_stressed:
             return 0.95
-        return CORRELATION_MAP.get((s1, s2)) or CORRELATION_MAP.get((s2, s1)) or 0.70
+        return get_rolling_correlation(s1, s2)
 
     # Collect active trades from all timeframes
     open_trades = []
