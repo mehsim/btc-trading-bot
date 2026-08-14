@@ -109,33 +109,40 @@ def get_model_feature_names(model):
 
 def sanitize_feature_matrix(X):
     """
-    Sanitizes feature matrix X by replacing NaN, Inf, -Inf, and None with 0.0 float values.
-    Guarantees clean, non-corrupted feature vectors reach model predictions.
+    Sanitizes feature matrix X by replacing NaN, Inf, -Inf, and None with context-appropriate neutral baselines
+    (1.0 for ratio features, 0.0 for z-scores, returns, and deltas).
     """
     if X is None:
         return X
     try:
+        ratio_cols = {"volume_ratio", "vol_ratio", "oi_ratio", "mfe_ratio", "atr_ratio"}
         if isinstance(X, pd.DataFrame):
             df = X.copy()
             df = df.replace([np.inf, -np.inf], np.nan)
-            df = df.fillna(0.0)
+            for c in df.columns:
+                fill_val = 1.0 if any(rc in c.lower() for rc in ratio_cols) else 0.0
+                df[c] = df[c].fillna(fill_val)
             return df.astype(float)
         elif isinstance(X, pd.Series):
             s = X.copy()
             s = s.replace([np.inf, -np.inf], np.nan)
-            s = s.fillna(0.0)
+            s_name = str(s.name or "").lower()
+            fill_val = 1.0 if any(rc in s_name for rc in ratio_cols) else 0.0
+            s = s.fillna(fill_val)
             return s.astype(float)
         elif isinstance(X, dict):
             clean_dict = {}
             for k, v in X.items():
+                k_lower = str(k).lower()
+                fill_val = 1.0 if any(rc in k_lower for rc in ratio_cols) else 0.0
                 if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-                    clean_dict[k] = 0.0
+                    clean_dict[k] = fill_val
                 else:
                     try:
                         clean_dict[k] = float(v)
                     except Exception as ex_ens:
                         log_event("WARNING", f"Ensemble notice: {ex_ens}")
-                        clean_dict[k] = 0.0
+                        clean_dict[k] = fill_val
             return clean_dict
         else:
             arr = np.asarray(X, dtype=float)

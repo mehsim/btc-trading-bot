@@ -1459,9 +1459,10 @@ def execute_bybit_order_ws_or_rest(endpoint, payload):
         return bybit_post_request(endpoint, payload)
 
 
-def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False, order_type="Market"):
+def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False, order_type="Market", order_link_id=None):
     # C1: Configurable order type & price bound slippage control
     order_type_str = "Limit" if (order_type == "Limit" and price is not None) else "Market"
+    link_id = order_link_id or f"bot_{symbol}_{int(time.time()*1000)}"
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -1469,7 +1470,8 @@ def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_on
         "orderType": order_type_str,
         "qty": str(qty),
         "timeInForce": "GTC" if order_type_str == "Limit" else "IOC",
-        "positionIdx": 0
+        "positionIdx": 0,
+        "orderLinkId": str(link_id)[:36]
     }
     if price is not None:
         payload["price"] = format_bybit_price(symbol, price)
@@ -2905,11 +2907,12 @@ def on_private_open(ws):
 
 _ws_filled_orders = {}
 _ws_filled_orders_lock = threading.Lock()
+_last_ws_pos_sync_time = 0.0
 
 def on_private_message(ws, message):
     import json
     import time
-    global last_private_ws_update_time
+    global last_private_ws_update_time, _last_ws_pos_sync_time
     last_private_ws_update_time = time.time()
     try:
         data = json.loads(message)
@@ -2921,6 +2924,8 @@ def on_private_message(ws, message):
         if req_id:
             with _ws_responses_lock:
                 _ws_responses[req_id] = data
+                if len(_ws_responses) > 200:
+                    _ws_responses.clear()
                 
         if op == "auth":
             if data.get("success") is True:
@@ -2946,19 +2951,24 @@ def on_private_message(ws, message):
                     if TRADE_MODE != "simulation":
                         bot_state["simulated_balance"] = val
                     print(f"[WebSocket Private] Balance updated dynamically from wallet stream: {val}")
-        elif topic == "order":
-            order_list = data.get("data", [])
-            for ord in order_list:
-                status = ord.get("orderStatus")
-                ord_id = ord.get("orderId")
-                if ord_id and status == "Filled":
-                    with _ws_filled_orders_lock:
-                        _ws_filled_orders[ord_id] = ord
-            import threading
-            threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
-        elif topic == "position":
-            import threading
-            threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
+        elif topic in ("order", "position"):
+            if topic == "order":
+                order_list = data.get("data", [])
+                for ord in order_list:
+                    status = ord.get("orderStatus")
+                    ord_id = ord.get("orderId")
+                    if ord_id and status == "Filled":
+                        with _ws_filled_orders_lock:
+                            _ws_filled_orders[ord_id] = ord
+                            if len(_ws_filled_orders) > 500:
+                                _ws_filled_orders.clear()
+            
+            # Debounce position sync to max once every 3.0s to avoid thread storms
+            now_t = time.time()
+            if now_t - _last_ws_pos_sync_time >= 3.0:
+                _last_ws_pos_sync_time = now_t
+                import threading
+                threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
     except Exception as e:
         print(f"[WebSocket Private Message Error] {e}")
 
@@ -4665,9 +4675,16 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
             min_sl_dist = entry_price * (min_sl_pct / 100.0)
             atr_sl_dist = sl_multiplier_adjusted * atr_dollars
-            is_floor_scaled = False
+            
+            # Preserve approved pre-flight stop loss if provided
+            preflight_sl = trade_details.get("stop_loss") if isinstance(trade_details, dict) else None
+            preflight_sl_dist = abs(entry_price - float(preflight_sl)) if preflight_sl is not None else 0.0
 
-            if atr_sl_dist >= min_sl_dist:
+            if preflight_sl_dist > 0:
+                raw_sl_dist = max(preflight_sl_dist, min_sl_dist)
+                sl_source = "PREFLIGHT_APPROVED"
+                sl_override_reason = "Pre-flight Approved SL Preserved"
+            elif atr_sl_dist >= min_sl_dist:
                 raw_sl_dist = atr_sl_dist
                 sl_source = "ATR"
                 sl_override_reason = "ATR Multiplier Applied"
@@ -5435,7 +5452,7 @@ def main():
                                 exit_reason = "TRAILING STOP / BREAK-EVEN HIT [SUCCESS]"
                             elif be_hit and is_profit:
                                 exit_reason = "BREAK-EVEN EXIT [SUCCESS]"
-                            elif is_profit:
+                                    elif is_profit:
                                 exit_reason = "PROFITABLE EXIT [SUCCESS]"
                             else:
                                 exit_reason = "STOP LOSS HIT [FAIL]"
@@ -5446,16 +5463,14 @@ def main():
                         is_stop_loss = "STOP LOSS" in str(exit_reason).upper() if exit_reason else True
                         
                         if is_stop_loss:
-                            # Maker limit execution for Stop Loss exit (Post-Only model)
+                            # Taker execution for Stop Loss market close
                             slippage_pct = 0.0
                             actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                            fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
-                            exit_reason = str(exit_reason) + " [Limit order Maker close]"
+                            exit_reason = str(exit_reason)
                         else:
                             # Maker execution for Take Profit, Timer, etc.
                             slippage_pct = 0.0
                             actual_price = bybit_exit_price if bybit_exit_price is not None else current_price
-                            fee_rate_roundtrip = 0.04  # Maker Entry + Maker Exit roundtrip
     
                         price_diff = actual_price - predicted_price
                         price_diff_pct = (price_diff / predicted_price) * 100
@@ -5504,7 +5519,6 @@ def main():
                         
                         actual_trend = "Bullish" if actual_change > 0 else "Bearish"
                         signal_correct = (actual_trend == direction)
-                        trend_status = f"{direction} was CORRECT [OK]" if signal_correct else f"{direction} was INCORRECT [FAIL]"
                         
                         print("\n==================================================")
                         print(f"[{active_symbol} {iv}m TRADE EXITED]: {exit_reason} (Slippage: {slippage_pct:.3f}%)")
@@ -5514,7 +5528,7 @@ def main():
                             print(f"Total Size: ${original_size:.2f} (Scaled-Out) | Net Return: {total_net_return_pct:+.4f}% (weighted)")
                             print(f"Scaled-Out PnL: ${scaled_out_pnl:+.2f} | Remaining PnL: ${realized_pnl:+.2f} | Total PnL: ${total_pnl:+.2f}")
                         else:
-                            print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {fee_rate_roundtrip:.2f}% fees)")
+                            print(f"Size: ${position_size_usd:.2f} | Net Return: {net_return_pct:+.4f}% (after {roundtrip_fee_rate*100.0:.3f}% fees)")
                             print(f"Realized PnL: ${realized_pnl:+.2f}")
                         # 81-Scenario Counterfactual Replay Matrix & Regret Analysis
                         try:
@@ -5527,11 +5541,10 @@ def main():
                                 interval=str(iv),
                                 entry_price=entry_price,
                                 exit_price=actual_price,
-                                actual_sl=float(active_trade.get("stop_loss", entry_price * 0.99)),
-                                actual_tp=float(active_trade.get("take_profit", entry_price * 1.02)),
+                                direction=direction,
+                                realized_pnl=total_pnl,
+                                planned_rr=float(active_trade.get("initial_planned_rr", 1.4)),
                                 actual_r=actual_r_val,
-                                risk_usd=float(position_size_usd)
-                            )
                             
                             best_cf = cf_res.get("best_scenario", {})
                             decision_outcome_db.update_outcome_and_regret(
@@ -5556,7 +5569,8 @@ def main():
                             "entry_price": float(entry_price),
                             "exit_price": float(actual_price),
                             "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
-                            "success": bool(signal_correct),
+                            "success": bool(total_pnl > 0),
+                            "signal_correct": bool(signal_correct),
                             "reason": str(exit_reason) + (" (Scale-Out)" if active_trade.get("half_closed", False) else ""),
                             "position_size_usd": float(position_size_usd),
                             "intended_size_usd": float(active_trade.get("intended_size_usd") or active_trade.get("original_size") or position_size_usd),
@@ -6729,17 +6743,6 @@ def main():
                                         atr_norm_val = latest_candle["ATR_norm"]
                                         atr_dollars = atr_norm_val * latest_candle["close"]
                                     
-                                        # Volatility (ATR)-Adaptive Take-Profit Multiplier
-                                        # High Volatility (ATR_norm >= 0.008) -> Smaller targets to lock profits
-                                        # Low Volatility (ATR_norm <= 0.003) -> Larger targets to capture extensions
-                                        base_tp = 2.0 if latest_candle["ADX"] >= 20.0 else 1.2
-                                        vol_factor = 1.0
-                                        if atr_norm_val > 0:
-                                            vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
-                                            vol_factor = max(0.75, min(1.5, vol_factor))
-                                        tp_multiplier = round(base_tp * vol_factor, 2)
-                                        print(f"[{iv}m Volatility Sizing] ADX: {latest_candle['ADX']:.1f} (Base TP: {base_tp:.1f}) | ATR Norm: {atr_norm_val*100:.3f}% (Vol Factor: {vol_factor:.2f}x) -> Dynamic TP Multiplier: {tp_multiplier:.2f}x")
-                                    
                                         # Align stop loss and take profit multipliers dynamically from baseline TIMEFRAME_CONFIG or release-gate approved walk-forward state
                                         optimized_cfg = bot_state.get("optimized_timeframe_config", {}).get(str(iv), {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
                                         baseline_cfg = TIMEFRAME_CONFIG.get(str(iv), {
@@ -6752,10 +6755,14 @@ def main():
                                         cfg = {**baseline_cfg, **optimized_cfg}
                                         adx_val = latest_candle.get("ADX", 0.0)
                                         sl_multiplier = cfg.get("sl_mult", 1.0)
-                                        if adx_val >= 20.0:
-                                            tp_multiplier_adjusted = cfg.get("tp_mult_trending", 2.0)
-                                        else:
-                                            tp_multiplier_adjusted = cfg.get("tp_mult_ranging", 1.5)
+                                        vol_factor = 1.0
+                                        if atr_norm_val > 0:
+                                            vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
+                                            vol_factor = max(0.75, min(1.5, vol_factor))
+
+                                        base_tp_target = cfg.get("tp_mult_trending", 2.0) if adx_val >= 20.0 else cfg.get("tp_mult_ranging", 1.5)
+                                        tp_multiplier_adjusted = round(base_tp_target * vol_factor, 3)
+                                        print(f"[{iv}m Target Config] ADX: {adx_val:.1f} | Base TP Mult: {base_tp_target:.2f}x (Vol Factor: {vol_factor:.2f}x) -> Effective TP Mult: {tp_multiplier_adjusted:.2f}x | SL Mult: {sl_multiplier:.2f}x")
 
                                         # 1. Volatility (ATR Percentile) Adjustment (±5%)
                                         atr_series = pd.to_numeric(df_completed["ATR"], errors="coerce").tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None

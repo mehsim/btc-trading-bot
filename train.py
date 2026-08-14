@@ -1898,7 +1898,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     except Exception as _ex_gov:
         print(f"[Governance] Warning: Could not update governance_state.json: {_ex_gov}")
 
-def load_live_trade_samples(interval, days=2, weight=3.0):
+def load_live_trade_samples(interval, days=2, weight=1.0):
     """Load recent closed trades and simulated skipped predictions, re-fetch features at entry time, return as weighted DataFrame."""
     try:
         import time as _time

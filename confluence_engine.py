@@ -376,8 +376,12 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     # FINAL SCORING
     score_pct = (total_score / max(1.0, float(max_score)) * 100.0) if max_score > 0 else 100.0
     score_threshold = 75.0
-    traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
-    trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True) and results.get("1h_Trend", {}).get("pass", True)
+    is_ranging_regime = "ranging" in str(regime).lower()
+    if is_ranging_regime:
+        # In ranging regimes, mean-reversion counter-trend bounces are valid; do not require 3-TF EMA consensus
+        trend_gates_passed = True
+    else:
+        trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True) and results.get("1h_Trend", {}).get("pass", True)
 
     effective_conf_threshold = float(dynamic_conf_threshold)
     approved = (calibrated_confidence >= effective_conf_threshold) and trend_gates_passed and traditional_approved
