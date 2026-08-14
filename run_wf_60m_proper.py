@@ -6,7 +6,7 @@ warnings.filterwarnings('ignore')
 
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features
-from ensemble import load_ensemble_classifier
+from ensemble import load_ensemble_classifier, _slice_model_input
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 INTERVAL = 60
@@ -38,8 +38,11 @@ for s in SUPPORTED_SYMBOLS:
         df_s = merge_derivatives_sentiment_features(df_s, symbol=s, interval=INTERVAL)
         df_s = add_features(df_s)
         
-        p_rang = model_ranging.predict_proba(df_s[feats_ranging].values)
-        p_trend = model_trending.predict_proba(df_s[feats_trending].values)
+        X_rang = _slice_model_input(model_ranging, df_s[feats_ranging])
+        X_trend = _slice_model_input(model_trending, df_s[feats_trending])
+
+        p_rang = model_ranging.predict_proba(X_rang)
+        p_trend = model_trending.predict_proba(X_trend)
         adxs = df_s["ADX"].values
         df_s["p_bear"] = np.where(adxs >= 25.0, p_trend[:, 0], p_rang[:, 0])
         df_s["p_bull"] = np.where(adxs >= 25.0, p_trend[:, 2], p_rang[:, 2])
