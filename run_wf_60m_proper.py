@@ -66,6 +66,12 @@ for s in SUPPORTED_SYMBOLS:
             _avail_r = [f for f in master_features if f in df_s.columns]
             X_full_r = df_s[_avail_r]
 
+        # Handle positional feature shape match if model expects 22 features
+        if hasattr(model_trending, "n_features_in_") and X_full_t.shape[1] != model_trending.n_features_in_:
+            X_full_t = X_full_t.iloc[:, :model_trending.n_features_in_]
+        if hasattr(model_ranging, "n_features_in_") and X_full_r.shape[1] != model_ranging.n_features_in_:
+            X_full_r = X_full_r.iloc[:, :model_ranging.n_features_in_]
+
         X_trend = _slice_model_input(model_trending, X_full_t)
         X_rang = _slice_model_input(model_ranging, X_full_r)
 
