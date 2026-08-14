@@ -728,6 +728,18 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
             f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
         )
+
+    # Model Governance Contract Enforcement: Feature Pipeline Hash Check (Unconditional Fail-Closed)
+    manifest_pipe_hash = m_data.get("feature_pipeline_hash")
+    if manifest_pipe_hash:
+        from features import FEATURE_PIPELINE_VERSION
+        current_pipe_hash = hashlib.sha256(f"{FEATURE_PIPELINE_VERSION}:{','.join(feature_names)}".encode("utf-8")).hexdigest()[:12]
+        if manifest_pipe_hash != current_pipe_hash:
+            raise RuntimeError(
+                f"[Model Governance Contract Error] Feature pipeline hash mismatch for '{prefix}': "
+                f"Manifest Pipeline Hash '{manifest_pipe_hash}' != Live Pipeline Hash '{current_pipe_hash}'. Model refused loading (Fail-Closed)."
+            )
+
     clf.model_version = model_ver
     clf.feature_version = feat_ver
     clf.ensemble_version = ens_ver

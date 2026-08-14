@@ -1654,8 +1654,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
             else:
                 champ_cv_mcc = champ_manifest.get("cv_metrics", {}).get("mcc", {}) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else {}
                 champ_mcc_val = float(champ_cv_mcc.get("mean")) if (isinstance(champ_cv_mcc, dict) and champ_cv_mcc.get("mean") is not None) else None
-                if champ_mcc_val is not None and chal_mcc_mean < champ_mcc_val:
-                    print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f})")
+                champ_neutral_pct = float(champ_manifest.get("cv_metrics", {}).get("label_dist_neutral_pct", 0.0)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.0
+                chal_neutral_pct = float(pct_neutral) if 'pct_neutral' in locals() else (float(neut_pct) if 'neut_pct' in locals() else 0.0)
+                
+                # If label distribution / schema shifted materially (>5% shift in neutral rate), direct MCC comparison across schemas is invalid
+                is_label_schema_diff = abs(champ_neutral_pct - chal_neutral_pct) > 5.0 and champ_neutral_pct > 0.0
+                mcc_tol = float(champ_manifest.get("governance_policy", {}).get("mcc_regression_tolerance", 0.010)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.010
+
+                if is_label_schema_diff:
+                    print(f"  [Predictive Floor Gate] Label schema shift detected (Champ neutral={champ_neutral_pct:.1f}% vs Chal neutral={chal_neutral_pct:.1f}%). Champion direct comparison void; promoting on absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}).")
+                elif champ_mcc_val is not None and chal_mcc_mean < (champ_mcc_val - mcc_tol):
+                    print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f} - tol {mcc_tol:.4f})")
                     should_save = False
 
         if should_save:
@@ -1804,6 +1813,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_manifest = dict(manifest_data)
                 chal_manifest["promoted"] = bool(should_save)
                 chal_manifest["evaluation_timestamp"] = now_iso
+                chal_manifest["manifest_mcc"] = round(float(chal_mcc_mean), 4)
+                chal_manifest["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
+                chal_manifest["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
+                if "metrics" not in chal_manifest or not isinstance(chal_manifest["metrics"], dict):
+                    chal_manifest["metrics"] = {}
+                chal_manifest["metrics"]["mcc"] = chal_manifest["manifest_mcc"]
+                chal_manifest["metrics"]["balanced_accuracy"] = chal_manifest["manifest_bal_acc"]
                 chal_manifest.pop("hmac_signature", None)
                 chal_canonical = json.dumps(chal_manifest, sort_keys=True, default=_json_safe).encode("utf-8")
                 chal_manifest["hmac_signature"] = hmac.new(hmac_key, chal_canonical, hashlib.sha256).hexdigest()

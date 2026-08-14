@@ -3,6 +3,8 @@ import warnings
 warnings.filterwarnings("ignore")
 from logger import log_event
 
+FEATURE_PIPELINE_VERSION = "v3.1.0"
+
 import numpy as np
 import bisect
 from ta.momentum import RSIIndicator

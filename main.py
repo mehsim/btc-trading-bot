@@ -7184,14 +7184,15 @@ def main():
                                         
                                             if all_pass:
                                                 # Post-Floor R:R & Economic Re-check (Closing the loop on widened SL)
-                                                final_sl_dist = abs(entry_price - stop_loss_price)
-                                                final_tp_dist = abs(take_profit_price - entry_price)
-                                                final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
-                                                cost_frac = 0.0016
-                                                required_p = (1.0 / (1.0 + max(1e-9, final_rr))) + cost_frac
-
-                                                if calibrated_confidence < required_p:
-                                                    log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {required_p:.3f}. Aborting entry.")
+                                                from trade_calculators import passes_economic_gate
+                                                if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
+                                                    final_sl_dist = abs(entry_price - stop_loss_price)
+                                                    final_tp_dist = abs(take_profit_price - entry_price)
+                                                    final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
+                                                    _sl_frac = final_sl_dist / max(1e-9, entry_price)
+                                                    _tp_frac = final_tp_dist / max(1e-9, entry_price)
+                                                    _req_p = (_sl_frac + 0.0016) / max(1e-9, (_sl_frac + _tp_frac))
+                                                    log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {_req_p:.3f}. Aborting entry.")
                                                     status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
                                                     all_pass = False
                                         

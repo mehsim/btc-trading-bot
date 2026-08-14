@@ -103,5 +103,7 @@
   "manifest_mcc": 0.206,
   "manifest_mcc_min": 0.1465,
   "manifest_bal_acc": 0.4861,
-  "hmac_signature": "57507e1ef1b5eabc30aa32e2019d4b73df79c8a93653ccb9c6129f0459e7b28e"
+  "feature_pipeline_hash": "205b80ae1fe5",
+  "feature_version": "v3.1.0",
+  "hmac_signature": "10416b05807c1ae6cca96df345f550cbaa50c35fec1e91574852dcb6971fa18e"
 }

@@ -82,7 +82,7 @@
   ],
   "vif_values": {},
   "feature_contract_hash": "385dc46c98e7",
-  "feature_pipeline_hash": "0084ba7ffed2",
+  "feature_pipeline_hash": "a4068d4eae16",
   "training_data_hash": "de2be28a0f06e737743f303f21c5180dbf41669b792d56c55f984f9453ec1c89",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "d8436d29410ba603aa8c56826993be02dc9f215df1a6582a20fed182e3dde575",
@@ -121,8 +121,8 @@
     "uniqueness_ratio": 0.0909,
     "effective_sample_size": 1782.36,
     "raw_sample_size": 19601,
-    "mcc": 0.0951,
-    "balanced_accuracy": 0.4212
+    "mcc": 0.02,
+    "balanced_accuracy": 0.3438
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -211,9 +211,9 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0951,
-  "manifest_mcc_min": 0.0771,
-  "manifest_bal_acc": 0.4212,
+  "manifest_mcc": 0.02,
+  "manifest_mcc_min": -0.0138,
+  "manifest_bal_acc": 0.3438,
   "label_distribution": [
     7364,
     8942,
@@ -221,5 +221,5 @@
   ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-14T20:30:05.397098+00:00",
-  "hmac_signature": "31469d887664344503629c635e370641488307eb4518b5c799963ad071f7b834"
+  "hmac_signature": "8f972de9da7b45a95a7d7b3fdf95ff42aceaee323381ec4901b11b16c27a61fa"
 }

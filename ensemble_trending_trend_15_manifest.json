@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_trend_15",
-  "timestamp": "2026-08-13T13:11:09.035010+00:00",
-  "model_version": "v7.2.0-9e86f616-202608131311",
+  "timestamp": "2026-08-14T20:58:24.613551+00:00",
+  "model_version": "v7.2.0-a3cc4154-202608142058",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "9e86f616",
+  "git_sha": "a3cc4154",
   "feature_count": 22,
   "feature_names": [
     "open_interest",
@@ -58,8 +58,8 @@
   ],
   "vif_values": {},
   "feature_contract_hash": "44acc0809fe0",
-  "feature_pipeline_hash": "0084ba7ffed2",
-  "training_data_hash": "557878d0db467894f821bfae594fe15df3bcbda3958d481511b9180f75415ffd",
+  "feature_pipeline_hash": "e8505f8ea0a0",
+  "training_data_hash": "2698724585cbc4baea6f666eeefc4659730f7ae0d7fab144b74816f297a37daf",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "cbb939e97467d871d93dc9ef14dd88645f8c5d6144ac2458c688f0d9df5a2ae3",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -80,26 +80,106 @@
     "mcc_regression_tolerance": 0.01
   },
   "dependencies": {
-    "python": "3.14.4",
+    "python": "3.14.6",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.5.1",
+    "numpy": "2.5.0",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
   "promotion_metrics": {
+    "mcc": 0.125,
+    "balanced_accuracy": 0.421,
     "uniqueness_ratio": 0.077,
-    "effective_sample_size": 415.08,
-    "raw_sample_size": 5390
+    "effective_sample_size": 419.23,
+    "raw_sample_size": 5444
   },
   "metrics": {
     "mcc": 0.125,
-    "balanced_accuracy": 0.421
+    "balanced_accuracy": 0.421,
+    "uniqueness_ratio": 0.077,
+    "effective_sample_size": 419.23,
+    "raw_sample_size": 5444
   },
   "cv_metrics": {
-    "mcc": 0.125,
-    "balanced_accuracy": 0.421
+    "metrics_schema_version": 1,
+    "balanced_accuracy": {
+      "mean": 0.3659,
+      "median": 0.3842,
+      "std": 0.0333,
+      "min": 0.3032,
+      "max": 0.3922
+    },
+    "macro_f1": {
+      "mean": 0.2965,
+      "median": 0.3165,
+      "std": 0.041,
+      "min": 0.242,
+      "max": 0.3494
+    },
+    "mcc": {
+      "mean": 0.0594,
+      "median": 0.0748,
+      "std": 0.0569,
+      "min": -0.0353,
+      "max": 0.1185
+    },
+    "mean_kappa": 0.0446292616654572,
+    "mean_pr_auc_bear": 0.1611472869393235,
+    "mean_pr_auc_bull": 0.20052315846004967,
+    "mean_raw_accuracy": 0.3746,
+    "mean_mae": 0.005312,
+    "label_dist_bearish_pct": 15.4,
+    "label_dist_neutral_pct": 66.33,
+    "label_dist_bullish_pct": 18.27,
+    "n_training_samples": 5444,
+    "n_holdout_samples": 960,
+    "effective_sample_size": 419.23,
+    "raw_sample_size": 5444,
+    "uniqueness_ratio": 0.077,
+    "confusion_matrix": {
+      "labels": [
+        "Bearish",
+        "Neutral",
+        "Bullish"
+      ],
+      "label_ids": [
+        0,
+        1,
+        2
+      ],
+      "matrix": [
+        [
+          191,
+          202,
+          278
+        ],
+        [
+          761,
+          1162,
+          1094
+        ],
+        [
+          260,
+          241,
+          346
+        ]
+      ]
+    },
+    "holdout_accuracy": 0.6552,
+    "holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.5259,
+    "holdout_ece": 0.0581,
+    "optuna_objective": {
+      "mean": null,
+      "median": null,
+      "std": null,
+      "min": null,
+      "max": null
+    },
+    "training_pipeline_version": "v7.2.0",
+    "git_sha": "b04ba1b7"
   },
   "barrier_config": {
     "tp_mult_trending": 2.5,
@@ -109,10 +189,5 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "stage": "Production",
-  "manifest_mcc": 0.125,
-  "manifest_mcc_min": 0.0875,
-  "manifest_bal_acc": 0.421,
-  "manifest_hmac": "f88cb88d59693cdab433b31eb5a7d1fc7c9e315ae651b705a04a3a07ee934686",
-  "hmac_signature": "8aa597d01ee0396d7f7ab981712f7e865949386416bf76be771d094e4b4d5da1"
+  "hmac_signature": "9d9164bae7ad7af9b23d5fca8c09b1cdcf49eab54e536b3fd3635e1c3c8ad366"
 }
