@@ -10,18 +10,14 @@ from ensemble import load_ensemble_classifier
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 INTERVAL = 60
-FEE_RATE = 0.0008  # 0.08% per leg (0.16% round-trip)
-TP_MULT = 1.5567
-SL_MULT = 0.6393
-LOOKAHEAD = 10
+FEE_RATE = 0.0004  # 0.04% per leg (0.08% round-trip)
+TP_MULT = 2.50
+SL_MULT = 1.50
+LOOKAHEAD = 12
 N_WINDOWS = 15
-MIN_EVAL_THRESHOLD_FLOOR = 0.25
+eval_threshold = 0.52
 
-p_star = SL_MULT / (TP_MULT + SL_MULT)  # 0.6393 / 2.196 = 0.29112
-cost_bps = 16.0
-eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (TP_MULT + SL_MULT))), 4)
-
-print(f"=== 60M CONTROL WALK-FORWARD BACKTEST (TP={TP_MULT}, SL={SL_MULT}, MIN_FLOOR={eval_threshold}) ===")
+print(f"=== 60M CONTROL WALK-FORWARD BACKTEST (TP={TP_MULT}, SL={SL_MULT}, CONF_THRESH={eval_threshold}) ===")
 
 # Load 60m models
 model_ranging = load_ensemble_classifier("ensemble_ranging_trend_60")
