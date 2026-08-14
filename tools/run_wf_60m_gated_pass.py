@@ -270,7 +270,8 @@ print("-" * 105)
 for i in range(N_WINDOWS):
     rn = df_normal.iloc[i]
     rf = df_flipped.iloc[i]
-    print(f"W{rn['window']:02d}      | {int(rn['taken']):<12} | {int(rn['skipped_regime']):<12} | {rn['win_rate']:>6.2f}%      | {rn['pf']:>8.3f}   | {int(rf['taken']):<12} | {rf['win_rate']:>6.2f}%      | {rf['pf']:>8.3f}")
+    w_num = int(rn['window'])
+    print(f"W{w_num:02d}      | {int(rn['taken']):<12} | {int(rn['skipped_regime']):<12} | {rn['win_rate']:>6.2f}%      | {rn['pf']:>8.3f}   | {int(rf['taken']):<12} | {rf['win_rate']:>6.2f}%      | {rf['pf']:>8.3f}")
 
 print("=" * 105)
 
