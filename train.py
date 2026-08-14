@@ -1655,7 +1655,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 champ_cv_mcc = champ_manifest.get("cv_metrics", {}).get("mcc", {}) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else {}
                 champ_mcc_val = float(champ_cv_mcc.get("mean")) if (isinstance(champ_cv_mcc, dict) and champ_cv_mcc.get("mean") is not None) else None
                 champ_neutral_pct = float(champ_manifest.get("cv_metrics", {}).get("label_dist_neutral_pct", 0.0)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.0
-                chal_neutral_pct = float(pct_neutral) if 'pct_neutral' in locals() else (float(neut_pct) if 'neut_pct' in locals() else 0.0)
+                chal_neutral_pct = float(neut_pct) if 'neut_pct' in locals() else 0.0
                 
                 # If label distribution / schema shifted materially (>5% shift in neutral rate), direct MCC comparison across schemas is invalid
                 is_label_schema_diff = abs(champ_neutral_pct - chal_neutral_pct) > 5.0 and champ_neutral_pct > 0.0
