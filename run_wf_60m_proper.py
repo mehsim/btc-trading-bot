@@ -63,6 +63,7 @@ for s in SUPPORTED_SYMBOLS:
 
         adxs = df_s["ADX"].values
         df_s["p_bear"] = np.where(adxs >= 25.0, p_trend[:, 0], p_rang[:, 0])
+        df_s["p_neut"] = np.where(adxs >= 25.0, p_trend[:, 1], p_rang[:, 1])
         df_s["p_bull"] = np.where(adxs >= 25.0, p_trend[:, 2], p_rang[:, 2])
         
         symbol_dfs[s] = df_s
@@ -76,6 +77,7 @@ for s, df_s in symbol_dfs.items():
             "sym_idx": idx,
             "timestamp": row["timestamp"],
             "p_bear": row["p_bear"],
+            "p_neut": row["p_neut"],
             "p_bull": row["p_bull"],
             "close": row["close"],
             "ATR_norm": row["ATR_norm"]
@@ -101,17 +103,12 @@ for w in range(N_WINDOWS):
         ts = df_all.loc[i, "timestamp"]
         
         p_bear = df_all.loc[i, "p_bear"]
+        p_neut = df_all.loc[i, "p_neut"]
         p_bull = df_all.loc[i, "p_bull"]
-        dir_total = p_bear + p_bull
-        if dir_total < 0.15:
-            continue
-            
-        norm_bear = p_bear / max(1e-9, dir_total)
-        norm_bull = p_bull / max(1e-9, dir_total)
         
-        if norm_bull >= eval_threshold:
+        if p_bull >= eval_threshold and p_bull > max(p_bear, p_neut):
             is_bull = True
-        elif norm_bear >= eval_threshold:
+        elif p_bear >= eval_threshold and p_bear > max(p_bull, p_neut):
             is_bull = False
         else:
             continue
