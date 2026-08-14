@@ -1024,6 +1024,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"Skipping {name} due to insufficient data.")
             return
 
+        from config import TIMEFRAME_CONFIG, HOLDOUT_FRACTION, MIN_EFFECTIVE_HOLDOUT_SAMPLES
+        purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12)
+        embargo_len = max(1, int(len(df_regime) * 0.01))
+        required_holdout_rows = max(
+            int(len(df_regime) * HOLDOUT_FRACTION),
+            int(MIN_EFFECTIVE_HOLDOUT_SAMPLES * purge_len) + embargo_len
+        )
+        split_idx = max(purge_len + 10, len(df_regime) - required_holdout_rows)
+        df_regime_train = df_regime.iloc[:split_idx - purge_len]  # RFECV sees ONLY this
+
         if MLFLOW_AVAILABLE:
             try:
                 if mlflow.active_run():
@@ -1049,11 +1059,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         if not skip_rfecv:
             print(f"\nRunning RFECV feature selection specifically for regime: {name.upper()}...")
-            y_rfecv = df_regime["target_trend"]
-            X_rfecv_prelim = df_regime[features]
+            y_rfecv = df_regime_train["target_trend"]
+            X_rfecv_prelim = df_regime_train[features]
             
-            if len(df_regime) > 10000:
-                df_sub = df_regime.iloc[-10000:]
+            if len(df_regime_train) > 10000:
+                df_sub = df_regime_train.iloc[-10000:]
                 X_rfecv_prelim = df_sub[features]
                 y_rfecv = df_sub["target_trend"]
 
@@ -1592,6 +1602,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_pred_p = final_ensemble_p.predict(X_holdout)
         chal_acc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_t))
         chal_mae = float(mean_absolute_error(y_holdout_price, chal_pred_p))
+        from sklearn.metrics import accuracy_score, matthews_corrcoef
+        holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
+        holdout_mcc = float(matthews_corrcoef(y_holdout_trend, chal_pred_t))
 
         from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
         try:
@@ -1610,11 +1623,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 champ_pred_p = champion_p.predict(X_holdout)
                 champ_acc = float(balanced_accuracy_score(y_holdout_trend, champ_pred_t))
                 champ_mae = float(mean_absolute_error(y_holdout_price, champ_pred_p))
+                champ_mcc = float(matthews_corrcoef(y_holdout_trend, champ_pred_t))
 
                 print(f"  [Champion-Challenger] Frozen Hold-Out Comparison for {name.upper()}:")
                 print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
+                print(f"    - Classifier Holdout MCC: Champion = {champ_mcc:.4f} | Challenger = {holdout_mcc:.4f}")
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
-                log_event("INFO", f"Challenger Metrics: Brier = {chal_brier:.4f} | ECE = {chal_ece:.4f}")
+                log_event("INFO", f"Challenger Metrics: Brier = {chal_brier:.4f} | ECE = {chal_ece:.4f} | Holdout MCC = {holdout_mcc:.4f}")
 
                 if chal_acc > champ_acc:
                     should_save = True
@@ -1751,6 +1766,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             },
             "holdout_accuracy": round(holdout_raw_acc, 4),
             "holdout_balanced_accuracy": round(chal_acc, 4),
+            "holdout_mcc": round(holdout_mcc, 4),
             "holdout_brier": round(chal_brier, 4),
             "holdout_ece": round(chal_ece, 4),
             "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
