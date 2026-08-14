@@ -2331,53 +2331,33 @@ def load_model_weights(iv):
             
     # Load
     try:
-        # Load selected features from manifest as single source of truth (fallback to selected_features files)
+        # Load selected features independently from feature contract definition files
         feat_trending = None
         feat_ranging = None
         
-        manifest_trending = f"{prefixes['trending_trend']}_manifest.json"
-        if os.path.exists(manifest_trending):
-            try:
-                with open(manifest_trending, "r") as f:
-                    m_tr = json.load(f)
-                    feat_trending = m_tr.get("feature_names")
-            except Exception as e:
-                log_event("DEBUG", f"Could not load feature_names from {manifest_trending}: {e}")
+        for f_name in [f"selected_features_{iv}_trending.json", f"selected_features_{iv}.json"]:
+            if os.path.exists(f_name):
+                try:
+                    with open(f_name, "r") as f:
+                        feat_trending = json.load(f)
+                        if feat_trending:
+                            break
+                except Exception as e:
+                    log_event("WARNING", f"Could not load {f_name}: {e}")
 
-        manifest_ranging = f"{prefixes['ranging_trend']}_manifest.json"
-        if os.path.exists(manifest_ranging):
-            try:
-                with open(manifest_ranging, "r") as f:
-                    m_rn = json.load(f)
-                    feat_ranging = m_rn.get("feature_names")
-            except Exception as e:
-                log_event("DEBUG", f"Could not load feature_names from {manifest_ranging}: {e}")
+        for f_name in [f"selected_features_{iv}_ranging.json", f"selected_features_{iv}.json"]:
+            if os.path.exists(f_name):
+                try:
+                    with open(f_name, "r") as f:
+                        feat_ranging = json.load(f)
+                        if feat_ranging:
+                            break
+                except Exception as e:
+                    log_event("WARNING", f"Could not load {f_name}: {e}")
 
-        # Fallback to selected_features json files if manifest missing feature_names
-        if not feat_trending:
-            for f_name in [f"selected_features_{iv}_trending.json", f"selected_features_{iv}.json", "selected_features_30.json"]:
-                if os.path.exists(f_name):
-                    try:
-                        with open(f_name, "r") as f:
-                            feat_trending = json.load(f)
-                            if feat_trending:
-                                break
-                    except Exception:
-                        pass
         if not feat_trending:
             from core import features as master_features
             feat_trending = master_features
-
-        if not feat_ranging:
-            for f_name in [f"selected_features_{iv}_ranging.json", f"selected_features_{iv}.json", "selected_features_30.json"]:
-                if os.path.exists(f_name):
-                    try:
-                        with open(f_name, "r") as f:
-                            feat_ranging = json.load(f)
-                            if feat_ranging:
-                                break
-                    except Exception:
-                        pass
         if not feat_ranging:
             from core import features as master_features
             feat_ranging = master_features

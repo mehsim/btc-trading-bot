@@ -487,7 +487,8 @@ def add_features(df, fetch_calendar_callback=None):
         df = high_alpha_feature_engine.compute_all_high_alpha_features(df)
     except Exception as e:
         print(f"[Features Warning] Failed computing high alpha features: {e}")
-    df = df.bfill().ffill().fillna(0.0)
+    df = df.bfill().ffill()
+    df = sanitize_feature_matrix(df)
     if cache_key is not None:
         if len(_FEATURES_CACHE) > 50:
             _FEATURES_CACHE.clear()

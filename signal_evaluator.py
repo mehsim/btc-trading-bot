@@ -58,7 +58,6 @@ class SignalEvaluator:
             try:
                 with open(manifest_path, "r") as mf:
                     m_data = json.load(mf)
-                    feat_list = m_data.get("feature_names") or m_data.get("surviving_features")
                     m_ver = m_data.get("model_version", "v7.2.0")
                     git_sha_str = m_data.get("git_sha", "unknown")
                     model_ver_str = f"btc_{interval}m_{regime_key}_clf:{m_ver}"
@@ -71,16 +70,16 @@ class SignalEvaluator:
             except Exception as ex_m:
                 log_event("WARNING", f"[SignalEvaluator Warning] Failed reading manifest {manifest_path}: {ex_m}")
 
-        if not feat_list:
-            for fname in [f"selected_features_{interval}_{regime_key}.json", f"selected_features_{interval}.json"]:
-                if os.path.exists(fname):
-                    try:
-                        with open(fname) as f:
-                            feat_list = json.load(f)
-                            if feat_list:
-                                break
-                    except (ValueError, TypeError, KeyError, OSError) as ex_f:
-                        log_event("WARNING", f"[SignalEvaluator Info] Feature file notice: {ex_f}")
+        # Independent feature source of truth
+        for fname in [f"selected_features_{interval}_{regime_key}.json", f"selected_features_{interval}.json"]:
+            if os.path.exists(fname):
+                try:
+                    with open(fname) as f:
+                        feat_list = json.load(f)
+                        if feat_list:
+                            break
+                except (ValueError, TypeError, KeyError, OSError) as ex_f:
+                    log_event("WARNING", f"[SignalEvaluator Info] Feature file notice: {ex_f}")
 
         if not feat_list:
             log_event("ERROR", f"[SignalEvaluator ERROR] No feature contract list found for {interval}m ({regime_key}). Failing closed.")
