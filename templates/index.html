@@ -3078,7 +3078,8 @@
                             subtitleElem.innerText = `Calibrated Conf: 0%`;
                         }
 
-                        const activeTradesList = data[`active_trade_${tf}`] || [];
+                        const rawActiveList = data[`active_trade_${tf}`] || [];
+                        const activeTradesList = rawActiveList.filter(t => !t.bybit_closed && !t.closed);
                         const positionContainer = document.getElementById(`position-container-${tf}`);
                         const levBadge = document.getElementById(`leverage-badge-${tf}`);
                         

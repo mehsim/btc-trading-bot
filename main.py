@@ -6022,8 +6022,8 @@ def main():
                 active_trades_list = bot_state.get(active_trade_key, [])
                 if not isinstance(active_trades_list, list):
                     active_trades_list = [] if active_trades_list is None else [active_trades_list]
-                    bot_state[active_trade_key] = active_trades_list
-                active_trades_list = list(active_trades_list)
+                active_trades_list = [t for t in active_trades_list if isinstance(t, dict) and not t.get("bybit_closed") and not t.get("closed")]
+                bot_state[active_trade_key] = active_trades_list
                 
             if (symbol, iv) not in fetched_data:
                 log_event("WARNING", f"[{symbol} {iv}m] Market data missing from fetched_data batch. Skipping evaluation.")
