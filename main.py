@@ -4959,6 +4959,12 @@ def main():
     hour_check_complete = False
     last_candle_check_time = 0.0
 
+    # Trigger immediate sync at main loop startup
+    try:
+        sync_active_positions_from_bybit()
+    except Exception as ex_init_sync:
+        print(f"[Main Loop Startup] Immediate position sync error: {ex_init_sync}")
+
     while True:
         current_time = time.time()
         
