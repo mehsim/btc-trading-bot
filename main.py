@@ -5450,9 +5450,7 @@ def main():
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
                             elif (half_closed or active_trade.get("break_even_triggered")) and is_profit:
                                 exit_reason = "TRAILING STOP / BREAK-EVEN HIT [SUCCESS]"
-                            elif be_hit and is_profit:
-                                exit_reason = "BREAK-EVEN EXIT [SUCCESS]"
-                                    elif is_profit:
+                            elif is_profit:
                                 exit_reason = "PROFITABLE EXIT [SUCCESS]"
                             else:
                                 exit_reason = "STOP LOSS HIT [FAIL]"
