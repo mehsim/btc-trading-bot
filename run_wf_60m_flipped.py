@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import json
@@ -6,31 +7,30 @@ warnings.filterwarnings('ignore')
 
 from data import get_history, merge_derivatives_sentiment_features
 from core import add_features
-from ensemble import load_ensemble_classifier
+from main import load_model_weights, models_by_interval
+from ensemble import get_model_feature_names, _slice_model_input
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 INTERVAL = 60
-FEE_RATE = 0.0008  # 0.08% per leg (0.16% round-trip)
-TP_MULT = 1.5567
-SL_MULT = 0.6393
-LOOKAHEAD = 10
+FEE_RATE = 0.0004  # 0.04% per leg (0.08% round-trip)
+TP_MULT = 2.50
+SL_MULT = 1.50
+LOOKAHEAD = 12
 N_WINDOWS = 15
-MIN_EVAL_THRESHOLD_FLOOR = 0.25
+eval_threshold = 0.52
 
-p_star = SL_MULT / (TP_MULT + SL_MULT)  # 0.6393 / 2.196 = 0.29112
-cost_bps = 16.0
-eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + (cost_bps / 1e4) / (TP_MULT + SL_MULT))), 4)
+print(f"=== 60M FLIPPED DIRECTION (BULLISH <-> BEARISH) WALK-FORWARD BACKTEST (TP={TP_MULT}, SL={SL_MULT}, CONF={eval_threshold}) ===")
 
-print(f"=== 60M FLIPPED DIRECTION (BULLISH <-> BEARISH) WALK-FORWARD BACKTEST ({eval_threshold}) ===")
+# Load active 60m models via main loader
+load_model_weights("60")
+load_model_weights(60)
+models_60 = models_by_interval.get("60") or models_by_interval.get(60) or {}
 
-# Load 60m models
-model_ranging = load_ensemble_classifier("ensemble_ranging_trend_60")
-model_trending = load_ensemble_classifier("ensemble_trending_trend_60")
+model_trending = models_60.get("trending", {}).get("trend") or models_60.get("ranging", {}).get("trend")
+model_ranging = models_60.get("ranging", {}).get("trend") or model_trending
 
-with open("selected_features_60_ranging.json") as f:
-    feats_ranging = json.load(f)
-with open("selected_features_60_trending.json") as f:
-    feats_trending = json.load(f)
+feat_trending = models_60.get("selected_features_trending") or models_60.get("selected_features_ranging") or models_60.get("selected_features")
+feat_ranging = models_60.get("selected_features_ranging") or feat_trending
 
 symbol_dfs = {}
 print("Loading 60m candle history across 9 symbols...")
@@ -42,10 +42,45 @@ for s in SUPPORTED_SYMBOLS:
         df_s = merge_derivatives_sentiment_features(df_s, symbol=s, interval=INTERVAL)
         df_s = add_features(df_s)
         
-        p_rang = model_ranging.predict_proba(df_s[feats_ranging].values)
-        p_trend = model_trending.predict_proba(df_s[feats_trending].values)
+        # Prepare trending feature matrix
+        _exp_names_t = get_model_feature_names(model_trending) if model_trending else None
+        if _exp_names_t and not all(str(n).startswith("Column_") for n in _exp_names_t):
+            X_full_t = df_s.reindex(columns=_exp_names_t, fill_value=0.0)
+        elif feat_trending:
+            _avail_t = [f for f in feat_trending if f in df_s.columns]
+            X_full_t = df_s[_avail_t]
+        else:
+            from core import features as master_features
+            _avail_t = [f for f in master_features if f in df_s.columns]
+            X_full_t = df_s[_avail_t]
+
+        # Prepare ranging feature matrix
+        _exp_names_r = get_model_feature_names(model_ranging) if model_ranging else None
+        if _exp_names_r and not all(str(n).startswith("Column_") for n in _exp_names_r):
+            X_full_r = df_s.reindex(columns=_exp_names_r, fill_value=0.0)
+        elif feat_ranging:
+            _avail_r = [f for f in feat_ranging if f in df_s.columns]
+            X_full_r = df_s[_avail_r]
+        else:
+            from core import features as master_features
+            _avail_r = [f for f in master_features if f in df_s.columns]
+            X_full_r = df_s[_avail_r]
+
+        # Handle positional feature shape match if model expects 22 features
+        if hasattr(model_trending, "n_features_in_") and X_full_t.shape[1] != model_trending.n_features_in_:
+            X_full_t = X_full_t.iloc[:, :model_trending.n_features_in_]
+        if hasattr(model_ranging, "n_features_in_") and X_full_r.shape[1] != model_ranging.n_features_in_:
+            X_full_r = X_full_r.iloc[:, :model_ranging.n_features_in_]
+
+        X_trend = _slice_model_input(model_trending, X_full_t)
+        X_rang = _slice_model_input(model_ranging, X_full_r)
+
+        p_trend = model_trending.predict_proba(X_trend)
+        p_rang = model_ranging.predict_proba(X_rang)
+
         adxs = df_s["ADX"].values
         df_s["p_bear"] = np.where(adxs >= 25.0, p_trend[:, 0], p_rang[:, 0])
+        df_s["p_neut"] = np.where(adxs >= 25.0, p_trend[:, 1], p_rang[:, 1])
         df_s["p_bull"] = np.where(adxs >= 25.0, p_trend[:, 2], p_rang[:, 2])
         
         symbol_dfs[s] = df_s
@@ -59,6 +94,7 @@ for s, df_s in symbol_dfs.items():
             "sym_idx": idx,
             "timestamp": row["timestamp"],
             "p_bear": row["p_bear"],
+            "p_neut": row["p_neut"],
             "p_bull": row["p_bull"],
             "close": row["close"],
             "ATR_norm": row["ATR_norm"]
@@ -69,7 +105,7 @@ total_bars = len(df_all)
 window_size = total_bars // N_WINDOWS
 window_metrics = []
 
-print("\n--- 60M PER-WINDOW FLIPPED SIGNAL PERFORMANCE BREAKDOWN ---")
+print("\n--- 60M FLIPPED PER-WINDOW PERFORMANCE BREAKDOWN ---")
 
 for w in range(N_WINDOWS):
     w_start = w * window_size
@@ -84,18 +120,13 @@ for w in range(N_WINDOWS):
         ts = df_all.loc[i, "timestamp"]
         
         p_bear = df_all.loc[i, "p_bear"]
+        p_neut = df_all.loc[i, "p_neut"]
         p_bull = df_all.loc[i, "p_bull"]
-        dir_total = p_bear + p_bull
-        if dir_total < 0.15:
-            continue
-            
-        norm_bear = p_bear / max(1e-9, dir_total)
-        norm_bull = p_bull / max(1e-9, dir_total)
         
-        # FLIP SIGNAL DIRECTION: If Bullish -> Bearish, If Bearish -> Bullish
-        if norm_bull >= eval_threshold:
+        # FLIPPED DIRECTION ASSIGNMENT:
+        if p_bull >= eval_threshold and p_bull > max(p_bear, p_neut):
             is_bull = False  # FLIPPED!
-        elif norm_bear >= eval_threshold:
+        elif p_bear >= eval_threshold and p_bear > max(p_bull, p_neut):
             is_bull = True   # FLIPPED!
         else:
             continue
