@@ -3816,7 +3816,7 @@ def get_rolling_correlation(symbol_a: str, symbol_b: str, interval: str = "60", 
             merged = pd.merge(df_a[["timestamp", "close"]], df_b[["timestamp", "close"]], on="timestamp", suffixes=("_a", "_b"))
             if len(merged) >= 10:
                 corr = merged["close_a"].corr(merged["close_b"])
-                if not math.isnan(corr):
+                if not np.isnan(corr):
                     return float(np.clip(corr, -1.0, 1.0))
     except Exception:
         pass
