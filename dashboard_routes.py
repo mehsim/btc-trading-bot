@@ -331,6 +331,47 @@ bot_logs = [
     f"[{time.strftime('%H:%M:%S')}] [System] Main monitoring loop active. Monitoring 9 assets across all timeframes..."
 ]
 
+def get_live_bot_logs(max_lines=40):
+    """Read latest live log lines directly from bot.log file or memory buffer."""
+    lines = []
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")
+    if not os.path.exists(log_file):
+        log_file = "bot.log"
+        
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 32768), os.SEEK_SET)
+                raw_lines = f.readlines()
+                for l in raw_lines:
+                    l_str = l.strip()
+                    if not l_str:
+                        continue
+                    if l_str.startswith("{") and l_str.endswith("}"):
+                        try:
+                            item = json.loads(l_str)
+                            ts = item.get("timestamp_utc", "")[:19].split("T")[-1]
+                            lvl = item.get("level", "INFO")
+                            msg = item.get("message", "")
+                            lines.append(f"[{ts}] [{lvl}] {msg}")
+                            continue
+                        except Exception:
+                            pass
+                    lines.append(l_str)
+        except Exception:
+            pass
+            
+    if not lines:
+        try:
+            import main
+            lines = list(main.bot_logs) if hasattr(main, "bot_logs") and main.bot_logs else list(bot_logs)
+        except Exception:
+            lines = list(bot_logs)
+            
+    return lines[-max_lines:]
+
 def get_default_confluence_checks():
     return {
         "checks": {
@@ -414,14 +455,7 @@ def api_status():
             if not status_data.get(f"confluence_results_{tf}"):
                 status_data[f"confluence_results_{tf}"] = get_default_confluence_checks()
 
-        try:
-            import main
-            active_logs = main.bot_logs if hasattr(main, "bot_logs") and main.bot_logs else bot_logs
-        except Exception:
-            active_logs = bot_logs
-
-        with logs_lock:
-            status_data["logs"] = list(active_logs)
+        status_data["logs"] = get_live_bot_logs(40)
 
         # Fetch real Bybit balance first to avoid UnboundLocalError
         real_bal = None
