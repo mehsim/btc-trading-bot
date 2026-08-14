@@ -595,7 +595,8 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
                 log_event("WARNING", f"database notice updating initial/size columns: {ex_init_cols}")
             
             # Step 2: Delete from active_trades
-            conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR (tf = ? AND symbol = ?);", (t_id, str(tf), symbol))
+            clean_tf = str(tf).replace("m", "")
+            conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR symbol = ? OR replace(tf, 'm', '') = ?;", (t_id, symbol, clean_tf))
             
             # Step 3: Pending pain check if applicable
             if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
