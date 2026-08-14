@@ -1415,8 +1415,8 @@ def get_bybit_min_qty_step(symbol):
                     with _instrument_info_cache_lock:
                         _instrument_info_cache[symbol] = (qty_step, now_t + 3600.0)
                     return qty_step
-    except Exception:
-        pass
+    except Exception as e:
+        log_event("DEBUG", f"Dynamic instrument fetch fallback for {symbol}: {e}")
 
     # Static Fallback
     min_limits = {
@@ -3818,8 +3818,8 @@ def get_rolling_correlation(symbol_a: str, symbol_b: str, interval: str = "60", 
                 corr = merged["close_a"].corr(merged["close_b"])
                 if not np.isnan(corr):
                     return float(np.clip(corr, -1.0, 1.0))
-    except Exception:
-        pass
+    except Exception as e:
+        log_event("DEBUG", f"Rolling correlation calculation fallback ({symbol_a}/{symbol_b}): {e}")
     return 0.70
 
 def calculate_covariance_multiplier(new_symbol, new_direction):
@@ -3839,8 +3839,8 @@ def calculate_covariance_multiplier(new_symbol, new_direction):
             is_stressed = vol_z_score > 2.0
             if is_stressed:
                 print(f"[Stress Covariance] Volatility Z-score: {vol_z_score:.2f} > 2.0. Stressed correlation mode active.")
-    except Exception:
-        pass
+    except Exception as e:
+        log_event("DEBUG", f"Stress evaluation fallback for {new_symbol}: {e}")
 
     def get_correlation(s1, s2):
         if s1 == s2:
