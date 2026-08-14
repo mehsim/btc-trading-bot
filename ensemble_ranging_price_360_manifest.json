@@ -46,7 +46,9 @@
   "metrics": {
     "uniqueness_ratio": 0.0588,
     "effective_sample_size": 1593.06,
-    "raw_sample_size": 27074
+    "raw_sample_size": 27074,
+    "mcc": 0.147,
+    "balanced_accuracy": 0.428
   },
   "barrier_config": {
     "tp_mult_trending": 3.6880903646791636,
@@ -140,5 +142,8 @@
     14924,
     6160
   ],
-  "hmac_signature": "692a2097026fa8c74dc6ebb5724bb7d0a1f3bf6bfde2c84470de7b9714373d00"
+  "manifest_mcc": 0.147,
+  "manifest_mcc_min": 0.1276,
+  "manifest_bal_acc": 0.428,
+  "hmac_signature": "b27068d031382f18100bf5360f82b35c4d349ab9be590a549dfa8c5581d55b56"
 }

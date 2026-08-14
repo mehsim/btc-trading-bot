@@ -329,12 +329,18 @@ bot_logs = [
 ]
 
 def sanitize_log_line(line_str: str) -> str:
-    """Scrub sensitive API keys, secrets, hashes, auth headers, and tokens from log lines."""
+    """Scrub sensitive API keys, secrets, hashes, auth headers, proxies, order IDs, and paths from log lines."""
     if not line_str:
         return ""
     scrubbed = re.sub(r'(?i)(api[_-]?key|secret|token|auth|password|signature)\s*[:=]\s*[\'"][^\'",\s]+[\'"]', r'\1="[REDACTED]"', line_str)
     scrubbed = re.sub(r'(?i)(api[_-]?key|secret|token|auth|password|signature)\s*[:=]\s*([a-zA-Z0-9_\-]{8,})', r'\1=[REDACTED]', scrubbed)
     scrubbed = re.sub(r'Bearer\s+[a-zA-Z0-9_\-\.]+', 'Bearer [REDACTED]', scrubbed)
+    # Scrub absolute server file paths
+    scrubbed = re.sub(r'/(Users|home|root|var|tmp)/[a-zA-Z0-9_\-\./]+', '[SYSTEM_PATH]', scrubbed)
+    # Scrub proxy host/port and credential strings
+    scrubbed = re.sub(r'https?://[a-zA-Z0-9_\-\.\:\@]+:[0-9]+', '[PROXY_HOST]', scrubbed)
+    # Scrub order IDs and link IDs
+    scrubbed = re.sub(r'(?i)(orderId|orderLinkId|order_id|bybit_order_id)\s*[:=]\s*[\'"]?([a-zA-Z0-9_\-]{8,})[\'"]?', r'\1="[ORDER_ID]"', scrubbed)
     return scrubbed
 
 def get_live_bot_logs(max_lines=40):

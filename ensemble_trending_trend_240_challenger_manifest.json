@@ -97,7 +97,9 @@
   "metrics": {
     "uniqueness_ratio": 0.0769,
     "effective_sample_size": 1353.31,
-    "raw_sample_size": 17587
+    "raw_sample_size": 17587,
+    "mcc": 0.0823,
+    "balanced_accuracy": 0.3824
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -193,5 +195,8 @@
   ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-12T22:44:23.340630+00:00",
-  "hmac_signature": "2e7b5451f8c58f24167f3189f98ca2dce975178344b884e555e2f6b875ab9fe2"
+  "manifest_mcc": 0.0823,
+  "manifest_mcc_min": -0.0125,
+  "manifest_bal_acc": 0.3824,
+  "hmac_signature": "40554fa3864b92966b683cf192058d9b49c21b50f9cee43f13f8523c4c93a63a"
 }

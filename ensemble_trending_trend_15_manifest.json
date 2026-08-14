@@ -111,8 +111,8 @@
   },
   "stage": "Production",
   "manifest_mcc": 0.125,
-  "manifest_mcc_min": 0.08,
+  "manifest_mcc_min": 0.0875,
   "manifest_bal_acc": 0.421,
   "manifest_hmac": "f88cb88d59693cdab433b31eb5a7d1fc7c9e315ae651b705a04a3a07ee934686",
-  "hmac_signature": "a1cdf1c039562740279e0a850ebfabc10ff79440362a980d3e08a92b1a07233e"
+  "hmac_signature": "8aa597d01ee0396d7f7ab981712f7e865949386416bf76be771d094e4b4d5da1"
 }
