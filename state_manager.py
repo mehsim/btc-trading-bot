@@ -120,7 +120,14 @@ class StateManager:
         sys.stderr.flush()
         
         for tf in ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]:
-            self._cache[f"active_trade_{tf}"] = database.get_active_trades(tf)
+            trades = database.get_active_trades(tf)
+            self._cache[f"active_trade_{tf}"] = trades
+            # Re-seed Redis from SQLite so stale Redis values don't shadow loaded DB state
+            if self._redis:
+                try:
+                    self._redis.set(f"bot_state:active_trade_{tf}", json.dumps(trades, default=default_json_serializer))
+                except Exception as ex_redis_seed:
+                    print(f"[StateManager] Failed to seed Redis active_trade_{tf}: {ex_redis_seed}")
         sys.stderr.write("[StateManager Debug] Active trades loaded.\n")
         sys.stderr.flush()
 
