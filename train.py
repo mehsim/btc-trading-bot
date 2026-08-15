@@ -461,13 +461,13 @@ def tune_triple_barrier_multipliers(df_coin, interval):
         _look = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
         _reach = math.sqrt(_look)
         if str(interval) in ["15", "30"]:
-            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  1.2, 2.0)
-            tp_m_trending = trial.suggest_float("tp_mult_trending", 1.5, 3.0)
-            sl_m          = trial.suggest_float("sl_mult",          1.00, 2.00)
+            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.8, 2.5)
+            tp_m_trending = trial.suggest_float("tp_mult_trending", 0.8, 3.0)
+            sl_m          = trial.suggest_float("sl_mult",          0.50, 1.50)
         else:
-            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  1.2, 2.5)
-            tp_m_trending = trial.suggest_float("tp_mult_trending", 1.5, 3.5)
-            sl_m          = trial.suggest_float("sl_mult",          1.00, 2.00)
+            tp_m_ranging  = trial.suggest_float("tp_mult_ranging",  0.8, 2.5)
+            tp_m_trending = trial.suggest_float("tp_mult_trending", 0.8, 3.5)
+            sl_m          = trial.suggest_float("sl_mult",          0.50, 1.50)
 
         # Economic R:R gate: reject geometries with R:R below 1.20
         if tp_m_trending < 1.20 * sl_m or tp_m_ranging < 1.20 * sl_m:
@@ -582,7 +582,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             return 0.0
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=15)
+    study.optimize(objective, n_trials=40)
     best = study.best_params
     best["lookahead"] = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10))
     print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
