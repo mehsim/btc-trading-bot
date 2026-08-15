@@ -747,29 +747,23 @@ def deduplicate_completed_trades():
     if not trades:
         return
         
-    sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0)))
+    sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0)), reverse=True)
+    seen_keys = set()
     deduped = []
     for t in sorted_trades:
-        duplicate = False
         t_exit = float(t.get("exit_time", 0.0))
         t_entry_p = round(float(t.get("entry_price", 0.0)), 4)
         t_exit_p = round(float(t.get("exit_price", 0.0)), 4)
-        t_sym = t.get("symbol")
+        t_sym = str(t.get("symbol"))
         t_iv = str(t.get("interval"))
-        t_dir = t.get("direction")
-        
-        for existing in deduped:
-            if (t_sym == existing.get("symbol") and str(t_iv) == str(existing.get("interval")) and 
-                t_dir == existing.get("direction") and 
-                abs(t_entry_p - round(float(existing.get("entry_price", 0.0)), 4)) < 1e-4 and 
-                abs(t_exit_p - round(float(existing.get("exit_price", 0.0)), 4)) < 1e-4 and 
-                abs(t_exit - float(existing.get("exit_time", 0.0))) < 43200):
-                duplicate = True
-                break
-                
-        if not duplicate:
+        t_dir = str(t.get("direction"))
+        t_window = int(t_exit // 43200) if t_exit > 0 else 0
+        key = (t_sym, t_iv, t_dir, t_entry_p, t_exit_p, t_window)
+        if key not in seen_keys:
+            seen_keys.add(key)
             deduped.append(t)
             
+    deduped.reverse()
     if len(deduped) != len(trades):
         print(f"[Heal] Deduplicated trade history: removed {len(trades) - len(deduped)} duplicate records within 12h window.")
         bot_state["trade_history"] = deduped
@@ -4486,28 +4480,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             policy_vec = generate_continuous_policy_vector(current_regime, confidence=calibrated_confidence)
             
             cand_sl = (entry_price - raw_sl_dist) if ml_trend == "Bullish" else (entry_price + raw_sl_dist)
-            cand_tp_temp = (entry_price + 1.5 * tp_multiplier_adjusted * atr_dollars) if ml_trend == "Bullish" else (entry_price - 1.5 * tp_multiplier_adjusted * atr_dollars)
-            
-            boot_ci = calculate_probabilistic_utility_bootstrap(
-                symbol=symbol,
-                entry_price=entry_price,
-                candidate_tp=cand_tp_temp,
-                candidate_sl=cand_sl,
-                direction=ml_trend,
-                win_prob=max(0.50, min(0.90, calibrated_confidence)),
-                loss_prob=1.0 - max(0.50, min(0.90, calibrated_confidence)),
-                leverage=leverage_val,
-                position_size_usd=position_size_usd
-            )
             
             unified_res = UnifiedTargetGenerator.compute_targets(
                 policy_vector=policy_vec,
-                bootstrap_ci=boot_ci,
                 entry_price=entry_price,
                 direction=ml_trend,
                 atr_dollars=atr_dollars,
                 symbol=symbol,
-                df_history=df_completed
+                df_history=df_completed,
+                interval=str(iv)
             )
             
             stop_loss_price = cand_sl
@@ -5925,6 +5906,13 @@ def main():
                     try:
                     
                         latest_candle = df.iloc[-1]
+                        
+                        # S-3 Data Continuity Guard: Refuse evaluation if candle series has unserviceable gaps (> 3 bars)
+                        if getattr(df, "attrs", {}).get("gap_exceeded", False):
+                            max_g = df.attrs.get("max_consecutive_synthetic_bars", 0)
+                            print(f"[{symbol} {iv}m Gap Guard] Window contains {max_g} consecutive missing bars (> 3). Abstaining from signal evaluation (Fail-Closed).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Unserviceable gap ({max_g} bars) in candle history — abstaining (Fail-Closed)")
+                            continue
                     
                         # Dynamic Regime Routing based on GMM Unsupervised Classifier
                         regime = classify_market_regime(df, interval=iv)

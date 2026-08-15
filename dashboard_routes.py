@@ -697,16 +697,13 @@ def api_status():
 
 @dashboard_bp.route("/api/health")
 def api_health():
-    from bybit_client import get_real_bybit_balance_cached
-    from websocket_client import get_ws_status
-    ws_st = get_ws_status()
+    """Lightweight public liveness check — returns operational status without touching API keys or balances."""
+    from datetime import datetime, timezone
     return jsonify({
-        "status": "ok",
+        "status": "healthy",
+        "service": "btc-trading-bot",
         "uptime_seconds": int(time.time() - startup_time),
-        "bybit_api": "connected" if get_real_bybit_balance_cached() != "API_KEYS_MISSING" else "API_KEYS_MISSING",
-        "websocket": "live" if ws_st.get("public_connected") else "disconnected",
-        "private_websocket": "live" if ws_st.get("private_connected") else "disconnected",
-        "active_trades": 0
+        "timestamp_utc": datetime.now(timezone.utc).isoformat()
     })
 
 

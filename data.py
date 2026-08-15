@@ -513,7 +513,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         except Exception as e:
             print(f"[Cache Write Error] {e}")
 
-    # Validate and enforce candle continuity (H-8)
+    # Validate and enforce candle continuity with capped synthetic bar synthesis (S-3)
     final_df = df_history.iloc[-target_count:].reset_index(drop=True)
     if len(final_df) > 1:
         try:
@@ -521,20 +521,43 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             diffs = final_df["timestamp"].diff().dropna()
             gaps = diffs[diffs > expected_step_ms * 1.5]
             if len(gaps) > 0:
-                log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} gap(s) in candle series. Max gap: {gaps.max()/expected_step_ms:.1f}x bars. Reindexing to contiguous grid.")
-                min_ts = int(final_df["timestamp"].iloc[0])
-                max_ts = int(final_df["timestamp"].iloc[-1])
-                full_ts = np.arange(min_ts, max_ts + expected_step_ms, expected_step_ms, dtype=np.int64)
-                df_grid = pd.DataFrame({"timestamp": full_ts})
-                final_df = pd.merge(df_grid, final_df, on="timestamp", how="left")
-                final_df["close"] = final_df["close"].ffill().bfill()
-                final_df["open"] = final_df["open"].fillna(final_df["close"])
-                final_df["high"] = final_df["high"].fillna(final_df["close"])
-                final_df["low"] = final_df["low"].fillna(final_df["close"])
-                final_df["volume"] = final_df["volume"].fillna(0.0)
-                final_df = final_df.iloc[-target_count:].reset_index(drop=True)
+                max_gap_bars = int(round(float(gaps.max()) / max(1, expected_step_ms)))
+                if max_gap_bars > 3:
+                    log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Unserviceable gap detected: {max_gap_bars} consecutive bars (limit: 3). Refusing flat bar synthesis to prevent feature distortion.")
+                    final_df.attrs["is_discontinuous"] = True
+                    final_df.attrs["gap_exceeded"] = True
+                    final_df.attrs["synthetic_bar_count"] = 0
+                    final_df.attrs["max_consecutive_synthetic_bars"] = max_gap_bars
+                else:
+                    log_event("INFO", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} minor gap(s) (max: {max_gap_bars} bars). Reindexing to contiguous grid (capped <= 3).")
+                    min_ts = int(final_df["timestamp"].iloc[0])
+                    max_ts = int(final_df["timestamp"].iloc[-1])
+                    full_ts = np.arange(min_ts, max_ts + expected_step_ms, expected_step_ms, dtype=np.int64)
+                    df_grid = pd.DataFrame({"timestamp": full_ts})
+                    merged_df = pd.merge(df_grid, final_df, on="timestamp", how="left")
+                    merged_df["is_synthetic"] = merged_df["close"].isna()
+                    synthetic_count = int(merged_df["is_synthetic"].sum())
+                    merged_df["close"] = merged_df["close"].ffill().bfill()
+                    merged_df["open"] = merged_df["open"].fillna(merged_df["close"])
+                    merged_df["high"] = merged_df["high"].fillna(merged_df["close"])
+                    merged_df["low"] = merged_df["low"].fillna(merged_df["close"])
+                    merged_df["volume"] = merged_df["volume"].fillna(0.0)
+                    final_df = merged_df.iloc[-target_count:].reset_index(drop=True)
+                    final_df.attrs["is_discontinuous"] = False
+                    final_df.attrs["gap_exceeded"] = False
+                    final_df.attrs["synthetic_bar_count"] = synthetic_count
+                    final_df.attrs["max_consecutive_synthetic_bars"] = max_gap_bars
+            else:
+                final_df.attrs["is_discontinuous"] = False
+                final_df.attrs["gap_exceeded"] = False
+                final_df.attrs["synthetic_bar_count"] = 0
+                final_df.attrs["max_consecutive_synthetic_bars"] = 0
         except Exception as ex_gap:
             log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Continuity reindex notice: {ex_gap}")
+            final_df.attrs["is_discontinuous"] = False
+            final_df.attrs["gap_exceeded"] = False
+            final_df.attrs["synthetic_bar_count"] = 0
+            final_df.attrs["max_consecutive_synthetic_bars"] = 0
 
     return final_df
 

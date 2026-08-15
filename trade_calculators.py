@@ -1164,11 +1164,11 @@ class UnifiedTargetGenerator:
     @staticmethod
     def compute_targets(
         policy_vector: dict,
-        bootstrap_ci: dict,
-        entry_price: float,
-        direction: str,
-        atr_dollars: float,
-        symbol: str,
+        bootstrap_ci: Optional[dict] = None,
+        entry_price: float = 0.0,
+        direction: str = "Bullish",
+        atr_dollars: float = 1.0,
+        symbol: str = "BTCUSDT",
         df_history: Any = None,
         interval: str = "60"
     ) -> dict:
