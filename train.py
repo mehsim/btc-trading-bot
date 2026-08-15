@@ -864,9 +864,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     df_coin["future"] = df_coin["close"].shift(-lookahead)
                     df_coin["target_price_change"] = (df_coin["future"] - df_coin["close"]) / df_coin["close"]
                     df_coin = add_triple_barrier_labels(df_coin, interval)
-                    df_coin.dropna(subset=["target_price_change", "target_trend"], inplace=True)
-                    df_coin = df_coin.copy()
-                    
+                    float_cols = df_coin.select_dtypes(include=['float64']).columns
+                    df_coin[float_cols] = df_coin[float_cols].astype(np.float32)
                     dfs.append(df_coin)
                     print(f"Successfully processed {s}: {len(df_coin)} rows.")
         except Exception as e:
@@ -917,9 +916,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
         # preserve chronological order — no random sampling
         import gc
         gc.collect()
-        if len(df) > 20000:
-            df_sub = df.iloc[-20000:]
-            print(f"[Training] Using most recent 20,000 rows for feature selection.")
+        if len(df) > 10000:
+            df_sub = df.iloc[-10000:]
+            print(f"[Training] Using most recent 10,000 rows for feature selection.")
         else:
             df_sub = df
 
@@ -937,10 +936,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
         top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
         top_feats = list(X_prelim.columns[top_idx])
         print(f"[Stage 1] Prefiltered {X_prelim.shape[1]} → {len(top_feats)} candidates.")
+        del prefilter
+        gc.collect()
 
         # ---- Stage 2: proper RFECV on survivors ----
         selector = RFECV(
-            estimator=XGBClassifier(n_estimators=60, max_depth=4, random_state=42, n_jobs=1),
+            estimator=XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1),
             step=3,
             cv=cv_selector,
             scoring="balanced_accuracy",
@@ -949,6 +950,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         )
         selector.fit(X_prelim[top_feats], y_prelim)
         selected_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
+        del selector
         gc.collect()
         print(f"[Stage 2] RFECV selected {len(selected_features)} of {len(top_feats)}.")
         from feature_pipeline import filter_multicollinear_features
@@ -1075,17 +1077,19 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 y_rfecv = df_sub["target_trend"]
 
             # ---- Stage 1: cheap importance prefilter ----
-            prefilter = XGBClassifier(n_estimators=50, max_depth=3, random_state=42, n_jobs=1)
+            prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
             prefilter.fit(X_rfecv_prelim, y_rfecv)
 
-            n_keep = min(60, X_rfecv_prelim.shape[1])
+            n_keep = min(45, X_rfecv_prelim.shape[1])
             top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
             top_feats = list(X_rfecv_prelim.columns[top_idx])
             print(f"[Regime {name.upper()} Stage 1] Prefiltered {X_rfecv_prelim.shape[1]} → {len(top_feats)} candidates.")
+            del prefilter
+            gc.collect()
 
             estimator = XGBClassifier(
-                n_estimators=200,
-                max_depth=5,
+                n_estimators=60,
+                max_depth=3,
                 learning_rate=0.1,
                 random_state=42,
                 tree_method="hist",
