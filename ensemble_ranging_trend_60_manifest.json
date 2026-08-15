@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_trend_60",
-  "timestamp": "2026-08-13T13:11:09.234766+00:00",
-  "model_version": "v7.2.0-9e86f616-202608131311",
+  "timestamp": "2026-08-10T13:29:38.409784+00:00",
+  "model_version": "v7.2.0-f2b1393a-202608061021",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "9e86f616",
+  "git_sha": "db6b44dd",
   "feature_count": 34,
   "feature_names": [
     "open_interest",
@@ -82,83 +82,74 @@
   ],
   "vif_values": {},
   "feature_contract_hash": "385dc46c98e7",
-  "feature_pipeline_hash": "0084ba7ffed2",
-  "training_data_hash": "de2be28a0f06e737743f303f21c5180dbf41669b792d56c55f984f9453ec1c89",
+  "feature_pipeline_hash": "a4068d4eae16",
+  "training_data_hash": "8d611840b16b85c71daa926c2e30f7e214bde11fc0bfa3d6d535c228e752b340",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "d8436d29410ba603aa8c56826993be02dc9f215df1a6582a20fed182e3dde575",
   "promotion_reason": "Initial deployment / benchmark promotion",
   "replaced_model_hash": "d8436d29410ba603aa8c56826993be02dc9f215df1a6582a20fed182e3dde575",
   "rollback_reference": "ensemble_ranging_trend_60_backup",
   "governance_policy": {
-    "version": "v2.5",
+    "version": "v2.4",
     "max_ece": 0.08,
     "max_brier": 0.5,
     "min_oos_sharpe": 0.5,
     "min_sharpe_delta": 0.1,
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
-    "enforce_stability_gate": true,
-    "min_samples": 20,
-    "min_mcc": 0.05,
-    "min_balanced_accuracy": 0.36,
-    "mcc_regression_tolerance": 0.01
+    "enforce_stability_gate": false,
+    "min_samples": 20
   },
   "dependencies": {
-    "python": "3.14.4",
+    "python": "3.14.6",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.5.1",
+    "numpy": "2.4.6",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
-  "promotion_metrics": {
-    "uniqueness_ratio": 0.0909,
-    "effective_sample_size": 4651.45,
-    "raw_sample_size": 51161
-  },
+  "promotion_metrics": {},
   "metrics": {
     "uniqueness_ratio": 0.0909,
-    "effective_sample_size": 4651.45,
-    "raw_sample_size": 51161,
-    "mcc": 0.0951,
-    "balanced_accuracy": 0.4212
+    "effective_sample_size": 4658.0,
+    "raw_sample_size": 51233
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.4212,
-      "median": 0.4144,
-      "std": 0.0102,
-      "min": 0.4125,
-      "max": 0.4393
+      "mean": 0.3615,
+      "median": 0.3666,
+      "std": 0.0225,
+      "min": 0.3358,
+      "max": 0.395
     },
     "macro_f1": {
-      "mean": 0.3969,
-      "median": 0.3975,
-      "std": 0.0112,
-      "min": 0.3783,
-      "max": 0.413
+      "mean": 0.308,
+      "median": 0.3266,
+      "std": 0.0556,
+      "min": 0.2181,
+      "max": 0.3648
     },
     "mcc": {
-      "mean": 0.0951,
-      "median": 0.09,
-      "std": 0.0172,
-      "min": 0.0771,
-      "max": 0.1264
+      "mean": 0.0319,
+      "median": 0.0458,
+      "std": 0.0278,
+      "min": -0.0068,
+      "max": 0.0666
     },
-    "mean_kappa": 0.09293896140779079,
-    "mean_pr_auc_bear": 0.4792951735211851,
-    "mean_pr_auc_bull": 0.4406650941139378,
-    "mean_raw_accuracy": 0.4068,
-    "mean_mae": 0.013539,
-    "label_dist_bearish_pct": 44.29,
-    "label_dist_neutral_pct": 16.58,
-    "label_dist_bullish_pct": 39.14,
-    "n_training_samples": 51161,
-    "n_holdout_samples": 8428,
-    "effective_sample_size": 4651.45,
-    "raw_sample_size": 51161,
+    "mean_kappa": 0.029769692762577283,
+    "mean_pr_auc_bear": 0.45009444358208855,
+    "mean_pr_auc_bull": 0.42743854579450336,
+    "mean_raw_accuracy": 0.3826,
+    "mean_mae": 0.014085,
+    "label_dist_bearish_pct": 44.12,
+    "label_dist_neutral_pct": 16.57,
+    "label_dist_bullish_pct": 39.31,
+    "n_training_samples": 51233,
+    "n_holdout_samples": 8440,
+    "effective_sample_size": 4658.0,
+    "raw_sample_size": 51233,
     "uniqueness_ratio": 0.0909,
     "confusion_matrix": {
       "labels": [
@@ -173,26 +164,26 @@
       ],
       "matrix": [
         [
-          7972,
-          4903,
-          5973
+          6218,
+          3541,
+          9030
         ],
         [
-          1837,
-          3444,
-          1769
+          2130,
+          1939,
+          2991
         ],
         [
-          6759,
-          4046,
-          5927
+          5619,
+          3044,
+          8178
         ]
       ]
     },
-    "holdout_accuracy": 0.4629,
-    "holdout_balanced_accuracy": 0.3567,
-    "holdout_brier": 0.6045,
-    "holdout_ece": 0.0245,
+    "holdout_accuracy": 0.437,
+    "holdout_balanced_accuracy": 0.3513,
+    "holdout_brier": 0.6138,
+    "holdout_ece": 0.0396,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -201,7 +192,7 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "9e86f616"
+    "git_sha": "db6b44dd"
   },
   "barrier_config": {
     "tp_mult_trending": 1.4746788008303522,
@@ -211,8 +202,12 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0951,
-  "manifest_mcc_min": 0.0771,
-  "manifest_bal_acc": 0.4212,
-  "hmac_signature": "aaca51cd670badc370e5bb77070abeb653196fbb6e963dded8d07f7fe0f5d39e"
+  "label_distribution": [
+    22362,
+    8750,
+    20121
+  ],
+  "hmac_signature": "d6b0fb76bbc4abfb8c778df61fce80b1c14c48f6d3188b3dd2cb4159a6a91534",
+  "feature_pipeline_version": "v3.1.0",
+  "manifest_mcc": 0.0951
 }

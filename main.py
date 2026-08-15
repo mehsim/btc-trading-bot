@@ -4301,8 +4301,7 @@ def sync_active_positions_from_bybit():
             # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
             recovered = 0
             for symbol, pos in open_positions.items():
-                with active_execution_lock:
-                    in_active_execution = symbol in active_execution_symbols
+                in_active_execution = symbol in active_execution_symbols
                 if in_active_execution:
                     print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
                     continue
@@ -4347,8 +4346,21 @@ def sync_active_positions_from_bybit():
                     import uuid
                     trade_uuid = str(uuid.uuid4())
                     
-                    # Calculate proper ATR on recovery
-                    calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
+                    # Calculate proper ATR on recovery: prefer measured ATR over inversion
+                    calc_atr = None
+                    try:
+                        _df_r = get_history(symbol=symbol, interval="60", limit=50)
+                        if _df_r is not None and "ATR" in _df_r.columns and len(_df_r) > 0:
+                            _a = float(_df_r["ATR"].iloc[-1])
+                            if _a > 0:
+                                calc_atr = _a
+                    except Exception as _e:
+                        log_event("DEBUG", f"Recovery ATR fetch failed for {symbol}: {_e}")
+
+                    if calc_atr is None:
+                        calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
+                        log_event("WARNING", f"[{symbol}] Recovery ATR inverted from stop — may be inaccurate")
+
                     if calc_atr > 0.05 * avg_price or calc_atr == 0:
                         calc_atr = 0.015 * avg_price
                         log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
@@ -4400,6 +4412,9 @@ def sync_active_positions_from_bybit():
                                 matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
                                 break
 
+                    _iv = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "6h": 360}.get(matched_tf, 60)
+                    _la = TIMEFRAME_CONFIG.get(str(_iv), {}).get("lookahead", 10)
+
                     recovered_trade = {
                         "trade_id": f"{symbol}_{trade_uuid}_recovered",
                         "bybit_order_id": entry_order_id,
@@ -4410,8 +4425,8 @@ def sync_active_positions_from_bybit():
                         "stop_loss": sl_price,
                         "take_profit": tp_price,
                         "direction": direction,
-                        "end_time": float(time.time() + 3600 * 48),
-                        "entry_time": int(time.time() * 1000),
+                        "end_time": float(time.time() + _iv * 60 * _la),
+                        "entry_time": int(pos.get("createdTime") or pos.get("updatedTime") or (time.time() * 1000)),
                         "atr_dollars": calc_atr,
                         "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
                         "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
