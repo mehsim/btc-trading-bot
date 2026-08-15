@@ -7,7 +7,7 @@
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
   "git_sha": "b04ba1b7",
-  "feature_count": 0,
+  "feature_count": 22,
   "feature_names": [
     "open_interest",
     "funding_rate",
@@ -32,9 +32,32 @@
     "EMA9_to_EMA21",
     "BB_pct"
   ],
-  "surviving_features": [],
+  "surviving_features": [
+    "open_interest",
+    "funding_rate",
+    "fear_greed",
+    "oi_change_1h",
+    "oi_change_4h",
+    "RSI",
+    "MACD_diff",
+    "EMA_9",
+    "EMA_21",
+    "EMA_50",
+    "EMA_200",
+    "BB_high",
+    "BB_low",
+    "BB_mid",
+    "MFI",
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct"
+  ],
   "vif_values": {},
-  "feature_contract_hash": "e3b0c44298fc",
+  "feature_contract_hash": "44acc0809fe0",
   "feature_pipeline_hash": "e8505f8ea0a0",
   "training_data_hash": "253d3488ad9d52ac02f2029d39f6abcfa92e46e5ab4a4b292377e6b29334bdbe",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
@@ -173,5 +196,5 @@
   "manifest_mcc": 0.0594,
   "manifest_mcc_min": -0.0353,
   "manifest_bal_acc": 0.3659,
-  "hmac_signature": "c88b4e09f89321467ede9b2e63514457297262dc1d7612778d91658d756edf72"
+  "hmac_signature": "f25a13461b70ed0a1796a992ce04cc9d7354b5c1d3ef822b2d8559d102c43a59"
 }

@@ -1814,7 +1814,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if os.path.exists(manifest_path):
                     with open(manifest_path, "r") as mf:
                         manifest_data = json.load(mf)
+                from features import FEATURE_PIPELINE_VERSION
                 manifest_data["feature_names"] = challenger_feature_names
+                manifest_data["feature_count"] = len(challenger_feature_names)
+                manifest_data["surviving_features"] = challenger_feature_names
+                manifest_data["feature_contract_hash"] = hashlib.sha256(",".join(challenger_feature_names).encode("utf-8")).hexdigest()[:12]
+                manifest_data["feature_pipeline_hash"] = hashlib.sha256(f"{FEATURE_PIPELINE_VERSION}:{','.join(challenger_feature_names)}".encode("utf-8")).hexdigest()[:12]
                 manifest_data["cv_metrics"] = cv_metrics_block
                 manifest_data["git_sha"] = _pipeline_git_sha
                 manifest_data["timestamp"] = now_iso

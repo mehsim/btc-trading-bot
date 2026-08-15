@@ -2,12 +2,12 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_price_15",
-  "timestamp": "2026-08-14T20:39:36.101908+00:00",
-  "model_version": "v7.2.0-b04ba1b7-202608142039",
+  "timestamp": "2026-08-15T09:27:44.562498+00:00",
+  "model_version": "v7.2.0-d2ec544b-202608150927",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "b04ba1b7",
-  "feature_count": 0,
+  "git_sha": "d2ec544b",
+  "feature_count": 22,
   "feature_names": [
     "open_interest",
     "funding_rate",
@@ -32,11 +32,34 @@
     "EMA9_to_EMA21",
     "BB_pct"
   ],
-  "surviving_features": [],
+  "surviving_features": [
+    "open_interest",
+    "funding_rate",
+    "fear_greed",
+    "oi_change_1h",
+    "oi_change_4h",
+    "RSI",
+    "MACD_diff",
+    "EMA_9",
+    "EMA_21",
+    "EMA_50",
+    "EMA_200",
+    "BB_high",
+    "BB_low",
+    "BB_mid",
+    "MFI",
+    "ATR_norm",
+    "close_to_EMA9",
+    "close_to_EMA21",
+    "close_to_EMA50",
+    "close_to_EMA200",
+    "EMA9_to_EMA21",
+    "BB_pct"
+  ],
   "vif_values": {},
-  "feature_contract_hash": "e3b0c44298fc",
+  "feature_contract_hash": "44acc0809fe0",
   "feature_pipeline_hash": "e8505f8ea0a0",
-  "training_data_hash": "f6eec8c1a6f6cc1e5ae12c66c4f24845f897a2c56e9592260678ddf9ddbfe4b1",
+  "training_data_hash": "1bafd581e1b7c061765df1ab40be1bbe614928d8ed7d37d5602e3df40dd51df3",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "fa423d8a09b2a6fbb1aba9f3bfb0f70d076e127221eb6f3d0b1dd1a3ac46abca",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -57,18 +80,18 @@
     "mcc_regression_tolerance": 0.01
   },
   "dependencies": {
-    "python": "3.14.4",
+    "python": "3.14.6",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.5.1",
+    "numpy": "2.5.0",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
   "promotion_metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 1325.69,
-    "raw_sample_size": 17228,
+    "effective_sample_size": 1322.15,
+    "raw_sample_size": 17182,
     "mcc": 0.125,
     "balanced_accuracy": 0.3296
   },
@@ -166,10 +189,5 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "label_distribution": [
-    4870,
-    10733,
-    4625
-  ],
-  "hmac_signature": "3dc3df83cb3dcac7496da330fa120fa1481aa6b172bc5b31a6f106826c7a2021"
+  "hmac_signature": "051bf24757ab5ccfb910885bea6f3b5448a488ada08c5cc82260bf2fe4473c42"
 }

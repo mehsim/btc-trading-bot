@@ -82,7 +82,7 @@
   ],
   "vif_values": {},
   "feature_contract_hash": "385dc46c98e7",
-  "feature_pipeline_hash": "0084ba7ffed2",
+  "feature_pipeline_hash": "a4068d4eae16",
   "training_data_hash": "67174081f2f6aef99c0a0e7beef170e9d6fdc9a4f8ca948fdb053dc2b5d30925",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "9025162cc1bb5da4a6642073d79ae518e60e550eb146f6b6d68a34b2514f756f",
@@ -214,5 +214,5 @@
   "manifest_mcc": 0.0951,
   "manifest_mcc_min": 0.0,
   "manifest_bal_acc": 0.4212,
-  "hmac_signature": "41f97add668a46db38d56d438e63a52b170dabd6ffb5d6fc17b4252a146d36fe"
+  "hmac_signature": "65084e0e8c62ee96a07c953c737cd1764ed9993d5869f4b000dced69abd41dc9"
 }
