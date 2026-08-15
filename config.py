@@ -210,7 +210,7 @@ MODEL_SELECTION = {
     "macro_f1_weight":           0.30,
     "ece_penalty_weight":        0.20,   # actual ECE from mlops_engine — no proxy
     "imbalance_penalty_weight":  0.40,
-    "imbalance_neutral_cap":     0.70,   # penalty activates above this Neutral fraction
+    "imbalance_neutral_cap":     0.50,   # penalty activates above this Neutral fraction
     "imbalance_min_class_pct":   0.10,   # warning threshold for any directional class
 }
 

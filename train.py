@@ -558,7 +558,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 ece = calculate_expected_calibration_error(y[val_idx], proba, n_bins=10)
 
                 neutral_frac = (y[val_idx] == 1).mean()
-                neutral_cap = MODEL_SELECTION.get("imbalance_neutral_cap", 0.70)
+                neutral_cap = MODEL_SELECTION.get("imbalance_neutral_cap", 0.50)
                 imbalance_pen = max(0.0, neutral_frac - neutral_cap)
 
                 w_bal = MODEL_SELECTION.get("balanced_accuracy_weight", 1.00)
