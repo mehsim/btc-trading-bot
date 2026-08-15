@@ -1059,7 +1059,11 @@ def load_history():
                 aws_host = f"{aws_host}:{sync_port}"
             sync_url = f"{aws_host.rstrip('/')}/api/status"
             print(f"Syncing: Attempting to pull latest history from AWS Server API ({sync_url})...")
-            resp = requests.get(sync_url, timeout=5)
+            headers = {}
+            api_k = get_secure_env("DASHBOARD_API_KEY", "").strip()
+            if api_k:
+                headers["X-API-KEY"] = api_k
+            resp = requests.get(sync_url, headers=headers, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
                 remote_trades = data.get("trade_history", [])
@@ -2261,7 +2265,7 @@ def run_flask():
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5001))
-    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")
+    flask_host = os.environ.get("FLASK_HOST", "127.0.0.1")
     sys.stderr.write(f"[Flask] Starting server on {flask_host}:{port}...\n")
     sys.stderr.flush()
     try:
@@ -2398,53 +2402,92 @@ def load_model_weights(iv):
 
         from mlops_engine import load_production_model_from_registry
 
-        reg_model_trending, ver_trending = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
-        if reg_model_trending is not None:
-            models_by_interval[iv]["trending"]["trend"] = reg_model_trending
-            models_by_interval[iv]["trending"]["model_version"] = ver_trending
-        elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
-            models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
-            models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
+        # 1. Trending Classifier
+        try:
+            reg_model_trending, ver_trending = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
+            if reg_model_trending is not None:
+                models_by_interval[iv]["trending"]["trend"] = reg_model_trending
+                models_by_interval[iv]["trending"]["model_version"] = ver_trending
+            elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
+                models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
+                models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
+        except Exception as e:
+            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_trend']} for {iv}m: {e}")
+            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
 
-        if os.path.exists(f"{prefixes['trending_price']}_xgb.json") and check_startup_manifest_health(prefixes['trending_price']):
-            models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
-        if os.path.exists(prefixes["trending_meta"]):
-            meta_clf = XGBClassifier()
-            meta_clf.load_model(prefixes["trending_meta"])
-            models_by_interval[iv]["trending"]["meta"] = meta_clf
+        # 2. Trending Regressor
+        try:
+            if os.path.exists(f"{prefixes['trending_price']}_xgb.json") and check_startup_manifest_health(prefixes['trending_price']):
+                models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
+        except Exception as e:
+            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_price']} for {iv}m: {e}")
+            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_price']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
 
-        reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
-        if reg_model_ranging is not None:
-            models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
-            models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
-        elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
-            models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
-            models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
-        if os.path.exists(f"{prefixes['ranging_price']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_price']):
-            models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
-        if os.path.exists(prefixes["ranging_meta"]):
-            meta_clf = XGBClassifier()
-            meta_clf.load_model(prefixes["ranging_meta"])
-            models_by_interval[iv]["ranging"]["meta"] = meta_clf
+        # 3. Trending Meta Classifier
+        try:
+            if os.path.exists(prefixes["trending_meta"]):
+                meta_clf = XGBClassifier()
+                meta_clf.load_model(prefixes["trending_meta"])
+                models_by_interval[iv]["trending"]["meta"] = meta_clf
+        except Exception as e:
+            log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
 
-        # Load calibrators if they exist, or default to identity mapping
-        trending_cal_file = f"calibrator_trending_{iv}.json"
-        if os.path.exists(trending_cal_file):
-            with open(trending_cal_file, "r") as f:
-                models_by_interval[iv]["trending"]["calibrator"] = json.load(f)
-            print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
-        else:
+        # 4. Ranging Classifier
+        try:
+            reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
+            if reg_model_ranging is not None:
+                models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
+                models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
+            elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
+                models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
+                models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
+        except Exception as e:
+            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_trend']} for {iv}m: {e}")
+            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
+
+        # 5. Ranging Regressor
+        try:
+            if os.path.exists(f"{prefixes['ranging_price']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_price']):
+                models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
+        except Exception as e:
+            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_price']} for {iv}m: {e}")
+            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_price']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
+
+        # 6. Ranging Meta Classifier
+        try:
+            if os.path.exists(prefixes["ranging_meta"]):
+                meta_clf = XGBClassifier()
+                meta_clf.load_model(prefixes["ranging_meta"])
+                models_by_interval[iv]["ranging"]["meta"] = meta_clf
+        except Exception as e:
+            log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['ranging_meta']}: {e}")
+
+        # 7. Calibrators (Always isolated and loaded regardless of model load status)
+        try:
+            trending_cal_file = f"calibrator_trending_{iv}.json"
+            if os.path.exists(trending_cal_file):
+                with open(trending_cal_file, "r") as f:
+                    models_by_interval[iv]["trending"]["calibrator"] = json.load(f)
+                print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
+            else:
+                models_by_interval[iv]["trending"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
+                print(f"Initialized identity calibrator for trending_{iv}")
+        except Exception as e:
             models_by_interval[iv]["trending"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-            print(f"Initialized identity calibrator for trending_{iv}")
+            log_event("WARNING", f"Error loading trending calibrator for {iv}m: {e}")
 
-        ranging_cal_file = f"calibrator_ranging_{iv}.json"
-        if os.path.exists(ranging_cal_file):
-            with open(ranging_cal_file, "r") as f:
-                models_by_interval[iv]["ranging"]["calibrator"] = json.load(f)
-            print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
-        else:
+        try:
+            ranging_cal_file = f"calibrator_ranging_{iv}.json"
+            if os.path.exists(ranging_cal_file):
+                with open(ranging_cal_file, "r") as f:
+                    models_by_interval[iv]["ranging"]["calibrator"] = json.load(f)
+                print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
+            else:
+                models_by_interval[iv]["ranging"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
+                print(f"Initialized identity calibrator for ranging_{iv}")
+        except Exception as e:
             models_by_interval[iv]["ranging"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-            print(f"Initialized identity calibrator for ranging_{iv}")
+            log_event("WARNING", f"Error loading ranging calibrator for {iv}m: {e}")
             
         print(f"Successfully loaded ensemble and meta models for interval {iv}")
         try:
@@ -2457,7 +2500,8 @@ def load_model_weights(iv):
         except (ImportError, AttributeError, OSError):
             pass
     except Exception as e:
-        print(f"Warning: Could not load ensemble models for interval {iv}: {e}")
+        log_event("CRITICAL", f"[Model Load Fatal Error] Fatal unexpected error loading interval {iv}: {e}")
+        send_telegram_alert(f"🚨 *FATAL MODEL LOADING ERROR* 🚨\n• *Interval*: {iv}m\n• *Error*: {str(e)}")
 
 
 
@@ -6350,7 +6394,8 @@ def main():
                             )
                             cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
                             p_star = base_sl_m / (actual_tp_m + base_sl_m)
-                            economic_base_threshold = float(round(p_star + (cost_bps / 1e4) / (actual_tp_m + base_sl_m), 4))
+                            cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + base_sl_m) * max(1e-4, atr_norm_val))
+                            economic_base_threshold = float(round(p_star + cost_adj, 4))
                         
                             dynamic_conf_threshold = economic_base_threshold
                             adjustments_applied = [("economic_base", economic_base_threshold)]

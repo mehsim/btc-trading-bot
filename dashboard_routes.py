@@ -128,9 +128,15 @@ def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
-        client_key = request.headers.get("X-API-KEY")
-        if not expected_key or not client_key or not hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+        client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
+        if expected_key:
+            if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+                return f(*args, **kwargs)
+            if request.remote_addr in ["127.0.0.1", "::1"]:
+                return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
+        elif request.remote_addr not in ["127.0.0.1", "::1"]:
+            return jsonify({"error": "Unauthorized", "message": "API key required for remote access."}), 401
         return f(*args, **kwargs)
     return decorated_function
 
@@ -408,6 +414,8 @@ def get_default_confluence_checks():
 
 
 @dashboard_bp.route("/api/status")
+@require_api_key
+@require_ip_whitelist
 def api_status():
     from state_manager import state_manager
     from bybit_client import get_real_bybit_balance_cached, bybit_get_request
@@ -705,6 +713,8 @@ def api_health():
 
 
 @dashboard_bp.route("/metrics")
+@require_api_key
+@require_ip_whitelist
 def prometheus_metrics():
     from state_manager import state_manager
     try:
@@ -727,6 +737,8 @@ def prometheus_metrics():
 
 
 @dashboard_bp.route("/api/reality_gap")
+@require_api_key
+@require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_reality_gap():
     """
@@ -845,6 +857,8 @@ def api_reality_gap():
 
 
 @dashboard_bp.route("/api/institutional_summary")
+@require_api_key
+@require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_institutional_summary():
     """
@@ -1465,6 +1479,8 @@ def _get_walk_forward_folds():
     return []
 
 @dashboard_bp.route("/api/exit_analytics")
+@require_api_key
+@require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_exit_analytics():
     """
@@ -1605,6 +1621,8 @@ def api_exit_analytics():
     })
 
 @dashboard_bp.route("/api/strategy_health")
+@require_api_key
+@require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_strategy_health():
     """
@@ -1786,6 +1804,8 @@ def api_strategy_health():
 
 
 @dashboard_bp.route("/api/model_governance", methods=["GET"])
+@require_api_key
+@require_ip_whitelist
 def get_model_governance():
     """
     Institutional Model Governance & Telemetry API Endpoint.
