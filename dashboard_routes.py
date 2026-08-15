@@ -135,8 +135,6 @@ def require_api_key(f):
             if request.remote_addr in ["127.0.0.1", "::1"]:
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
-        elif request.remote_addr not in ["127.0.0.1", "::1"]:
-            return jsonify({"error": "Unauthorized", "message": "API key required for remote access."}), 401
         return f(*args, **kwargs)
     return decorated_function
 
