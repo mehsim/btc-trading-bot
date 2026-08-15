@@ -2427,17 +2427,6 @@ def load_model_weights(iv):
             meta_clf.load_model(prefixes["ranging_meta"])
             models_by_interval[iv]["ranging"]["meta"] = meta_clf
 
-        # Fallback to trending model if ranging model files do not exist on disk
-        if models_by_interval[iv]["ranging"]["trend"] is None:
-            models_by_interval[iv]["ranging"]["trend"] = models_by_interval[iv]["trending"]["trend"]
-            models_by_interval[iv]["ranging"]["model_version"] = models_by_interval[iv]["trending"].get("model_version", f"btc_{iv}m_trending_clf:v1.0")
-            print(f"[Model Load Fallback] Ranging trend model missing for {iv}m; using trending model fallback.")
-        if models_by_interval[iv]["ranging"]["price"] is None:
-            models_by_interval[iv]["ranging"]["price"] = models_by_interval[iv]["trending"]["price"]
-            print(f"[Model Load Fallback] Ranging price model missing for {iv}m; using trending model fallback.")
-        if models_by_interval[iv]["ranging"]["meta"] is None:
-            models_by_interval[iv]["ranging"]["meta"] = models_by_interval[iv]["trending"].get("meta")
-            
         # Load calibrators if they exist, or default to identity mapping
         trending_cal_file = f"calibrator_trending_{iv}.json"
         if os.path.exists(trending_cal_file):
@@ -6186,19 +6175,8 @@ def main():
                             served_regime = regime
 
                             if m_price is None or m_trend is None or not feat_list:
-                                alt_key = "ranging" if regime_key == "trending" else "trending"
-                                alt_price = models_tf.get(alt_key, {}).get("price")
-                                alt_trend = models_tf.get(alt_key, {}).get("trend")
-                                alt_cal = models_tf.get(alt_key, {}).get("calibrator")
-                                alt_meta = models_tf.get(alt_key, {}).get("meta")
-                                alt_feats = models_tf.get(f"selected_features_{alt_key}") or models_tf.get("selected_features")
-                                if alt_price is not None and alt_trend is not None and alt_feats:
-                                    log_event("WARNING", f"[{symbol} {iv}m] {regime} model incomplete — falling back to {alt_key.title()} ensemble & feature contract")
-                                    m_price, m_trend, m_cal, m_meta, feat_list = alt_price, alt_trend, alt_cal, alt_meta, alt_feats
-                                    served_regime = f"{alt_key.title()}_Fallback"
-                                else:
-                                    log_event("CRITICAL", f"[{symbol} {iv}m] {regime} model & fallback unavailable — skipping interval (Fail-Closed)")
-                                    continue
+                                log_event("INFO", f"[{symbol} {iv}m] {regime} model unavailable / abstaining — skipping interval (Fail-Closed)")
+                                continue
 
                             active_model_price = m_price
                             active_model_trend = m_trend
