@@ -115,25 +115,25 @@ position_size_usd = min(position_size_usd, max_cvar_allowed_size)
 ## 5. Operations & Troubleshooting Runbook
 
 ### Primary AWS Deployment Details
-- **Instance IP**: `47.129.153.199` (AWS Singapore)
-- **SSH Key**: `/Users/mehsimkhurshid/Downloads/singapore-key.pem`
-- **Systemd Service**: `trading-bot`
+- **Instance Host**: `${AWS_HOST}` (AWS Singapore)
+- **SSH Key**: `${SSH_KEY_PATH}`
+- **Systemd Service / Daemon**: `trading-bot` (or background `nohup python3 -u main.py`)
 
 ### Daily Commands Quick-Reference
 
-1. **Check Live Service Status**:
+1. **Check Live Service / Process Status**:
    ```bash
-   ssh -i /Users/mehsimkhurshid/Downloads/singapore-key.pem ubuntu@47.129.153.199 "sudo systemctl status trading-bot"
+   ssh -i "${SSH_KEY_PATH}" "ubuntu@${AWS_HOST}" "pgrep -a -f 'python3 -u main.py'"
    ```
 
 2. **Tail Live Logs**:
    ```bash
-   ssh -i /Users/mehsimkhurshid/Downloads/singapore-key.pem ubuntu@47.129.153.199 "sudo journalctl -u trading-bot -f"
+   ssh -i "${SSH_KEY_PATH}" "ubuntu@${AWS_HOST}" "tail -n 100 -f ~/btc-trading-bot/bot.log"
    ```
 
 3. **Query Recent Trades PnL**:
    ```bash
-   ssh -i /Users/mehsimkhurshid/Downloads/singapore-key.pem ubuntu@47.129.153.199 "cd ~/btc-trading-bot && python3 -c \"
+   ssh -i "${SSH_KEY_PATH}" "ubuntu@${AWS_HOST}" "cd ~/btc-trading-bot && python3 -c \"
    import sqlite3
    conn = sqlite3.connect('trading_bot.db')
    cur = conn.cursor()
@@ -143,9 +143,9 @@ position_size_usd = min(position_size_usd, max_cvar_allowed_size)
    \""
    ```
 
-4. **Deploy Latest Code & Restart Service**:
+4. **Deploy Latest Code & Restart Daemon**:
    ```bash
-   ssh -i /Users/mehsimkhurshid/Downloads/singapore-key.pem ubuntu@47.129.153.199 "cd ~/btc-trading-bot && git fetch origin && git reset --hard origin/main && sudo systemctl restart trading-bot"
+   ssh -i "${SSH_KEY_PATH}" "ubuntu@${AWS_HOST}" "cd ~/btc-trading-bot && git fetch origin && git reset --hard origin/main && pkill -9 -f 'python3 -u main.py' || true; source .venv/bin/activate && nohup python3 -u main.py </dev/null >>bot.log 2>&1 & disown"
    ```
 
 5. **Run Governance & Kill Criteria Audit**:

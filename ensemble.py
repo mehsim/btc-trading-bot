@@ -202,6 +202,10 @@ def _slice_model_input(model, X):
                 f"Silent truncation or zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
             )
 
+        # R-5: Symmetrical float32 precision with training
+        float_cols = df.select_dtypes(include=[np.floating, "float", "float64"]).columns
+        if len(float_cols) > 0:
+            df[float_cols] = df[float_cols].astype(np.float32)
         return df
     elif isinstance(X, dict):
         if expected_names:
@@ -211,20 +215,20 @@ def _slice_model_input(model, X):
                     f"[Feature Shape Coercion Error] Input dict missing {len(missing)} required model features: {missing}."
                 )
             row = [float(X[col]) for col in expected_names]
-            return pd.DataFrame([row], columns=expected_names)
+            return pd.DataFrame([row], columns=expected_names, dtype=np.float32)
         return X
     else:
         X_arr = np.asarray(X)
         if expected_names and 'features' in globals() and isinstance(globals()['features'], list):
             global_feats = globals()['features']
             if X_arr.ndim == 2 and X_arr.shape[1] == len(global_feats):
-                df_tmp = pd.DataFrame(X_arr, columns=global_feats)
+                df_tmp = pd.DataFrame(X_arr, columns=global_feats, dtype=np.float32)
                 missing = [c for c in expected_names if c not in df_tmp.columns]
                 if missing:
                     raise RuntimeError(
                         f"[Feature Shape Coercion Error] Array features missing {len(missing)} required model features: {missing}."
                     )
-                return df_tmp[expected_names]
+                return df_tmp[expected_names].astype(np.float32)
         if n_expected and n_expected > 0:
             n_cols = X_arr.shape[1] if X_arr.ndim == 2 else X_arr.shape[0]
             if n_cols != n_expected:
@@ -232,6 +236,8 @@ def _slice_model_input(model, X):
                     f"[Feature Shape Mismatch Error (H-04/F-12)] Input vector feature count ({n_cols}) does not match model expected features ({n_expected}). "
                     f"Silent truncation or zero-padding of positional features is prohibited because feature order cannot be guaranteed. Retrain models to match current feature contract."
                 )
+        if issubclass(X_arr.dtype.type, np.floating):
+            return X_arr.astype(np.float32)
         return X
 
 class PurgedEmbargoTimeSeriesSplit:

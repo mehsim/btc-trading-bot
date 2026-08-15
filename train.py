@@ -933,7 +933,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
         prefilter.fit(X_prelim, y_prelim)
 
-        n_keep = min(45, X_prelim.shape[1])
+        n_keep = min(60, X_prelim.shape[1])
         top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
         top_feats = list(X_prelim.columns[top_idx])
         print(f"[Stage 1] Prefiltered {X_prelim.shape[1]} → {len(top_feats)} candidates.")
@@ -943,7 +943,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         # ---- Stage 2: proper RFECV on survivors ----
         selector = RFECV(
             estimator=XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1),
-            step=3,
+            step=1,
             cv=cv_selector,
             scoring="balanced_accuracy",
             min_features_to_select=10,
@@ -1081,7 +1081,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
             prefilter.fit(X_rfecv_prelim, y_rfecv)
 
-            n_keep = min(45, X_rfecv_prelim.shape[1])
+            n_keep = min(60, X_rfecv_prelim.shape[1])
             top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
             top_feats = list(X_rfecv_prelim.columns[top_idx])
             print(f"[Regime {name.upper()} Stage 1] Prefiltered {X_rfecv_prelim.shape[1]} → {len(top_feats)} candidates.")
@@ -1100,7 +1100,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
             selector = RFECV(
                 estimator=estimator,
-                step=2,
+                step=1,
                 cv=cv_rfecv,
                 scoring="balanced_accuracy",
                 min_features_to_select=10,

@@ -37,9 +37,12 @@ from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 import database
 import trade_calculators
-import exit_manager
-from trade_calculators import transaction_cost_model, calculate_break_even_stop, UnifiedTargetGenerator, calculate_probabilistic_utility_bootstrap
-from statistical_validation import statistical_validation
+from trade_calculators import (
+    transaction_cost_model, calculate_break_even_stop, UnifiedTargetGenerator, calculate_probabilistic_utility_bootstrap,
+    compute_be_trigger_distance, validate_trade_structure, AdaptiveVolumeGate, MFEBreakEvenTrigger,
+    adaptive_volume_gate, mfe_be_trigger, choppiness_index, check_flash_crash, estimate_liquidation_pool,
+    calculate_covariance_multiplier
+)
 from decision_outcome_db import decision_outcome_db
 from meta_learning_engine import meta_learning_engine
 from causal_attribution_engine import causal_attribution_engine
@@ -100,191 +103,7 @@ MIN_RR_RATIO = {
     "360": 4.0, "6h": 4.0
 }
 
-def compute_be_trigger_distance(atr_dollars, leverage, interval, mfe_trigger_atr_multiple, entry_price=0.0, min_pct_floor=0.0):
-    """
-    FIX 2: Compute minimum favorable move before break-even activates.
-    Enforces a minimum 1.0x ATR distance for leverage > 10x to prevent premature BE chop-outs.
-    """
-    base_be_dist = max(mfe_trigger_atr_multiple * atr_dollars, entry_price * min_pct_floor)
-    if leverage > 10.0:
-        min_be_dist = 1.0 * atr_dollars
-        final_be_dist = max(base_be_dist, min_be_dist)
-        return final_be_dist
-    return base_be_dist
 
-def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, leverage, interval, symbol, direction):
-    """
-    UNIVERSAL TRADE STRUCTURE SANITIZER: Pre-flight gate before order placement.
-    Validates & adjusts R:R ratio, minimum stop width, and leverage compatibility.
-    Returns: (is_valid, adjusted_dict, log_reason_str)
-    """
-    stop_dist = abs(entry_price - stop_price)
-    tp_dist = abs(tp_price - entry_price)
-    
-    adjusted = {
-        "stop_price": stop_price,
-        "tp_price": tp_price,
-        "leverage": leverage,
-        "stop_dist": stop_dist,
-        "tp_dist": tp_dist
-    }
-    logs = []
-    
-    # 1. Enforce minimum stop width for ALL trades
-    min_stop = atr_dollars * 1.0 if leverage > 10.0 else atr_dollars * 0.75
-    if stop_dist < min_stop:
-        if leverage > 10.0:
-            adjusted["leverage"] = 10.0
-            logs.append(f"[LEVERAGE_CAPPED] {symbol} {interval} leverage reduced from {leverage:.1f}x to 10.0x & SL widened from ${stop_dist:.4f} to 1.0x ATR (${min_stop:.4f})")
-        else:
-            logs.append(f"[STOP_WIDENED] {symbol} {interval} SL widened from ${stop_dist:.4f} to 0.75x ATR (${min_stop:.4f})")
-            
-        required_stop = min_stop
-        if direction == "Bearish":
-            adjusted["stop_price"] = entry_price + required_stop
-        else:
-            adjusted["stop_price"] = entry_price - required_stop
-        adjusted["stop_dist"] = required_stop
-
-    # 2. Universal R:R Ratio Capping by timeframe (Max Cap)
-    iv_str = str(interval).replace("m", "")
-    max_rr = MAX_RR_RATIO.get(str(interval), MAX_RR_RATIO.get(iv_str, 4.0))
-    current_rr = adjusted["tp_dist"] / adjusted["stop_dist"] if adjusted["stop_dist"] > 0 else 0.0
-    
-    if current_rr > max_rr:
-        max_allowed_tp_dist = adjusted["stop_dist"] * max_rr
-        if direction == "Bearish":
-            adjusted["tp_price"] = entry_price - max_allowed_tp_dist
-        else:
-            adjusted["tp_price"] = entry_price + max_allowed_tp_dist
-        adjusted["tp_dist"] = max_allowed_tp_dist
-        current_rr = max_rr
-        logs.append(f"[TP_CAPPED_UNIVERSAL] {symbol} {interval} R:R capped from {tp_dist/adjusted['stop_dist']:.1f}:1 to {max_rr:.1f}:1 (TP dist reduced from ${tp_dist:.4f} to ${max_allowed_tp_dist:.4f})")
-        
-    # 3. Minimum R:R Ratio Floor Gate (Dynamic TP optimization if below min_rr)
-    min_rr = MIN_RR_RATIO.get(str(interval), MIN_RR_RATIO.get(iv_str, 2.0))
-    if current_rr < min_rr:
-        try:
-            from trade_frequency_optimizer import trade_frequency_optimizer
-            opt_tp, new_rr, adjusted_flag = trade_frequency_optimizer.optimize_tp_target_for_rr(
-                entry_price=entry_price, stop_price=adjusted["stop_price"], atr_dollars=atr_dollars, direction=direction, min_rr_required=min_rr
-            )
-            if adjusted_flag:
-                adjusted["tp_price"] = opt_tp
-                adjusted["tp_dist"] = abs(opt_tp - entry_price)
-                current_rr = min_rr
-                logs.append(f"[TP_OPTIMIZED_RR] {symbol} {interval} TP target adjusted to ${opt_tp:.4f} to satisfy {min_rr:.1f}:1 R:R floor")
-        except Exception as e:
-            pass
-
-    if current_rr < min_rr:
-        logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1")
-        return False, adjusted, "; ".join(logs)
-        
-    return True, adjusted, "; ".join(logs) if logs else "OK"
-
-class AdaptiveVolumeGate:
-    def __init__(self, lookback_days=30, optimization_window=500):
-        self.lookback_days = lookback_days
-        self.optimization_window = optimization_window
-        self.threshold_cache = {}
-        self.last_optimized = {}
-
-    def get_volume_percentile(self, symbol, kline_df=None):
-        try:
-            if kline_df is not None and "volume" in kline_df.columns and len(kline_df) >= 10:
-                volumes = kline_df["volume"].values
-                current_vol = volumes[-1]
-                percentile = float(np.mean(volumes <= current_vol))
-                return percentile
-        except Exception:
-            pass
-        return 1.0
-
-    def optimize_threshold(self, symbol):
-        try:
-            trades = database.get_trade_history(limit=self.optimization_window)
-            sym_trades = [t for t in trades if isinstance(t, dict) and t.get("symbol") == symbol]
-            if len(sym_trades) < 20:
-                return 0.25
-            
-            def _safe_vol(t):
-                try:
-                    if t.get("raw_data"):
-                        return float(json.loads(t["raw_data"]).get("vol_pctile", 1.0))
-                except Exception:
-                    pass
-                return 1.0
-
-            best_threshold = 0.25
-            best_profit = -float('inf')
-            for threshold in np.arange(0.10, 0.51, 0.05):
-                allowed = [t for t in sym_trades if _safe_vol(t) >= threshold]
-                if len(allowed) < 5:
-                    continue
-                pnl_sum = sum(float(t.get("pnl_usd", 0.0)) for t in allowed)
-                if pnl_sum > best_profit:
-                    best_profit = pnl_sum
-                    best_threshold = threshold
-            self.threshold_cache[symbol] = float(best_threshold)
-            self.last_optimized[symbol] = time.time()
-            return float(best_threshold)
-        except Exception:
-            return 0.25
-
-    def check(self, symbol, kline_df=None):
-        current_pct = self.get_volume_percentile(symbol, kline_df=kline_df)
-        last_opt = self.last_optimized.get(symbol, 0)
-        if time.time() - last_opt > 86400 * 7 or symbol not in self.threshold_cache:
-            threshold = self.optimize_threshold(symbol)
-        else:
-            threshold = self.threshold_cache[symbol]
-            
-        if current_pct < threshold:
-            return False, f"VOLUME_GATE_BLOCKED: {symbol} 4H volume at {current_pct:.1%} (Threshold: {threshold:.1%})", current_pct
-        return True, f"VOLUME_GATE_PASSED: {symbol} 4H volume at {current_pct:.1%}", current_pct
-
-class MFEBreakEvenTrigger:
-    def __init__(self, lookback_trades=150, min_sample_size=15):
-        self.lookback_trades = lookback_trades
-        self.min_sample_size = min_sample_size
-        self.trigger_cache = {}
-
-    def get_trigger_multiple(self, symbol, timeframe="60"):
-        key = (symbol, str(timeframe))
-        if key in self.trigger_cache:
-            return self.trigger_cache[key]
-            
-        try:
-            trades = database.get_trade_history(limit=self.lookback_trades)
-            sym_winning_trades = [
-                t for t in trades
-                if isinstance(t, dict) and t.get("symbol") == symbol and float(t.get("pnl_usd", 0.0)) > 0
-            ]
-            mfe_ratios = []
-            for t in sym_winning_trades:
-                atr = float(t.get("atr_dollars", 0.0))
-                if atr > 0:
-                    raw = {}
-                    if t.get("raw_data"):
-                        try:
-                            raw = json.loads(t["raw_data"])
-                        except Exception:
-                            raw = {}
-                    mfe_val = float(raw.get("mfe", 0.0))
-                    if mfe_val > 0:
-                        mfe_ratios.append(mfe_val / atr)
-            if len(mfe_ratios) >= self.min_sample_size:
-                trig = float(np.percentile(mfe_ratios, 25))
-                trig = float(np.clip(trig, 0.8, 2.0))
-                self.trigger_cache[key] = trig
-                return trig
-        except Exception:
-            pass
-        return 0.85 if str(timeframe) not in ["15", "30"] else 0.65
-
-adaptive_volume_gate = AdaptiveVolumeGate()
-mfe_be_trigger = MFEBreakEvenTrigger()
 
 class CircularLogBuffer:
     def __init__(self, capacity=100):
@@ -423,44 +242,7 @@ def get_pkt_time():
     return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5)
 
 
-def choppiness_index(df, window=None):
-    """0-100 scale. >61.8 = choppy, <38.2 = trending"""
-    if window is None:
-        import config
-        window = getattr(config, "DEFAULT_INDICATOR_WINDOW", 14)
-    if df is None or len(df) < window:
-        return 50.0
-    high_max = df['high'].rolling(window).max()
-    low_min = df['low'].rolling(window).min()
-    tr = np.maximum(df['high'] - df['low'], np.maximum(abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))))
-    atr_sum = tr.rolling(window).sum()
-    price_range = high_max - low_min
-    ci = 100 * np.log10(atr_sum / (price_range + 1e-8)) / np.log10(window)
-    return float(ci.iloc[-1]) if not np.isnan(ci.iloc[-1]) else 50.0
 
-def is_news_blackout(now_utc, interval):
-    """15M/30M avoid trading around major scheduled economic news (e.g., FOMC, CPI, NFP)"""
-    if str(interval) not in ["15", "30"]:
-        return False
-    minute = now_utc.minute
-    hour = now_utc.hour
-    if hour in [13, 14, 18, 19]:
-        if 45 <= minute or minute <= 15:
-            return True
-    return False
-
-def check_flash_crash(symbol: str, max_drop_pct: float = 3.0, window_minutes: int = 5) -> bool:
-    """Block 15M/30M entries if price dropped >3% in last 5 minutes"""
-    try:
-        df_1m = get_history(symbol=symbol, interval="1", limit=window_minutes + 2)
-        if df_1m is None or len(df_1m) < window_minutes:
-            return False
-        recent_high = df_1m["high"].iloc[-window_minutes:].max()
-        current_low = df_1m["low"].iloc[-1]
-        drop_pct = ((recent_high - current_low) / (recent_high + 1e-8)) * 100.0
-        return drop_pct > max_drop_pct
-    except Exception:
-        return False
 
 def get_funding_adjustment(symbol: str, direction: str, funding_rate: float) -> float:
     """Bias confidence toward funded side (+0.03 boost) and penalize expensive side (-0.05)"""
@@ -701,37 +483,7 @@ def send_telegram_alert(message: str):
         
     threading.Thread(target=_post, daemon=True).start()
         
-def estimate_liquidation_pool(df_history, direction, entry_price):
-    """
-    Estimates the location of the nearest high-leverage liquidation pool
-    based on historical swing highs/lows (support and resistance levels).
-    """
-    import numpy as np
-    
-    # Look at the last 60 candles to find recent swing high/low
-    lookback = min(len(df_history), 60)
-    df_recent = df_history.iloc[-lookback:]
-    
-    if direction == "Bullish":
-        # We are Long. Take Profit is above entry.
-        # Short sellers entered near the recent swing high. Their liquidations (buy stops)
-        # are clustered 1% to 2% above the swing high (representing 100x and 50x leverage liquidations).
-        swing_high = float(df_recent["high"].max())
-        # Target just inside the 50x/100x liquidation pool (1.2% above swing high)
-        liq_pool_target = swing_high * 1.012
-        # Ensure it's higher than entry price
-        return max(liq_pool_target, entry_price * 1.005)
-    elif direction == "Bearish":
-        # We are Short. Take Profit is below entry.
-        # Long buyers entered near the recent swing low. Their liquidations (sell stops)
-        # are clustered 1% to 2% below the swing low.
-        swing_low = float(df_recent["low"].min())
-        # Target just inside the 50x/100x liquidation pool (1.2% below swing low)
-        liq_pool_target = swing_low * 0.988
-        # Ensure it's lower than entry price
-        return min(liq_pool_target, entry_price * 0.995)
-    else:
-        return entry_price
+
 
 # Telegram listener extracted to telegram_listener.py
 
@@ -849,29 +601,24 @@ HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.
 
 def save_history():
     with bot_state_lock:
-        # Deduplicate completed trades
-        trades = bot_state.get("trade_history", [])
+        # O(N) Trade Deduplication with Key Hashing (M-10)
+        trades = list(bot_state.get("trade_history", []))
         if trades:
-            try:
-                import database
-                db_trades = database.get_trade_history(limit=500)
-                if db_trades:
-                    trades.extend(db_trades)
-            except Exception:
-                pass
-            
             seen_keys = set()
             deduped = []
-            for t in sorted(trades, key=lambda x: float(x.get("exit_time") or 0.0)):
-                sym = t.get("symbol")
-                dir_str = str(t.get("direction", "")).lower()
-                entry_p = round(float(t.get("entry_price") or 0.0), 2)
-                exit_p = round(float(t.get("exit_price") or 0.0), 2)
-                exit_t = int(float(t.get("exit_time") or 0.0) // 60)
-                key = (sym, dir_str, entry_p, exit_p, exit_t)
+            for t in reversed(trades):
+                t_exit = float(t.get("exit_time") or 0.0)
+                t_entry_p = round(float(t.get("entry_price") or 0.0), 4)
+                t_exit_p = round(float(t.get("exit_price") or 0.0), 4)
+                t_sym = str(t.get("symbol", ""))
+                t_iv = str(t.get("interval", ""))
+                t_dir = str(t.get("direction", "")).lower()
+                t_window = int(t_exit // 43200) if t_exit > 0 else 0
+                key = (t_sym, t_iv, t_dir, t_entry_p, t_exit_p, t_window)
                 if key not in seen_keys:
                     seen_keys.add(key)
                     deduped.append(t)
+            deduped.reverse()
             bot_state["trade_history"] = deduped[-1000:]
 
 
@@ -2384,20 +2131,26 @@ def load_model_weights(iv):
         def check_startup_manifest_health(prefix: str) -> bool:
             manifest_path = f"{prefix}_manifest.json"
             if not os.path.exists(manifest_path):
-                print(f"[CRITICAL ALERT] Model manifest missing for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                msg = f"Model manifest missing for {prefix} ({iv}m)."
+                log_event("CRITICAL", f"[Model Manifest Error] {msg}")
+                send_telegram_alert(f"🚨 *MODEL MANIFEST MISSING* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Action*: Engaging Rule-Based Fallback")
                 return False
             try:
                 with open(manifest_path, "r") as f:
                     m = json.load(f)
                 schema_v = m.get("manifest_schema_version", 1)
                 if schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION or schema_v < 1:
-                    print(f"[CRITICAL ALERT] Model manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                    msg = f"Model manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix} ({iv}m)."
+                    log_event("CRITICAL", f"[Model Manifest Error] {msg}")
+                    send_telegram_alert(f"🚨 *MANIFEST SCHEMA MISMATCH* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Schema*: v{schema_v}")
                     return False
                 from model_governance import model_governance_engine
                 model_governance_engine.log_barrier_manifest_audit("BTCUSDT", str(iv), m)
                 return True
             except Exception as e:
-                print(f"[CRITICAL ALERT] Corrupted model manifest for {prefix}: {e}. Engaging RULE_BASED_FALLBACK for interval {iv}.")
+                msg = f"Corrupted model manifest for {prefix} ({iv}m): {e}"
+                log_event("CRITICAL", f"[Model Manifest Error] {msg}")
+                send_telegram_alert(f"🚨 *CORRUPTED MANIFEST* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Error*: {str(e)}")
                 return False
 
         from mlops_engine import load_production_model_from_registry
@@ -3871,73 +3624,7 @@ def get_rolling_correlation(symbol_a: str, symbol_b: str, interval: str = "60", 
         log_event("DEBUG", f"Rolling correlation calculation fallback ({symbol_a}/{symbol_b}): {e}")
     return 0.70
 
-def calculate_covariance_multiplier(new_symbol, new_direction):
-    """
-    Calculates a position sizing multiplier based on empirical rolling portfolio covariance.
-    Penalizes highly correlated assets in the same direction.
-    Allows offsetting/hedging for assets in opposite directions.
-    """
-    is_stressed = False
-    try:
-        df_vol = get_history(symbol=new_symbol, interval="60", limit=30)
-        if df_vol is not None and not df_vol.empty and "ATR_norm" in df_vol.columns:
-            rolling_atr = df_vol["ATR_norm"].tail(30)
-            atr_mean = rolling_atr.mean()
-            atr_std = rolling_atr.std()
-            vol_z_score = (df_vol["ATR_norm"].iloc[-1] - atr_mean) / (atr_std + 1e-8) if atr_std > 0 else 0.0
-            is_stressed = vol_z_score > 2.0
-            if is_stressed:
-                print(f"[Stress Covariance] Volatility Z-score: {vol_z_score:.2f} > 2.0. Stressed correlation mode active.")
-    except Exception as e:
-        log_event("DEBUG", f"Stress evaluation fallback for {new_symbol}: {e}")
 
-    def get_correlation(s1, s2):
-        if s1 == s2:
-            return 1.0
-        if is_stressed:
-            return 0.95
-        return get_rolling_correlation(s1, s2)
-
-    # Collect active trades from all timeframes
-    open_trades = []
-    for tf_key in ACTIVE_TRADE_TF_KEYS:
-        open_trades.extend(bot_state.get(f"active_trade_{tf_key}", []))
-
-    if not open_trades:
-        return 1.0, 0.0
-
-    total_risk = 0.0
-    breakdown = []
-    
-    for t in open_trades:
-        open_sym = t.get("symbol")
-        open_dir = t.get("direction")
-        if not open_sym or not open_dir:
-            continue
-        r = get_correlation(new_symbol, open_sym)
-        
-        if new_direction == open_dir:
-            impact = r
-            risk_type = "CONCENTRATION"
-        else:
-            impact = -r
-            risk_type = "HEDGE"
-            
-        total_risk += impact
-        breakdown.append(f"  - Active: {open_sym} {open_dir} | Correlation: {r:.2f} | Risk impact: {impact:+.2f} ({risk_type})")
-
-    if total_risk <= 0:
-        multiplier = 1.0
-    else:
-        multiplier = 1.0 / (1.0 + total_risk)
-        multiplier = max(0.20, min(1.0, multiplier))
-
-    print(f"\n[Portfolio Covariance Analysis] New Entry: {new_symbol} {new_direction}")
-    for item in breakdown:
-        print(item)
-    print(f"  - Total Net Correlation Risk: {total_risk:+.2f} -> Covariance Multiplier: {multiplier:.2f}x\n")
-
-    return float(multiplier), float(total_risk)
 
 def calculate_recent_performance_leverage_multiplier(days=7):
     """
@@ -4934,6 +4621,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "atr_sl_dist": float(atr_sl_dist),
             "min_sl_dist": float(min_sl_dist),
             "initial_planned_rr": float(init_planned_rr),
+            "entry_regime": str(regime_name),
             "direction": str(ml_trend),
             "end_time": float(time.time() + duration_seconds),
             "entry_time": int(time.time() * 1000),
@@ -5461,8 +5149,35 @@ def main():
                     risk_dist_mfe = abs(entry_price - stop_loss) if abs(entry_price - stop_loss) > 1e-6 else atr_dollars
                     mfe_r = round(pnl_dist_mfe / risk_dist_mfe, 2)
                     
-                    curr_regime = bot_state.get(f"regime_{iv}", "Trending") if "bot_state" in globals() and isinstance(bot_state, dict) else "Trending"
+                    curr_regime = bot_state.get(f"regime_{active_symbol}_{iv}") or bot_state.get(f"regime_{iv}", "Trending")
+                    entry_regime_val = str(active_trade.get("entry_regime", curr_regime))
                     
+                    # Compute rolling volatility parameters for Levels 5, 6, 7 (M-14)
+                    garch_vol_val = float(atr_dollars / max(1e-6, current_price))
+                    rolling_vol_20th = float(garch_vol_val * 0.70)
+                    atr_ratio_val = 1.0
+                    if df_completed is not None and not df_completed.empty and "ATR_norm" in df_completed.columns and len(df_completed) >= 20:
+                        rolling_vol_20th = float(df_completed["ATR_norm"].tail(96).quantile(0.20))
+                        mean_atr = float(df_completed["ATR_norm"].tail(96).mean())
+                        atr_ratio_val = float(df_completed["ATR_norm"].iloc[-1] / max(1e-4, mean_atr))
+                    
+                    # Incoming signal opportunity cost & portfolio heat
+                    total_active_val = sum(t.get("position_size_usd", 0.0) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_k}", []))
+                    current_equity = bot_state.get("simulated_balance", 80.0)
+                    port_heat = total_active_val / max(1.0, current_equity)
+                    is_heat_full = port_heat >= 0.80
+
+                    # Find best incoming predicted expected R across other symbols
+                    best_incoming_r = None
+                    for other_sym in SUPPORTED_SYMBOLS:
+                        if other_sym != active_symbol:
+                            pred_other = bot_state.get(f"latest_prediction_{other_sym}_{iv}", {})
+                            if isinstance(pred_other, dict) and pred_other.get("direction") in ["Bullish", "Bearish"]:
+                                change_pct = abs(float(pred_other.get("predicted_change", 0.0))) / max(1e-6, current_price)
+                                r_cand = change_pct / max(1e-4, garch_vol_val)
+                                if best_incoming_r is None or r_cand > best_incoming_r:
+                                    best_incoming_r = r_cand
+
                     hierarchy_eval = exit_policy_engine.evaluate_10_level_exit_hierarchy(
                         symbol=active_symbol,
                         interval=str(iv),
@@ -5474,9 +5189,14 @@ def main():
                         candles_elapsed=candles_elapsed,
                         expected_r=float(active_trade.get("initial_planned_rr", 1.4)),
                         mfe_r=mfe_r,
-                        entry_regime=str(active_trade.get("entry_regime", curr_regime)),
+                        entry_regime=entry_regime_val,
                         current_regime=str(curr_regime),
-                        mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 100.0))) if "bot_state" in globals() and isinstance(bot_state, dict) else 100.0
+                        garch_vol=garch_vol_val,
+                        rolling_vol_20th_pct=rolling_vol_20th,
+                        atr_ratio=atr_ratio_val,
+                        mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 100.0))) if "bot_state" in globals() and isinstance(bot_state, dict) else 100.0,
+                        incoming_signal_expected_r=best_incoming_r,
+                        portfolio_heat_full=is_heat_full
                     )
                     
                     if hierarchy_eval.get("should_exit"):
@@ -7040,11 +6760,39 @@ def main():
                                             status_msg = "Skipped (Kelly Edge <= 0)"
                                             continue
 
+                                        # Joint Risk Budget Allocation (MHI-governed fractional Kelly + Portfolio Heat + Liquidity Capping)
+                                        portfolio_heat = min(1.0, total_active_size / max(1.0, current_bal))
+                                        mhi_val = float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 90.0)))
+                                        budget_res = risk_engine.joint_risk_budget_allocator.allocate_risk_budget(
+                                            symbol=symbol,
+                                            entry_price=entry_price,
+                                            atr_dollars=atr_dollars,
+                                            atr_norm=atr_norm_val,
+                                            calibrated_confidence=calibrated_confidence,
+                                            direction=ml_trend,
+                                            total_equity=current_bal,
+                                            portfolio_heat=portfolio_heat,
+                                            mhi_score=mhi_val,
+                                            df_completed=df_completed,
+                                            mcc_val=_mcc_val
+                                        )
+                                        if not budget_res.get("execution_permitted", True):
+                                            rej_reason = budget_res.get("reason", "Halted by Risk Budget Allocator")
+                                            print(f"[{symbol} {iv}m Joint Risk Budget Guard] Trade rejected: {rej_reason}")
+                                            log_event("INFO", f"[{symbol} {iv}m] Trade rejected by JointRiskBudgetAllocator: {rej_reason}")
+                                            status_msg = f"Skipped ({rej_reason})"
+                                            continue
+
                                         # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)
                                         f_clamped = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
                                     
-                                        # Sizing before leverage
-                                        position_size_usd = current_bal * f_clamped
+                                        # Sizing before leverage (constrained by JointRiskBudgetAllocator allocation if tighter)
+                                        raw_sized_usd = current_bal * f_clamped
+                                        alloc_size_usd = budget_res.get("position_size")
+                                        if alloc_size_usd is not None and alloc_size_usd > 0:
+                                            position_size_usd = min(raw_sized_usd, alloc_size_usd)
+                                        else:
+                                            position_size_usd = raw_sized_usd
                                     
                                         # Covariance multiplier to account for existing correlations
                                         position_size_usd = position_size_usd * cov_multiplier
