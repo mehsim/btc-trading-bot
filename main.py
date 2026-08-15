@@ -757,7 +757,7 @@ app.register_blueprint(dashboard_bp)
 bot_logs = []
 logs_lock = threading.Lock()
 retraining_lock = threading.Lock()
-active_trades_lock = threading.Lock()
+active_trades_lock = threading.RLock()
 
 from state_manager import state_manager as bot_state
 
@@ -835,7 +835,7 @@ order_flow_lock = threading.Lock()
 order_flow_data = {s: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0} for s in SUPPORTED_SYMBOLS}
 
 # Thread-safe active background order execution guard
-active_execution_lock = threading.Lock()
+active_execution_lock = threading.RLock()
 active_execution_symbols = set()
 
 economic_calendar_cache = None
