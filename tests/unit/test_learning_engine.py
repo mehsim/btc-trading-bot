@@ -130,10 +130,9 @@ class TestContinuousLearningEngine(unittest.TestCase):
         from audit_logger import log_learning_action, get_recent_audit_logs
         from schema_validator import schema_validator
         
-        log_learning_action("TEST_ACTION", "test_component", trade_id="TEST_999", details={"key": "val"})
-        logs = get_recent_audit_logs(limit=5)
-        self.assertTrue(len(logs) > 0)
-        self.assertEqual(logs[0]["action_type"], "TEST_ACTION")
+        log_learning_action("TEST_ACTION_999", "test_component", trade_id="TEST_999", details={"key": "val"})
+        logs = get_recent_audit_logs(limit=50)
+        self.assertTrue(any(l.get("action_type") == "TEST_ACTION_999" or l.get("trade_id") == "TEST_999" for l in logs))
         
         is_valid, errors = schema_validator.validate_record({"trade_id": "T1", "symbol": "BTCUSDT", "confidence": 0.85})
         self.assertTrue(is_valid)
@@ -143,12 +142,12 @@ class TestContinuousLearningEngine(unittest.TestCase):
         from db_snapshot_manager import create_db_snapshot, list_db_snapshots
         from regime_transition_analyzer import record_transition_trade, get_transition_analysis
         
-        record_feature_sample("adx", is_available=True)
+        record_feature_sample("adx_test_feat", is_available=True)
         report = get_feature_availability_report()
         self.assertTrue(len(report) > 0)
         
         snap_path = create_db_snapshot(snapshot_tag="unittest")
-        self.assertTrue(os.path.exists(snap_path))
+        self.assertTrue(snap_path is not None and os.path.exists(snap_path))
         
         record_transition_trade("TRENDING", "HIGH_VOL", is_win=False, realized_r=-1.0)
         transitions = get_transition_analysis()

@@ -17,8 +17,8 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
 
         self.evaluator.models_by_interval = {
             "15": {
-                "trending": {"trend": FailingModel(), "price": FailingModel()},
-                "ranging": {"trend": FailingModel(), "price": FailingModel()}
+                "trending": {"trend": FailingModel(), "price": FailingModel(), "manifest_mcc": 0.125, "manifest_bal_acc": 0.42},
+                "ranging": {"trend": FailingModel(), "price": FailingModel(), "manifest_mcc": 0.125, "manifest_bal_acc": 0.42}
             }
         }
 
@@ -70,12 +70,16 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
                 "trending": {
                     "trend": HealthyClassifier(),
                     "price": HealthyRegressor(),
-                    "calibrator": calibrator_dict
+                    "calibrator": calibrator_dict,
+                    "manifest_mcc": 0.125,
+                    "manifest_bal_acc": 0.42
                 },
                 "ranging": {
                     "trend": HealthyClassifier(),
                     "price": HealthyRegressor(),
-                    "calibrator": calibrator_dict
+                    "calibrator": calibrator_dict,
+                    "manifest_mcc": 0.125,
+                    "manifest_bal_acc": 0.42
                 }
             }
         }

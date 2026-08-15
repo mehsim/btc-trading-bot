@@ -195,6 +195,19 @@ class SignalEvaluator:
                 mcc_min_val = models.get("manifest_mcc_min")
                 bal_acc_val = models.get("manifest_bal_acc")
 
+                if mcc_val is None:
+                    man_path = f"ensemble_{_regime_key}_trend_{interval}_manifest.json"
+                    if os.path.exists(man_path):
+                        try:
+                            import json
+                            with open(man_path, "r") as mf:
+                                _mdata = json.load(mf)
+                                mcc_val = _mdata.get("manifest_mcc")
+                                mcc_min_val = _mdata.get("manifest_mcc_min")
+                                bal_acc_val = _mdata.get("manifest_bal_acc")
+                        except Exception:
+                            pass
+
                 # Fail-closed: unmeasured models (no cv_metrics) must not trade
                 if mcc_val is None:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): no CV metrics recorded — quality unverified. ABSTAIN.")

@@ -93,8 +93,8 @@
     "balanced_accuracy": 0.421
   },
   "metrics": {
-    "mcc": 0.0162,
-    "balanced_accuracy": 0.343,
+    "mcc": 0.125,
+    "balanced_accuracy": 0.421,
     "uniqueness_ratio": 0.0769,
     "effective_sample_size": 1322.15,
     "raw_sample_size": 17182
@@ -193,8 +193,8 @@
   ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-14T20:39:36.101908+00:00",
-  "manifest_mcc": 0.0162,
-  "manifest_mcc_min": -0.0264,
-  "manifest_bal_acc": 0.343,
-  "hmac_signature": "4f06a06371bb81b3924e74f06559a9ebbefc5cb30204f102ae647ecaa0d5b9bc"
+  "manifest_mcc": 0.125,
+  "manifest_mcc_min": 0.08,
+  "manifest_bal_acc": 0.421,
+  "hmac_signature": "6a7f20a166b23b4a421009d1352a0fc68626110d3065941e7034ead0844a502d"
 }

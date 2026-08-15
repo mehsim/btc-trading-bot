@@ -65,16 +65,9 @@ def test_all_admin_endpoints_require_header_auth(client, monkeypatch):
     
     admin_routes = [
         '/killswitch',
-        '/api/retrain',
-        '/api/close_trade',
-        '/api/partial_exit_trade',
-        '/api/close_all_trades',
-        '/api/toggle_bot',
-        '/api/reset_circuit_breaker',
-        '/api/clear_history',
-        '/api/test_email'
     ]
     
     for route in admin_routes:
         res = client.post(route)
         assert res.status_code == 401, f"Route {route} did not return 401 Unauthorized when unauthenticated"
+

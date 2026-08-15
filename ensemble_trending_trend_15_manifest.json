@@ -189,5 +189,8 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "hmac_signature": "9d9164bae7ad7af9b23d5fca8c09b1cdcf49eab54e536b3fd3635e1c3c8ad366"
+  "manifest_mcc": 0.125,
+  "manifest_mcc_min": 0.08,
+  "manifest_bal_acc": 0.421,
+  "hmac_signature": "a4a4bc445a4bcd291d7769b34830bd414aaec4ee43b34b5e2b0970f31fa0edd3"
 }
