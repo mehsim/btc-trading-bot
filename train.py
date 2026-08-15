@@ -1526,9 +1526,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
             log_event("WARNING", f"train notice: {ex_train}")
             _chal_git_sha = "unknown"
 
-        # challenger_feature_names: use RFECV-selected list, NOT X_holdout.columns
-        # (DataFrame column order is not guaranteed to match training order)
-        challenger_feature_names = list(X_holdout.columns) if not hasattr(features_module, 'selected_features') else features
+        # challenger_feature_names: authoritatively use regime_features with strict invariant check
+        challenger_feature_names = list(regime_features)
+        assert list(X_holdout.columns) == challenger_feature_names, "feature contract drift: X_holdout columns do not match regime_features"
 
         if champion_exists:
             manifest_path = f"{c_prefix_t}_manifest.json"
