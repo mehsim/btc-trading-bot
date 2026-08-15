@@ -5,6 +5,7 @@ import json
 import time
 import hashlib
 import hmac
+import gc
 import pandas as pd
 import numpy as np
 import joblib
@@ -572,12 +573,10 @@ def tune_triple_barrier_multipliers(df_coin, interval):
                 scores.append(fold_score)
                 optuna_fold_scores.append(fold_score)
 
-            import gc
             gc.collect()
             return safe_mean(scores) if scores else 0.0
         except Exception as ex_train:
             log_event("WARNING", f"train notice: {ex_train}")
-            import gc
             gc.collect()
             return 0.0
 
@@ -914,7 +913,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print("\nRunning advanced feature selection via RFECV with Purged CV...")
         
         # preserve chronological order — no random sampling
-        import gc
         gc.collect()
         if len(df) > 10000:
             df_sub = df.iloc[-10000:]
@@ -1107,7 +1105,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
             )
             selector.fit(X_rfecv_prelim[top_feats], y_rfecv)
             regime_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
-            import gc
             del selector, estimator
             gc.collect()
             
@@ -1329,7 +1326,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
             
             meta_features_list.append(X_val[is_non_neutral])
             meta_labels_list.append(is_correct[is_non_neutral].astype(int))
-            import gc
             gc.collect()
             
         # Aggregate Confusion Matrix
