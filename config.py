@@ -51,7 +51,7 @@ def resolve_min_sl_pct(symbol: str = "BTCUSDT", interval: str = "60") -> float:
     elif interval == "6h": iv_str = "360"
     val = MIN_SL_PCT_CONFIG.get(iv_str, MIN_SL_PCT_CONFIG.get("default", 0.008))
     return float(val) * 100.0
-HORIZON_REACHABILITY_FACTOR = 0.90  # F-2: Arbitrary horizon reachability scale factor (lookahead^0.5 * ATR * factor)
+HORIZON_REACHABILITY_FACTOR = 1.5  # Canonical horizon reachability scale factor (lookahead^0.5 * ATR * factor)
 MIN_LEVERAGE_RAMP_START = 1.5       # B-1: Leverage starts at 1.5x to eliminate deadband below validation floor
 NEUTRAL_PENALTY_COEFFICIENT = 0.20  # B-9: Neutral probability penalty coefficient
 

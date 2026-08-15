@@ -513,7 +513,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         except Exception as e:
             print(f"[Cache Write Error] {e}")
 
-    # Validate candle continuity (H-8)
+    # Validate and enforce candle continuity (H-8)
     final_df = df_history.iloc[-target_count:].reset_index(drop=True)
     if len(final_df) > 1:
         try:
@@ -521,9 +521,20 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             diffs = final_df["timestamp"].diff().dropna()
             gaps = diffs[diffs > expected_step_ms * 1.5]
             if len(gaps) > 0:
-                log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} gap(s) in candle series. Max gap: {gaps.max()/expected_step_ms:.1f}x bars.")
-        except Exception:
-            pass
+                log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} gap(s) in candle series. Max gap: {gaps.max()/expected_step_ms:.1f}x bars. Reindexing to contiguous grid.")
+                min_ts = int(final_df["timestamp"].iloc[0])
+                max_ts = int(final_df["timestamp"].iloc[-1])
+                full_ts = np.arange(min_ts, max_ts + expected_step_ms, expected_step_ms, dtype=np.int64)
+                df_grid = pd.DataFrame({"timestamp": full_ts})
+                final_df = pd.merge(df_grid, final_df, on="timestamp", how="left")
+                final_df["close"] = final_df["close"].ffill().bfill()
+                final_df["open"] = final_df["open"].fillna(final_df["close"])
+                final_df["high"] = final_df["high"].fillna(final_df["close"])
+                final_df["low"] = final_df["low"].fillna(final_df["close"])
+                final_df["volume"] = final_df["volume"].fillna(0.0)
+                final_df = final_df.iloc[-target_count:].reset_index(drop=True)
+        except Exception as ex_gap:
+            log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Continuity reindex notice: {ex_gap}")
 
     return final_df
 

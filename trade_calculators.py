@@ -1157,7 +1157,8 @@ class UnifiedTargetGenerator:
         min_tp_d = max(0.75 * atr_dollars, entry_price * 0.0020)
         actual_tp_m = max(min_tp_d / max(1e-6, atr_dollars), base_tp_m)
         lookahead = cfg.get("lookahead", 10)
-        max_reach_m = float(np.sqrt(lookahead)) * 1.5
+        reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
+        max_reach_m = float(np.sqrt(lookahead)) * reach_factor
         return float(min(actual_tp_m, max_reach_m))
 
     @staticmethod
@@ -1185,7 +1186,8 @@ class UnifiedTargetGenerator:
 
         # C-1: Reachability Bound (TP must not exceed max range supported by prediction lookahead)
         lookahead = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
-        max_reach_dist = atr_dollars * float(np.sqrt(lookahead)) * 1.5
+        reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
+        max_reach_dist = atr_dollars * float(np.sqrt(lookahead)) * reach_factor
         calc_dist = min(calc_dist, max_reach_dist)
 
         raw_tp = entry_price + (dir_sign * calc_dist)

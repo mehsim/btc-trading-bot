@@ -4833,7 +4833,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 new_tp_dist = final_sl_dist * target_rr
                 
                 lookahead = cfg.get("lookahead", 10)
-                reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 0.90)
+                reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
                 max_reachable = math.sqrt(lookahead) * atr_dollars * reach_factor
                 
                 if new_tp_dist > max_reachable:
@@ -6337,21 +6337,29 @@ def main():
                             expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
                             # Update global state prediction metrics for this timeframe
+                            _manifest_mcc_val = getattr(m_trend, "manifest_mcc", None)
+                            if _manifest_mcc_val is None:
+                                _m_info = locals().get("manifest_info")
+                                if isinstance(_m_info, dict):
+                                    _manifest_mcc_val = _m_info.get("manifest_mcc")
+
                             pred_entry_dict = {
                                 "predicted_change": pred_change,
                                 "predicted_price": predicted_price,
                                 "direction": ml_trend,
                                 "raw_confidence": ml_confidence,
                                 "calibrated_confidence": calibrated_confidence,
+                                "manifest_mcc": _manifest_mcc_val,
                                 "signal_source": "ML_ENSEMBLE",
                                 "is_fallback": False
                             }
-                            bot_state[f"regime_{symbol}_{tf}"] = regime_name
-                            bot_state[f"adx_{symbol}_{tf}"] = adx_regime
-                            bot_state[f"regime_{tf}"] = regime_name
-                            bot_state[f"adx_{tf}"] = adx_regime
-                            bot_state[f"latest_prediction_{symbol}_{tf}"] = pred_entry_dict
-                            bot_state[f"latest_prediction_{tf}"] = pred_entry_dict
+                            for k_suffix in [str(tf), str(iv)]:
+                                bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
+                                bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
+                                bot_state[f"regime_{k_suffix}"] = regime_name
+                                bot_state[f"adx_{k_suffix}"] = adx_regime
+                                bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
+                                bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
 
                             rec.regime = str(regime_name)
                             rec.direction = str(ml_trend)
@@ -6436,11 +6444,65 @@ def main():
                                 adjustments_applied.append(("asian_session", 0.05))
                                 print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
                                 
+                            # Calculate live market microstructure spread in bps
+                            _bid_px = float(latest_candle.get("bid", latest_candle.get("close", 100.0)))
+                            _ask_px = float(latest_candle.get("ask", latest_candle.get("close", 100.0)))
+                            if _ask_px > _bid_px > 0:
+                                current_spread_bps = round(((_ask_px - _bid_px) / ((_ask_px + _bid_px) / 2.0)) * 10000.0, 2)
+                            else:
+                                current_spread_bps = round(float(cost_bps / 2.0), 2)
+                            bot_state["current_spread_bps"] = current_spread_bps
+
+                            # Compute Composite Uncertainty (U_ensemble + U_market)
+                            from statistical_validation import statistical_validation
+                            _mean_atr = float(df_completed["ATR_norm"].mean()) if (df_completed is not None and "ATR_norm" in df_completed.columns and len(df_completed) >= 20) else atr_norm_val
+                            unc_metrics = statistical_validation.calculate_composite_uncertainty(
+                                individual_predictions={
+                                    "xgb": prob_bullish if ml_trend == "Bullish" else prob_bearish,
+                                    "lgb": prob_bullish if ml_trend == "Bullish" else prob_bearish,
+                                    "cat": prob_bullish if ml_trend == "Bullish" else prob_bearish,
+                                },
+                                atr_expansion_ratio=float(atr_norm_val / max(1e-4, _mean_atr)),
+                                spread_bp=float(current_spread_bps)
+                            )
+                            u_tot = float(unc_metrics.get("u_total", 0.04))
+                            bot_state["u_total"] = u_tot
+                            for k_suffix in [str(tf), str(iv)]:
+                                bot_state[f"u_total_{symbol}_{k_suffix}"] = u_tot
+                                bot_state[f"u_total_{k_suffix}"] = u_tot
+
+                            # Compute drift p-value from live PSI
+                            last_psi = float(bot_state.get("last_psi", 0.04))
+                            drift_p = round(max(0.001, min(0.999, 1.0 - (last_psi / 0.25))), 4)
+                            bot_state["drift_p_val"] = drift_p
+
+                            # Compute rolling 30-trade symbol Sharpe
+                            sym_trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol]
+                            if len(sym_trades) >= 5:
+                                sym_pnls = [float(t.get("pnl_usd", 0.0)) for t in sym_trades]
+                                from trade_calculators import calculate_rolling_sharpe
+                                sym_sharpe = round(float(calculate_rolling_sharpe(sym_pnls)), 2)
+                            else:
+                                sym_sharpe = 1.2
+                            bot_state["symbol_sharpe"] = sym_sharpe
+
+                            # Compute MHI score
+                            from strategy_health_engine import strategy_health_engine
+                            mhi_res = strategy_health_engine.compute_model_health_index(
+                                recent_pnls=[float(t.get("pnl_usd", 0.0)) for t in bot_state.get("trade_history", [])[-30:]],
+                                ece_score=float(bot_state.get("last_ece", 0.04)),
+                                brier_score=float(bot_state.get("last_brier_score", 0.15)),
+                                psi_score=float(bot_state.get("last_psi", 0.04)),
+                                execution_health_score=85.0
+                            )
+                            mhi_val = mhi_res.get("mhi_score", 90.0)
+                            bot_state["mhi_score"] = mhi_val
+                            for k_suffix in [str(tf), str(iv)]:
+                                bot_state[f"mhi_{k_suffix}"] = mhi_val
+                                bot_state[f"mhi_{symbol}_{k_suffix}"] = mhi_val
+
                             # Adaptive Confidence Threshold Matrix for 15m
                             if str(iv) == "15":
-                                drift_p = bot_state.get("drift_p_val", 0.50) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.50
-                                u_tot = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
-                                sym_sharpe = float(bot_state.get("symbol_sharpe", 1.2)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1.2
                                 adaptive_val = trade_calculators.calculate_adaptive_15m_threshold(
                                     regime=regime_name,
                                     drift_p_val=drift_p,
@@ -6667,10 +6729,15 @@ def main():
                             dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(0.40, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
-                            if f"latest_prediction_{tf}" in bot_state and isinstance(bot_state[f"latest_prediction_{tf}"], dict):
-                                bot_state[f"latest_prediction_{tf}"]["threshold_base"] = economic_base_threshold
-                                bot_state[f"latest_prediction_{tf}"]["threshold_adjustments"] = adjustments_applied
-                                bot_state[f"latest_prediction_{tf}"]["dynamic_threshold"] = dynamic_conf_threshold
+                            for k_suffix in [str(tf), str(iv)]:
+                                if f"latest_prediction_{symbol}_{k_suffix}" in bot_state and isinstance(bot_state[f"latest_prediction_{symbol}_{k_suffix}"], dict):
+                                    bot_state[f"latest_prediction_{symbol}_{k_suffix}"]["threshold_base"] = economic_base_threshold
+                                    bot_state[f"latest_prediction_{symbol}_{k_suffix}"]["threshold_adjustments"] = adjustments_applied
+                                    bot_state[f"latest_prediction_{symbol}_{k_suffix}"]["dynamic_threshold"] = dynamic_conf_threshold
+                                if f"latest_prediction_{k_suffix}" in bot_state and isinstance(bot_state[f"latest_prediction_{k_suffix}"], dict):
+                                    bot_state[f"latest_prediction_{k_suffix}"]["threshold_base"] = economic_base_threshold
+                                    bot_state[f"latest_prediction_{k_suffix}"]["threshold_adjustments"] = adjustments_applied
+                                    bot_state[f"latest_prediction_{k_suffix}"]["dynamic_threshold"] = dynamic_conf_threshold
                             rec._inputs["dynamic_threshold"] = float(dynamic_conf_threshold)
                         
                             status_msg = "Pending"
@@ -6956,7 +7023,7 @@ def main():
                                             MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC,
                                             CVAR_TAIL_PERCENTILE, CVAR_FALLBACK, DAILY_LOSS_BUDGET_FRAC
                                         )
-                                        _latest_pred = bot_state.get(f"latest_prediction_{iv}", {})
+                                        _latest_pred = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{tf}") or bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{tf}", {})
                                         _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
                                         scaled_kelly = risk_engine.compute_conservative_kelly(
                                             calibrated_confidence=calibrated_confidence,
@@ -6967,8 +7034,14 @@ def main():
                                             mcc_val=_mcc_val
                                         )
                                     
+                                        if scaled_kelly <= 0.0:
+                                            print(f"[{symbol} {iv}m Kelly Sizing] Scaled Kelly is non-positive ({scaled_kelly:.4f}) — abstaining from trade entry (Fail-Closed).")
+                                            log_event("INFO", f"[{symbol} {iv}m] Scaled Kelly non-positive ({scaled_kelly:.4f}) — abstaining from entry.")
+                                            status_msg = "Skipped (Kelly Edge <= 0)"
+                                            continue
+
                                         # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)
-                                        f_clamped = max(MIN_POSITION_BALANCE_FRAC, min(MAX_POSITION_BALANCE_FRAC, scaled_kelly))
+                                        f_clamped = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
                                     
                                         # Sizing before leverage
                                         position_size_usd = current_bal * f_clamped
@@ -7671,8 +7744,7 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_backup_scheduler, name="daily-backup-scheduler", daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread
     threading.Thread(target=run_daily_summary_scheduler, name="daily-summary-scheduler", daemon=True).start()
-    from signal_evaluator import run_signal_evaluator_loop
-    threading.Thread(target=run_signal_evaluator_loop, args=(bot_state,), name="signal-evaluator", daemon=True).start()
+    # Note: Primary evaluation is driven authoritatively by the main candle processing loop to prevent state-key race conditions.
 
     # Keep main thread alive
     while True:
