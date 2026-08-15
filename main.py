@@ -2013,7 +2013,7 @@ def run_flask():
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5001))
-    flask_host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")
     sys.stderr.write(f"[Flask] Starting server on {flask_host}:{port}...\n")
     sys.stderr.flush()
     try:
