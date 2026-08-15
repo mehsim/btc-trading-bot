@@ -6076,9 +6076,9 @@ def main():
                 database.set_setting("micro_run_start_ts", str(micro_ts))
             
             closed_all = database.get_completed_trades(limit=1000) if hasattr(database, "get_completed_trades") else []
-            micro_trades = [t for t in closed_all if float(t.get("exit_time", 0)) >= micro_ts]
+            micro_trades = [t for t in closed_all if float(t.get("exit_time") or 0) >= micro_ts]
             closed_trade_count = len(micro_trades)
-            cumulative_loss = -sum(float(t.get("venue_closed_pnl", t.get("pnl_usd", 0.0))) for t in micro_trades if float(t.get("venue_closed_pnl", t.get("pnl_usd", 0.0))) < 0)
+            cumulative_loss = -sum(float(t.get("venue_closed_pnl") or t.get("pnl_usd") or 0.0) for t in micro_trades if float(t.get("venue_closed_pnl") or t.get("pnl_usd") or 0.0) < 0)
             
             max_trades_cap = getattr(config, "MAX_LIVE_TRADES_CAP", 60)
             max_loss_cap = getattr(config, "MAX_LIVE_LOSS_CAP", 15.0)
