@@ -37,6 +37,7 @@ from news_monitor import news_monitor
 from decay_calibrator import decay_calibrator
 import database
 import trade_calculators
+import exit_manager
 from trade_calculators import (
     transaction_cost_model, calculate_break_even_stop, UnifiedTargetGenerator, calculate_probabilistic_utility_bootstrap,
     compute_be_trigger_distance, validate_trade_structure, AdaptiveVolumeGate, MFEBreakEvenTrigger,
@@ -4621,7 +4622,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "atr_sl_dist": float(atr_sl_dist),
             "min_sl_dist": float(min_sl_dist),
             "initial_planned_rr": float(init_planned_rr),
-            "entry_regime": str(regime_name),
+            "entry_regime": str(bot_state.get(f"regime_{symbol}_{iv}", bot_state.get(f"regime_{iv}", "Trending"))),
             "direction": str(ml_trend),
             "end_time": float(time.time() + duration_seconds),
             "entry_time": int(time.time() * 1000),
@@ -5156,10 +5157,11 @@ def main():
                     garch_vol_val = float(atr_dollars / max(1e-6, current_price))
                     rolling_vol_20th = float(garch_vol_val * 0.70)
                     atr_ratio_val = 1.0
-                    if df_completed is not None and not df_completed.empty and "ATR_norm" in df_completed.columns and len(df_completed) >= 20:
-                        rolling_vol_20th = float(df_completed["ATR_norm"].tail(96).quantile(0.20))
-                        mean_atr = float(df_completed["ATR_norm"].tail(96).mean())
-                        atr_ratio_val = float(df_completed["ATR_norm"].iloc[-1] / max(1e-4, mean_atr))
+                    df_recent_pos = get_history(symbol=active_symbol, interval=str(iv), limit=100)
+                    if df_recent_pos is not None and not df_recent_pos.empty and "ATR_norm" in df_recent_pos.columns and len(df_recent_pos) >= 20:
+                        rolling_vol_20th = float(df_recent_pos["ATR_norm"].tail(96).quantile(0.20))
+                        mean_atr = float(df_recent_pos["ATR_norm"].tail(96).mean())
+                        atr_ratio_val = float(df_recent_pos["ATR_norm"].iloc[-1] / max(1e-4, mean_atr))
                     
                     # Incoming signal opportunity cost & portfolio heat
                     total_active_val = sum(t.get("position_size_usd", 0.0) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_k}", []))
