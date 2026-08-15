@@ -251,6 +251,23 @@ class StatisticalValidation:
             "agreement_status": status
         }
 
+    def calculate_composite_uncertainty(
+        self,
+        individual_predictions: Optional[Dict[str, float]] = None,
+        model_weights: Optional[Dict[str, float]] = None,
+        atr_expansion_ratio: float = 1.12,
+        spread_bp: float = 3.5,
+        brier_score: float = 0.214
+    ) -> Dict[str, Any]:
+        """Calculates composite uncertainty across ensemble predictions and market conditions."""
+        return self.compute_ensemble_uncertainty_weighting(
+            individual_predictions=individual_predictions,
+            model_weights=model_weights,
+            atr_expansion_ratio=atr_expansion_ratio,
+            spread_bp=spread_bp,
+            brier_score=brier_score
+        )
+
     @staticmethod
     def interpret_bayes_factor(bf10: float) -> str:
         """Kass & Raftery (1995) Bayesian Evidence Scale interpretation."""
