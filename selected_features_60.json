@@ -1,1 +1,1 @@
-["day_of_week_cos", "btc_rsi_lag1", "fear_greed_lag2", "hour_cos", "day_of_week_sin", "hour_sin", "close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2", "volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"]
+["btc_return_5m_lag1", "fear_greed_lag2", "btc_rsi_lag1", "day_of_week_cos", "day_of_week_sin", "hour_cos", "hour_sin", "close_to_Kalman", "close_to_Kalman_lag1", "close_to_Kalman_lag2", "volatility_gk", "volatility_gk_lag1", "volatility_gk_lag2"]

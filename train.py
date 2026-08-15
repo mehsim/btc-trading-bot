@@ -1799,8 +1799,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["cv_metrics"] = cv_metrics_block
                 manifest_data["git_sha"] = _pipeline_git_sha
                 manifest_data["timestamp"] = now_iso
+                manifest_data["manifest_mcc"] = round(float(chal_mcc_mean), 4)
+                manifest_data["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
+                manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
                 if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
                     manifest_data["metrics"] = {}
+                manifest_data["metrics"]["mcc"] = manifest_data["manifest_mcc"]
+                manifest_data["metrics"]["balanced_accuracy"] = manifest_data["manifest_bal_acc"]
                 manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
