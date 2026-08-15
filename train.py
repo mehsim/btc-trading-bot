@@ -1043,6 +1043,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 log_event("WARNING", f"train notice: {ex_train}")
 
         features_filename = f"selected_features_{interval}_{name}.json"
+        _prev_feats = None
+        if os.path.exists(features_filename):
+            try:
+                with open(features_filename, "r") as _pff:
+                    _prev_feats = json.load(_pff)
+            except Exception as _ex_pf:
+                _prev_feats = None
         regime_features = []
         skip_rfecv = False
         if not globals().get("FORCE_RFECV", False):
@@ -1723,18 +1730,30 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 should_save = False
 
         force_save = os.environ.get("FORCE_SAVE_MODELS", "0") == "1"
-        if should_save or (not compatible) or force_save:
-            if not should_save and (not compatible):
-                print(f"  [Champion-Challenger Contract Override] Champion has incompatible feature contract. Forcing overwrite of model files to enforce feature contract alignment.")
-            elif force_save:
+        contract_stale = (not compatible) and champion_exists
+
+        if should_save or force_save:
+            if force_save:
                 print(f"  [FORCE_SAVE_MODELS] Force saving fresh trained ensemble model files to disk...")
             else:
                 print(f"  [Champion-Challenger] Challenger approved & promoted. Overwriting active model files...")
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+        elif contract_stale:
+            # champion can no longer load, but challenger failed quality — do NOT promote
+            print(f"  [Champion-Challenger] Challenger REJECTED on quality; champion contract is stale. "
+                  f"Champion PRESERVED — {name.upper()} {interval}m will abstain until a passing model exists.")
+            _tg_alert(f"🔴 *{interval}m {name.upper()} has no serviceable model*\n"
+                      f"Challenger failed floors; champion contract stale. Regime will abstain.")
         else:
             print(f"  [Champion-Challenger] Champion retained. Preserving champion manifest intact.")
+
+        # If rejected, roll back selected_features_{interval}_{name}.json to previous features
+        if not (should_save or force_save) and _prev_feats is not None:
+            with open(features_filename, "w") as f:
+                json.dump(_prev_feats, f)
+            print(f"  [Champion-Challenger] Restored previous feature contract in {features_filename}")
 
         # Write/update governance manifest with complete cv_metrics block and sample uniqueness metrics
         _pipeline_git_sha = _chal_git_sha
@@ -1825,7 +1844,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                if should_save or (not compatible) or force_save:
+                if should_save or force_save:
                     with open(manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
 
