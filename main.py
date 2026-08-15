@@ -6789,24 +6789,33 @@ def main():
                                             status_msg = f"Skipped ({rej_reason})"
                                             continue
 
-                                        # Enforce bounds on balance fraction (Min 2%, Max 15% per trade from config)
+                                        # Enforce bounds on balance fraction (Min 2%, Max 5% per trade from config)
+                                        if scaled_kelly <= 0.0:
+                                            print(f"[{symbol} {iv}m Kelly Sizing] Scaled Kelly is non-positive ({scaled_kelly:.4f}) — abstaining from trade entry (Fail-Closed).")
+                                            log_event("INFO", f"[{symbol} {iv}m] Scaled Kelly non-positive ({scaled_kelly:.4f}) — abstaining from entry.")
+                                            status_msg = "Skipped (Kelly Edge <= 0)"
+                                            continue
+
                                         f_clamped = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
                                     
-                                        # Sizing before leverage (constrained by JointRiskBudgetAllocator allocation if tighter)
-                                        raw_sized_usd = current_bal * f_clamped
-                                        alloc_size_usd = budget_res.get("position_size")
-                                        if alloc_size_usd is not None and alloc_size_usd > 0:
-                                            position_size_usd = min(raw_sized_usd, alloc_size_usd)
+                                        # Dimensional Kelly: f_clamped is the fraction of total capital at risk at the stop loss.
+                                        # Capital at Risk = current_bal * f_clamped.
+                                        # Target Notional = (current_bal * f_clamped) / stop_loss_frac.
+                                        stop_loss_frac = max(0.002, abs(entry_price - stop_loss_price) / max(1e-9, entry_price))
+                                        raw_notional_usd = (current_bal * f_clamped) / stop_loss_frac
+                                        alloc_notional_usd = budget_res.get("position_size")
+                                        if alloc_notional_usd is not None and alloc_notional_usd > 0:
+                                            target_notional_usd = min(raw_notional_usd, alloc_notional_usd)
                                         else:
-                                            position_size_usd = raw_sized_usd
+                                            target_notional_usd = raw_notional_usd
                                     
                                         # Covariance multiplier to account for existing correlations
-                                        position_size_usd = position_size_usd * cov_multiplier
+                                        target_notional_usd = target_notional_usd * cov_multiplier
                                     
                                         # Volatility Regime Sizing Multiplier (Sweet spot 1.2x boost, extreme vol 0.5x, flat chop 0.3x)
                                         vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
-                                        position_size_usd = position_size_usd * vol_regime_mult
-                                        print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
+                                        target_notional_usd = target_notional_usd * vol_regime_mult
+                                        print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Target Notional: ${target_notional_usd:.2f}")
 
                                         # Phase 1 Continuous Learning Engine Risk Multiplier (Enforces >= 50 closed trades floor)
                                         from learning_engine import continuous_learning_engine
@@ -6816,8 +6825,8 @@ def main():
                                             "confidence": calibrated_confidence,
                                             "regime": regime_name
                                         })
-                                        position_size_usd = position_size_usd * learning_risk_mult
-                                        print(f"[{symbol} {iv}m Learning Engine Sizing] Multiplier: {learning_risk_mult:.2f}x -> Position Size: ${position_size_usd:.2f}")
+                                        target_notional_usd = target_notional_usd * learning_risk_mult
+                                        print(f"[{symbol} {iv}m Learning Engine Sizing] Multiplier: {learning_risk_mult:.2f}x -> Target Notional: ${target_notional_usd:.2f}")
                                     
                                         # CVaR (Expected Shortfall) Risk Constraint
                                         try:
@@ -6831,22 +6840,22 @@ def main():
                                             else:
                                                 cvar_95 = CVAR_FALLBACK
                                             daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
-                                            max_cvar_size = daily_loss_budget / (cvar_95 + 1e-8)
-                                            print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Risk Size Allowed: ${max_cvar_size:.2f}")
-                                            position_size_usd = min(position_size_usd, max_cvar_size)
+                                            max_cvar_notional = daily_loss_budget / (cvar_95 + 1e-8)
+                                            print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Notional Allowed: ${max_cvar_notional:.2f}")
+                                            target_notional_usd = min(target_notional_usd, max_cvar_notional)
                                         except Exception as cvar_err:
                                             print(f"[CVaR Error] {cvar_err}")
                                         if is_golden_hour:
                                             # Golden Hour: Double the target slot allocation size
-                                            position_size_usd = position_size_usd * 2.0
-                                            print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Golden Target: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                            target_notional_usd = target_notional_usd * 2.0
+                                            print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Golden Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                         else:
-                                            print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Clamped: {f_clamped*100:.1f}% -> Final Size: ${position_size_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                            print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                         
-                                        # Clip to minimum Bybit order requirement (e.g. $2.0)
-                                        position_size_usd = max(2.0, position_size_usd)
+                                        # Base margin estimate before final leverage clamp
+                                        position_size_usd = max(2.0, target_notional_usd / 10.0)
                                         original_kelly_size = float(position_size_usd) # Keep intended size pre-clamp
-                                        print(f"[{iv}m Trade Size Boundary Check] Final size before leverage (CVaR constrained): ${position_size_usd:.2f}")
+                                        print(f"[{iv}m Trade Size Boundary Check] Target notional (CVaR constrained): ${target_notional_usd:.2f}")
 
                                         # Calculate Kelly parameters for logs and metadata (preserving variables for downstream use)
                                         kelly_fraction = scaled_kelly
@@ -6978,7 +6987,8 @@ def main():
                                             duration_seconds = int(iv) * 60.0 * lookahead
                                             import uuid
                                             trade_uuid = str(uuid.uuid4())
-                                            # Calculate quantity (qty) in coins rounded according to symbol requirements
+                                            # Calculate margin and quantity (qty) in coins rounded according to symbol requirements
+                                            position_size_usd = max(2.0, target_notional_usd / max(1.0, leverage_val))
                                             leveraged_size = position_size_usd * leverage_val
                                             raw_qty = leveraged_size / entry_price
                                             qty_str = format_bybit_qty(symbol, raw_qty)
