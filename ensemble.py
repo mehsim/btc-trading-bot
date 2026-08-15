@@ -145,21 +145,28 @@ def _slice_model_input(model, X):
     expected_names = get_model_feature_names(model)
     n_expected = len(expected_names) if expected_names else None
 
-    if n_expected is None:
+    if n_expected is None or (isinstance(n_expected, (int, float)) and n_expected <= 0):
+        n_expected = None
         if hasattr(model, "booster_") and hasattr(model.booster_, "num_feature"):
             try:
-                n_expected = model.booster_.num_feature()
+                _nf = model.booster_.num_feature()
+                if _nf and _nf > 0:
+                    n_expected = _nf
             except Exception as ex_ens:
                 log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if n_expected is None and hasattr(model, "get_num_features"):
             try:
-                n_expected = model.get_num_features()
+                _nf = model.get_num_features()
+                if _nf and _nf > 0:
+                    n_expected = _nf
             except Exception as ex_ens:
                 log_event("WARNING", f"Ensemble notice: {ex_ens}")
         if n_expected is None:
-            n_expected = getattr(model, "n_features_in_", getattr(model, "_n_features_in", getattr(model, "_n_features", getattr(model, "n_features_", None))))
+            _nf = getattr(model, "n_features_in_", getattr(model, "_n_features_in", getattr(model, "_n_features", getattr(model, "n_features_", None))))
+            if _nf and isinstance(_nf, (int, float)) and _nf > 0:
+                n_expected = int(_nf)
 
-    if n_expected is None and expected_names is None:
+    if (n_expected is None or n_expected <= 0) and (not expected_names):
         return X
 
     if isinstance(X, (pd.DataFrame, pd.Series)):
@@ -187,7 +194,7 @@ def _slice_model_input(model, X):
                     f"Expected {len(expected_names)} features, got {df.shape[1]}."
                 )
             return df[expected_names]
-        elif n_expected and df.shape[1] != n_expected:
+        elif n_expected and n_expected > 0 and df.shape[1] != n_expected:
             # No feature names — model trained on positional numpy array.
             n_got = df.shape[1]
             raise RuntimeError(
@@ -218,7 +225,7 @@ def _slice_model_input(model, X):
                         f"[Feature Shape Coercion Error] Array features missing {len(missing)} required model features: {missing}."
                     )
                 return df_tmp[expected_names]
-        if n_expected:
+        if n_expected and n_expected > 0:
             n_cols = X_arr.shape[1] if X_arr.ndim == 2 else X_arr.shape[0]
             if n_cols != n_expected:
                 raise RuntimeError(
