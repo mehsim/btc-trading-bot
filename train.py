@@ -863,8 +863,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     df_coin["future"] = df_coin["close"].shift(-lookahead)
                     df_coin["target_price_change"] = (df_coin["future"] - df_coin["close"]) / df_coin["close"]
                     df_coin = add_triple_barrier_labels(df_coin, interval)
+                    df_coin.dropna(subset=["target_price_change", "target_trend"], inplace=True)
+                    df_coin["target_trend"] = df_coin["target_trend"].astype(int)
                     float_cols = df_coin.select_dtypes(include=['float64']).columns
                     df_coin[float_cols] = df_coin[float_cols].astype(np.float32)
+                    df_coin = df_coin.copy()
                     dfs.append(df_coin)
                     print(f"Successfully processed {s}: {len(df_coin)} rows.")
         except Exception as e:
