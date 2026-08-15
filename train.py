@@ -1095,7 +1095,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
             selector = RFECV(
                 estimator=estimator,
-                step=1,
+                step=2,
                 cv=cv_rfecv,
                 scoring="balanced_accuracy",
                 min_features_to_select=10,
@@ -1103,6 +1103,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
             )
             selector.fit(X_rfecv_prelim[top_feats], y_rfecv)
             regime_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
+            import gc
+            del selector, estimator
+            gc.collect()
             
             required_price_features = ["close_to_Kalman", "btc_rsi", "ADX", "ATR_norm"]
             for pf in required_price_features:
