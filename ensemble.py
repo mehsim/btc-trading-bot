@@ -1157,6 +1157,29 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
                 f"Manifest Pipeline Hash '{manifest_pipe_hash}' != Live Pipeline Hash '{current_pipe_hash}'. Model refused loading (Fail-Closed)."
             )
 
+    # Step 2: Barrier contract verification — refuse if recorded barriers differ from live config
+    from config import TIMEFRAME_CONFIG as _TFC
+    _saved_barriers = m_data.get("barrier_config")
+    if _saved_barriers:
+        _pfx_parts = prefix.rsplit("_", 1)
+        _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
+        if _pfx_interval:
+            from config import REGIME_ADX_ENTER_BY_INTERVAL as _R_ADX_MAP, STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL as _R_ADX_EXIT_MAP, STRONG_TREND_ADX_EXIT as _ST_ADX_EXIT
+            _live_cfg = dict(_TFC.get(_pfx_interval, {}))
+            _live_cfg["regime_adx_enter"] = float(_R_ADX_MAP.get(str(_pfx_interval), _ST_ADX_ENTER))
+            _live_cfg["regime_adx_exit"] = float(_R_ADX_EXIT_MAP.get(str(_pfx_interval), _ST_ADX_EXIT))
+            _live_barriers = {k: _live_cfg[k] for k in _saved_barriers if k in _live_cfg}
+            _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
+            if _mismatched and os.environ.get("ALLOW_BARRIER_MISMATCH") != "1":
+                raise RuntimeError(
+                    f"[Barrier Contract Error] Mismatch for '{prefix}' ({_pfx_interval}m): "
+                    f"trained {{{', '.join(f'{k}={_saved_barriers[k]}' for k in _mismatched)}}}, "
+                    f"serving {{{', '.join(f'{k}={_live_barriers[k]}' for k in _mismatched)}}}. "
+                    f"Model refused loading (Fail-Closed). Retrain required."
+                )
+    else:
+        log_event("WARNING", f"[Barrier Contract] {prefix}: no barrier_config in manifest — pre-contract model, load permitted until retrained")
+
     reg.model_version = model_ver
     reg.feature_version = feat_ver
     reg.ensemble_version = ens_ver
