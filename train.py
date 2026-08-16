@@ -1684,12 +1684,26 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 champ_neutral_pct = float(champ_manifest.get("cv_metrics", {}).get("label_dist_neutral_pct", 0.0)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.0
                 chal_neutral_pct = float(neut_pct) if 'neut_pct' in locals() else 0.0
                 
-                # If label distribution / schema shifted materially (>5% shift in neutral rate), direct MCC comparison across schemas is invalid
+                champ_n_train = int(champ_manifest.get("cv_metrics", {}).get("n_training_samples", 0)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0
+                chal_n_train = int(len(X))
+                
+                # Check 1: Label distribution shift (>5% shift in neutral rate)
                 is_label_schema_diff = abs(champ_neutral_pct - chal_neutral_pct) > 5.0 and champ_neutral_pct > 0.0
+                
+                # Check 2: Population / Regime membership shift (>25% change in training sample count from GMM boundary adjustment)
+                is_population_shift = False
+                sample_count_ratio = 1.0
+                if champ_n_train > 0:
+                    sample_count_ratio = chal_n_train / float(champ_n_train)
+                    if sample_count_ratio > 1.25 or sample_count_ratio < 0.80:
+                        is_population_shift = True
+                
+                is_distribution_shifted = is_label_schema_diff or is_population_shift
                 mcc_tol = float(champ_manifest.get("governance_policy", {}).get("mcc_regression_tolerance", 0.010)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.010
 
-                if is_label_schema_diff:
-                    print(f"  [Predictive Floor Gate] Label schema shift detected (Champ neutral={champ_neutral_pct:.1f}% vs Chal neutral={chal_neutral_pct:.1f}%). Champion direct comparison void; promoting on absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}).")
+                if is_distribution_shifted:
+                    shift_reason = f"neutral shift ({champ_neutral_pct:.1f}% -> {chal_neutral_pct:.1f}%)" if is_label_schema_diff else f"regime sample population shift ({champ_n_train} -> {chal_n_train} samples, {sample_count_ratio:.2f}x)"
+                    print(f"  [Predictive Floor Gate] Regime/population shift detected ({shift_reason}). Champion direct comparison void; promoting on absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}).")
                 elif champ_mcc_val is not None and chal_mcc_mean < (champ_mcc_val - mcc_tol):
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f} - tol {mcc_tol:.4f})")
                     should_save = False
