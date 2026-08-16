@@ -65,7 +65,8 @@ MODEL_SLOT_DENYLIST = {
     "trending_240",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_30",    # holdout MCC 0.0223 / 0.0000, balacc 0.3398 — below holdout floor
-    "trending_60",    # holdout MCC 0.0193, balacc 0.3444 — below holdout floor (0.02 / 0.35)
+    # trending_60 lifted 2026-08-16: prior denial used a cross-asset holdout (0.0193/34.44%);
+    # temporal holdout measures +0.1891 / 45.85% — clears both floors
     "ranging_60",     # holdout MCC 0.0000, balacc 0.3333 — unservable
 }.union(_persisted_denylist)
 
