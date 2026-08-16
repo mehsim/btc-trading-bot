@@ -1958,8 +1958,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
     df_trending = df[df["regime"] == "trending"].copy().reset_index(drop=True)
     df_ranging = df[df["regime"] == "ranging"].copy().reset_index(drop=True)
 
-    train_regime_model(df_trending, "trending")
-    train_regime_model(df_ranging, "ranging")
+    target_regime = globals().get("TARGET_REGIME", "all")
+    if target_regime in ["all", "trending"]:
+        train_regime_model(df_trending, "trending")
+    else:
+        print(f"[Regime Filter] Skipping TRENDING regime training (target_regime='{target_regime}')")
+
+    if target_regime in ["all", "ranging"]:
+        train_regime_model(df_ranging, "ranging")
+    else:
+        print(f"[Regime Filter] Skipping RANGING regime training (target_regime='{target_regime}')")
 
     # M-3: persist total Optuna trial count so governance gate uses real search breadth.
     # Barrier study: 5 trials; 2 regimes × 6 optimizer functions × 3 trials = 36; total = 41.
@@ -2196,9 +2204,11 @@ if __name__ == "__main__":
     parser.add_argument("--pages", type=int, default=8, help="Number of data pages (default 8 for AWS 1GB RAM)")
     parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
     parser.add_argument("--force-rfecv", action="store_true", help="Force running RFECV feature selection instead of reusing cached features")
+    parser.add_argument("--regime", type=str, default="all", choices=["all", "trending", "ranging"], help="Target market regime to train (all, trending, or ranging)")
     args = parser.parse_args()
     LIVE_FEEDBACK = args.live_feedback
     FORCE_RFECV = args.force_rfecv
+    TARGET_REGIME = args.regime
 
     intervals_to_train = ["15", "30", "60", "120", "240"] if args.interval == "all" else [args.interval]
     _tg_alert(

@@ -7,9 +7,9 @@ FEATURE_PIPELINE_VERSION = "v3.1.0"
 
 import numpy as np
 import bisect
-from ta.momentum import RSIIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator, WilliamsRIndicator
 from ta.volume import MFIIndicator
-from ta.trend import MACD, EMAIndicator, ADXIndicator
+from ta.trend import MACD, EMAIndicator, ADXIndicator, CCIIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 
 try:
@@ -248,6 +248,20 @@ def add_features(df, fetch_calendar_callback=None):
     rolling_v = df["volume"].rolling(window=168, min_periods=1).sum()
     df["VWAP"] = rolling_pv / (rolling_v + 1e-8)
     df["close_to_VWAP"] = df["close"] / df["VWAP"] - 1.0
+
+    # Mean-Reversion Oscillators (Crucial for Ranging Regime)
+    stoch = StochasticOscillator(df["high"], df["low"], df["close"], window=14, smooth_window=3)
+    df["stoch_k"] = (stoch.stoch() / 100.0).fillna(0.5)
+    df["stoch_d"] = (stoch.stoch_signal() / 100.0).fillna(0.5)
+    
+    williams = WilliamsRIndicator(df["high"], df["low"], df["close"], lbp=14)
+    df["williams_r"] = ((williams.williams_r() + 100.0) / 100.0).fillna(0.5)
+    
+    cci_ind = CCIIndicator(df["high"], df["low"], df["close"], window=20)
+    df["cci"] = (cci_ind.cci() / 100.0).fillna(0.0)
+    
+    bb_std = (df["BB_high"] - df["BB_low"]) / 4.0
+    df["bb_zscore"] = ((df["close"] - df["BB_mid"]) / (bb_std + 1e-8)).fillna(0.0)
     
     # Momentum (Rate of Change)
     df["ROC_5"] = df["close"].pct_change(5)
