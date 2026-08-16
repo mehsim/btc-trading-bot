@@ -6058,6 +6058,10 @@ def main():
                                     _manifest_mcc_val = _m_info.get("manifest_mcc")
 
                             pred_entry_dict = {
+                                "timestamp": float(time.time()),
+                                "time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                                "symbol": symbol,
+                                "interval": str(iv),
                                 "predicted_change": pred_change,
                                 "predicted_price": predicted_price,
                                 "direction": ml_trend,

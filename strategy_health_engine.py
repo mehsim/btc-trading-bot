@@ -13,7 +13,7 @@ Evaluates strategy self-awareness across 6 quantitative health metrics:
 
 import os
 import time
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional, List
 import config
 
 class StrategyHealthEngine:
@@ -197,6 +197,29 @@ class StrategyHealthEngine:
                 "calmar_ratio": calmar_ratio
             }
         }
+
+    def compute_model_health_index(
+        self,
+        recent_pnls: Optional[List[float]] = None,
+        ece_score: float = 0.04,
+        brier_score: float = 0.15,
+        psi_score: float = 0.04,
+        execution_health_score: float = 85.0,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Calculates Model Health Index from recent PnLs and calibration scores."""
+        trades_count = len(recent_pnls) if recent_pnls else 20
+        wins = [p for p in (recent_pnls or []) if p > 0]
+        losses = [abs(p) for p in (recent_pnls or []) if p < 0]
+        pf = (sum(wins) / max(1e-4, sum(losses))) if losses else (1.5 if wins else 1.0)
+        return self.calculate_model_health_index(
+            decision_stability_pct=execution_health_score,
+            confidence_robustness_pct=95.0,
+            ece_pct=float(ece_score * 100.0) if ece_score < 1.0 else float(ece_score),
+            psi_score=psi_score,
+            rolling_pf=pf,
+            trades_count=trades_count
+        )
 
 
 strategy_health_engine = StrategyHealthEngine()

@@ -819,6 +819,23 @@ def calculate_recent_performance_leverage_multiplier(bot_state=None, days=7):
         return 1.0
 
 
+def calculate_rolling_sharpe(pnls: list) -> float:
+    """
+    Calculates rolling Sharpe ratio from a list of recent trade PnLs.
+    Returns 1.2 default if insufficient history.
+    """
+    if not pnls or len(pnls) < 3:
+        return 1.2
+    try:
+        arr = np.array(pnls, dtype=float)
+        std = float(np.std(arr))
+        if std < 1e-4:
+            return 1.2
+        return float(np.mean(arr) / std * np.sqrt(len(arr)))
+    except Exception:
+        return 1.2
+
+
 def calculate_decomposed_trade_quality(trade: dict) -> dict:
     """
     Decomposes Trade Quality into 5 distinct vectors:
