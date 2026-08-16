@@ -1643,6 +1643,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
                 log_event("INFO", f"Challenger Metrics: Brier = {chal_brier:.4f} | ECE = {chal_ece:.4f} | Holdout MCC = {holdout_mcc:.4f}")
 
+                # Evaluate Champion Health against Institutional Governance Floors
+                from config import MODEL_GOVERNANCE
+                _min_h_mcc = MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02)
+                _min_h_balacc = MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.35)
+                if champ_mcc < _min_h_mcc or champ_acc < _min_h_balacc:
+                    print(f"  🚨 [Champion Retention Gate] Champion failed out-of-sample floor (Holdout MCC={champ_mcc:.4f} < {_min_h_mcc} or BalAcc={champ_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                    log_event("WARNING", f"[Champion Retention Warning] {name}_{interval} champion breached holdout floor.")
+
                 if chal_acc > champ_acc:
                     should_save = True
                 elif chal_acc == champ_acc and chal_mae < champ_mae:

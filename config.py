@@ -48,7 +48,9 @@ MODEL_SLOT_DENYLIST = {
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_240",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
-    "trending_30",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
+    "trending_30",    # holdout MCC 0.0223 / 0.0000, balacc 0.3398 — below holdout floor
+    "trending_60",    # holdout MCC 0.0193, balacc 0.3444 — below holdout floor (0.02 / 0.35)
+    "ranging_60",     # holdout MCC 0.0000, balacc 0.3333 — unservable
 }
 
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
