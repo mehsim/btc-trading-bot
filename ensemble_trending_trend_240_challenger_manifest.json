@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_trend_240",
-  "timestamp": "2026-08-16T12:26:34.530046+00:00",
+  "timestamp": "2026-08-16T15:17:43.268618+00:00",
   "model_version": "v7.2.0-9e86f616-202608131311",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "025dd31b",
+  "git_sha": "526d77d1",
   "feature_count": 26,
   "feature_names": [
     "open_interest",
@@ -103,46 +103,46 @@
   },
   "metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 2722.31,
-    "raw_sample_size": 35384,
-    "mcc": 0.0223,
-    "balanced_accuracy": 0.345
+    "effective_sample_size": 2444.77,
+    "raw_sample_size": 31776,
+    "mcc": 0.0431,
+    "balanced_accuracy": 0.3586
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.345,
-      "median": 0.342,
-      "std": 0.0066,
-      "min": 0.3372,
-      "max": 0.3561
+      "mean": 0.3586,
+      "median": 0.3547,
+      "std": 0.0118,
+      "min": 0.3461,
+      "max": 0.3752
     },
     "macro_f1": {
-      "mean": 0.3009,
-      "median": 0.2936,
-      "std": 0.0161,
-      "min": 0.286,
-      "max": 0.3287
+      "mean": 0.3374,
+      "median": 0.3442,
+      "std": 0.0226,
+      "min": 0.301,
+      "max": 0.3675
     },
     "mcc": {
-      "mean": 0.0223,
-      "median": 0.0248,
-      "std": 0.0097,
-      "min": 0.0106,
-      "max": 0.0367
+      "mean": 0.0431,
+      "median": 0.0385,
+      "std": 0.0201,
+      "min": 0.0204,
+      "max": 0.0781
     },
-    "mean_kappa": 0.019289121109097418,
-    "mean_pr_auc_bear": 0.28886237107177914,
-    "mean_pr_auc_bull": 0.25139424866625637,
-    "mean_raw_accuracy": 0.3124,
-    "mean_mae": 0.042241,
-    "label_dist_bearish_pct": 27.29,
-    "label_dist_neutral_pct": 49.4,
-    "label_dist_bullish_pct": 23.31,
-    "n_training_samples": 35384,
-    "n_holdout_samples": 5830,
-    "effective_sample_size": 2722.31,
-    "raw_sample_size": 35384,
+    "mean_kappa": 0.04019273918045456,
+    "mean_pr_auc_bear": 0.29949708643102824,
+    "mean_pr_auc_bull": 0.24655654512516278,
+    "mean_raw_accuracy": 0.3774,
+    "mean_mae": 0.03993,
+    "label_dist_bearish_pct": 27.97,
+    "label_dist_neutral_pct": 48.21,
+    "label_dist_bullish_pct": 23.82,
+    "n_training_samples": 31776,
+    "n_holdout_samples": 8640,
+    "effective_sample_size": 2444.77,
+    "raw_sample_size": 31776,
     "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
@@ -157,29 +157,29 @@
       ],
       "matrix": [
         [
-          3429,
-          1378,
-          3304
+          3436,
+          2508,
+          1182
         ],
         [
-          5699,
-          2958,
-          5695
+          5249,
+          5331,
+          2372
         ],
         [
-          3030,
-          1167,
-          2825
+          2776,
+          2399,
+          1227
         ]
       ]
     },
-    "holdout_accuracy": 0.5184,
-    "holdout_balanced_accuracy": 0.3333,
-    "holdout_mcc": -0.0043,
+    "holdout_accuracy": 0.4608,
+    "holdout_balanced_accuracy": 0.3308,
+    "holdout_mcc": -0.0126,
     "champion_holdout_mcc": null,
     "champion_holdout_balanced_accuracy": null,
-    "holdout_brier": 0.6173,
-    "holdout_ece": 0.0675,
+    "holdout_brier": 0.64,
+    "holdout_ece": 0.0225,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -188,7 +188,7 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "025dd31b"
+    "git_sha": "526d77d1"
   },
   "barrier_config": {
     "tp_mult_trending": 1.8,
@@ -198,15 +198,15 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0223,
-  "manifest_mcc_min": 0.0106,
-  "manifest_bal_acc": 0.345,
+  "manifest_mcc": 0.0431,
+  "manifest_mcc_min": 0.0204,
+  "manifest_bal_acc": 0.3586,
   "label_distribution": [
-    11365,
-    20570,
-    9707
+    11451,
+    19732,
+    9750
   ],
   "promoted": false,
-  "evaluation_timestamp": "2026-08-16T12:26:34.530046+00:00",
-  "hmac_signature": "d0568e639a6d6cbb878ee912e8f43dccd161208aff4600a4ce97e54335ef2d35"
+  "evaluation_timestamp": "2026-08-16T15:17:43.268618+00:00",
+  "hmac_signature": "13f25cffc088025330a377713265636e9d7661126186aea52de4cf28d6aa86ac"
 }
