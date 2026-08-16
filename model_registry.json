@@ -1,25 +1,25 @@
 {
   "Production": {
-    "run_id": "train_15m_ranging_1786624074",
+    "run_id": "train_15m_ranging_1786870375",
     "model_name": "ensemble_ranging_15",
     "metrics": {
-      "val_accuracy": 0.3299912389680711,
-      "val_mae": 0.0059428201389978424
+      "val_accuracy": 0.33252301392873357,
+      "val_mae": 0.007063811688591991
     },
     "stage": "Production",
-    "registered_at_utc": "2026-08-13T12:27:54.722913+00:00"
+    "registered_at_utc": "2026-08-16T08:52:55.832405+00:00"
   },
   "Staging": {
-    "run_id": "train_60m_trending_1786573754",
-    "model_name": "btc_60m_trending_clf",
+    "run_id": "train_15m_trending_1786870308",
+    "model_name": "btc_15m_trending_clf",
     "metrics": {
-      "val_accuracy": 0.3584903345379568,
-      "brier_score": 0.6243452419517688,
-      "ece": 0.019547795675529858,
-      "val_mae": 0.02122681743354171
+      "val_accuracy": 0.3658228528746194,
+      "brier_score": 0.6661332360691519,
+      "ece": 0.03570253598575258,
+      "val_mae": 0.008845699031784249
     },
     "stage": "Staging",
-    "registered_at_utc": "2026-08-12T22:29:14.002568+00:00"
+    "registered_at_utc": "2026-08-16T08:51:48.171978+00:00"
   },
   "Archived": [
     {
@@ -551,6 +551,26 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-08-13T12:26:49.726220+00:00"
+    },
+    {
+      "run_id": "train_15m_ranging_1786624074",
+      "model_name": "ensemble_ranging_15",
+      "metrics": {
+        "val_accuracy": 0.3299912389680711,
+        "val_mae": 0.0059428201389978424
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-13T12:27:54.722913+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1786870308",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3658228528746194,
+        "val_mae": 0.008845699031784249
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-16T08:51:48.317067+00:00"
     }
   ]
 }

@@ -1791,6 +1791,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_accuracy": round(holdout_raw_acc, 4),
             "holdout_balanced_accuracy": round(chal_acc, 4),
             "holdout_mcc": round(holdout_mcc, 4),
+            "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
+            "champion_holdout_balanced_accuracy": round(champ_acc, 4) if ('champ_acc' in locals() and champ_acc is not None) else None,
             "holdout_brier": round(chal_brier, 4),
             "holdout_ece": round(chal_ece, 4),
             "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
