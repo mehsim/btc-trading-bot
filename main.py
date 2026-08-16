@@ -2185,8 +2185,9 @@ def load_model_weights(iv):
             log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
 
         # 4. Ranging Classifier & Regressor (Loaded when dynamic regime routing is enabled)
-        from config import ENABLE_DYNAMIC_REGIME_ROUTING
-        if ENABLE_DYNAMIC_REGIME_ROUTING:
+        from config import ENABLE_DYNAMIC_REGIME_ROUTING, DYNAMIC_REGIME_ROUTING_INTERVALS
+        is_ranging_enabled_for_iv = ENABLE_DYNAMIC_REGIME_ROUTING or (str(iv) in DYNAMIC_REGIME_ROUTING_INTERVALS)
+        if is_ranging_enabled_for_iv:
             try:
                 reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
                 if reg_model_ranging is not None:
@@ -5926,9 +5927,10 @@ def main():
 
                         if iv in models_by_interval:
                             models_tf = models_by_interval[iv]
-                            from config import ENABLE_DYNAMIC_REGIME_ROUTING
-                            if ENABLE_DYNAMIC_REGIME_ROUTING:
-                                regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
+                            from config import ENABLE_DYNAMIC_REGIME_ROUTING, DYNAMIC_REGIME_ROUTING_INTERVALS
+                            is_dynamic_routing = ENABLE_DYNAMIC_REGIME_ROUTING or (str(iv) in DYNAMIC_REGIME_ROUTING_INTERVALS)
+                            if is_dynamic_routing:
+                                regime_key = "ranging" if "Ranging" in str(regime) else "trending"
                                 served_regime = regime
                             else:
                                 regime_key = "trending"

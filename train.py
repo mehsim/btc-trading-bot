@@ -1952,7 +1952,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
     from sklearn.mixture import GaussianMixture
 
     print("Fitting Gaussian Mixture Model for Unsupervised Regime Splitting...")
-    features_gmm = df[["ATR_norm", "ADX"]].dropna().values
+    valid_gmm_idx = df[["ATR_norm", "ADX"]].dropna().index
+    features_gmm = df.loc[valid_gmm_idx, ["ATR_norm", "ADX"]].values
     gmm = GaussianMixture(n_components=2, random_state=42)
     regimes = gmm.fit_predict(features_gmm)
 
@@ -1962,7 +1963,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
     trending_component = np.argmax(gmm.means_[:, 0])  # Index with highest mean ATR_norm
 
-    df["regime"] = ["trending" if r == trending_component else "ranging" for r in regimes]
+    df["regime"] = "ranging"
+    df.loc[valid_gmm_idx, "regime"] = ["trending" if r == trending_component else "ranging" for r in regimes]
     df_trending = df[df["regime"] == "trending"].copy().reset_index(drop=True)
     df_ranging = df[df["regime"] == "ranging"].copy().reset_index(drop=True)
 

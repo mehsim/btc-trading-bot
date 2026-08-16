@@ -43,6 +43,7 @@ MODEL_GOVERNANCE = {
 # When False (Default): Routes to validated universal/trending models across all market regimes.
 # When True: Routes strictly to regime-specific models (trending vs ranging) and abstains fail-closed if unservable.
 ENABLE_DYNAMIC_REGIME_ROUTING = False
+DYNAMIC_REGIME_ROUTING_INTERVALS = {"120"}  # 120m champion verified with Holdout MCC 0.0955 and BalAcc 38.44%
 
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
