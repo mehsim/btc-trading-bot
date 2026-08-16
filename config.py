@@ -3,6 +3,9 @@ Centralized Configuration System for BTC Trading Bot
 Consolidates strategy thresholds, leverage caps, risk parameters, and memory bounds.
 """
 
+import os
+import json
+
 # F-09 Isolated Governance Risk Limits
 from risk_limits import (
     HARD_TIMEFRAME_MAX_LEVERAGE_CAPS as TIMEFRAME_MAX_LEVERAGE_CAPS,
@@ -44,14 +47,27 @@ MODEL_GOVERNANCE = {
 # When True: Routes strictly to regime-specific models (trending vs ranging) and abstains fail-closed if unservable.
 ENABLE_DYNAMIC_REGIME_ROUTING = False
 DYNAMIC_REGIME_ROUTING_INTERVALS = {"120", "30"}  # 120m & 30m ranging champions verified out-of-sample
+_persisted_denylist = set()
+if os.path.exists("governance_denylist.json"):
+    try:
+        with open("governance_denylist.json", "r") as _gdf:
+            _pdata = json.load(_gdf)
+            if isinstance(_pdata, list):
+                _persisted_denylist = set(_pdata)
+            elif isinstance(_pdata, dict):
+                _persisted_denylist = set(_pdata.keys())
+    except Exception:
+        pass
+
 MODEL_SLOT_DENYLIST = {
+    "ranging_15",     # legacy barrier mismatch (trained 2.5/2.2 vs serving 1.4/1.25)
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_240",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_30",    # holdout MCC 0.0223 / 0.0000, balacc 0.3398 — below holdout floor
     "trending_60",    # holdout MCC 0.0193, balacc 0.3444 — below holdout floor (0.02 / 0.35)
     "ranging_60",     # holdout MCC 0.0000, balacc 0.3333 — unservable
-}
+}.union(_persisted_denylist)
 
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage

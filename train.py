@@ -72,6 +72,28 @@ def _emit_governance_event(event: dict):
     except Exception as _ge:
         print(f"[Governance] Failed to write audit event: {_ge}")
 
+def _record_to_governance_denylist(slot: str, reason: str = ""):
+    """Persists a rejected/sub-floor champion to governance_denylist.json."""
+    denylist_file = "governance_denylist.json"
+    data = {}
+    if os.path.exists(denylist_file):
+        try:
+            with open(denylist_file, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    data = {k: {"reason": "legacy list", "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")} for k in data}
+        except Exception:
+            data = {}
+    data[slot] = {
+        "reason": reason,
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    }
+    try:
+        with open(denylist_file, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"[Governance] Failed to persist denylist: {e}")
+
 def _tg_alert(msg: str):
     """Send a Telegram notification from train.py without importing main.py."""
     try:
@@ -180,7 +202,7 @@ from config import TIMEFRAME_CONFIG
 # =========================
 SYMBOL = "BTCUSDT"
 INTERVAL = "60"
-PAGES = 5  # 5 pages ~5,000 candles — low-RAM retraining mode
+PAGES = 5
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
 # Feature list matches train.py and main.py
@@ -1643,13 +1665,34 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
                 log_event("INFO", f"Challenger Metrics: Brier = {chal_brier:.4f} | ECE = {chal_ece:.4f} | Holdout MCC = {holdout_mcc:.4f}")
 
-                # Evaluate Champion Health against Institutional Governance Floors
+                # Step 2: Record immutable champion validation event in audit trail
+                _emit_governance_event({
+                    "event_type": "champion_validation",
+                    "slot": f"{name}_{interval}",
+                    "interval": str(interval),
+                    "regime": name,
+                    "champion_holdout_mcc": champ_mcc,
+                    "champion_holdout_balacc": champ_acc,
+                    "challenger_holdout_mcc": holdout_mcc,
+                    "challenger_holdout_balacc": chal_acc,
+                    "symbols": list(SUPPORTED_SYMBOLS),
+                    "samples_evaluated": int(len(y_holdout_trend)),
+                })
+
+                # Step 3: Evaluate Champion Health against Institutional Governance Floors (Population Guarded)
                 from config import MODEL_GOVERNANCE
                 _min_h_mcc = MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02)
                 _min_h_balacc = MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.35)
+                is_full_population = len(SUPPORTED_SYMBOLS) > 1 or SUPPORTED_SYMBOLS == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
+
                 if champ_mcc < _min_h_mcc or champ_acc < _min_h_balacc:
-                    print(f"  🚨 [Champion Retention Gate] Champion failed out-of-sample floor (Holdout MCC={champ_mcc:.4f} < {_min_h_mcc} or BalAcc={champ_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
-                    log_event("WARNING", f"[Champion Retention Warning] {name}_{interval} champion breached holdout floor.")
+                    if is_full_population:
+                        print(f"  🚨 [Champion Retention Gate] Champion failed out-of-sample floor (Holdout MCC={champ_mcc:.4f} < {_min_h_mcc} or BalAcc={champ_acc*100:.2f}% < {_min_h_balacc*100:.1f}%). Auto-denying slot '{name}_{interval}'.")
+                        log_event("WARNING", f"[Champion Retention Warning] {name}_{interval} champion breached holdout floor. Written to governance_denylist.json.")
+                        _record_to_governance_denylist(f"{name}_{interval}", reason=f"breached holdout floor: mcc={champ_mcc:.4f}, balacc={champ_acc:.4f}")
+                    else:
+                        print(f"  ℹ️ [Champion Retention Notice] Evaluation was on sub-population {SUPPORTED_SYMBOLS}. Skipping auto-denial for full-population champion '{name}_{interval}'.")
+                        log_event("INFO", f"[Champion Retention Notice] Sub-population test for {name}_{interval}, auto-denial skipped.")
 
                 if chal_acc > champ_acc:
                     should_save = True
