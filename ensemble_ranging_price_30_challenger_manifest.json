@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_price_30",
-  "timestamp": "2026-08-09T11:00:48.870502+00:00",
-  "model_version": "v7.2.0-f2b1393a-202608061021",
+  "timestamp": "2026-08-16T10:40:50.809456+00:00",
+  "model_version": "v7.2.0-56c93f9a-202608161040",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "073eeb61",
+  "git_sha": "56c93f9a",
   "feature_count": 25,
   "feature_names": [
     "open_interest",
@@ -65,75 +65,86 @@
   "vif_values": {},
   "feature_contract_hash": "2d999eedc6df",
   "feature_pipeline_hash": "4712b43d3155",
-  "training_data_hash": "9768b0d2b7e1cf2d97df984ba978bb4ea9e87e4218e941c47a1a6f4e8377a734",
+  "training_data_hash": "a141144d3febe9a68d05540e096c973834917e16c4139aec38e305ec4211d1fa",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "c726ef39c4311bbc0e4a00ac2236ab611b9b33ccbca350fe7ea22285a502aac1",
   "promotion_reason": "Initial deployment / benchmark promotion",
   "replaced_model_hash": "c726ef39c4311bbc0e4a00ac2236ab611b9b33ccbca350fe7ea22285a502aac1",
   "rollback_reference": "ensemble_ranging_price_30_backup",
   "governance_policy": {
-    "version": "v2.4",
+    "version": "v2.5",
     "max_ece": 0.08,
     "max_brier": 0.5,
     "min_oos_sharpe": 0.5,
     "min_sharpe_delta": 0.1,
     "max_cv_bal_acc_std": 0.05,
     "max_cv_fold_range": 0.12,
-    "enforce_stability_gate": false,
-    "min_samples": 20
+    "enforce_stability_gate": true,
+    "min_samples": 20,
+    "min_mcc": 0.05,
+    "min_balanced_accuracy": 0.36,
+    "min_holdout_mcc": 0.02,
+    "min_holdout_balanced_accuracy": 0.35,
+    "mcc_regression_tolerance": 0.01
   },
   "dependencies": {
     "python": "3.14.6",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.4.6",
+    "numpy": "2.5.0",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
   },
-  "promotion_metrics": {},
-  "metrics": {
+  "promotion_metrics": {
     "uniqueness_ratio": 0.0769,
     "effective_sample_size": 2349.15,
     "raw_sample_size": 30533,
     "mcc": 0.0372,
     "balanced_accuracy": 0.365
   },
+  "metrics": {
+    "uniqueness_ratio": 0.0769,
+    "effective_sample_size": 4638.69,
+    "raw_sample_size": 60297,
+    "mcc": 0.0793,
+    "balanced_accuracy": 0.3785
+  },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.365,
-      "median": 0.353,
-      "std": 0.0205,
-      "min": 0.3415,
-      "max": 0.392
+      "mean": 0.3785,
+      "median": 0.3764,
+      "std": 0.0067,
+      "min": 0.3712,
+      "max": 0.3911
     },
     "macro_f1": {
-      "mean": 0.3106,
-      "median": 0.3187,
-      "std": 0.0241,
-      "min": 0.2654,
-      "max": 0.3367
+      "mean": 0.3466,
+      "median": 0.3325,
+      "std": 0.0219,
+      "min": 0.3235,
+      "max": 0.3793
     },
     "mcc": {
-      "mean": 0.0372,
-      "median": 0.0354,
-      "std": 0.0319,
-      "min": -0.0038,
-      "max": 0.075
+      "mean": 0.0793,
+      "median": 0.0777,
+      "std": 0.0093,
+      "min": 0.0672,
+      "max": 0.0937
     },
-    "mean_kappa": 0.03056852479924075,
-    "mean_pr_auc_bear": 0.43109424341989316,
-    "mean_pr_auc_bull": 0.4487956918380741,
-    "mean_raw_accuracy": 0.3796,
-    "mean_mae": 0.008685,
-    "label_dist_bearish_pct": 42.97,
-    "label_dist_neutral_pct": 16.88,
-    "label_dist_bullish_pct": 40.15,
-    "n_training_samples": 30533,
-    "n_holdout_samples": 5031,
-    "effective_sample_size": 2349.15,
-    "raw_sample_size": 30533,
+    "mean_kappa": 0.07138140163345859,
+    "mean_pr_auc_bear": 0.36277002806461917,
+    "mean_pr_auc_bull": 0.33743236497618173,
+    "mean_raw_accuracy": 0.3897,
+    "mean_mae": 0.009595,
+    "label_dist_bearish_pct": 34.08,
+    "label_dist_neutral_pct": 35.37,
+    "label_dist_bullish_pct": 30.56,
+    "n_training_samples": 60297,
+    "n_holdout_samples": 9933,
+    "effective_sample_size": 4638.69,
+    "raw_sample_size": 60297,
     "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
@@ -148,26 +159,29 @@
       ],
       "matrix": [
         [
-          5308,
-          2586,
-          3118
+          10655,
+          4370,
+          2013
         ],
         [
-          1750,
-          1302,
-          1025
+          9179,
+          6915,
+          1832
         ],
         [
-          5254,
-          2049,
-          3048
+          9572,
+          3698,
+          2011
         ]
       ]
     },
-    "holdout_accuracy": 0.4329,
-    "holdout_balanced_accuracy": 0.3255,
-    "holdout_brier": 0.6356,
-    "holdout_ece": 0.0137,
+    "holdout_accuracy": 0.3822,
+    "holdout_balanced_accuracy": 0.3606,
+    "holdout_mcc": 0.0661,
+    "champion_holdout_mcc": null,
+    "champion_holdout_balanced_accuracy": null,
+    "holdout_brier": 0.6787,
+    "holdout_ece": 0.0917,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -176,13 +190,8 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "073eeb61"
+    "git_sha": "56c93f9a"
   },
-  "label_distribution": [
-    13040,
-    5091,
-    12402
-  ],
   "barrier_config": {
     "tp_mult_trending": 2.8909683078238504,
     "tp_mult_ranging": 1.3620801690780144,
@@ -191,10 +200,15 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "promoted": false,
-  "evaluation_timestamp": "2026-08-09T11:00:48.870502+00:00",
-  "manifest_mcc": 0.0372,
-  "manifest_mcc_min": -0.0038,
-  "manifest_bal_acc": 0.365,
-  "hmac_signature": "945b5949af083e2bb2c1f386b3dece549bb9bc2153f957727c241b544d22c85c"
+  "manifest_mcc": 0.0793,
+  "manifest_mcc_min": 0.0672,
+  "manifest_bal_acc": 0.3785,
+  "label_distribution": [
+    24177,
+    25092,
+    21682
+  ],
+  "promoted": true,
+  "evaluation_timestamp": "2026-08-16T10:40:50.809456+00:00",
+  "hmac_signature": "94102e4052833af7c42320cbbfd0e258b89aa331edc304584764e33075e6f182"
 }

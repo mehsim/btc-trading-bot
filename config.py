@@ -299,15 +299,15 @@ TIMEFRAME_CONFIG = {
     },
     "120": {  # 2H Timeframe - Extended Swing
         "lookahead": int(_get_tf_env("TF_120M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_120M_SL_MULT", 1.20),
-        "tp_mult_ranging": _get_tf_env("TF_120M_TP_RANGING", 2.16),
-        "tp_mult_trending": _get_tf_env("TF_120M_TP_TRENDING", 2.70)
+        "sl_mult": _get_tf_env("TF_120M_SL_MULT", 0.9962),
+        "tp_mult_ranging": _get_tf_env("TF_120M_TP_RANGING", 1.4682),
+        "tp_mult_trending": _get_tf_env("TF_120M_TP_TRENDING", 2.20)
     },
     "240": {  # 4H Timeframe - Macro Swing
         "lookahead": int(_get_tf_env("TF_240M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_240M_SL_MULT", 1.50),
-        "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 2.70),
-        "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 3.30)
+        "sl_mult": _get_tf_env("TF_240M_SL_MULT", 0.7693),
+        "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.3370),
+        "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 1.80)
     },
     "360": {  # 6H Timeframe - Macro Trend
         "lookahead": int(_get_tf_env("TF_360M_LOOKAHEAD", 16)),
