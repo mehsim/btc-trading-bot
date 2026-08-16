@@ -2055,6 +2055,12 @@ for iv in ["15", "30", "60", "120", "240"]:
     }
 
 def load_model_weights(iv):
+    from config import MODEL_SLOT_DENYLIST
+    if f"trending_{iv}" in MODEL_SLOT_DENYLIST and f"ranging_{iv}" in MODEL_SLOT_DENYLIST:
+        models_by_interval.setdefault(iv, {})["_fully_denied"] = True
+        log_event("INFO", f"[{iv}m] Both trending and ranging models denied by governance policy — interval offline.")
+        return
+
     load_iv = iv
     if iv == "30" and not os.path.exists(f"ensemble_trending_trend_{iv}_xgb.json"):
         load_iv = "15"
@@ -5927,8 +5933,13 @@ def main():
                     
                         # Ensure models for interval iv are loaded into memory on-demand
                         _tf = models_by_interval.get(iv, {})
+                        if _tf.get("_fully_denied"):
+                            continue
                         if not any(_tf.get(_r, {}).get("trend") for _r in ("trending", "ranging")):
                             load_model_weights(iv)
+                            _tf = models_by_interval.get(iv, {})
+                            if _tf.get("_fully_denied"):
+                                continue
 
                         if iv in models_by_interval:
                             models_tf = models_by_interval[iv]
