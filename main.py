@@ -2034,6 +2034,28 @@ from xgboost import XGBClassifier, XGBRegressor
 import joblib
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 
+# Startup Barrier Drift Assertion: Compare TIMEFRAME_CONFIG against optimized_barriers_*.json
+from config import TIMEFRAME_CONFIG
+for _iv in ["15", "30", "60", "120", "240"]:
+    _opt_path = f"optimized_barriers_{_iv}.json"
+    if os.path.exists(_opt_path):
+        try:
+            with open(_opt_path, "r") as _of:
+                _ob = json.load(_of)
+            _cfg = TIMEFRAME_CONFIG.get(_iv, {})
+            for _k in ["tp_mult_trending", "tp_mult_ranging", "sl_mult", "lookahead"]:
+                if _k in _ob and _k in _cfg:
+                    _diff = abs(float(_ob[_k]) - float(_cfg[_k]))
+                    if _diff > 1e-9:
+                        raise RuntimeError(
+                            f"[Startup Drift Error] TIMEFRAME_CONFIG['{_iv}']['{_k}'] ({_cfg[_k]}) "
+                            f"diverges from {_opt_path} ({_ob[_k]}) by {_diff:.2e} > 1e-9. Boot aborted."
+                        )
+        except Exception as _e:
+            if isinstance(_e, RuntimeError):
+                raise
+            log_event("WARNING", f"[Startup Barrier Audit] Could not verify {_opt_path}: {_e}")
+
 models_by_interval = {}
 model_files_mtime = {}
 

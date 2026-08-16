@@ -1546,9 +1546,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 )
                 if compatible:
                     champ_b = champ_manifest.get("barrier_config", {})
-                    if str(interval) in ["15", "30"] and float(champ_b.get("tp_mult_trending", 0.0)) > 2.0:
+                    if str(interval) in ["15", "30"] and float(champ_b.get("tp_mult_trending", 0.0)) > 3.0:
                         compatible = False
-                        reason = f"Champion uses legacy unclamped barrier targets (TP={champ_b.get('tp_mult_trending'):.2f}x > 2.0x)"
+                        reason = f"Champion uses legacy unclamped barrier targets (TP={champ_b.get('tp_mult_trending'):.2f}x > 3.0x)"
             else:
                 champ_manifest = {}
                 compatible, reason = False, "No manifest — champion predates governance system"
