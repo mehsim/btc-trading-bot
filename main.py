@@ -2184,35 +2184,37 @@ def load_model_weights(iv):
         except Exception as e:
             log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
 
-        # 4. Ranging Classifier
-        try:
-            reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
-            if reg_model_ranging is not None:
-                models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
-                models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
-            elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
-                models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
-                models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
-        except Exception as e:
-            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_trend']} for {iv}m: {e}")
-            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
+        # 4. Ranging Classifier & Regressor (Loaded when dynamic regime routing is enabled)
+        from config import ENABLE_DYNAMIC_REGIME_ROUTING
+        if ENABLE_DYNAMIC_REGIME_ROUTING:
+            try:
+                reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
+                if reg_model_ranging is not None:
+                    models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
+                    models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
+                elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
+                    models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
+                    models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
+            except Exception as e:
+                log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_trend']} for {iv}m: {e}")
+                send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
 
-        # 5. Ranging Regressor
-        try:
-            if os.path.exists(f"{prefixes['ranging_price']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_price']):
-                models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
-        except Exception as e:
-            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_price']} for {iv}m: {e}")
-            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_price']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
+            # 5. Ranging Regressor
+            try:
+                if os.path.exists(f"{prefixes['ranging_price']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_price']):
+                    models_by_interval[iv]["ranging"]["price"] = load_ensemble_regressor(prefixes["ranging_price"], n_features_ranging, feature_names=feat_ranging)
+            except Exception as e:
+                log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_price']} for {iv}m: {e}")
+                send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_price']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
 
-        # 6. Ranging Meta Classifier
-        try:
-            if os.path.exists(prefixes["ranging_meta"]):
-                meta_clf = XGBClassifier()
-                meta_clf.load_model(prefixes["ranging_meta"])
-                models_by_interval[iv]["ranging"]["meta"] = meta_clf
-        except Exception as e:
-            log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['ranging_meta']}: {e}")
+            # 6. Ranging Meta Classifier
+            try:
+                if os.path.exists(prefixes["ranging_meta"]):
+                    meta_clf = XGBClassifier()
+                    meta_clf.load_model(prefixes["ranging_meta"])
+                    models_by_interval[iv]["ranging"]["meta"] = meta_clf
+            except Exception as e:
+                log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['ranging_meta']}: {e}")
 
         # 7. Calibrators (Always isolated and loaded regardless of model load status)
         try:
@@ -5924,23 +5926,29 @@ def main():
 
                         if iv in models_by_interval:
                             models_tf = models_by_interval[iv]
-                            regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
+                            from config import ENABLE_DYNAMIC_REGIME_ROUTING
+                            if ENABLE_DYNAMIC_REGIME_ROUTING:
+                                regime_key = regime.lower() if regime in ["Trending", "Ranging"] else "trending"
+                                served_regime = regime
+                            else:
+                                regime_key = "trending"
+                                served_regime = f"Trending (Universal Baseline, Market: {regime})"
+
                             m_price = models_tf.get(regime_key, {}).get("price")
                             m_trend = models_tf.get(regime_key, {}).get("trend")
                             m_cal = models_tf.get(regime_key, {}).get("calibrator")
                             m_meta = models_tf.get(regime_key, {}).get("meta")
                             feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
-                            served_regime = regime
 
                             if m_price is None or m_trend is None or not feat_list:
-                                log_event("INFO", f"[{symbol} {iv}m] {regime} model unavailable / abstaining — skipping interval (Fail-Closed)")
+                                log_event("INFO", f"[{symbol} {iv}m] {served_regime} model unavailable / abstaining — skipping interval (Fail-Closed)")
                                 continue
 
                             active_model_price = m_price
                             active_model_trend = m_trend
                             active_calibrator = m_cal
                             active_meta_model = m_meta
-                            regime_name = f"{served_regime} (GMM)"
+                            regime_name = f"{served_regime} (GMM)" if ENABLE_DYNAMIC_REGIME_ROUTING else served_regime
                             
                             # C-1: Preserve strict train/serve feature distribution consistency
                             # Remove ad-hoc inference-time feature multiplier scaling

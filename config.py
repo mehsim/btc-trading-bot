@@ -37,6 +37,11 @@ MODEL_GOVERNANCE = {
     "mcc_regression_tolerance": 0.010   # R-2: Absorbs run-to-run noise during challenger evaluation
 }
 
+# Dynamic Regime-Based Model Routing (Trending vs Ranging)
+# When False (Default): Routes to validated universal/trending models across all market regimes.
+# When True: Routes strictly to regime-specific models (trending vs ranging) and abstains fail-closed if unservable.
+ENABLE_DYNAMIC_REGIME_ROUTING = False
+
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
 CONSERVATIVE_LEVERAGE_CAPS = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "default": 3.0}
