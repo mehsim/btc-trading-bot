@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_ranging_price_120",
-  "timestamp": "2026-08-16T10:23:01.883520+00:00",
+  "timestamp": "2026-08-16T12:16:27.582499+00:00",
   "model_version": "v7.2.0-9e86f616-202608131311",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "9654314f",
+  "git_sha": "025dd31b",
   "feature_count": 46,
   "feature_names": [
     "open_interest",
@@ -143,46 +143,46 @@
   },
   "metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 4500.62,
-    "raw_sample_size": 58502,
-    "mcc": 0.0714,
-    "balanced_accuracy": 0.3674
+    "effective_sample_size": 3259.92,
+    "raw_sample_size": 42373,
+    "mcc": 0.0312,
+    "balanced_accuracy": 0.3482
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3674,
-      "median": 0.3632,
-      "std": 0.0113,
-      "min": 0.3538,
-      "max": 0.387
+      "mean": 0.3482,
+      "median": 0.3482,
+      "std": 0.0025,
+      "min": 0.3447,
+      "max": 0.3513
     },
     "macro_f1": {
-      "mean": 0.3072,
-      "median": 0.3201,
-      "std": 0.0366,
-      "min": 0.2388,
-      "max": 0.3452
+      "mean": 0.2955,
+      "median": 0.2917,
+      "std": 0.0295,
+      "min": 0.2543,
+      "max": 0.3346
     },
     "mcc": {
-      "mean": 0.0714,
-      "median": 0.0679,
-      "std": 0.0174,
-      "min": 0.0555,
-      "max": 0.1046
+      "mean": 0.0312,
+      "median": 0.0303,
+      "std": 0.0053,
+      "min": 0.0245,
+      "max": 0.0408
     },
-    "mean_kappa": 0.05780151064479584,
-    "mean_pr_auc_bear": 0.20109879749964343,
-    "mean_pr_auc_bull": 0.20047631362390347,
-    "mean_raw_accuracy": 0.3581,
-    "mean_mae": 0.025098,
-    "label_dist_bearish_pct": 19.51,
-    "label_dist_neutral_pct": 62.78,
-    "label_dist_bullish_pct": 17.71,
-    "n_training_samples": 58502,
-    "n_holdout_samples": 9637,
-    "effective_sample_size": 4500.62,
-    "raw_sample_size": 58502,
+    "mean_kappa": 0.02542287320114476,
+    "mean_pr_auc_bear": 0.23469460485412066,
+    "mean_pr_auc_bull": 0.21975708179232328,
+    "mean_raw_accuracy": 0.3393,
+    "mean_mae": 0.026868,
+    "label_dist_bearish_pct": 22.78,
+    "label_dist_neutral_pct": 55.9,
+    "label_dist_bullish_pct": 21.32,
+    "n_training_samples": 42373,
+    "n_holdout_samples": 6981,
+    "effective_sample_size": 3259.92,
+    "raw_sample_size": 42373,
     "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
@@ -197,29 +197,29 @@
       ],
       "matrix": [
         [
-          4208,
-          2300,
-          2972
+          3891,
+          2097,
+          2021
         ],
         [
-          12667,
-          10641,
-          7204
+          9041,
+          6341,
+          4378
         ],
         [
-          4327,
-          1823,
-          2608
+          3691,
+          2102,
+          1748
         ]
       ]
     },
-    "holdout_accuracy": 0.632,
-    "holdout_balanced_accuracy": 0.3333,
-    "holdout_mcc": 0.0,
-    "champion_holdout_mcc": 0.0955,
-    "champion_holdout_balanced_accuracy": 0.3844,
-    "holdout_brier": 0.5187,
-    "holdout_ece": 0.0195,
+    "holdout_accuracy": 0.5567,
+    "holdout_balanced_accuracy": 0.3334,
+    "holdout_mcc": 0.0003,
+    "champion_holdout_mcc": 0.0291,
+    "champion_holdout_balanced_accuracy": 0.3525,
+    "holdout_brier": 0.592,
+    "holdout_ece": 0.0247,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -228,7 +228,7 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "9654314f"
+    "git_sha": "025dd31b"
   },
   "barrier_config": {
     "tp_mult_trending": 3.5220347741598514,
@@ -238,15 +238,15 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0714,
-  "manifest_mcc_min": 0.0555,
-  "manifest_bal_acc": 0.3674,
+  "manifest_mcc": 0.0312,
+  "manifest_mcc_min": 0.0245,
+  "manifest_bal_acc": 0.3482,
   "label_distribution": [
-    13428,
-    43219,
-    12192
+    11360,
+    27875,
+    10629
   ],
   "promoted": false,
-  "evaluation_timestamp": "2026-08-16T10:23:01.883520+00:00",
-  "hmac_signature": "015007b00e94ce497588e2756879b23dd42e80253e5068e21ca8d96969f80ef5"
+  "evaluation_timestamp": "2026-08-16T12:16:27.582499+00:00",
+  "hmac_signature": "2f01d8323150b23f47d43a1bab88a37fde039454f7221c6deb622256d1342f55"
 }
