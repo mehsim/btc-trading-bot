@@ -900,6 +900,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         return
         
     df = pd.concat(dfs, ignore_index=True)
+    if "timestamp" in df.columns:
+        df = df.sort_values("timestamp").reset_index(drop=True)
     print(f"\n=== Combined Training Dataset: {len(df)} total rows across {len(dfs)} symbols ===")
 
     # Inject live trade feedback samples if --live-feedback flag is set
@@ -1050,7 +1052,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             return
 
         from config import TIMEFRAME_CONFIG, HOLDOUT_FRACTION, MIN_EFFECTIVE_HOLDOUT_SAMPLES
-        purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12)
+        purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12) * len(SUPPORTED_SYMBOLS)
         embargo_len = max(1, int(len(df_regime) * 0.01))
         required_holdout_rows = max(
             int(len(df_regime) * HOLDOUT_FRACTION),
@@ -1197,7 +1199,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         # C-1 ML Validity: Purge & Embargo train/holdout boundary (lookahead purge + 1% embargo)
         from config import TIMEFRAME_CONFIG, HOLDOUT_FRACTION, MIN_EFFECTIVE_HOLDOUT_SAMPLES, CV_N_SPLITS
-        purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12)
+        purge_len = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12) * len(SUPPORTED_SYMBOLS)
         embargo_len = max(1, int(len(X_full) * 0.01))
         
         # M-1: Dynamic holdout size ensuring minimum effective independent holdout samples
