@@ -34,6 +34,8 @@ MODEL_GOVERNANCE = {
     "min_samples": 20,
     "min_mcc": 0.05,                   # C-1 Predictive Floor: MCC < 0.05 is at statistical chance
     "min_balanced_accuracy": 0.36,     # C-1 Predictive Floor: 3-class random chance is 0.333
+    "min_holdout_mcc": 0.02,                    # out-of-sample floor — applies with or without a champion
+    "min_holdout_balanced_accuracy": 0.35,      # 3-class chance is 0.3333
     "mcc_regression_tolerance": 0.010   # R-2: Absorbs run-to-run noise during challenger evaluation
 }
 

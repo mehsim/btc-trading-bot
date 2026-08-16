@@ -1663,6 +1663,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         from config import MODEL_GOVERNANCE
         min_mcc_floor = MODEL_GOVERNANCE.get("min_mcc", 0.05)
         min_bal_acc_floor = MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)
+        min_holdout_mcc_floor = MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02)
+        min_holdout_bal_acc_floor = MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.35)
 
         chal_mcc_mean = float(stat_mcc.get("mean", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("mean") is not None) else 0.0
         chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
@@ -1677,6 +1679,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 should_save = False
             elif chal_bal_acc_mean < min_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")
+                should_save = False
+            elif holdout_mcc < min_holdout_mcc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor}) — CV edge did not generalize")
+                should_save = False
+            elif chal_acc < min_holdout_bal_acc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout balanced accuracy ({chal_acc:.4f}) below out-of-sample floor ({min_holdout_bal_acc_floor}) — at or near chance")
                 should_save = False
             else:
                 champ_cv_mcc = champ_manifest.get("cv_metrics", {}).get("mcc", {}) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else {}
