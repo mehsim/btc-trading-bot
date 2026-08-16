@@ -5926,7 +5926,8 @@ def main():
                         adx_regime = latest_candle["ADX"]
                     
                         # Ensure models for interval iv are loaded into memory on-demand
-                        if models_by_interval.get(iv, {}).get("trending", {}).get("trend") is None:
+                        _tf = models_by_interval.get(iv, {})
+                        if not any(_tf.get(_r, {}).get("trend") for _r in ("trending", "ranging")):
                             load_model_weights(iv)
 
                         if iv in models_by_interval:
