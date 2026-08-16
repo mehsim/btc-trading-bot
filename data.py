@@ -967,12 +967,23 @@ def classify_market_regime(df_history: pd.DataFrame, interval: Optional[str] = N
     if len(df_clean) == 0:
         return "Low Vol, Ranging"
 
+    from config import REGIME_ADX_ENTER_BY_INTERVAL, REGIME_ADX_EXIT_BY_INTERVAL, STRONG_TREND_ADX_ENTER, STRONG_TREND_ADX_EXIT
+    _enter_thr = REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)
+    _exit_thr = REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)
+
+    adx_series = df_clean["ADX"].values
+    is_trending_state = False
+    for a in adx_series:
+        if not is_trending_state and a >= _enter_thr:
+            is_trending_state = True
+        elif is_trending_state and a <= _exit_thr:
+            is_trending_state = False
+
     latest_atr = df_clean["ATR_norm"].iloc[-1]
-    latest_adx = df_clean["ADX"].iloc[-1]
     atr_median = float(df_clean["ATR_norm"].iloc[:-1].median()) if len(df_clean) > 1 else float(latest_atr)
 
     is_high_vol = latest_atr > atr_median
-    is_trending = latest_adx >= 20.0
+    is_trending = is_trending_state
 
     if is_high_vol and is_trending:
         return "High Vol, Trending"

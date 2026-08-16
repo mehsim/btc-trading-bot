@@ -1811,7 +1811,7 @@ def get_model_governance():
         import time, os, json, glob
 
         models_info = []
-        model_files = glob.glob("ensemble_*_*.json") + glob.glob("ensemble_*_*.txt") + glob.glob("gmm_regime_*.pkl")
+        model_files = glob.glob("ensemble_*_*.json") + glob.glob("ensemble_*_*.txt")
         
         now_ts = time.time()
         for mf in sorted(set(model_files)):

@@ -1948,23 +1948,26 @@ def train_models(interval=INTERVAL, pages=PAGES):
             except Exception as ex_train:
                 log_event("WARNING", f"train notice: {ex_train}")
 
-    # Split dataset based on GMM Unsupervised Regime Classification
-    from sklearn.mixture import GaussianMixture
+    # Split dataset based on Unified ADX Hysteresis (matching barrier labelling)
+    from config import REGIME_ADX_ENTER_BY_INTERVAL, REGIME_ADX_EXIT_BY_INTERVAL, STRONG_TREND_ADX_ENTER, STRONG_TREND_ADX_EXIT
+    _enter_thr = REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)
+    _exit_thr = REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)
 
-    print("Fitting Gaussian Mixture Model for Unsupervised Regime Splitting...")
-    valid_gmm_idx = df[["ATR_norm", "ADX"]].dropna().index
-    features_gmm = df.loc[valid_gmm_idx, ["ATR_norm", "ADX"]].values
-    gmm = GaussianMixture(n_components=2, random_state=42)
-    regimes = gmm.fit_predict(features_gmm)
+    print(f"Splitting dataset via Unified ADX Hysteresis (enter>={_enter_thr}, exit<={_exit_thr})...")
+    adx_arr = df["ADX"].values
+    regime_arr = []
+    is_trending_state = False
+    for a in adx_arr:
+        if pd.isna(a):
+            regime_arr.append("ranging")
+            continue
+        if not is_trending_state and a >= _enter_thr:
+            is_trending_state = True
+        elif is_trending_state and a <= _exit_thr:
+            is_trending_state = False
+        regime_arr.append("trending" if is_trending_state else "ranging")
 
-    # Save pre-trained GMM for inference mapping
-    joblib.dump(gmm, f"gmm_regime_{interval}.pkl")
-    print(f"Saved GMM model: gmm_regime_{interval}.pkl")
-
-    trending_component = np.argmax(gmm.means_[:, 0])  # Index with highest mean ATR_norm
-
-    df["regime"] = "ranging"
-    df.loc[valid_gmm_idx, "regime"] = ["trending" if r == trending_component else "ranging" for r in regimes]
+    df["regime"] = regime_arr
     df_trending = df[df["regime"] == "trending"].copy().reset_index(drop=True)
     df_ranging = df[df["regime"] == "ranging"].copy().reset_index(drop=True)
 
