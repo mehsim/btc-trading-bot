@@ -2155,39 +2155,43 @@ def load_model_weights(iv):
         from mlops_engine import load_production_model_from_registry
 
         # 1. Trending Classifier
-        try:
-            reg_model_trending, ver_trending = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
-            if reg_model_trending is not None:
-                models_by_interval[iv]["trending"]["trend"] = reg_model_trending
-                models_by_interval[iv]["trending"]["model_version"] = ver_trending
-            elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
-                models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
-                models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
-        except Exception as e:
-            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_trend']} for {iv}m: {e}")
-            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
+        from config import MODEL_SLOT_DENYLIST
+        if f"trending_{iv}" in MODEL_SLOT_DENYLIST:
+            log_event("WARNING", f"[Model Slot Denylist] Skipping load for denied model slot 'trending_{iv}' (Fail-Closed Abstain).")
+        else:
+            try:
+                reg_model_trending, ver_trending = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
+                if reg_model_trending is not None:
+                    models_by_interval[iv]["trending"]["trend"] = reg_model_trending
+                    models_by_interval[iv]["trending"]["model_version"] = ver_trending
+                elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
+                    models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
+                    models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
+            except Exception as e:
+                log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_trend']} for {iv}m: {e}")
+                send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
 
-        # 2. Trending Regressor
-        try:
-            if os.path.exists(f"{prefixes['trending_price']}_xgb.json") and check_startup_manifest_health(prefixes['trending_price']):
-                models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
-        except Exception as e:
-            log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_price']} for {iv}m: {e}")
-            send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_price']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
+            # 2. Trending Regressor
+            try:
+                if os.path.exists(f"{prefixes['trending_price']}_xgb.json") and check_startup_manifest_health(prefixes['trending_price']):
+                    models_by_interval[iv]["trending"]["price"] = load_ensemble_regressor(prefixes["trending_price"], n_features_trending, feature_names=feat_trending)
+            except Exception as e:
+                log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_price']} for {iv}m: {e}")
+                send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_price']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
 
-        # 3. Trending Meta Classifier
-        try:
-            if os.path.exists(prefixes["trending_meta"]):
-                meta_clf = XGBClassifier()
-                meta_clf.load_model(prefixes["trending_meta"])
-                models_by_interval[iv]["trending"]["meta"] = meta_clf
-        except Exception as e:
-            log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
+            # 3. Trending Meta Classifier
+            try:
+                if os.path.exists(prefixes["trending_meta"]):
+                    meta_clf = XGBClassifier()
+                    meta_clf.load_model(prefixes["trending_meta"])
+                    models_by_interval[iv]["trending"]["meta"] = meta_clf
+            except Exception as e:
+                log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
 
         # 4. Ranging Classifier & Regressor (Loaded when dynamic regime routing is enabled)
         from config import ENABLE_DYNAMIC_REGIME_ROUTING, DYNAMIC_REGIME_ROUTING_INTERVALS
         is_ranging_enabled_for_iv = ENABLE_DYNAMIC_REGIME_ROUTING or (str(iv) in DYNAMIC_REGIME_ROUTING_INTERVALS)
-        if is_ranging_enabled_for_iv:
+        if is_ranging_enabled_for_iv and f"ranging_{iv}" not in MODEL_SLOT_DENYLIST:
             try:
                 reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
                 if reg_model_ranging is not None:
