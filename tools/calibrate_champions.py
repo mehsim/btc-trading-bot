@@ -73,28 +73,41 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     if len(df_regime) < 100:
         df_regime = df_combined.copy()
         
+    # Compute forward realized trade outcome over lookahead horizon (default 16 bars)
+    lookahead_bars = manifest.get("barrier_config", {}).get("lookahead", 16)
+    df_regime["future_return"] = df_regime["close"].shift(-lookahead_bars) / df_regime["close"] - 1.0
+    
     available_cols = [col for col in features if col in df_regime.columns]
-    X_mat = _slice_model_input(model, df_regime[available_cols])
-    y_true = df_regime["target_trend"].values
+    valid_mask = df_regime["future_return"].notna()
+    df_eval = df_regime[valid_mask].copy()
+    
+    X_mat = _slice_model_input(model, df_eval[available_cols])
     
     # Predict probabilities from Champion
     probs = model.predict_proba(X_mat)
+    p_bear = probs[:, 0]
+    p_neut = probs[:, 1]
+    p_bull = probs[:, 2]
     
-    # Isotonic calibration on directional predictions (Bullish=2 vs Bearish=0)
-    pred_classes = np.argmax(probs, axis=1)
-    max_probs = np.max(probs, axis=1)
+    # Directional trade selection (Bullish if p_bull > p_bear and p_bull > 0.36; Bearish if p_bear > p_bull and p_bear > 0.36)
+    p_dir_bull = p_bull / np.maximum(1e-5, p_bull + p_bear)
+    p_dir_bear = p_bear / np.maximum(1e-5, p_bull + p_bear)
     
-    # Filter for directional predictions only (pred_classes != 1)
-    # Neutral true outcomes count as misses (y_true != pred_classes)
-    mask = (pred_classes != 1)
-    if np.sum(mask) == 0:
-        print(f"  No directional predictions for {prefix}")
+    bull_mask = (p_bull > p_bear) & (p_bull >= 0.36)
+    bull_wins = (df_eval.loc[bull_mask, "future_return"] > 0).astype(float).values
+    bull_conf = p_dir_bull[bull_mask]
+    
+    bear_mask = (p_bear > p_bull) & (p_bear >= 0.36)
+    bear_wins = (df_eval.loc[bear_mask, "future_return"] < 0).astype(float).values
+    bear_conf = p_dir_bear[bear_mask]
+    
+    calibration_probs = np.concatenate([bull_conf, bear_conf])
+    calibration_labels = np.concatenate([bull_wins, bear_wins])
+    
+    if len(calibration_probs) < 50:
+        print(f"  Insufficient directional trades for {prefix}")
         return
         
-    y_binary = (y_true[mask] == pred_classes[mask]).astype(float)
-    calibration_probs = max_probs[mask]
-    calibration_labels = y_binary
-    
     # Fit Beta Calibrator (Smooth, strictly monotonic 3-parameter continuous calibration)
     from tools.beta_calibrator import BetaCalibrator
     bc = BetaCalibrator().fit(calibration_probs, calibration_labels)

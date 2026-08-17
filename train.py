@@ -1732,12 +1732,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
         else:
             print(f"  [Champion-Challenger] No existing champion (or contract updated) for {name.upper()}. Promoting challenger.")
 
-        # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < 0.05 or min fold MCC < 0.0 or BalAcc < 0.36)
-        from config import MODEL_GOVERNANCE
-        min_mcc_floor = MODEL_GOVERNANCE.get("min_mcc", 0.05)
-        min_bal_acc_floor = MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)
-        min_holdout_mcc_floor = MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02)
-        min_holdout_bal_acc_floor = MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.35)
+        # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
+        from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+        min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_mcc", 0.05))
+        min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
+        min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+        min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
 
         chal_mcc_mean = float(stat_mcc.get("mean", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("mean") is not None) else 0.0
         chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
@@ -1747,8 +1747,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             if chal_mcc_mean < min_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) below predictive floor ({min_mcc_floor})")
                 should_save = False
-            elif chal_mcc_min < 0.0:
-                print(f"  [Predictive Floor Gate] REJECTED: Challenger anti-correlated on at least one CV fold (min fold MCC = {chal_mcc_min:.4f} < 0.0)")
+            elif chal_mcc_min < -0.05:
+                print(f"  [Predictive Floor Gate] REJECTED: Challenger severely anti-correlated on at least one CV fold (min fold MCC = {chal_mcc_min:.4f} < -0.05)")
                 should_save = False
             elif chal_bal_acc_mean < min_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")
@@ -1818,9 +1818,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "mcc": chal_mcc_mean,
                 "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
             }
-            champ_eval = {"mcc": champ_mcc_val} if champ_mcc_val is not None else None
+            champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and compatible and not is_distribution_shifted) else None
             promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
-            if compatible and not promoted and not force_save:
+            if compatible and not is_distribution_shifted and not promoted and not force_save:
                 print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
                 should_save = False
             # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol

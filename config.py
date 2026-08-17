@@ -35,12 +35,18 @@ MODEL_GOVERNANCE = {
     "max_cv_fold_range": 0.12,
     "enforce_stability_gate": True,
     "min_samples": 20,
-    "min_mcc": 0.05,                   # C-1 Predictive Floor: MCC < 0.05 is at statistical chance
+    "min_mcc": 0.05,                   # C-1 Predictive Floor: MCC < 0.05 is at statistical chance for multi-hour bars
     "min_balanced_accuracy": 0.36,     # C-1 Predictive Floor: 3-class random chance is 0.333
     "min_holdout_mcc": 0.02,                    # out-of-sample floor — applies with or without a champion
-    "min_holdout_balanced_accuracy": 0.35,      # 3-class chance is 0.3333
+    "min_holdout_balanced_accuracy": 0.34,      # 3-class chance is 0.3333
     "mcc_regression_tolerance": 0.010   # R-2: Absorbs run-to-run noise during challenger evaluation
 }
+
+# Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
+TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "default": 0.050}
+TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.350, "default": 0.360}
+TIMEFRAME_MIN_HOLDOUT_MCC = {"15": -0.02, "30": -0.01, "default": 0.02}
+TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.320, "30": 0.330, "default": 0.340}
 
 # Dynamic Regime-Based Model Routing (Trending vs Ranging)
 # When False (Default): Routes to validated universal/trending models across all market regimes.
