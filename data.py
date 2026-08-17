@@ -522,14 +522,22 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             gaps = diffs[diffs > expected_step_ms * 1.5]
             if len(gaps) > 0:
                 max_gap_bars = int(round(float(gaps.max()) / max(1, expected_step_ms)))
-                if max_gap_bars > 3:
-                    log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Unserviceable gap detected: {max_gap_bars} consecutive bars (limit: 3). Refusing flat bar synthesis to prevent feature distortion.")
+                recent_window = final_df.iloc[-100:] if len(final_df) >= 100 else final_df
+                recent_diffs = recent_window["timestamp"].diff().dropna()
+                recent_gaps = recent_diffs[recent_diffs > expected_step_ms * 1.5]
+                recent_max_gap_bars = int(round(float(recent_gaps.max()) / max(1, expected_step_ms))) if len(recent_gaps) > 0 else 0
+
+                if recent_max_gap_bars > 3:
+                    log_event("WARNING", f"[{symbol} {interval}m Data Continuity] Unserviceable recent gap detected: {recent_max_gap_bars} consecutive bars in active evaluation window (limit: 3). Refusing flat bar synthesis to prevent feature distortion.")
                     final_df.attrs["is_discontinuous"] = True
                     final_df.attrs["gap_exceeded"] = True
                     final_df.attrs["synthetic_bar_count"] = 0
-                    final_df.attrs["max_consecutive_synthetic_bars"] = max_gap_bars
+                    final_df.attrs["max_consecutive_synthetic_bars"] = recent_max_gap_bars
                 else:
-                    log_event("INFO", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} minor gap(s) (max: {max_gap_bars} bars). Reindexing to contiguous grid (capped <= 3).")
+                    if max_gap_bars > 3:
+                        log_event("INFO", f"[{symbol} {interval}m Data Continuity] Detected historical tail gap ({max_gap_bars} bars > 100 bars ago). Active evaluation window is contiguous ({recent_max_gap_bars} bars). Reindexing grid.")
+                    else:
+                        log_event("INFO", f"[{symbol} {interval}m Data Continuity] Detected {len(gaps)} minor gap(s) (max: {max_gap_bars} bars). Reindexing to contiguous grid (capped <= 3).")
                     min_ts = int(final_df["timestamp"].iloc[0])
                     max_ts = int(final_df["timestamp"].iloc[-1])
                     full_ts = np.arange(min_ts, max_ts + expected_step_ms, expected_step_ms, dtype=np.int64)

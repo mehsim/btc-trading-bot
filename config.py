@@ -68,7 +68,7 @@ if os.path.exists("governance_denylist.json"):
 MODEL_SLOT_DENYLIST = {
     "ranging_15",     # legacy barrier mismatch (trained 2.5/2.2 vs serving 1.4/1.25)
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
-    "trending_240",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
+    # trending_240 lifted 2026-08-17: Beta calibrated, 48.8% WR, 2.59 PF, +0.88 R out-of-sample
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_30",    # holdout MCC 0.0223 / 0.0000, balacc 0.3398 — below holdout floor
     # trending_60 lifted 2026-08-16: prior denial used a cross-asset holdout (0.0193/34.44%);
