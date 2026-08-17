@@ -6,13 +6,18 @@ Purged Time-Series Cross-Validation folds to eliminate spurious indicators.
 from typing import List, Tuple, Dict
 import numpy as np
 import pandas as pd
-import shap
+try:
+    import shap
+    HAS_SHAP = True
+except ImportError:
+    shap = None
+    HAS_SHAP = False
 from xgboost import XGBClassifier
 
 
 class BorutaShapSelector:
     """
-    Selects robust features by comparing empirical feature SHAP importance
+    Selects robust features by comparing empirical feature importance (SHAP or Gini gain)
     against randomized shadow feature distributions.
     """
     def __init__(self, n_trials: int = 15, max_features: int = 25, random_state: int = 42):
@@ -57,24 +62,28 @@ class BorutaShapSelector:
             )
             model.fit(X_combined, y)
 
-            # Compute Tree SHAP values on sample
-            sample_idx = np.random.choice(len(X_combined), size=min(300, len(X_combined)), replace=False)
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(X_combined.iloc[sample_idx])
-            
-            if isinstance(shap_values, list):
-                # Multiclass: aggregate absolute SHAP across classes
-                mean_abs_shap = np.mean([np.abs(sv).mean(axis=0) for sv in shap_values], axis=0)
+            if HAS_SHAP and shap is not None:
+                # Compute Tree SHAP values on sample
+                sample_idx = np.random.choice(len(X_combined), size=min(300, len(X_combined)), replace=False)
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_combined.iloc[sample_idx])
+                
+                if isinstance(shap_values, list):
+                    # Multiclass: aggregate absolute SHAP across classes
+                    mean_abs_imp = np.mean([np.abs(sv).mean(axis=0) for sv in shap_values], axis=0)
+                else:
+                    mean_abs_imp = np.abs(shap_values).mean(axis=0)
             else:
-                mean_abs_shap = np.abs(shap_values).mean(axis=0)
+                # Native XGBoost Gini/Gain feature importances (zero-dependency fallback)
+                mean_abs_imp = np.asarray(model.feature_importances_, dtype=float)
 
-            real_shap = mean_abs_shap[:n_features]
-            shadow_shap = mean_abs_shap[n_features:]
-            max_shadow = np.max(shadow_shap) if len(shadow_shap) > 0 else 0.0
+            real_imp = mean_abs_imp[:n_features]
+            shadow_imp = mean_abs_imp[n_features:]
+            max_shadow = np.max(shadow_imp) if len(shadow_imp) > 0 else 0.0
 
             for i, feat in enumerate(feature_names):
-                total_importance[feat] += float(real_shap[i])
-                if real_shap[i] > max_shadow:
+                total_importance[feat] += float(real_imp[i])
+                if real_imp[i] > max_shadow:
                     hits[feat] += 1
 
         # Select features that beat shadow maximum in >= 40% of trials
