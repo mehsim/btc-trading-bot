@@ -86,7 +86,7 @@ def resolve_min_sl_pct(symbol: str = "BTCUSDT", interval: str = "60") -> float:
     return float(val) * 100.0
 HORIZON_REACHABILITY_FACTOR = 1.5  # Canonical horizon reachability scale factor (lookahead^0.5 * ATR * factor)
 MIN_LEVERAGE_RAMP_START = 1.5       # B-1: Leverage starts at 1.5x to eliminate deadband below validation floor
-NEUTRAL_PENALTY_COEFFICIENT = 0.20  # B-9: Neutral probability penalty coefficient
+NEUTRAL_PENALTY_COEFFICIENT = 0.0  # B-9: Neutral penalty coefficient (0.0 allows pure isotonic probability calibration)
 
 # R-1: Model Quality Sizing Policy (Capital allocation scales by measured predictive content)
 QUALITY_SIZING = {

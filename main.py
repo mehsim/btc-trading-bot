@@ -6058,18 +6058,18 @@ def main():
                             _p = {"Bearish": prob_bearish, "Neutral": prob_neutral, "Bullish": prob_bullish}
                             ml_trend = max(_p, key=_p.get)
                             ml_confidence = _p[ml_trend]
-                            neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
-                            if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
-                                ml_confidence = min(0.95, ml_confidence * (1.0 - prob_neutral * neutral_coeff))
 
-                            # Apply Isotonic Regression probability calibration if available
+                            # 1. Calibrate the RAW probability first (what the isotonic calibrator was fitted on)
                             calibrated_confidence = ml_confidence
                             calibrator = active_calibrator
                             if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
                                 calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
                                 print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
-                            else:
-                                calibrated_confidence = ml_confidence
+
+                            # 2. Decision-layer neutral discount (default 0.0 to prevent double penalty)
+                            neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
+                            if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
+                                calibrated_confidence = min(0.95, calibrated_confidence * (1.0 - prob_neutral * neutral_coeff))
 
                             # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
                             calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
