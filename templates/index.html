@@ -3178,23 +3178,22 @@
                     const logs = data.logs || [];
                     const logContainer = document.getElementById("terminal-console-logs");
                     if (logContainer && logs.length > 0) {
-                        if (logs.length > loggedLinesCount || logContainer.children.length <= 2) {
-                            const startIdx = (logs.length > loggedLinesCount && loggedLinesCount > 0) ? loggedLinesCount : Math.max(0, logs.length - 30);
-                            if (logContainer.children.length <= 2) {
-                                logContainer.innerHTML = "";
-                            }
-                            for (let k = startIdx; k < logs.length; k++) {
-                                const lineText = logs[k];
+                        const logsSignature = logs.slice(-10).join("|");
+                        if (logContainer._lastSignature !== logsSignature || logContainer.children.length === 0) {
+                            logContainer._lastSignature = logsSignature;
+                            logContainer.innerHTML = "";
+                            logs.forEach(lineText => {
+                                if (!lineText || !lineText.trim()) return;
                                 const lineDiv = document.createElement("div");
                                 lineDiv.className = "terminal-line";
 
-                                if (lineText.includes("APPROVED") || lineText.includes("[PASS]")) {
+                                if (lineText.includes("APPROVED") || lineText.includes("[PASS]") || lineText.includes("SUCCESS")) {
                                     lineDiv.style.color = "var(--accent-green)";
-                                } else if (lineText.includes("REJECTED") || lineText.includes("[FAIL]") || lineText.includes("Error") || lineText.includes("WARNING")) {
+                                } else if (lineText.includes("REJECTED") || lineText.includes("[FAIL]") || lineText.includes("Error") || lineText.includes("WARNING") || lineText.includes("Denied")) {
                                     lineDiv.style.color = "var(--accent-red)";
-                                } else if (lineText.includes("New completed") || lineText.includes("Trade Opened")) {
+                                } else if (lineText.includes("New completed") || lineText.includes("Trade Opened") || lineText.includes("Signal")) {
                                     lineDiv.style.color = "var(--accent-orange)";
-                                } else if (lineText.includes("TRADE EXITED")) {
+                                } else if (lineText.includes("TRADE EXITED") || lineText.includes("Exit")) {
                                     lineDiv.style.color = "var(--accent-purple)";
                                 }
 
@@ -3207,11 +3206,7 @@
                                     lineDiv.innerText = lineText;
                                 }
                                 logContainer.appendChild(lineDiv);
-                            }
-                            loggedLinesCount = logs.length;
-                            while (logContainer.children.length > 40) {
-                                logContainer.removeChild(logContainer.firstChild);
-                            }
+                            });
                             logContainer.scrollTop = logContainer.scrollHeight;
                         }
                     }

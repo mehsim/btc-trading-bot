@@ -134,26 +134,31 @@ class CircularLogBuffer:
         try:
             str_msg = message.decode("utf-8", errors="replace") if isinstance(message, bytes) else str(message)
             if str_msg.strip():
-                # Strip ANSI escape codes to keep logs clean in Telegram
                 clean_msg = re.sub(r'\x1b\[[0-9;]*[mK]', '', str_msg.strip())
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                self.logs_list.append(f"[{timestamp}] {clean_msg}")
+                formatted = f"[{timestamp}] {clean_msg}" if not clean_msg.startswith("[") else clean_msg
+                self.logs_list.append(formatted)
                 if len(self.logs_list) > self.capacity:
                     self.logs_list.pop(0)
-        except Exception:
+                try:
+                    from logger import add_to_live_log
+                    add_to_live_log(clean_msg)
+                except (ImportError, AttributeError, ValueError):
+                    pass
+        except (ValueError, TypeError, UnicodeError):
             pass
                 
     def flush(self):
         try:
             self.original_stdout.flush()
-        except Exception:
+        except (IOError, OSError, AttributeError):
             pass
 
     def __getattr__(self, name):
         return getattr(self.original_stdout, name)
 
 log_buffer = CircularLogBuffer(capacity=100)
-# sys.stdout = log_buffer
+sys.stdout = log_buffer
 
 import os
 print("[System Debug] os imported.")

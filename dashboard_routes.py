@@ -347,7 +347,15 @@ def sanitize_log_line(line_str: str) -> str:
     return scrubbed
 
 def get_live_bot_logs(max_lines=40):
-    """Read latest live log lines directly from bot.log file or memory buffer with sensitive data scrubbed."""
+    """Read latest live log lines directly from in-memory buffer or bot.log file with sensitive data scrubbed."""
+    try:
+        from logger import get_recent_logs
+        mem_logs = get_recent_logs(max_lines)
+        if mem_logs and len(mem_logs) > 0:
+            return [sanitize_log_line(l) for l in mem_logs]
+    except Exception:
+        pass
+
     lines = []
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")
     if not os.path.exists(log_file):
@@ -372,18 +380,17 @@ def get_live_bot_logs(max_lines=40):
                             msg = item.get("message", "")
                             lines.append(sanitize_log_line(f"[{ts}] [{lvl}] {msg}"))
                             continue
-                        except (ValueError, TypeError, KeyError) as ex_parse:
-                            log_event("WARNING", f"dashboard_routes log json parse notice: {ex_parse}")
+                        except (ValueError, TypeError, KeyError):
+                            pass
                     lines.append(sanitize_log_line(l_str))
-        except (IOError, OSError) as ex_file:
-            log_event("WARNING", f"dashboard_routes log read notice: {ex_file}")
+        except (IOError, OSError):
+            pass
             
     if not lines:
         try:
             import main
             lines = [sanitize_log_line(l) for l in (list(main.bot_logs) if hasattr(main, "bot_logs") and main.bot_logs else list(bot_logs))]
-        except Exception as ex_main_logs:
-            log_event("WARNING", f"dashboard_routes main logs notice: {ex_main_logs}")
+        except Exception:
             lines = [sanitize_log_line(l) for l in list(bot_logs)]
             
     return lines[-max_lines:]
