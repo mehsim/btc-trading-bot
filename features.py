@@ -225,6 +225,27 @@ def add_features(df, fetch_calendar_callback=None):
     df["volatility_10m"] = df["return_5m"].rolling(10).std()
     df["volume_ratio"] = df["volume"] / (df["volume"].rolling(20).mean() + 1e-8)
     
+    # Higher-Timeframe (HTF) Macro Trend Integration
+    w_144 = min(max(10, len(df) - 1), 144)
+    w_336 = min(max(20, len(df) - 1), 336)
+    w_800 = min(max(30, len(df) - 1), 800)
+    w_500 = min(max(25, len(df) - 1), 500)
+    ema_144 = EMAIndicator(df["close"], window=w_144).ema_indicator()
+    ema_336 = EMAIndicator(df["close"], window=w_336).ema_indicator()
+    ema_800 = EMAIndicator(df["close"], window=w_800).ema_indicator()
+    ema_500 = EMAIndicator(df["close"], window=w_500).ema_indicator()
+
+    df["htf_4h_ema_alignment"] = (ema_144 / (ema_336 + 1e-8) - 1.0).fillna(0.0)
+    df["htf_4h_trend_dir"] = np.where(ema_144 > ema_336, 1.0, np.where(ema_144 < ema_336, -1.0, 0.0))
+    df["htf_4h_close_to_ema200"] = (df["close"] / (ema_800 + 1e-8) - 1.0).fillna(0.0)
+    df["htf_1d_close_to_ema200"] = (df["close"] / (ema_500 + 1e-8) - 1.0).fillna(0.0)
+    df["htf_trend_momentum_consensus"] = (
+        np.sign(df["close_to_EMA9"].fillna(0.0)) +
+        np.sign(df["close_to_EMA21"].fillna(0.0)) +
+        np.sign(df["close_to_EMA200"].fillna(0.0)) +
+        df["htf_4h_trend_dir"]
+    ) / 4.0
+    
     # Additional engineered features
     df["high_low_ratio"] = (df["high"] - df["low"]) / df["close"]
     df["open_close_ratio"] = (df["close"] - df["open"]) / df["open"]
@@ -438,6 +459,11 @@ def add_features(df, fetch_calendar_callback=None):
         new_lag_cols[f"btc_close_lag{lag}"] = df["btc_close"].shift(lag).ffill().bfill().fillna(0.0)
         new_lag_cols[f"btc_volume_lag{lag}"] = df["btc_volume"].shift(lag).ffill().bfill().fillna(0.0)
         new_lag_cols[f"btc_rsi_lag{lag}"] = df["btc_rsi"].shift(lag).ffill().bfill().fillna(50.0)
+        new_lag_cols[f"htf_4h_ema_alignment_lag{lag}"] = df["htf_4h_ema_alignment"].shift(lag).fillna(0.0)
+        new_lag_cols[f"htf_4h_trend_dir_lag{lag}"] = df["htf_4h_trend_dir"].shift(lag).fillna(0.0)
+        new_lag_cols[f"htf_4h_close_to_ema200_lag{lag}"] = df["htf_4h_close_to_ema200"].shift(lag).fillna(0.0)
+        new_lag_cols[f"htf_1d_close_to_ema200_lag{lag}"] = df["htf_1d_close_to_ema200"].shift(lag).fillna(0.0)
+        new_lag_cols[f"htf_trend_momentum_consensus_lag{lag}"] = df["htf_trend_momentum_consensus"].shift(lag).fillna(0.0)
 
     # Cyclical time features
     datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)

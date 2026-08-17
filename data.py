@@ -873,6 +873,7 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
         df["fear_greed"] = 50.0
         return df
 
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype("int64")
     min_ts = int(df["timestamp"].min())
     max_ts = int(df["timestamp"].max())
 
@@ -897,6 +898,7 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
 
     # Merge open interest
     if not df_oi.empty:
+        df_oi["timestamp"] = pd.to_numeric(df_oi["timestamp"], errors="coerce").fillna(0).astype("int64")
         df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
     else:
@@ -904,6 +906,7 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
 
     # Merge funding rate
     if not df_funding.empty:
+        df_funding["timestamp"] = pd.to_numeric(df_funding["timestamp"], errors="coerce").fillna(0).astype("int64")
         df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
     else:
@@ -911,6 +914,7 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
 
     # Merge fear and greed
     if not df_fng.empty:
+        df_fng["timestamp"] = pd.to_numeric(df_fng["timestamp"], errors="coerce").fillna(0).astype("int64")
         df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_fng, on="timestamp", direction="backward")
     else:
@@ -929,6 +933,7 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
         try:
             df_btc = get_history(symbol="BTCUSDT", interval=str(interval), limit=len(df) + 100)
             if not df_btc.empty:
+                df_btc["timestamp"] = pd.to_numeric(df_btc["timestamp"], errors="coerce").fillna(0).astype("int64")
                 df_btc = df_btc.sort_values("timestamp").reset_index(drop=True)
                 delta = df_btc["close"].diff()
                 gain = (delta.where(delta > 0, 0.0)).rolling(window=14, min_periods=1).mean()
