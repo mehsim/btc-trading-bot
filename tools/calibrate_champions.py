@@ -100,7 +100,7 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     ir.fit(calibration_probs, calibration_labels)
     
     # Require minimum support per bin to eliminate sparse tail artifacts
-    MIN_BIN = 200
+    MIN_BIN = 1000
     Xs = np.array(ir.X_thresholds_)
     Ys = np.array(ir.y_thresholds_)
     counts = np.histogram(calibration_probs, bins=np.append(Xs, np.inf))[0]
@@ -141,5 +141,10 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
         print(f"   Raw {r:.2f} -> Calibrated {y_thresh[i]:.3f}")
 
 if __name__ == "__main__":
-    calibrate_champion_slot("trending", "15", 0.422)
-    calibrate_champion_slot("trending", "60", 0.358)
+    from trade_calculators import REALIZED_RR_HAIRCUT
+    # 15m: nominal R:R 2.0 (tp=1.4, sl=0.7) -> haircut R:R 1.16 -> required_p approx 0.467 (or with floor 0.55)
+    # 60m: nominal R:R 2.24 (tp=1.475, sl=0.6585) -> haircut R:R 1.30 -> required_p approx 0.435
+    req_15 = (0.7 + 0.16) / (0.7 + (1.4 * REALIZED_RR_HAIRCUT))  # ~0.569
+    req_60 = (0.6585 + 0.16) / (0.6585 + (1.4747 * REALIZED_RR_HAIRCUT)) # ~0.540 (or 0.435 baseline)
+    calibrate_champion_slot("trending", "15", economic_gate=0.467)
+    calibrate_champion_slot("trending", "60", economic_gate=0.435)

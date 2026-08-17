@@ -1456,7 +1456,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             ir.fit(calibration_probs, calibration_labels)
             
             # Require minimum support per bin to eliminate sparse tail artifacts
-            MIN_BIN = 200
+            MIN_BIN = 1000
             Xs = np.array(ir.X_thresholds_)
             Ys = np.array(ir.y_thresholds_)
             counts = np.histogram(calibration_probs, bins=np.append(Xs, np.inf))[0]

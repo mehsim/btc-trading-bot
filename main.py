@@ -4554,7 +4554,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 is_floor_scaled = True
                 log_event("INFO", f"[{symbol} {iv}m F-2 Target Scaling] Scaled TP to ${take_profit_price:.4f} (R:R {target_rr:.2f}) to match MIN_FLOOR SL (${stop_loss_price:.4f}).")
                 
-            from trade_calculators import passes_economic_gate, assert_valid_geometry
+            from trade_calculators import passes_economic_gate, calculate_required_p, assert_valid_geometry
             try:
                 assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol)
             except ValueError as geo_err:
@@ -4566,11 +4566,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
                 _sl_dist = abs(entry_price - stop_loss_price)
                 _tp_dist = abs(take_profit_price - entry_price)
-                _sl_frac = _sl_dist / max(1e-9, entry_price)
-                _tp_frac = _tp_dist / max(1e-9, entry_price)
-                _required_p = (_sl_frac + 0.0016) / max(1e-9, (_sl_frac + _tp_frac))
-                log_event("WARNING", f"[{symbol} {iv}m] MIN_FLOOR widened SL to {min_sl_pct:.2f}%: R:R {_tp_dist/_sl_dist:.2f} requires {_required_p:.3f}, have {calibrated_confidence:.3f}. Aborting.")
-                send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — post-floor R:R {_tp_dist/_sl_dist:.2f} (requires {_required_p:.3f}, have {calibrated_confidence:.3f})")
+                _required_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
+                log_event("WARNING", f"[{symbol} {iv}m] Realized R:R gate failed (nominal R:R {_tp_dist/_sl_dist:.2f} with haircut requires {_required_p:.3f}, have {calibrated_confidence:.3f}). Aborting.")
+                send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — Realized R:R requires {_required_p:.3f}, have {calibrated_confidence:.3f}")
                 opp_side = "Sell" if side == "Buy" else "Buy"
                 emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
                 return
@@ -7098,14 +7096,12 @@ def main():
                                         
                                             if all_pass:
                                                 # Post-Floor R:R & Economic Re-check (Closing the loop on widened SL)
-                                                from trade_calculators import passes_economic_gate
+                                                from trade_calculators import passes_economic_gate, calculate_required_p
                                                 if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
                                                     final_sl_dist = abs(entry_price - stop_loss_price)
                                                     final_tp_dist = abs(take_profit_price - entry_price)
                                                     final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
-                                                    _sl_frac = final_sl_dist / max(1e-9, entry_price)
-                                                    _tp_frac = final_tp_dist / max(1e-9, entry_price)
-                                                    _req_p = (_sl_frac + 0.0016) / max(1e-9, (_sl_frac + _tp_frac))
+                                                    _req_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
                                                     log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {_req_p:.3f}. Aborting entry.")
                                                     status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
                                                     all_pass = False
