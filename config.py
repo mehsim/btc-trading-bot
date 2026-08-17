@@ -316,9 +316,11 @@ TIMEFRAME_CONFIG = {
         "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.45),
         "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 1.75)
     },
-    "60": {   # 1H Timeframe - Swing
+    "60": {   # 1H Timeframe - High-Conviction Swing (Targets ~3-4 trades/day across portfolio)
         "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 10)),
         "sl_mult": _get_tf_env("TF_60M_SL_MULT", 1.00),
+        "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.70),
+        "min_adx": _get_tf_env("TF_60M_MIN_ADX", 35.0),
         "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.20),
         "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.40)
     },
@@ -328,9 +330,11 @@ TIMEFRAME_CONFIG = {
         "tp_mult_ranging": _get_tf_env("TF_120M_TP_RANGING", 2.3502696284633258),
         "tp_mult_trending": _get_tf_env("TF_120M_TP_TRENDING", 3.5220347741598514)
     },
-    "240": {  # 4H Timeframe - Macro Swing
+    "240": {  # 4H Timeframe - High-Conviction Macro Swing (Targets ~1-2 trades/day across portfolio)
         "lookahead": int(_get_tf_env("TF_240M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_240M_SL_MULT", 0.7693),
+        "base_confidence_threshold": _get_tf_env("TF_240M_CONF_THRESH", 0.58),
+        "min_adx": _get_tf_env("TF_240M_MIN_ADX", 28.0),
         "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.3370),
         "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 1.80)
     },

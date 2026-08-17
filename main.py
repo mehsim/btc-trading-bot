@@ -6169,9 +6169,15 @@ def main():
                             p_star = base_sl_m / (actual_tp_m + base_sl_m)
                             cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + base_sl_m) * max(1e-4, atr_norm_val))
                             economic_base_threshold = float(round(p_star + cost_adj, 4))
-                        
-                            dynamic_conf_threshold = economic_base_threshold
-                            adjustments_applied = [("economic_base", economic_base_threshold)]
+                            base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
+                            dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
+                            adjustments_applied = [("economic_base", dynamic_conf_threshold)]
+
+                            # ADX Regime Floor Filter
+                            min_adx_thresh = float(cfg.get("min_adx", 24.0))
+                            if adx_regime < min_adx_thresh:
+                                log_event("INFO", f"[{symbol} {iv}m ADX Filter] ADX {adx_regime:.1f} < min required {min_adx_thresh:.1f}. Skipping lower-conviction chop.")
+                                continue
 
                             # 2. Bounded Regime & Volatility Adjustments
                             if "Ranging" in regime_name:

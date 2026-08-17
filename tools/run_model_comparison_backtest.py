@@ -18,6 +18,7 @@ from features import add_features, sanitize_feature_matrix
 from ensemble import load_ensemble_classifier, get_model_feature_names
 from tools.beta_calibrator import calibrate_probability
 from trade_calculators import passes_economic_gate, calculate_required_p, REALIZED_RR_HAIRCUT
+from config import TIMEFRAME_CONFIG
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 FEE_RATE = 0.0008  # 0.08% per leg (0.16% round-trip)
@@ -189,13 +190,23 @@ def run_comparative_backtest(interval: str):
         })
 
     # ==========================================
-    # RUN 2: PHASES 1-4 NEW ARCHITECTURE
+    # RUN 2: PHASES 1-4 HIGH-CONVICTION ARCHITECTURE
     # ==========================================
-    min_raw_new = 0.35 if iv_int <= 60 else 0.18
-    min_dir_new = 0.52 if iv_int <= 60 else 0.55
+    tf_cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+    min_adx_new = float(tf_cfg.get("min_adx", 24.0))
+    if iv_int == 60:
+        min_raw_new = float(tf_cfg.get("base_confidence_threshold", 0.70))
+        min_dir_new = 0.70
+    elif iv_int >= 120:
+        min_raw_new = 0.18
+        min_dir_new = float(tf_cfg.get("base_confidence_threshold", 0.58))
+    else:
+        min_raw_new = 0.35
+        min_dir_new = 0.52
+    
     trades_new = []
     for i in range(n_samples - lookahead - 1):
-        if adxs[i] < 24.0:
+        if adxs[i] < min_adx_new:
             continue
             
         p_b = p_bulls[i]
