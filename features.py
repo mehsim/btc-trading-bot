@@ -226,10 +226,17 @@ def add_features(df, fetch_calendar_callback=None):
     df["volume_ratio"] = df["volume"] / (df["volume"].rolling(20).mean() + 1e-8)
     
     # Higher-Timeframe (HTF) Macro Trend Integration
-    w_144 = min(max(10, len(df) - 1), 144)
-    w_336 = min(max(20, len(df) - 1), 336)
-    w_800 = min(max(30, len(df) - 1), 800)
-    w_500 = min(max(25, len(df) - 1), 500)
+    try:
+        base_iv_min = int(df["interval"].iloc[-1]) if "interval" in df.columns else 15
+    except Exception:
+        base_iv_min = 15
+    m_4h = max(1, 240 // max(1, base_iv_min))
+    m_1d = max(1, 1440 // max(1, base_iv_min))
+
+    w_144 = min(max(5, len(df) - 1), 9 * m_4h)
+    w_336 = min(max(10, len(df) - 1), 21 * m_4h)
+    w_800 = min(max(15, len(df) - 1), 50 * m_4h)
+    w_500 = min(max(20, len(df) - 1), 50 * m_1d)
     ema_144 = EMAIndicator(df["close"], window=w_144).ema_indicator()
     ema_336 = EMAIndicator(df["close"], window=w_336).ema_indicator()
     ema_800 = EMAIndicator(df["close"], window=w_800).ema_indicator()

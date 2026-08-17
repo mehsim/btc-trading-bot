@@ -17,6 +17,7 @@ Exits 0 on total contract alignment, exits 1 on any discrepancy.
 import os
 import sys
 import json
+import hashlib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -108,6 +109,23 @@ def run_preflight():
                 feat_cnt = manifest.get("feature_count", 0)
                 if len(feats) != feat_cnt:
                     errors.append(f"{slot} feature count mismatch: count={feat_cnt}, list_len={len(feats)}")
+
+                # Verify live selected_features_{iv}_{reg}.json synchronization with manifest
+                sel_path = f"selected_features_{iv}_{reg}.json"
+                if not os.path.exists(sel_path):
+                    sel_path = f"selected_features_{iv}.json"
+                if os.path.exists(sel_path):
+                    try:
+                        with open(sel_path, "r") as sf:
+                            live_sel = json.load(sf)
+                        if len(live_sel) != feat_cnt:
+                            errors.append(f"{slot} live selected list ({len(live_sel)}) != manifest feature_count ({feat_cnt}) from {sel_path}")
+                        live_hash = hashlib.sha256(",".join(live_sel).encode()).hexdigest()[:12]
+                        manifest_hash = manifest.get("feature_contract_hash")
+                        if manifest_hash and live_hash != manifest_hash:
+                            errors.append(f"{slot} live feature contract hash ({live_hash}) != manifest hash ({manifest_hash}) from {sel_path}")
+                    except Exception as ex_sf:
+                        errors.append(f"{slot} failed to read {sel_path}: {ex_sf}")
 
                 # Verify binary files on disk
                 prefix = f"ensemble_{reg}_trend_{iv}"
