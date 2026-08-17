@@ -1444,16 +1444,19 @@ def train_models(interval=INTERVAL, pages=PAGES):
             meta_model.fit(X, dummy_y)
             print("  Warning: Insufficient samples for Meta-Classifier. Dummy classifier trained.")
             
-        # Train Isotonic Regression Calibrator on validation predictions
+        # Train Beta Calibrator and Isotonic Calibrator on validation predictions
         from sklearn.isotonic import IsotonicRegression
+        from tools.beta_calibrator import BetaCalibrator
         ir = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+        bc = BetaCalibrator()
         
-        # Fit calibrator
+        # Fit calibrators
         if len(calibration_probs) > 10:
             fit_n = len(calibration_probs)
             if fit_n < 100:
                 print(f"  [Calibrator Warning] Small fitting sample size (N={fit_n} < 100). Fallback Platt scaling recommended.")
             ir.fit(calibration_probs, calibration_labels)
+            bc.fit(calibration_probs, calibration_labels)
             
             # Require minimum support per bin to eliminate sparse tail artifacts
             MIN_BIN = 1000
@@ -1468,19 +1471,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     Ys[:first_ok] = Ys[first_ok]
 
             calibrator_data = {
+                "scaling_method": "beta_calibration",
+                "a": float(bc.a),
+                "b": float(bc.b),
+                "c": float(bc.c),
                 "X": Xs.tolist(),
                 "y": Ys.tolist(),
                 "fitting_sample_size": fit_n,
-                "scaling_method": "isotonic_min_support_clamped" if fit_n >= 100 else "platt_fallback",
                 "min_bin_support": MIN_BIN
             }
             calibrator_filename = f"calibrator_{name}_{interval}_challenger.json"
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)
-            print(f"  [Calibrator] Saved Isotonic/Platt calibrator to {calibrator_filename} (N={fit_n}, MIN_BIN={MIN_BIN})")
+            print(f"  [Calibrator] Saved Beta & Clamped calibrator to {calibrator_filename} (N={fit_n}, Beta a={bc.a:.3f}, b={bc.b:.3f}, c={bc.c:.3f})")
         else:
             # Save default identity mapping if no predictions occurred
-            calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
+            calibrator_data = {"scaling_method": "beta_calibration", "a": 1.0, "b": 1.0, "c": 0.0, "X": [0.0, 1.0], "y": [0.0, 1.0]}
             calibrator_filename = f"calibrator_{name}_{interval}_challenger.json"
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)

@@ -6057,12 +6057,14 @@ def main():
                             ml_trend = max(_p, key=_p.get)
                             ml_confidence = _p[ml_trend]
 
-                            # 1. Calibrate the RAW probability first (what the isotonic calibrator was fitted on)
+                            # 1. Calibrate the RAW probability first (using Beta or Isotonic calibrator)
                             calibrated_confidence = ml_confidence
                             calibrator = active_calibrator
-                            if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-                                calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
-                                print(f"[{symbol} {iv}m Isotonic Calibration] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
+                            if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
+                                from tools.beta_calibrator import calibrate_probability
+                                calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
+                                method_name = calibrator.get("scaling_method", "calibration")
+                                print(f"[{symbol} {iv}m {method_name}] Raw: {ml_confidence*100:.2f}% -> Pure Calibrated: {calibrated_confidence*100:.2f}%")
 
                             # 2. Decision-layer neutral discount (default 0.0 to prevent double penalty)
                             neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)

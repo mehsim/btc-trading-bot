@@ -95,11 +95,14 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     calibration_probs = max_probs[mask]
     calibration_labels = y_binary
     
-    # Fit Isotonic Regression
+    # Fit Beta Calibrator (Smooth, strictly monotonic 3-parameter continuous calibration)
+    from tools.beta_calibrator import BetaCalibrator
+    bc = BetaCalibrator().fit(calibration_probs, calibration_labels)
+    
+    # Also compute clamped isotonic thresholds for backward compatibility / audit
     ir = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
     ir.fit(calibration_probs, calibration_labels)
     
-    # Require minimum support per bin to eliminate sparse tail artifacts
     MIN_BIN = 1000
     Xs = np.array(ir.X_thresholds_)
     Ys = np.array(ir.y_thresholds_)
@@ -113,10 +116,13 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
             Ys[:first_ok] = Ys[first_ok]
             
     calibrator_data = {
+        "scaling_method": "beta_calibration",
+        "a": float(bc.a),
+        "b": float(bc.b),
+        "c": float(bc.c),
         "X": Xs.tolist(),
         "y": Ys.tolist(),
         "fitting_sample_size": int(len(calibration_probs)),
-        "scaling_method": "isotonic_min_support_clamped",
         "min_bin_support": MIN_BIN,
         "champion_sha": manifest.get("git_sha", "unknown")
     }
@@ -125,20 +131,19 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     with open(cal_filename, "w") as f:
         json.dump(calibrator_data, f, indent=2)
         
-    print(f"✅ Saved Champion Calibrator to {cal_filename} (N={len(calibration_probs)}, MIN_BIN={MIN_BIN})")
+    print(f"✅ Saved Champion Calibrator to {cal_filename} (N={len(calibration_probs)}, Beta a={bc.a:.3f}, b={bc.b:.3f}, c={bc.c:.3f})")
     
     # Evaluate against gate
-    X_thresh = calibrator_data["X"]
-    y_thresh = calibrator_data["y"]
-    max_cal = max(y_thresh)
-    min_cal = min(y_thresh)
+    test_raws = [0.35, 0.40, 0.43, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
+    cal_scores = [float(bc.predict_proba(r)) for r in test_raws]
+    max_cal = max(cal_scores)
+    min_cal = min(cal_scores)
     status = "TRADEABLE" if max_cal >= economic_gate else "STILL BLOCKED"
     
     print(f"📊 {cal_filename} Status: {status}")
-    print(f"   Calibrated Range: [{min_cal:.3f}, {max_cal:.3f}] | Economic Gate Needs: {economic_gate:.3f}")
-    for r in (0.35, 0.40, 0.43, 0.45, 0.50, 0.55, 0.60):
-        i = min(bisect.bisect_left(X_thresh, r), len(y_thresh) - 1)
-        print(f"   Raw {r:.2f} -> Calibrated {y_thresh[i]:.3f}")
+    print(f"   Beta Calibrated Range: [{min_cal:.3f}, {max_cal:.3f}] | Economic Gate Needs: {economic_gate:.3f}")
+    for r, cal_val in zip(test_raws, cal_scores):
+        print(f"   Raw {r:.2f} -> Beta Calibrated {cal_val:.3f}")
 
 if __name__ == "__main__":
     from trade_calculators import REALIZED_RR_HAIRCUT
