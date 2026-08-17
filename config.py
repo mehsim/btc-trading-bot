@@ -299,14 +299,14 @@ TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe - Hardened Institutional Scalp
         "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.0),
-        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.52),
+        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.40),
         "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 2.2),
         "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 2.5)
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.20),
-        "base_confidence_threshold": _get_tf_env("TF_30M_CONF_THRESH", 0.54),
+        "base_confidence_threshold": _get_tf_env("TF_30M_CONF_THRESH", 0.40),
         "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.45),
         "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 1.75)
     },
