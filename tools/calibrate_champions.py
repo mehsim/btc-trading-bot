@@ -99,11 +99,25 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     ir = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
     ir.fit(calibration_probs, calibration_labels)
     
+    # Require minimum support per bin to eliminate sparse tail artifacts
+    MIN_BIN = 200
+    Xs = np.array(ir.X_thresholds_)
+    Ys = np.array(ir.y_thresholds_)
+    counts = np.histogram(calibration_probs, bins=np.append(Xs, np.inf))[0]
+    
+    if (counts >= MIN_BIN).any():
+        last_ok = int(np.max(np.where(counts >= MIN_BIN)[0]))
+        Ys[last_ok + 1:] = Ys[last_ok]
+        first_ok = int(np.min(np.where(counts >= MIN_BIN)[0]))
+        if first_ok > 0:
+            Ys[:first_ok] = Ys[first_ok]
+            
     calibrator_data = {
-        "X": ir.X_thresholds_.tolist(),
-        "y": ir.y_thresholds_.tolist(),
+        "X": Xs.tolist(),
+        "y": Ys.tolist(),
         "fitting_sample_size": int(len(calibration_probs)),
-        "scaling_method": "isotonic",
+        "scaling_method": "isotonic_min_support_clamped",
+        "min_bin_support": MIN_BIN,
         "champion_sha": manifest.get("git_sha", "unknown")
     }
     
@@ -111,7 +125,7 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     with open(cal_filename, "w") as f:
         json.dump(calibrator_data, f, indent=2)
         
-    print(f"✅ Saved Champion Calibrator to {cal_filename} (N={len(calibration_probs)})")
+    print(f"✅ Saved Champion Calibrator to {cal_filename} (N={len(calibration_probs)}, MIN_BIN={MIN_BIN})")
     
     # Evaluate against gate
     X_thresh = calibrator_data["X"]
