@@ -25,10 +25,14 @@ parser = argparse.ArgumentParser(description="BTC Trading Bot Backtester")
 parser.add_argument("--interval", default="60", choices=["15", "30", "60", "120", "240", "360"], help="Trading interval in minutes")
 parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol")
 parser.add_argument("--fee-rate", type=float, default=0.002, help="Trading fee rate")
-parser.add_argument("--min-confidence", type=float, default=0.70, help="Minimum confidence threshold")
+parser.add_argument("--min-confidence", type=float, default=0.35, help="Minimum confidence threshold")
 parser.add_argument("--pages", type=int, default=40, help="History pages count")
 parser.add_argument("--pessimistic", action="store_true", default=True, help="Use pessimistic fill model (next-bar open + spread/slippage)")
 parser.add_argument("--optimistic", action="store_true", default=False, help="Use optimistic fill model (signal close price)")
+parser.add_argument("--sl-mult", type=float, default=None, help="Override SL multiplier for simulation")
+parser.add_argument("--tp-mult", type=float, default=None, help="Override TP multiplier for simulation")
+parser.add_argument("--lookahead", type=int, default=None, help="Override lookahead bars for simulation")
+parser.add_argument("--rule-feature", type=str, default=None, help="Direct decile rule mode on a single feature")
 
 args, _ = parser.parse_known_args()
 INTERVAL = args.interval
@@ -37,6 +41,10 @@ FEE_RATE = args.fee_rate
 MIN_CONFIDENCE = args.min_confidence
 PAGES = args.pages
 PESSIMISTIC_MODE = not args.optimistic
+OVERRIDE_SL_MULT = args.sl_mult
+OVERRIDE_TP_MULT = args.tp_mult
+OVERRIDE_LOOKAHEAD = args.lookahead
+RULE_FEATURE = args.rule_feature
 
 INTERVAL_SLIPPAGE = {
     "5": 0.0005,   # 0.05% base slippage for 5m
@@ -52,13 +60,17 @@ def calculate_backtest_slippage(interval: str, atr_norm: float = 0.0) -> float:
     return base + volatility_premium
 
 
-def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True):
+def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True, rule_feature=None):
     df = df.reset_index(drop=True)
     trades = []
     equity_compounded = 100.0
     equity_simple = 0.0
     peak_equity = 100.0
     max_drawdown = 0.0
+    
+    feat_ranks = None
+    if rule_feature and rule_feature in df.columns:
+        feat_ranks = df[rule_feature].rank(pct=True)
     
     import json
     feat_trending = None
@@ -91,6 +103,23 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     X_matrix_trending = df[feat_trending].values
     X_matrix_ranging = df[feat_ranging].values
 
+    probs_tr_all = None
+    pred_pct_tr_all = None
+    if models_trending is not None:
+        probs_tr_all = models_trending["trend"].predict_proba(X_matrix_trending, weights=models_trending.get("weights"))
+        pred_pct_tr_all = models_trending["price"].predict(X_matrix_trending)
+
+    probs_rn_all = None
+    pred_pct_rn_all = None
+    if models_ranging is not None:
+        probs_rn_all = models_ranging["trend"].predict_proba(X_matrix_ranging, weights=models_ranging.get("weights"))
+        pred_pct_rn_all = models_ranging["price"].predict(X_matrix_ranging)
+
+    adx_enter_map = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
+    adx_enter = adx_enter_map.get(str(interval), 28.0)
+    _routing = getattr(config, "ENABLE_DYNAMIC_REGIME_ROUTING", False) or \
+               str(interval) in getattr(config, "DYNAMIC_REGIME_ROUTING_INTERVALS", set())
+
     active_until_idx = -1
     i = 3
     total_candles = len(df)
@@ -101,15 +130,19 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         adx_val = df.loc[i, "ADX"]
         close_price = df.loc[i, "close"]
         
-        if adx_val >= 20.0:
-            row_X = X_matrix_trending[i].reshape(1, -1)
-            pred_pct = float(models_trending["price"].predict(row_X)[0])
-            probs = models_trending["trend"].predict_proba(row_X, weights=models_trending.get("weights"))[0]
+        if (not _routing) or adx_val >= adx_enter:
+            if probs_tr_all is None:
+                i += 1
+                continue
+            pred_pct = float(pred_pct_tr_all[i])
+            probs = probs_tr_all[i]
             calibrator = models_trending.get("calibrator")
         else:
-            row_X = X_matrix_ranging[i].reshape(1, -1)
-            pred_pct = float(models_ranging["price"].predict(row_X)[0])
-            probs = models_ranging["trend"].predict_proba(row_X, weights=models_ranging.get("weights"))[0]
+            if probs_rn_all is None or (getattr(config, "MODEL_SLOT_DENYLIST", set()) and f"ranging_{interval}" in config.MODEL_SLOT_DENYLIST):
+                i += 1
+                continue
+            pred_pct = float(pred_pct_rn_all[i])
+            probs = probs_rn_all[i]
             calibrator = models_ranging.get("calibrator")
 
         pred_change = pred_pct * close_price
@@ -127,6 +160,18 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
             calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
         calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
+
+        if feat_ranks is not None:
+            r_val = float(feat_ranks.iloc[i])
+            if r_val >= 0.90:
+                ml_trend = "Bullish"
+                calibrated_confidence = 1.0
+            elif r_val <= 0.10:
+                ml_trend = "Bearish"
+                calibrated_confidence = 1.0
+            else:
+                ml_trend = "Neutral"
+                calibrated_confidence = 0.0
 
         expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
 
@@ -219,7 +264,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                 break
             raw_entry = df.loc[i + 1, "open"]
             half_spread = 0.00015  # 0.015% half spread floor
-            taker_fee = 0.0006     # 0.06% taker fee per leg
+            taker_fee = fee_rate / 2.0
             vol_slippage = calculate_backtest_slippage(interval, atr_norm)
             
             if ml_trend == "Bullish":
@@ -239,20 +284,27 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         adx_enter_map = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
         adx_enter = adx_enter_map.get(str(interval), 22.0)
 
-        sl_mult = cfg.get("sl_mult", 1.5)
-        tp_multiplier = cfg.get("tp_mult_trending", 2.5) if adx_val >= adx_enter else cfg.get("tp_mult_ranging", 1.5)
+        sl_mult = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 1.5)
+        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else (cfg.get("tp_mult_trending", 2.5) if ((not _routing) or adx_val >= adx_enter) else cfg.get("tp_mult_ranging", 1.5))
 
         raw_sl_dist = sl_mult * atr_dollars
         min_sl_pct = config.resolve_min_sl_pct(SYMBOL, interval)
         min_sl_dist = entry_price * (min_sl_pct / 100.0)
-        sl_dist = max(raw_sl_dist, min_sl_dist)
+        
+        if raw_sl_dist < min_sl_dist:
+            sl_dist = min_sl_dist
+            target_rr = tp_multiplier / max(1e-9, sl_mult)
+            tp_dist = sl_dist * target_rr
+        else:
+            sl_dist = raw_sl_dist
+            tp_dist = tp_multiplier * atr_dollars
             
         if ml_trend == "Bullish":
             stop_loss = entry_price - sl_dist
-            take_profit = entry_price + tp_multiplier * atr_dollars
+            take_profit = entry_price + tp_dist
         else:
             stop_loss = entry_price + sl_dist
-            take_profit = entry_price - tp_multiplier * atr_dollars
+            take_profit = entry_price - tp_dist
 
         # Post-floor economic gate (mirrors live production abort)
         _sl_frac = sl_dist / max(1e-9, entry_price)
@@ -263,8 +315,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             continue
 
         # Look up to lookahead candles
-        cfg = TIMEFRAME_CONFIG.get(str(interval), {"lookahead": 10})
-        lookahead = cfg.get("lookahead", 10)
+        lookahead = OVERRIDE_LOOKAHEAD if OVERRIDE_LOOKAHEAD is not None else cfg.get("lookahead", 10)
         
         start_step = 1 if pessimistic_mode else 1
         exit_price = df.iloc[min(i + lookahead, total_candles - 1)]["close"]
@@ -329,10 +380,24 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         max_drawdown = max(max_drawdown, current_drawdown)
 
         trades.append({
-            "net_return": net_return
+            "exit_reason": exit_reason,
+            "gross_return": gross_return,
+            "net_return": net_return,
+            "sl_frac": _sl_frac
         })
         active_until_idx = i + max(1, candles_elapsed)
         i = active_until_idx
+
+    if trades:
+        import collections
+        _mix = collections.Counter(t["exit_reason"] for t in trades)
+        _n = max(1, len(trades))
+        _sl_frac_avg = (sum(t.get("sl_frac", 0.01) for t in trades) / _n) or 0.01
+        print("\n  --- Exit mix ---")
+        for _r in ("Take Profit", "Stop Loss", "Timer Elapsed"):
+            _b = [t for t in trades if t["exit_reason"] == _r]
+            _meanR = (sum(t["net_return"] for t in _b) / len(_b) / _sl_frac_avg) if _b else 0.0
+            print(f"  {_r:<15} {_mix[_r]:>5}  {100*_mix[_r]/_n:5.1f}%   mean {_meanR:+.3f}R")
 
     returns = [t["net_return"] for t in trades]
     from trade_calculators import calculate_replay_statistics
@@ -390,24 +455,50 @@ def run_backtest():
 
         weights_tr = [0.10, 0.45, 0.45] if str(INTERVAL) == "15" else ([0.15, 0.42, 0.43] if str(INTERVAL) == "30" else [0.30, 0.20, 0.50])
         weights_rn = [0.10, 0.45, 0.45] if str(INTERVAL) == "15" else ([0.15, 0.42, 0.43] if str(INTERVAL) == "30" else [0.30, 0.50, 0.20])
-        models_trending = {
-            "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
-            "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
-            "weights": weights_tr
-        }
-        models_ranging = {
-            "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
-            "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
-            "weights": weights_rn
-        }
+        trending_cal_file = f"calibrator_trending_{INTERVAL}.json"
+        ranging_cal_file = f"calibrator_ranging_{INTERVAL}.json"
+        cal_tr = None
+        cal_rn = None
+        if os.path.exists(trending_cal_file):
+            with open(trending_cal_file, "r") as f:
+                cal_tr = json.load(f)
+        if os.path.exists(ranging_cal_file):
+            with open(ranging_cal_file, "r") as f:
+                cal_rn = json.load(f)
+
+        models_trending = None
+        if f"trending_{INTERVAL}" not in getattr(config, "MODEL_SLOT_DENYLIST", set()):
+            try:
+                models_trending = {
+                    "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
+                    "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
+                    "weights": weights_tr,
+                    "calibrator": cal_tr
+                }
+            except Exception as e:
+                print(f"[Warning] Could not load trending models: {e}")
+
+        models_ranging = None
+        if f"ranging_{INTERVAL}" not in getattr(config, "MODEL_SLOT_DENYLIST", set()):
+            try:
+                models_ranging = {
+                    "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
+                    "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
+                    "weights": weights_rn,
+                    "calibrator": cal_rn
+                }
+            except Exception as e:
+                print(f"[Warning] Could not load ranging models: {e}")
+
+        if models_trending is None and models_ranging is None:
+            raise RuntimeError(f"Both trending and ranging models are unavailable for interval {INTERVAL}.")
         print("Models loaded successfully.")
     except Exception as e:
         print(f"Error loading models: {e}. Please run 'train.py' first.")
         sys.exit(1)
 
     # 2. Fetch Historical Data
-    # Fetch 15 pages of 1-hour candles (~15,000 candles, which is ~625 days of spot history)
-    pages = 15
+    pages = PAGES
     print(f"\n[Step 1] Fetching historical hourly klines ({pages * 1000} candles)...")
     try:
         df = get_history(symbol=SYMBOL, interval=INTERVAL, limit=1000, pages=pages)
@@ -486,20 +577,20 @@ def run_backtest():
     print("\n[Step 4] Simulating backtest scenario comparisons...")
     
     scenarios = {
-        "A (Baseline - Regressor Fee Check, Conf >= 70%)": {
-            "min_confidence": 0.70, "use_regressor_fee_check": True, "require_trend_alignment": True
+        "A (Production Baseline: Economic Gate p*, Trend Align)": {
+            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": True, "require_trend_alignment": True
         },
-        "B (ATR Fee Check >= 0.25%, Conf >= 70%)": {
-            "min_confidence": 0.70, "use_regressor_fee_check": False, "require_trend_alignment": True
+        "B (Pure Economic Gate p*, Trend Align)": {
+            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": True
         },
-        "C (ATR Fee Check >= 0.25%, Conf >= 65%)": {
-            "min_confidence": 0.65, "use_regressor_fee_check": False, "require_trend_alignment": True
+        "C (High Conviction: Conf >= 38%, Trend Align)": {
+            "min_confidence": max(0.38, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": True
         },
-        "D (ATR Fee Check >= 0.25%, Conf >= 60%)": {
-            "min_confidence": 0.60, "use_regressor_fee_check": False, "require_trend_alignment": True
+        "D (Pure Model Signals: Conf >= min_conf, No HTF Filter)": {
+            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": False
         },
-        "E (ATR Fee Check, Conf >= 65%, No Trend Align)": {
-            "min_confidence": 0.65, "use_regressor_fee_check": False, "require_trend_alignment": False
+        "E (High Conviction: Conf >= 38%, No HTF Filter)": {
+            "min_confidence": max(0.38, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": False
         }
     }
 
@@ -513,9 +604,10 @@ def run_backtest():
             require_trend_alignment=cfg["require_trend_alignment"],
             fee_rate=0.002,
             interval=INTERVAL,
-            pessimistic_mode=True
+            pessimistic_mode=True,
+            rule_feature=RULE_FEATURE
         )
-        t_count_p, win_rate_p, pf_p, mdd_p, ret_p = res_p[:5]
+        t_count_p, win_rate_p, pf_p, mdd_p, ret_p, exp_r_p = res_p[:6]
 
         # Execute optimistic (signal close) run for comparison
         res_o = run_single_backtest(
@@ -525,14 +617,18 @@ def run_backtest():
             require_trend_alignment=cfg["require_trend_alignment"],
             fee_rate=0.002,
             interval=INTERVAL,
-            pessimistic_mode=False
+            pessimistic_mode=False,
+            rule_feature=RULE_FEATURE
         )
-        t_count_o, win_rate_o, pf_o, mdd_o, ret_o = res_o[:5]
+        t_count_o, win_rate_o, pf_o, mdd_o, ret_o, exp_r_o = res_o[:6]
+        avg_ret_p = (ret_p / max(1, t_count_p)) if t_count_p > 0 else 0.0
 
         results.append({
             "Scenario": name,
             "Trades": t_count_p,
             "Pessimistic Return": f"{ret_p:+.2f}%" if t_count_p > 0 else "0.00%",
+            "Avg Net / Trade": f"{avg_ret_p:+.2f}%" if t_count_p > 0 else "0.00%",
+            "Expectancy (R)": f"{exp_r_p:+.2f}R" if t_count_p > 0 else "0.00R",
             "Optimistic Return": f"{ret_o:+.2f}%" if t_count_o > 0 else "0.00%",
             "Pessimistic MDD": f"{mdd_p:.2f}%" if t_count_p > 0 else "N/A",
             "Pessimistic WinRate": f"{win_rate_p:.2f}%" if t_count_p > 0 else "N/A"
@@ -546,8 +642,8 @@ def run_backtest():
     print(results_df.to_string(index=False))
     print("=" * 90 + "\n")
 
-    # 7. Fee Sensitivity Analysis on Scenario B (Best filter balance)
-    print("\n[Step 5] Simulating fee sensitivity analysis on Scenario B...")
+    # 7. Fee Sensitivity Analysis on Scenario D (Active trade population)
+    print("\n[Step 5] Simulating fee sensitivity analysis on Scenario D (Pure Model Signals)...")
     fee_structures = {
         "1. Spot Taker Fee (0.20% roundtrip)": 0.0020,
         "2. Futures Taker Fee (0.10% roundtrip)": 0.0010,
@@ -558,10 +654,12 @@ def run_backtest():
     for structure_name, rate in fee_structures.items():
         res_fee = run_single_backtest(
             df, models_trending, models_ranging, p95, max_conf,
-            min_confidence=0.70,
+            min_confidence=MIN_CONFIDENCE,
             use_regressor_fee_check=False,
-            require_trend_alignment=True,
-            fee_rate=rate
+            require_trend_alignment=False,
+            fee_rate=rate,
+            interval=INTERVAL,
+            rule_feature=RULE_FEATURE
         )
         t_count, win_rate, pf, mdd, ret = res_fee[:5]
         fee_results.append({

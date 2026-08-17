@@ -39,10 +39,12 @@ class TestTodayMetrics(unittest.TestCase):
                 return default
             mock_get.side_effect = side_effect
             
+            import os
+            os.environ["DASHBOARD_API_KEY"] = "test_today_key"
             from dashboard_routes import api_institutional_summary
             from flask import Flask
             app = Flask(__name__)
-            with app.app_context():
+            with app.test_request_context("/", headers={"X-API-KEY": "test_today_key"}):
                 res = api_institutional_summary()
                 data = res.get_json()
                 
@@ -73,10 +75,12 @@ class TestTodayMetrics(unittest.TestCase):
                 return default
             mock_get.side_effect = side_effect
             
+            import os
+            os.environ["DASHBOARD_API_KEY"] = "test_today_key"
             from dashboard_routes import api_institutional_summary
             from flask import Flask
             app = Flask(__name__)
-            with app.app_context():
+            with app.test_request_context("/", headers={"X-API-KEY": "test_today_key"}):
                 res = api_institutional_summary()
                 data = res.get_json()
                 

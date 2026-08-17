@@ -547,14 +547,13 @@ def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
-        client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
-        if expected_key:
-            if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
-                return f(*args, **kwargs)
-            if request.remote_addr in ["127.0.0.1", "::1"]:
-                return f(*args, **kwargs)
-            return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
-        return f(*args, **kwargs)
+        if not expected_key:
+            return jsonify({"error": "Unauthorized", "message": "Dashboard API key is not configured on server."}), 401
+        
+        client_key = request.headers.get("X-API-KEY")
+        if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+            return f(*args, **kwargs)
+        return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
     return decorated_function
 
 def require_ip_whitelist(f):

@@ -164,6 +164,23 @@ def on_open(ws):
     }
     ws.send(json.dumps(sub_msg))
 
+def handle_shutdown(signum=None, frame=None):
+    print(f"\n[Flow Collector] Shutdown signal received ({signum}). Flushing in-flight minute bucket to disk...")
+    with bucket_lock:
+        try:
+            flush_bucket(current_minute_ts, current_bucket)
+            print("[Flow Collector] In-flight bucket successfully flushed to Parquet. Exiting cleanly.")
+        except Exception as e:
+            print(f"[Flow Collector] Error flushing bucket during shutdown: {e}", file=sys.stderr)
+    if signum is not None:
+        sys.exit(0)
+
+import signal
+import atexit
+signal.signal(signal.SIGTERM, handle_shutdown)
+signal.signal(signal.SIGINT, handle_shutdown)
+atexit.register(handle_shutdown)
+
 def run_collector():
     while True:
         try:

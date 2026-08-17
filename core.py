@@ -58,13 +58,30 @@ def calculate_historical_thresholds(model_trend, interval):
                 df = add_features(df)
                 
                 selected_features_list = None
+                manifest_filename = f"ensemble_trending_trend_{interval}_manifest.json"
                 selected_features_filename = f"selected_features_{interval}.json"
-                if os.path.exists(selected_features_filename):
-                    with open(selected_features_filename, "r") as f:
-                        selected_features_list = json.load(f)
+                
+                if os.path.exists(manifest_filename):
+                    try:
+                        with open(manifest_filename, "r") as f:
+                            m_data = json.load(f)
+                            selected_features_list = m_data.get("feature_names") or m_data.get("features")
+                    except Exception as ex_manifest:
+                        from logger import log_event
+                        log_event("WARNING", f"Manifest load notice: {ex_manifest}")
+                
+                if not selected_features_list and os.path.exists(selected_features_filename):
+                    try:
+                        with open(selected_features_filename, "r") as f:
+                            selected_features_list = json.load(f)
+                    except Exception as ex_feat_file:
+                        from logger import log_event
+                        log_event("WARNING", f"Selected features file load notice: {ex_feat_file}")
+                
+                feat_cols = [col for col in selected_features_list if col in df.columns] if selected_features_list else [c for c in features if c in df.columns]
                             
                 from ensemble import _slice_model_input
-                X_hist = _slice_model_input(model_trend, df[features])
+                X_hist = _slice_model_input(model_trend, df[feat_cols])
                 probs = model_trend.predict_proba(X_hist)
                 confidences = np.max(probs, axis=1)
                 

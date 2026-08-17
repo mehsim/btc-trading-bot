@@ -128,14 +128,13 @@ def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
-        client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
-        if expected_key:
-            if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
-                return f(*args, **kwargs)
-            if request.remote_addr in ["127.0.0.1", "::1"]:
-                return f(*args, **kwargs)
-            return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
-        return f(*args, **kwargs)
+        if not expected_key:
+            return jsonify({"error": "Unauthorized", "message": "Dashboard API key is not configured on server."}), 401
+        
+        client_key = request.headers.get("X-API-KEY")
+        if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+            return f(*args, **kwargs)
+        return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
     return decorated_function
 
 require_admin_key = require_api_key
@@ -412,7 +411,6 @@ def get_default_confluence_checks():
 
 
 @dashboard_bp.route("/api/status")
-@require_api_key
 @require_ip_whitelist
 def api_status():
     from state_manager import state_manager
@@ -700,7 +698,7 @@ def api_health():
     """Lightweight public liveness check — returns operational status without touching API keys or balances."""
     from datetime import datetime, timezone
     return jsonify({
-        "status": "healthy",
+        "status": "ok",
         "service": "btc-trading-bot",
         "uptime_seconds": int(time.time() - startup_time),
         "timestamp_utc": datetime.now(timezone.utc).isoformat()

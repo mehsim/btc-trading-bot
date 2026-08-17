@@ -680,6 +680,7 @@ def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_m
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
     csv_file = os.path.join(cache_dir, f"funding_{symbol}.csv")
+    alt_csv_file = os.path.join(cache_dir, f"{symbol}_funding.csv")
     
     df_cache = None
     if os.path.exists(csv_file):
@@ -687,17 +688,24 @@ def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_m
             df_cache = pd.read_csv(csv_file)
             df_cache["timestamp"] = df_cache["timestamp"].astype(float)
             df_cache["funding_rate"] = df_cache["funding_rate"].astype(float)
-        except Exception as e:
-            print(f"[Funding CSV Load Error] {e}")
+        except Exception:
+            df_cache = None
+    elif os.path.exists(alt_csv_file):
+        try:
+            df_cache = pd.read_csv(alt_csv_file)
+            df_cache["timestamp"] = df_cache["timestamp"].astype(float)
+            df_cache["funding_rate"] = df_cache["funding_rate"].astype(float)
+        except Exception:
             df_cache = None
 
     url = f"{BYBIT_BASE_URL}/v5/market/funding/history"
     funding_data = []
     
     cache_max_ts = float(df_cache["timestamp"].max()) if df_cache is not None and len(df_cache) > 0 else None
+    cache_min_ts = float(df_cache["timestamp"].min()) if df_cache is not None and len(df_cache) > 0 else None
     current_end = int(end_ts_ms) if end_ts_ms else int(time.time() * 1000)
     stop_fetching = False
-    max_pages = 2 if cache_max_ts is not None else 50
+    max_pages = 50
     
     for page in range(max_pages):
         params = {
@@ -903,6 +911,10 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     # Calculate OI momentum and sanitize inf values
     df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df["oi_change_pct"] = df["oi_change_1h"]
+    df["oi_price_divergence"] = np.sign(df["close"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)) * np.sign(df["oi_change_pct"])
+    df["funding_pctile"] = df["funding_rate"].rolling(720, min_periods=24).rank(pct=True).fillna(0.5)
+    df["funding_roc"] = df["funding_rate"].diff().fillna(0.0)
     
     # Merge BTCUSDT Correlation Features
     if symbol != "BTCUSDT":
@@ -946,6 +958,10 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     df["fear_greed"] = df["fear_greed"].ffill().fillna(50.0)
     df["oi_change_1h"] = df["oi_change_1h"].ffill().fillna(0.0)
     df["oi_change_4h"] = df["oi_change_4h"].ffill().fillna(0.0)
+    df["oi_change_pct"] = df["oi_change_pct"].ffill().fillna(0.0)
+    df["oi_price_divergence"] = df["oi_price_divergence"].ffill().fillna(0.0)
+    df["funding_pctile"] = df["funding_pctile"].ffill().fillna(0.5)
+    df["funding_roc"] = df["funding_roc"].ffill().fillna(0.0)
     df["btc_close"] = df["btc_close"].ffill().fillna(df["close"])
     df["btc_volume"] = df["btc_volume"].ffill().fillna(df["volume"])
     df["btc_rsi"] = df["btc_rsi"].ffill().fillna(50.0)
