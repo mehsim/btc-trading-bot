@@ -1460,14 +1460,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "fitting_sample_size": fit_n,
                 "scaling_method": "isotonic" if fit_n >= 100 else "platt_fallback"
             }
-            calibrator_filename = f"calibrator_{name}_{interval}.json"
+            calibrator_filename = f"calibrator_{name}_{interval}_challenger.json"
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)
             print(f"  [Calibrator] Saved Isotonic/Platt calibrator to {calibrator_filename} (N={fit_n})")
         else:
             # Save default identity mapping if no predictions occurred
             calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-            calibrator_filename = f"calibrator_{name}_{interval}.json"
+            calibrator_filename = f"calibrator_{name}_{interval}_challenger.json"
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)
             print(f"  [Calibrator] Saved default calibrator to {calibrator_filename}")
@@ -1821,6 +1821,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
+            import shutil
+            chal_cal_file = f"calibrator_{name}_{interval}_challenger.json"
+            live_cal_file = f"calibrator_{name}_{interval}.json"
+            if os.path.exists(chal_cal_file):
+                shutil.copyfile(chal_cal_file, live_cal_file)
+                print(f"  [Calibrator] Promoted challenger calibrator to {live_cal_file}")
         elif contract_stale:
             # champion can no longer load, but challenger failed quality — do NOT promote
             print(f"  [Champion-Challenger] Challenger REJECTED on quality; champion contract is stale. "
