@@ -302,12 +302,13 @@ def _get_tf_env(key: str, default: float) -> float:
 # Centralized Single Source of Truth for Timeframe Parameters (Recommendation #3)
 # Allows dynamic overrides via .env (e.g. TF_15M_SL_MULT=1.25) or Optuna tuning
 TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe - Hardened Institutional Scalp
-        "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.0),
-        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.43),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 2.2),
-        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 2.5)
+    "15": {   # 15M Timeframe - High-Conviction Scalp (Targets ~4-5 trades/day across portfolio)
+        "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 16)),
+        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.9),
+        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.52),
+        "min_adx": _get_tf_env("TF_15M_MIN_ADX", 20.0),
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.4),
+        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.8)
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
