@@ -693,11 +693,7 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
                     feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
                 if n_features is None and feature_names:
                     n_features = len(feature_names)
-                label_dist = m_data.get("label_distribution")
-                if label_dist:
-                    is_resp, resp_msg = verify_model_responsiveness(label_dist)
-                    if not is_resp:
-                        log_event("WARNING", f"[Model Governance Notice] '{prefix}' manifest label distribution: {resp_msg}")
+                # load-time label_distribution check removed — see rolling live-prediction check
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
@@ -817,6 +813,12 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
             clf.cat_model = None
 
+    try:
+        with open(f"{prefix}_manifest.json") as _mf:
+            _mcc = ((json.load(_mf).get("cv_metrics") or {}).get("mcc") or {}).get("mean")
+        setattr(clf, "manifest_mcc", float(_mcc) if _mcc is not None else None)
+    except Exception:
+        setattr(clf, "manifest_mcc", None)
     return clf
 
 import hashlib, subprocess, datetime
@@ -1217,5 +1219,11 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
             reg.cat_model = None
 
+    try:
+        with open(f"{prefix}_manifest.json") as _mf:
+            _mcc = ((json.load(_mf).get("cv_metrics") or {}).get("mcc") or {}).get("mean")
+        setattr(reg, "manifest_mcc", float(_mcc) if _mcc is not None else None)
+    except Exception:
+        setattr(reg, "manifest_mcc", None)
     return reg
 

@@ -22,12 +22,24 @@ except Exception:
 
 import os
 
-os.environ.setdefault("MANIFEST_HMAC_SECRET", "test-only-deterministic-key-v1")
+if os.path.exists(".manifest_hmac_secret"):
+    with open(".manifest_hmac_secret", "r") as f:
+        _sec = f.read().strip()
+    if _sec:
+        os.environ.setdefault("MANIFEST_HMAC_SECRET", _sec)
+else:
+    os.environ.setdefault("MANIFEST_HMAC_SECRET", "test-only-deterministic-key-v1")
 
 
 @pytest.fixture(autouse=True, scope="session")
 def _manifest_secret():
-    os.environ.setdefault("MANIFEST_HMAC_SECRET", "test-only-deterministic-key-v1")
+    if os.path.exists(".manifest_hmac_secret"):
+        with open(".manifest_hmac_secret", "r") as f:
+            _sec = f.read().strip()
+        if _sec:
+            os.environ.setdefault("MANIFEST_HMAC_SECRET", _sec)
+    else:
+        os.environ.setdefault("MANIFEST_HMAC_SECRET", "test-only-deterministic-key-v1")
 
 
 @pytest.fixture(autouse=True)

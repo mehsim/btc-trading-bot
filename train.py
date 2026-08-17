@@ -405,6 +405,11 @@ def add_triple_barrier_labels(df, interval):
         tp_mult_trending = cfg.get("tp_mult_trending", 2.5)
         tp_mult_ranging = cfg.get("tp_mult_ranging", 1.5)
         
+    from config import MIN_TARGET_ATR_MULT
+    min_target = max(MIN_TARGET_ATR_MULT.get(str(interval), 1.5), 1.20 * sl_mult)
+    tp_mult_trending = max(tp_mult_trending, min_target)
+    tp_mult_ranging = max(tp_mult_ranging, min_target)
+        
     is_trending_state = False
     for i in range(n_samples):
         p_t = closes[i]

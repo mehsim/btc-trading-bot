@@ -6688,7 +6688,8 @@ def main():
                                             vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
                                             vol_factor = max(0.75, min(1.5, vol_factor))
 
-                                        base_tp_target = cfg.get("tp_mult_trending", 2.0) if adx_val >= 20.0 else cfg.get("tp_mult_ranging", 1.5)
+                                        min_target = max(getattr(config, "MIN_TARGET_ATR_MULT", {}).get(str(iv), 1.5), 1.20 * sl_multiplier)
+                                        base_tp_target = max(cfg.get("tp_mult_trending", 2.0) if adx_val >= 20.0 else cfg.get("tp_mult_ranging", 1.5), min_target)
                                         tp_multiplier_adjusted = round(base_tp_target * vol_factor, 3)
                                         print(f"[{iv}m Target Config] ADX: {adx_val:.1f} | Base TP Mult: {base_tp_target:.2f}x (Vol Factor: {vol_factor:.2f}x) -> Effective TP Mult: {tp_multiplier_adjusted:.2f}x | SL Mult: {sl_multiplier:.2f}x")
 
@@ -6982,11 +6983,12 @@ def main():
                                             # F-1: MCC Leverage Qualification Threshold Clamp
                                             mcc_val = pred_entry_dict.get("manifest_mcc") if 'pred_entry_dict' in locals() else (locals().get("pred_info", {}).get("manifest_mcc"))
                                             mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
-                                            if mcc_val is not None and mcc_val < mcc_thresh:
+                                            if mcc_val is None or mcc_val < mcc_thresh:
                                                 cons_caps = getattr(config, "CONSERVATIVE_LEVERAGE_CAPS", {})
                                                 mcc_cap = cons_caps.get(symbol, cons_caps.get("default", 3.0))
                                                 lev_cap = min(lev_cap, mcc_cap)
-                                                log_event("INFO", f"[{symbol} {iv}m F-1 Leverage Guard] Model MCC ({mcc_val:.4f} < {mcc_thresh:.4f}) — Clamped max leverage to {lev_cap:.1f}x.")
+                                                _shown = f"{mcc_val:.4f}" if mcc_val is not None else "unavailable"
+                                                log_event("INFO", f"[{symbol} {iv}m F-1 Leverage Guard] Model MCC ({_shown} < {mcc_thresh:.4f}) — Clamped max leverage to {lev_cap:.1f}x.")
 
                                             # Volatility-based leverage scaling cap
                                             atr_pct_of_price = (atr_dollars / entry_price) * 100.0
