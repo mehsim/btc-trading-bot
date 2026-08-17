@@ -84,15 +84,14 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     pred_classes = np.argmax(probs, axis=1)
     max_probs = np.max(probs, axis=1)
     
-    # Filter for directional predictions (exclude neutral=1)
-    mask = (pred_classes != 1) & (y_true != 1)
-    
-    if np.sum(mask) < 50:
-        mask = (pred_classes != 1)
-        y_binary = (y_true == pred_classes).astype(float)
-    else:
-        y_binary = (y_true[mask] == pred_classes[mask]).astype(float)
+    # Filter for directional predictions only (pred_classes != 1)
+    # Neutral true outcomes count as misses (y_true != pred_classes)
+    mask = (pred_classes != 1)
+    if np.sum(mask) == 0:
+        print(f"  No directional predictions for {prefix}")
+        return
         
+    y_binary = (y_true[mask] == pred_classes[mask]).astype(float)
     calibration_probs = max_probs[mask]
     calibration_labels = y_binary
     
