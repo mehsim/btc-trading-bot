@@ -112,10 +112,11 @@ def run_comparative_backtest(interval: str):
         p_be = p_bears[i]
         
         # Naive raw confidence without economic gating
-        if p_b > p_be and p_b >= 0.35:
+        min_raw_baseline = 0.35 if iv_int <= 60 else 0.18
+        if p_b > p_be and p_b >= min_raw_baseline:
             direction = "Bullish"
             raw_conf = p_b
-        elif p_be > p_b and p_be >= 0.35:
+        elif p_be > p_b and p_be >= min_raw_baseline:
             direction = "Bearish"
             raw_conf = p_be
         else:
@@ -190,6 +191,8 @@ def run_comparative_backtest(interval: str):
     # ==========================================
     # RUN 2: PHASES 1-4 NEW ARCHITECTURE
     # ==========================================
+    min_raw_new = 0.35 if iv_int <= 60 else 0.18
+    min_dir_new = 0.52 if iv_int <= 60 else 0.55
     trades_new = []
     for i in range(n_samples - lookahead - 1):
         if adxs[i] < 24.0:
@@ -198,17 +201,21 @@ def run_comparative_backtest(interval: str):
         p_b = p_bulls[i]
         p_be = p_bears[i]
         
-        if p_b > p_be and p_b >= 0.36:
+        p_dir_bull = p_b / max(1e-5, p_b + p_be)
+        p_dir_bear = p_be / max(1e-5, p_b + p_be)
+        
+        if p_b > p_be and p_b >= min_raw_new and p_dir_bull >= min_dir_new:
             direction = "Bullish"
-            dir_conf = p_b / max(1e-5, p_b + p_be)
-        elif p_be > p_b and p_be >= 0.36:
+            dir_conf = p_dir_bull
+        elif p_be > p_b and p_be >= min_raw_new and p_dir_bear >= min_dir_new:
             direction = "Bearish"
-            dir_conf = p_be / max(1e-5, p_b + p_be)
+            dir_conf = p_dir_bear
         else:
             continue
 
         entry_p = opens[i + 1]
-        atr_dist = max(atr_norms[i] * entry_p, entry_p * (0.0040 if iv_int <= 15 else 0.0060))
+        atr_floor = 0.0040 if iv_int <= 15 else (0.0060 if iv_int <= 60 else 0.0080)
+        atr_dist = max(atr_norms[i] * entry_p, entry_p * atr_floor)
         sl_dist = sl_mult * atr_dist
         tp_dist = tp_mult * atr_dist
         
@@ -334,3 +341,4 @@ def run_comparative_backtest(interval: str):
 if __name__ == "__main__":
     run_comparative_backtest("15")
     run_comparative_backtest("60")
+    run_comparative_backtest("240")

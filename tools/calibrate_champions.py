@@ -89,15 +89,18 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     p_neut = probs[:, 1]
     p_bull = probs[:, 2]
     
-    # Directional trade selection (Bullish if p_bull > p_bear and p_bull > 0.36; Bearish if p_bear > p_bull and p_bear > 0.36)
+    # Directional trade selection (Bullish if p_bull > p_bear and p_dir >= min_dir_ratio)
     p_dir_bull = p_bull / np.maximum(1e-5, p_bull + p_bear)
     p_dir_bear = p_bear / np.maximum(1e-5, p_bull + p_bear)
     
-    bull_mask = (p_bull > p_bear) & (p_bull >= 0.36)
+    min_raw = 0.35 if int(interval) <= 60 else 0.18
+    min_dir = 0.52 if int(interval) <= 60 else 0.55
+    
+    bull_mask = (p_bull > p_bear) & (p_bull >= min_raw) & (p_dir_bull >= min_dir)
     bull_wins = (df_eval.loc[bull_mask, "future_return"] > 0).astype(float).values
     bull_conf = p_dir_bull[bull_mask]
     
-    bear_mask = (p_bear > p_bull) & (p_bear >= 0.36)
+    bear_mask = (p_bear > p_bull) & (p_bear >= min_raw) & (p_dir_bear >= min_dir)
     bear_wins = (df_eval.loc[bear_mask, "future_return"] < 0).astype(float).values
     bear_conf = p_dir_bear[bear_mask]
     
@@ -166,3 +169,4 @@ if __name__ == "__main__":
     req_60 = (0.6585 + 0.16) / (0.6585 + (1.4747 * REALIZED_RR_HAIRCUT)) # ~0.540 (or 0.435 baseline)
     calibrate_champion_slot("trending", "15", economic_gate=0.467)
     calibrate_champion_slot("trending", "60", economic_gate=0.435)
+    calibrate_champion_slot("trending", "240", economic_gate=0.424)
