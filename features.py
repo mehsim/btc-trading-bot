@@ -237,6 +237,24 @@ def add_features(df, fetch_calendar_callback=None):
     df["ADX_pos"] = adx_ind.adx_pos()
     df["ADX_neg"] = adx_ind.adx_neg()
 
+    # 3. Leading Microstructure & Derivatives Dynamics (Phase 3)
+    # A. Intra-bar CVD (Cumulative Volume Delta) momentum
+    signed_vol = np.where(df["high"] > df["low"], ((df["close"] - df["open"]) / (df["high"] - df["low"] + 1e-8)) * df["volume"], 0.0)
+    df["cvd_momentum_14"] = pd.Series(signed_vol, index=df.index).rolling(14, min_periods=3).sum() / (df["volume"].rolling(14, min_periods=3).sum() + 1e-8)
+    
+    # B. Open Interest acceleration interacting with price returns
+    df["oi_acceleration"] = (df["oi_change_1h"] - df["oi_change_4h"]) * df["close"].pct_change(1).fillna(0.0)
+    
+    # C. Funding Rate Z-score (200-candle rolling window)
+    funding_mean = df["funding_rate"].rolling(200, min_periods=20).mean()
+    funding_std = df["funding_rate"].rolling(200, min_periods=20).std().replace(0, np.nan).fillna(1e-5)
+    df["funding_zscore"] = ((df["funding_rate"] - funding_mean) / funding_std).clip(-3.0, 3.0)
+    
+    # D. Orderbook Imbalance Proxy from Wick Volume Absorption
+    upper_wick = df["high"] - np.maximum(df["open"], df["close"])
+    lower_wick = np.minimum(df["open"], df["close"]) - df["low"]
+    df["orderbook_imbalance"] = ((lower_wick - upper_wick) / (df["high"] - df["low"] + 1e-8)).clip(-1.0, 1.0)
+
     # Rolling z-score normalization for RSI and ADX (200-candle window)
     for col in ["RSI", "ADX"]:
         rolling_mean = df[col].rolling(200, min_periods=200).mean()
