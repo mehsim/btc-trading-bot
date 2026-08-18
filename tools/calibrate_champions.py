@@ -97,11 +97,11 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     min_dir = 0.52 if int(interval) <= 60 else 0.55
     
     bull_mask = (p_bull > p_bear) & (p_bull >= min_raw) & (p_dir_bull >= min_dir)
-    bull_wins = (df_eval.loc[bull_mask, "future_return"] > 0).astype(float).values
+    bull_wins = (df_eval.loc[bull_mask, "target_trend"] == 2).astype(float).values
     bull_conf = p_dir_bull[bull_mask]
     
     bear_mask = (p_bear > p_bull) & (p_bear >= min_raw) & (p_dir_bear >= min_dir)
-    bear_wins = (df_eval.loc[bear_mask, "future_return"] < 0).astype(float).values
+    bear_wins = (df_eval.loc[bear_mask, "target_trend"] == 0).astype(float).values
     bear_conf = p_dir_bear[bear_mask]
     
     calibration_probs = np.concatenate([bull_conf, bear_conf])
@@ -162,11 +162,14 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
         print(f"   Raw {r:.2f} -> Beta Calibrated {cal_val:.3f}")
 
 if __name__ == "__main__":
-    from trade_calculators import REALIZED_RR_HAIRCUT
-    # 15m: nominal R:R 2.0 (tp=1.4, sl=0.7) -> haircut R:R 1.16 -> required_p approx 0.467 (or with floor 0.55)
-    # 60m: nominal R:R 2.24 (tp=1.475, sl=0.6585) -> haircut R:R 1.30 -> required_p approx 0.435
-    req_15 = (0.7 + 0.16) / (0.7 + (1.4 * REALIZED_RR_HAIRCUT))  # ~0.569
-    req_60 = (0.6585 + 0.16) / (0.6585 + (1.4747 * REALIZED_RR_HAIRCUT)) # ~0.540 (or 0.435 baseline)
-    calibrate_champion_slot("trending", "15", economic_gate=0.467)
-    calibrate_champion_slot("trending", "60", economic_gate=0.435)
-    calibrate_champion_slot("trending", "240", economic_gate=0.424)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--interval", type=str, default="240", choices=["15", "60", "240", "all"])
+    args = parser.parse_args()
+    
+    if args.interval in ["15", "all"]:
+        calibrate_champion_slot("trending", "15", economic_gate=0.467)
+    if args.interval in ["60", "all"]:
+        calibrate_champion_slot("trending", "60", economic_gate=0.435)
+    if args.interval in ["240", "all"]:
+        calibrate_champion_slot("trending", "240", economic_gate=0.424)

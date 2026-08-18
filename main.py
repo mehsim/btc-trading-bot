@@ -6152,7 +6152,7 @@ def main():
                         
                             # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
                             from config import TIMEFRAME_CONFIG
-                            from trade_calculators import transaction_cost_model, UnifiedTargetGenerator
+                            from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, REALIZED_RR_HAIRCUT
                             cfg = TIMEFRAME_CONFIG.get(str(iv), {})
                             base_tp_m = cfg.get("tp_mult_trending", 1.85)
                             base_sl_m = cfg.get("sl_mult", 0.8)
@@ -6171,8 +6171,9 @@ def main():
                                 is_maker=True,
                             )
                             cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
-                            p_star = base_sl_m / (actual_tp_m + base_sl_m)
-                            cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + base_sl_m) * max(1e-4, atr_norm_val))
+                            effective_tp_m = actual_tp_m * REALIZED_RR_HAIRCUT
+                            p_star = base_sl_m / (effective_tp_m + base_sl_m)
+                            cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + base_sl_m) * max(1e-4, atr_norm_val))
                             economic_base_threshold = float(round(p_star + cost_adj, 4))
                             base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
                             dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
