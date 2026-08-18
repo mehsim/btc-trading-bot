@@ -105,6 +105,7 @@ class StateManager:
         # Load settings from db or use default
         self._cache["simulated_balance"] = float(database.get_setting("simulated_balance", 80.0))
         self._cache["bot_running"] = database.get_setting("bot_running", "True") == "True"
+        self._cache["bot_stopped"] = database.get_setting("bot_stopped", "False") == "True"
         self._cache["fresh_reset_v3"] = database.get_setting("fresh_reset_v3", "False") == "True"
         sys.stderr.write("[StateManager Debug] Settings loaded from DB.\n")
         sys.stderr.flush()
@@ -128,7 +129,13 @@ class StateManager:
                     self._redis.set(f"bot_state:active_trade_{tf}", json.dumps(trades, default=default_json_serializer))
                 except Exception as ex_redis_seed:
                     print(f"[StateManager] Failed to seed Redis active_trade_{tf}: {ex_redis_seed}")
-        sys.stderr.write("[StateManager Debug] Active trades loaded.\n")
+        if self._redis:
+            try:
+                self._redis.set("bot_state:bot_running", json.dumps(self._cache["bot_running"]))
+                self._redis.set("bot_state:bot_stopped", json.dumps(self._cache["bot_stopped"]))
+            except Exception as ex_redis_seed:
+                print(f"[StateManager] Failed to seed Redis bot_running/bot_stopped: {ex_redis_seed}")
+        sys.stderr.write("[StateManager Debug] Active trades and runtime settings loaded.\n")
         sys.stderr.flush()
 
         # Initialize defaults to Redis

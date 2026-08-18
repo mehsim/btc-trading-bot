@@ -351,8 +351,8 @@ class EnsembleClassifier:
                 # Create Meta-Feature Matrix [N, 9] (3 classes x 3 models)
                 X_meta = np.column_stack([xgb_val_prob, lgb_val_prob, cat_val_prob])
                 
-                # Fit L2 Regularized Logistic Regression Stacking Meta-Classifier
-                meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42)
+                # Fit L2 Regularized Logistic Regression Stacking Meta-Classifier with balanced class weighting
+                meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42, class_weight='balanced')
                 meta_clf.fit(X_meta, y_val)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()

@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_trend_240",
-  "timestamp": "2026-08-16T15:17:43.268618+00:00",
-  "model_version": "v7.2.0-9e86f616-202608131311",
+  "timestamp": "2026-08-18T16:38:42.912862+00:00",
+  "model_version": "v7.2.0-9f56d47c-202608181638",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "526d77d1",
+  "git_sha": "9f56d47c",
   "feature_count": 26,
   "feature_names": [
     "open_interest",
@@ -67,7 +67,7 @@
   "vif_values": {},
   "feature_contract_hash": "29d018979028",
   "feature_pipeline_hash": "499fdd9b615f",
-  "training_data_hash": "98ad12be2a5d4401860cb25998d7695f8f1dad2181d1a6b2037ab7de66232838",
+  "training_data_hash": "880b6d7a7868fc3dac63b15bf9f6728d29064fb94b8b08dfb5d8509c4c27c13d",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "1ab0d09aa4862ea62edddd02802f8cea3c63a71b442db88c52cd4649bc9f394c",
   "promotion_reason": "Initial deployment / benchmark promotion",
@@ -85,13 +85,15 @@
     "min_samples": 20,
     "min_mcc": 0.05,
     "min_balanced_accuracy": 0.36,
+    "min_holdout_mcc": 0.02,
+    "min_holdout_balanced_accuracy": 0.34,
     "mcc_regression_tolerance": 0.01
   },
   "dependencies": {
-    "python": "3.14.4",
+    "python": "3.14.6",
     "scikit-learn": "1.9.0",
     "pandas": "2.3.3",
-    "numpy": "2.5.1",
+    "numpy": "2.5.0",
     "xgboost": "3.3.0",
     "lightgbm": "4.6.0",
     "catboost": "1.2.10"
@@ -99,50 +101,52 @@
   "promotion_metrics": {
     "uniqueness_ratio": 0.077,
     "effective_sample_size": 825.62,
-    "raw_sample_size": 10727
+    "raw_sample_size": 10727,
+    "mcc": 0.0729,
+    "balanced_accuracy": 0.3811
   },
   "metrics": {
     "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 2444.77,
-    "raw_sample_size": 31776,
-    "mcc": 0.0431,
-    "balanced_accuracy": 0.3586
+    "effective_sample_size": 2457.15,
+    "raw_sample_size": 31937,
+    "mcc": 0.0582,
+    "balanced_accuracy": 0.3747
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3586,
-      "median": 0.3547,
-      "std": 0.0118,
-      "min": 0.3461,
-      "max": 0.3752
+      "mean": 0.3747,
+      "median": 0.3715,
+      "std": 0.0139,
+      "min": 0.3606,
+      "max": 0.401
     },
     "macro_f1": {
-      "mean": 0.3374,
-      "median": 0.3442,
-      "std": 0.0226,
-      "min": 0.301,
-      "max": 0.3675
+      "mean": 0.3172,
+      "median": 0.3233,
+      "std": 0.0324,
+      "min": 0.2596,
+      "max": 0.3567
     },
     "mcc": {
-      "mean": 0.0431,
-      "median": 0.0385,
-      "std": 0.0201,
-      "min": 0.0204,
-      "max": 0.0781
+      "mean": 0.0582,
+      "median": 0.0553,
+      "std": 0.0147,
+      "min": 0.039,
+      "max": 0.0825
     },
-    "mean_kappa": 0.04019273918045456,
-    "mean_pr_auc_bear": 0.29949708643102824,
-    "mean_pr_auc_bull": 0.24655654512516278,
-    "mean_raw_accuracy": 0.3774,
+    "mean_kappa": 0.04898237532634393,
+    "mean_pr_auc_bear": 0.22884219200047323,
+    "mean_pr_auc_bull": 0.182143554324629,
+    "mean_raw_accuracy": 0.3572,
     "mean_mae": 0.03993,
-    "label_dist_bearish_pct": 27.97,
-    "label_dist_neutral_pct": 48.21,
-    "label_dist_bullish_pct": 23.82,
-    "n_training_samples": 31776,
+    "label_dist_bearish_pct": 19.39,
+    "label_dist_neutral_pct": 64.12,
+    "label_dist_bullish_pct": 16.5,
+    "n_training_samples": 31937,
     "n_holdout_samples": 8640,
-    "effective_sample_size": 2444.77,
-    "raw_sample_size": 31776,
+    "effective_sample_size": 2457.15,
+    "raw_sample_size": 31937,
     "uniqueness_ratio": 0.0769,
     "confusion_matrix": {
       "labels": [
@@ -157,29 +161,29 @@
       ],
       "matrix": [
         [
-          3436,
-          2508,
-          1182
+          2673,
+          1224,
+          1008
         ],
         [
-          5249,
-          5331,
-          2372
+          7645,
+          5673,
+          3940
         ],
         [
-          2776,
-          2399,
-          1227
+          2019,
+          1269,
+          1159
         ]
       ]
     },
-    "holdout_accuracy": 0.4608,
-    "holdout_balanced_accuracy": 0.3308,
-    "holdout_mcc": -0.0126,
-    "champion_holdout_mcc": null,
-    "champion_holdout_balanced_accuracy": null,
-    "holdout_brier": 0.64,
-    "holdout_ece": 0.0225,
+    "holdout_accuracy": 0.2964,
+    "holdout_balanced_accuracy": 0.3493,
+    "holdout_mcc": 0.0331,
+    "champion_holdout_mcc": 0.0,
+    "champion_holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.6942,
+    "holdout_ece": 0.1043,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -188,25 +192,25 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "526d77d1"
+    "git_sha": "9f56d47c"
   },
   "barrier_config": {
-    "tp_mult_trending": 1.8,
-    "tp_mult_ranging": 1.337,
-    "sl_mult": 0.7693,
+    "tp_mult_trending": 2.4005024826625188,
+    "tp_mult_ranging": 1.783121353301515,
+    "sl_mult": 0.7692996169158203,
     "lookahead": 12,
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0431,
-  "manifest_mcc_min": 0.0204,
-  "manifest_bal_acc": 0.3586,
+  "manifest_mcc": 0.0582,
+  "manifest_mcc_min": 0.039,
+  "manifest_bal_acc": 0.3747,
   "label_distribution": [
-    11451,
-    19732,
-    9750
+    7967,
+    26349,
+    6779
   ],
-  "promoted": false,
-  "evaluation_timestamp": "2026-08-16T15:17:43.268618+00:00",
-  "hmac_signature": "13f25cffc088025330a377713265636e9d7661126186aea52de4cf28d6aa86ac"
+  "promoted": true,
+  "evaluation_timestamp": "2026-08-18T16:38:42.912862+00:00",
+  "hmac_signature": "f3c3d81ed4d5469cdd74c67322936cee9cba607d1d1f8ce6f723db9823821665"
 }

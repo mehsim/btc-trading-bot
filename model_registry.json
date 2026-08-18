@@ -1,25 +1,25 @@
 {
   "Production": {
-    "run_id": "train_15m_trending_1786979254",
-    "model_name": "ensemble_trending_15",
+    "run_id": "train_240m_trending_1787071122",
+    "model_name": "ensemble_trending_240",
     "metrics": {
-      "val_accuracy": 0.3380497718096335,
-      "val_mae": 0.006035056272028838
+      "val_accuracy": 0.3492629261941464,
+      "val_mae": 0.056542835739279484
     },
     "stage": "Production",
-    "registered_at_utc": "2026-08-17T15:07:34.392285+00:00"
+    "registered_at_utc": "2026-08-18T16:38:42.914350+00:00"
   },
   "Staging": {
-    "run_id": "train_15m_trending_1786979254",
-    "model_name": "btc_15m_trending_clf",
+    "run_id": "train_240m_trending_1787071122",
+    "model_name": "btc_240m_trending_clf",
     "metrics": {
-      "val_accuracy": 0.3380497718096335,
-      "brier_score": 0.741970615494114,
-      "ece": 0.1708989080246986,
-      "val_mae": 0.006035056272028838
+      "val_accuracy": 0.3492629261941464,
+      "brier_score": 0.6942294134298315,
+      "ece": 0.10431369705451396,
+      "val_mae": 0.056542835739279484
     },
     "stage": "Staging",
-    "registered_at_utc": "2026-08-17T15:07:34.194585+00:00"
+    "registered_at_utc": "2026-08-18T16:38:42.763726+00:00"
   },
   "Archived": [
     {
@@ -1221,6 +1221,266 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-08-17T15:05:15.131736+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1786979254",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3380497718096335,
+        "val_mae": 0.006035056272028838
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T15:07:34.392285+00:00"
+    },
+    {
+      "run_id": "train_15m_ranging_1786989729",
+      "model_name": "ensemble_ranging_15",
+      "metrics": {
+        "val_accuracy": 0.3467285276074316,
+        "val_mae": 0.006169272893893258
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T18:02:09.515886+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1786989931",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.33306607265319804,
+        "val_mae": 0.01396396487436801
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T18:05:31.185404+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1786990089",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.0643820975148125
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T18:08:09.969473+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1786991036",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3389933405876695,
+        "val_mae": 0.0057883369322828
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T18:23:56.170279+00:00"
+    },
+    {
+      "run_id": "train_60m_trending_1786991393",
+      "model_name": "ensemble_trending_60",
+      "metrics": {
+        "val_accuracy": 0.3349673139853937,
+        "val_mae": 0.014571162520953312
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T18:29:53.839061+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1786991638",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3326678331968509,
+        "val_mae": 0.006983284861399057
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-17T18:33:58.929984+00:00"
+    },
+    {
+      "run_id": "train_15m_ranging_1787049965",
+      "model_name": "ensemble_ranging_15",
+      "metrics": {
+        "val_accuracy": 0.33021073959015745,
+        "val_mae": 0.0062359450843471175
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T10:46:05.576082+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1787050092",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.011446498292016487
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T10:48:12.367920+00:00"
+    },
+    {
+      "run_id": "train_30m_trending_1787052863",
+      "model_name": "ensemble_trending_30",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.007759972226857512
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:34:23.730652+00:00"
+    },
+    {
+      "run_id": "train_30m_ranging_1787052982",
+      "model_name": "ensemble_ranging_30",
+      "metrics": {
+        "val_accuracy": 0.34878827372201976,
+        "val_mae": 0.007346344428467861
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:36:22.059619+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1787053546",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.3334498014546861,
+        "val_mae": 0.010734470767678946
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:45:46.789650+00:00"
+    },
+    {
+      "run_id": "train_120m_trending_1787053749",
+      "model_name": "ensemble_trending_120",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.030562435201532852
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:49:09.471906+00:00"
+    },
+    {
+      "run_id": "train_120m_ranging_1787053873",
+      "model_name": "ensemble_ranging_120",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.1387617214895389
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:51:13.131073+00:00"
+    },
+    {
+      "run_id": "train_240m_trending_1787054188",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.07221908476678002
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:56:28.406633+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1787054309",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.33073485973793093,
+        "val_mae": 0.04995210200167091
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T11:58:29.157385+00:00"
+    },
+    {
+      "run_id": "train_120m_trending_1787054942",
+      "model_name": "ensemble_trending_120",
+      "metrics": {
+        "val_accuracy": 0.3327401011642603,
+        "val_mae": 0.04251568499468096
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T12:09:02.140433+00:00"
+    },
+    {
+      "run_id": "train_120m_ranging_1787055064",
+      "model_name": "ensemble_ranging_120",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.03758501019293176
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T12:11:04.465214+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1787066273",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.3327340168488222,
+        "val_mae": 0.011720965415132095
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T15:17:53.273453+00:00"
+    },
+    {
+      "run_id": "train_15m_ranging_1787068049",
+      "model_name": "ensemble_ranging_15",
+      "metrics": {
+        "val_accuracy": 0.345073915995072,
+        "val_mae": 0.005935981775147937
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T15:47:29.843704+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1787068258",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.33501259897909735,
+        "val_mae": 0.014286844019673612
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T15:50:58.530847+00:00"
+    },
+    {
+      "run_id": "train_240m_trending_1787068801",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.06694047839786073
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T16:00:01.625021+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1787068943",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3335184390577619,
+        "val_mae": 0.046692108381858506
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T16:02:23.699332+00:00"
+    },
+    {
+      "run_id": "train_240m_trending_1787070643",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.06994655910791947
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T16:30:43.434000+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1787070772",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3333333333333333,
+        "val_mae": 0.04070417097856081
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T16:32:52.747433+00:00"
+    },
+    {
+      "run_id": "train_240m_trending_1787070931",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.34503748229005443,
+        "val_mae": 0.056684675715505214
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-18T16:35:31.673841+00:00"
     }
   ]
 }

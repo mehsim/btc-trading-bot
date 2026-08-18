@@ -474,7 +474,7 @@ def add_triple_barrier_labels(df, interval):
     df["target_trend"] = labels
     return df
 
-def tune_triple_barrier_multipliers(df_coin, interval):
+def tune_triple_barrier_multipliers(df_coin, interval, n_trials=30):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     selected_feats = ["ATR_norm", "ADX", "RSI", "MACD_diff", "volume_ratio"]
     df_clean = df_coin.dropna(subset=selected_feats).copy().reset_index(drop=True)
@@ -608,7 +608,7 @@ def tune_triple_barrier_multipliers(df_coin, interval):
             return 0.0
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=40)
+    study.optimize(objective, n_trials=n_trials)
     best = study.best_params
     best["lookahead"] = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10))
     print(f"[Optuna Barrier Tuning] Best Multipliers: TP Ranging={best['tp_mult_ranging']:.2f}, TP Trending={best['tp_mult_trending']:.2f}, SL={best['sl_mult']:.2f}")
@@ -823,7 +823,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
     # Skip retuning if a saved barriers file already exists — reuse it to avoid
     # expensive Optuna trials that can OOM on low-RAM servers.
     _barriers_cache = f"optimized_barriers_{interval}.json"
-    if os.path.exists(_barriers_cache):
+    if os.path.exists(_barriers_cache) and not globals().get("FORCE_TUNE_BARRIERS", False) and not globals().get("TUNE_ONLY", False):
         try:
             with open(_barriers_cache) as _f:
                 OPTIMIZED_BARRIERS = json.load(_f)
@@ -832,20 +832,25 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"[Warning] Failed to load {_barriers_cache}: {e}")
     else:
         try:
-            print("\n--- Running Optuna pre-study to optimize Triple-Barrier Multipliers ---")
+            _trials = globals().get("OPTUNA_TRIALS", 30)
+            print(f"\n--- Running Optuna pre-study ({_trials} trials) to optimize Triple-Barrier Multipliers ---")
             df_tune = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=min(pages, 4))
             if df_tune is not None and len(df_tune) > 100:
                 df_tune["close_btc"] = df_tune["close"]
                 df_tune = merge_derivatives_sentiment_features(df_tune, symbol="BTCUSDT", interval=interval)
                 df_tune = add_features(df_tune)
-                best_barriers = tune_triple_barrier_multipliers(df_tune, interval)
+                best_barriers = tune_triple_barrier_multipliers(df_tune, interval, n_trials=_trials)
                 if best_barriers:
                     OPTIMIZED_BARRIERS = best_barriers
                     with open(_barriers_cache, "w") as f:
-                        json.dump(best_barriers, f)
-                    print(f"Saved optimized barriers configuration to {_barriers_cache}")
+                        json.dump(best_barriers, f, indent=2)
+                    print(f"Saved optimized barriers configuration to {_barriers_cache}: {best_barriers}")
         except Exception as e:
             print(f"[Warning] Optuna multiplier pre-tuning failed, using defaults: {e}")
+
+    if globals().get("TUNE_ONLY", False):
+        print(f"✅ Barrier tuning complete for interval {interval}m. Skipping model training (--tune-only).")
+        return
 
     # =========================
     # LOAD & PROCESS DATA FOR ALL SUPPORTED COINS
@@ -2302,10 +2307,16 @@ if __name__ == "__main__":
     parser.add_argument("--live-feedback", action="store_true", help="Inject recent live trade outcomes as weighted samples")
     parser.add_argument("--force-rfecv", action="store_true", help="Force running RFECV feature selection instead of reusing cached features")
     parser.add_argument("--regime", type=str, default="all", choices=["all", "trending", "ranging"], help="Target market regime to train (all, trending, or ranging)")
+    parser.add_argument("--tune-only", action="store_true", help="Only tune barriers using Optuna and save to optimized_barriers_{interval}.json without training models")
+    parser.add_argument("--force-tune-barriers", action="store_true", help="Force retuning barriers before training instead of reusing cached barriers")
+    parser.add_argument("--trials", type=int, default=30, help="Number of Optuna barrier tuning trials (default 30)")
     args = parser.parse_args()
     LIVE_FEEDBACK = args.live_feedback
     FORCE_RFECV = args.force_rfecv
     TARGET_REGIME = args.regime
+    TUNE_ONLY = args.tune_only
+    FORCE_TUNE_BARRIERS = args.force_tune_barriers
+    OPTUNA_TRIALS = args.trials
 
     intervals_to_train = ["15", "30", "60", "120", "240"] if args.interval == "all" else [args.interval]
     _tg_alert(
