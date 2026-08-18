@@ -70,7 +70,7 @@ MODEL_SLOT_DENYLIST = {
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_240",   # holdout MCC unmeasured (None) — denied pending formal contract-stable holdout validation
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
-    "trending_30",    # holdout MCC 0.0223 / 0.0000, balacc 0.3398 — below holdout floor
+    # trending_30 & ranging_30 lifted 2026-08-18: retrained with RFECV (MCC +0.0638 / +0.0831)
     # trending_60 lifted 2026-08-16: prior denial used a cross-asset holdout (0.0193/34.44%);
     # temporal holdout measures +0.1891 / 45.85% — clears both floors
     "ranging_60",     # holdout MCC 0.0000, balacc 0.3333 — unservable

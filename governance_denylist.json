@@ -1,15 +1,7 @@
 {
   "ranging_60": {
     "reason": "breached holdout floor: mcc=0.0000, balacc=0.3333",
-    "timestamp": "2026-08-17T10:45:09Z"
-  },
-  "trending_30": {
-    "reason": "breached holdout floor: mcc=-0.0040, balacc=0.3328",
-    "timestamp": "2026-08-16T15:05:49Z"
-  },
-  "ranging_30": {
-    "reason": "breached holdout floor: mcc=0.0229, balacc=0.3481",
-    "timestamp": "2026-08-16T15:06:40Z"
+    "timestamp": "2026-08-18T10:48:12Z"
   },
   "trending_120": {
     "reason": "breached holdout floor: mcc=0.0000, balacc=0.3333",
@@ -18,5 +10,9 @@
   "ranging_120": {
     "reason": "breached holdout floor: mcc=0.0253, balacc=0.3460",
     "timestamp": "2026-08-16T15:10:10Z"
+  },
+  "ranging_240": {
+    "reason": "breached holdout floor: mcc=0.0000, balacc=0.3333",
+    "timestamp": "2026-08-17T18:08:09Z"
   }
 }
