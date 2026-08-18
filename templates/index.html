@@ -3591,7 +3591,9 @@
             let filtered = (allPredictions || []).slice().filter(p => {
                 if (!p) return false;
                 const conf = p.calibrated_confidence ?? p.raw_confidence ?? p.confidence;
-                return conf !== null && conf !== undefined && !isNaN(conf) && String(p.direction) !== 'None' && String(p.direction) !== 'undefined';
+                const hasValidConf = conf !== null && conf !== undefined && !isNaN(conf);
+                const hasValidDir = p.direction && String(p.direction) !== 'None' && String(p.direction) !== 'undefined' && String(p.direction) !== 'null';
+                return hasValidConf || hasValidDir || (p.symbol && p.status);
             });
             if (currentPredTfFilter !== 'all') {
                 filtered = filtered.filter(p => {
@@ -3646,15 +3648,15 @@
 
                 const sym = p.symbol || "BTCUSDT";
                 const ivStr = String(p.interval || "15").replace('m', '') + 'M';
-                const dir = p.direction || "Neutral";
+                const dir = (p.direction && String(p.direction) !== 'None' && String(p.direction) !== 'null') ? p.direction : (p.status || "Neutral");
                 const dirClass = dir === "Bullish" ? "color-bullish" : (dir === "Bearish" ? "color-bearish" : "");
                 const badgeStyle = dir === "Bullish" ? "background:rgba(16,185,129,0.15); color:var(--accent-green); border:1px solid rgba(16,185,129,0.3);" :
                                   (dir === "Bearish" ? "background:rgba(244,63,94,0.15); color:var(--accent-red); border:1px solid rgba(244,63,94,0.3);" :
                                   "background:rgba(255,255,255,0.06); color:var(--text-secondary); border:1px solid var(--card-border);");
 
-                const conf = p.calibrated_confidence !== undefined ? p.calibrated_confidence : (p.confidence || 0.0);
-                const confPct = (parseFloat(conf) * 100).toFixed(1) + '%';
-                const threshVal = p.dynamic_threshold !== undefined && p.dynamic_threshold !== null ? (parseFloat(p.dynamic_threshold) * 100).toFixed(1) + '%' : 'N/A';
+                const conf = p.calibrated_confidence ?? p.confidence ?? p.raw_confidence;
+                const confPct = (conf !== null && conf !== undefined && !isNaN(conf)) ? (parseFloat(conf) * 100).toFixed(1) + '%' : 'N/A';
+                const threshVal = p.dynamic_threshold !== undefined && p.dynamic_threshold !== null && !isNaN(p.dynamic_threshold) ? (parseFloat(p.dynamic_threshold) * 100).toFixed(1) + '%' : 'N/A';
                 
                 const predChange = parseFloat(p.predicted_change) || 0.0;
                 const changeStr = (predChange >= 0 ? '+' : '') + predChange.toFixed(3);

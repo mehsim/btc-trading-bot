@@ -131,10 +131,12 @@ class StateManager:
                     print(f"[StateManager] Failed to seed Redis active_trade_{tf}: {ex_redis_seed}")
         if self._redis:
             try:
+                self._redis.set("bot_state:trade_history", json.dumps(raw_trades, default=default_json_serializer))
+                self._redis.set("bot_state:prediction_history", json.dumps(raw_preds, default=default_json_serializer))
                 self._redis.set("bot_state:bot_running", json.dumps(self._cache["bot_running"]))
                 self._redis.set("bot_state:bot_stopped", json.dumps(self._cache["bot_stopped"]))
             except Exception as ex_redis_seed:
-                print(f"[StateManager] Failed to seed Redis bot_running/bot_stopped: {ex_redis_seed}")
+                print(f"[StateManager] Failed to seed Redis bot_running/bot_stopped/history: {ex_redis_seed}")
         sys.stderr.write("[StateManager Debug] Active trades and runtime settings loaded.\n")
         sys.stderr.flush()
 
