@@ -5869,19 +5869,21 @@ def main():
             
             closed_all = database.get_completed_trades(limit=1000) if hasattr(database, "get_completed_trades") else []
             micro_trades = [t for t in closed_all if float(t.get("exit_time") or 0) >= micro_ts]
-            closed_trade_count = len(micro_trades)
+            persisted_trade_count = int(database.get_setting("closed_trade_count", "0") or 0)
+            closed_trade_count = max(len(micro_trades), persisted_trade_count)
             cumulative_loss = -sum(float(t.get("venue_closed_pnl") or t.get("pnl_usd") or 0.0) for t in micro_trades if float(t.get("venue_closed_pnl") or t.get("pnl_usd") or 0.0) < 0)
             
             max_trades_cap = getattr(config, "MAX_LIVE_TRADES_CAP", 60)
             max_loss_cap = getattr(config, "MAX_LIVE_LOSS_CAP", 15.0)
+            is_persisted_stopped = database.get_setting("bot_stopped") == "True"
             
-            if closed_trade_count >= max_trades_cap or cumulative_loss >= max_loss_cap:
+            if is_persisted_stopped or closed_trade_count >= max_trades_cap or cumulative_loss >= max_loss_cap:
                 bot_state["bot_running"] = False
                 bot_state["bot_stopped"] = True
                 database.set_setting("bot_running", "False")
                 database.set_setting("bot_stopped", "True")
-                log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}) — bot halted.")
-                print(f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}) — bot halted.")
+                log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
+                print(f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
                 return
         except Exception as ex_cb:
             log_event("WARNING", f"[TRADING_LOOP] Circuit breaker check exception: {ex_cb}")
@@ -6130,6 +6132,14 @@ def main():
                                 bot_state[f"adx_{k_suffix}"] = adx_regime
                                 bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
                                 bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
+
+                            # F-1: Observe MCC Leverage Qualification status at prediction time
+                            mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
+                            if _manifest_mcc_val is None or _manifest_mcc_val < mcc_thresh:
+                                cons_caps = getattr(config, "CONSERVATIVE_LEVERAGE_CAPS", {})
+                                mcc_cap = cons_caps.get(symbol, cons_caps.get("default", 3.0))
+                                _mcc_str = f"{_manifest_mcc_val:.4f}" if _manifest_mcc_val is not None else "unavailable"
+                                log_event("INFO", f"[{symbol} {iv}m F-1 Leverage Guard] Model MCC ({_mcc_str} < {mcc_thresh:.4f}) — Max leverage clamped to {mcc_cap:.1f}x.")
 
                             rec.regime = str(regime_name)
                             rec.direction = str(ml_trend)
