@@ -68,7 +68,7 @@ if os.path.exists("governance_denylist.json"):
 MODEL_SLOT_DENYLIST = {
     "ranging_15",     # legacy barrier mismatch (trained 2.5/2.2 vs serving 1.4/1.25)
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
-    # trending_240 lifted 2026-08-17: Beta calibrated, 48.8% WR, 2.59 PF, +0.88 R out-of-sample
+    "trending_240",   # holdout MCC unmeasured (None) — denied pending formal contract-stable holdout validation
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_30",    # holdout MCC 0.0223 / 0.0000, balacc 0.3398 — below holdout floor
     # trending_60 lifted 2026-08-16: prior denial used a cross-asset holdout (0.0193/34.44%);
@@ -485,7 +485,7 @@ MAX_POSITION_BALANCE_FRAC = 0.05
 CVAR_TAIL_PERCENTILE = 0.05
 CVAR_FALLBACK = 0.03
 DAILY_LOSS_BUDGET_FRAC = 0.05
-MAX_CONCURRENT_POSITIONS = int(os.environ.get("MAX_CONCURRENT_POSITIONS", "5"))
+MAX_CONCURRENT_POSITIONS = int(os.environ.get("MAX_CONCURRENT_POSITIONS", "3"))
 MAX_LIVE_TRADES_CAP = 60
 MAX_LIVE_LOSS_CAP = 15.0
 
