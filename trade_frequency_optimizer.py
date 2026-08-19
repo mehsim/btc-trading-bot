@@ -12,7 +12,7 @@ Automates 5 key enhancements to safely increase trade frequency and accuracy:
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 
 EXPANDED_SYMBOL_UNIVERSE = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "ADAUSDT", "DOTUSDT", "LTCUSDT", "XRPUSDT",

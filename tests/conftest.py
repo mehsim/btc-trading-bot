@@ -16,7 +16,7 @@ sys.setswitchinterval(0.000001)
 # Enable automatic deadlock / hang detection: dumps tracebacks if test suite hangs > 120s
 try:
     faulthandler.dump_traceback_later(120, exit=True)
-except Exception:
+except (AttributeError, RuntimeError, OSError):
     pass
 
 
@@ -73,5 +73,5 @@ def reset_deadlock_timer():
     try:
         faulthandler.cancel_dump_traceback_later()
         faulthandler.dump_traceback_later(120, exit=True)
-    except Exception:
+    except (AttributeError, RuntimeError, OSError):
         pass

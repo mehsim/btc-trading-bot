@@ -7214,11 +7214,10 @@ def main():
                                                     take_profit_price=take_profit_price,
                                                     position_size_usd=position_size_usd,
                                                     live_price=entry_price,
-                                                    atr_norm=float(atr_norm) if atr_norm is not None else 0.01
+                                                    atr_norm=float(pred_info.get("atr_norm", 0.01)) if isinstance(pred_info, dict) and pred_info.get("atr_norm") is not None else 0.01
                                                 )
                                                 if not ev_valid:
-                                                    print(f"[{symbol} {iv}m ExecutionValidator] REJECTED: {ev_msg}")
-                                                    log_event("WARNING", f"[{symbol} {iv}m ExecutionValidator] {ev_msg}")
+                                                    log_event("WARNING", f"[{symbol} {iv}m ExecutionValidator] REJECTED: {ev_msg}")
                                                     status_msg = f"Skipped ({ev_msg})"
                                                     wallet_exceeded = True
                                                     bybit_success = False

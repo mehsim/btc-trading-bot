@@ -236,6 +236,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         cfg = TIMEFRAME_CONFIG.get(str(interval), {})
 
         # ATR-based Stop Loss and Take Profit with production TP resolution
+        regime_detected = "trending" if is_trending_state else "ranging"
         sl_multiplier = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 0.8)
         tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else (cfg.get("tp_mult_trending", 1.85) if (regime_detected == "trending") else cfg.get("tp_mult_ranging", 1.25))
 
@@ -253,6 +254,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         min_sl_dist = entry_price * min_sl_pct
         if sl_dist < min_sl_dist:
             sl_dist = min_sl_dist
+        _sl_frac = sl_dist / max(1e-9, entry_price)
 
         if ml_trend == "Bullish":
             stop_loss = entry_price - sl_dist
@@ -311,10 +313,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             
         if pessimistic_mode:
             # Full round-trip taker fee (entry + exit) + half spread
-            total_trading_cost = (2.0 * taker_fee) + half_spread
+            total_trading_cost = (2.0 * FEE_RATE) + (FEE_RATE / 4.0)
             net_return = gross_return - total_trading_cost
         else:
-            net_return = gross_return - fee_rate - vol_slippage
+            vol_slippage = (atr_norm * 0.05) if atr_norm is not None else 0.0005
+            net_return = gross_return - FEE_RATE - vol_slippage
         
         # Deduct 8h perpetual funding rate for holds >= 8 hours
         try:

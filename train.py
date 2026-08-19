@@ -1744,10 +1744,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_ece = 0.99
         else:
             print(f"  [Champion-Challenger] No existing champion (or contract updated) for {name.upper()}. Promoting challenger.")
-            chal_acc = float(holdout_bal_acc) if 'holdout_bal_acc' in locals() else float(stat_bal.get("mean", 0.0))
-            chal_mae = float(stat_mae.get("mean", 0.0)) if ('stat_mae' in locals() and isinstance(stat_mae, dict)) else 0.0
-            chal_brier = float(safe_stat(brier_scores).get("mean", 0.20)) if 'brier_scores' in locals() else 0.20
-            chal_ece = float(ece_score) if 'ece_score' in locals() else 0.03
+            chal_acc = float(locals().get("holdout_bal_acc", stat_bal.get("mean", 0.0)))
+            chal_mae = float(locals().get("stat_mae", {}).get("mean", 0.0)) if isinstance(locals().get("stat_mae"), dict) else 0.0
+            chal_brier = float(safe_stat(locals().get("brier_scores", [])).get("mean", 0.20))
+            chal_ece = float(locals().get("ece_score", 0.03))
 
         # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
         from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
