@@ -71,7 +71,10 @@ class ContinuousLearningEngine:
         try:
             trade_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(safe_float(trade.get('exit_time'), time.time()))}"
             symbol = trade.get("symbol", "BTCUSDT")
-            pnl = safe_float(trade.get("venue_closed_pnl", trade.get("pnl_usd", 0.0)))
+            pnl_val = trade.get("venue_closed_pnl")
+            if pnl_val is None:
+                pnl_val = trade.get("pnl_usd", 0.0)
+            pnl = safe_float(pnl_val, 0.0)
             conf = safe_float(trade.get("confidence", 0.60), 0.60)
             is_win = (pnl > 0)
             

@@ -71,4 +71,20 @@ def detect_market_regime_with_hysteresis(df: pd.DataFrame, symbol: str = "DEFAUL
     atr_hist_median = float(df["ATR_norm"].iloc[:-1].median()) if len(df) > 1 else float(atr_norm)
     vol_ratio = atr_norm / max(1e-9, atr_hist_median)
 
-    return production_regime_engine.update_regime(symbol=symbol, interval=interval, adx_value=adx_val, volatility_ratio=vol_ratio)
+    chop_val = float(df["choppiness_index"].iloc[-1]) if "choppiness_index" in df.columns else (
+        float(df["CHOP"].iloc[-1]) if "CHOP" in df.columns else 50.0
+    )
+    bb_width = float(df["BB_width_norm"].iloc[-1] * 100.0) if "BB_width_norm" in df.columns else (
+        float((df["BB_high"].iloc[-1] - df["BB_low"].iloc[-1]) / max(1e-9, df["close"].iloc[-1]) * 100.0) if ("BB_high" in df.columns and "BB_low" in df.columns and "close" in df.columns) else 20.0
+    )
+    vol_20d = float(df["volume"].iloc[-1] / max(1e-9, df["volume"].tail(20).mean())) if ("volume" in df.columns and len(df) >= 20) else 1.0
+
+    return production_regime_engine.update_regime(
+        symbol=symbol,
+        interval=interval,
+        adx_value=adx_val,
+        volatility_ratio=vol_ratio,
+        choppiness=chop_val,
+        bb_width_pct=bb_width,
+        volume_ratio_20d=vol_20d
+    )

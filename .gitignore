@@ -45,3 +45,5 @@ mlflow.db
 db_snapshots/
 junit/
 .manifest_hmac_secret
+bot.log
+*.log

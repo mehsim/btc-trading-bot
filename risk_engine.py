@@ -308,7 +308,12 @@ def check_margin_utilization(used_margin: float, total_equity: float, max_levera
 def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish", journal: Any = None) -> tuple:
     try:
         policy = getattr(config, "PRE_TRADE_POLICY", {})
-        max_lev = policy.get("max_leverage", 25.0)
+        from risk_limits import HARD_TIMEFRAME_MAX_LEVERAGE_CAPS
+        tf_caps = getattr(config, "TIMEFRAME_MAX_LEVERAGE_CAPS", {})
+        tf_clean = str(interval).replace("m", "")
+        hard_cap = HARD_TIMEFRAME_MAX_LEVERAGE_CAPS.get(tf_clean, 10.0)
+        cfg_cap = tf_caps.get(tf_clean, hard_cap)
+        max_lev = min(hard_cap, cfg_cap)
         min_lev = policy.get("min_leverage", 1.0)
         min_pos = policy.get("min_position_usd", 0.20)
         min_notional = policy.get("min_notional_usd", 1.0)

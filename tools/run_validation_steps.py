@@ -123,6 +123,11 @@ def simulate_walk_forward(symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], n_windows=1
                                 pnl = tp_dist / entry_price - fee_pct
                                 break
                                 
+                    if pnl is None and idx + 5 < len(sub_df):
+                        exit_price = sub_df.iloc[idx + 5]['close']
+                        raw_ret = (exit_price - entry_price) / entry_price if sig == 'LONG' else (entry_price - exit_price) / entry_price
+                        pnl = raw_ret - fee_pct
+
                     if pnl is not None:
                         all_trades.append({
                             'window': w,

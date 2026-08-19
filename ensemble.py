@@ -13,10 +13,11 @@ from features import sanitize_feature_matrix as _canon_sanitize
 
 from xgboost import XGBClassifier, XGBRegressor
 
-def resolve_direction(probs):
+def resolve_direction(probs, interval=None, min_dir_mass=0.15):
     """
     Resolves directional class ("Bullish", "Bearish", "Neutral") and raw confidence score.
     Handles 1, 2, or 3-class probability arrays seamlessly without indexing assumptions.
+    Applies directional mass normalization when neutral probability dominates to prevent argmax collapse.
     """
     if len(probs) >= 3:
         prob_bearish = float(probs[0])
@@ -31,6 +32,18 @@ def resolve_direction(probs):
         prob_bearish = val if val < 0.5 else 0.0
         prob_neutral = 0.0
         prob_bullish = val if val >= 0.5 else 0.0
+
+    dir_total = prob_bearish + prob_bullish
+    # When 3-class model has substantial directional mass (>= 15%), evaluate normalized directional split
+    if len(probs) >= 3 and dir_total >= min_dir_mass:
+        norm_bear = prob_bearish / max(1e-9, dir_total)
+        norm_bull = prob_bullish / max(1e-9, dir_total)
+        if norm_bull > norm_bear and norm_bull >= 0.50:
+            return "Bullish", norm_bull
+        elif norm_bear > norm_bull and norm_bear >= 0.50:
+            return "Bearish", norm_bear
+        else:
+            return "Neutral", prob_neutral
 
     _p = {"Bearish": prob_bearish, "Neutral": prob_neutral, "Bullish": prob_bullish}
     trend = max(_p, key=_p.get)
@@ -245,15 +258,16 @@ class PurgedEmbargoTimeSeriesSplit:
     Implements Purged and Embargoed Time-Series Cross-Validation.
     Prevents overlapping lookahead window leakage between train and validation sets.
     """
-    def __init__(self, n_splits=5, lookahead=None, embargo_pct=0.01, interval=None):
-        from config import TIMEFRAME_CONFIG
+    def __init__(self, n_splits=5, lookahead=None, embargo_pct=0.01, interval=None, n_symbols=None):
+        from config import TIMEFRAME_CONFIG, SUPPORTED_SYMBOLS
+        sym_mult = n_symbols if n_symbols is not None else len(SUPPORTED_SYMBOLS)
         if interval is not None and str(interval) in TIMEFRAME_CONFIG:
-            required_lookahead = TIMEFRAME_CONFIG[str(interval)].get("lookahead", 12)
+            required_lookahead = TIMEFRAME_CONFIG[str(interval)].get("lookahead", 12) * sym_mult
         else:
-            required_lookahead = 12
+            required_lookahead = 12 * sym_mult
             
         eff_lookahead = lookahead if lookahead is not None else required_lookahead
-        assert eff_lookahead >= required_lookahead, f"Purge window ({eff_lookahead}) shorter than label horizon ({required_lookahead})"
+        assert eff_lookahead >= (required_lookahead // sym_mult), f"Purge window ({eff_lookahead}) shorter than label horizon"
         self.n_splits = n_splits
         self.lookahead = eff_lookahead
         self.embargo_pct = embargo_pct
@@ -693,7 +707,9 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
                     feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
                 if n_features is None and feature_names:
                     n_features = len(feature_names)
-                # load-time label_distribution check removed — see rolling live-prediction check
+        except (RuntimeError, ValueError) as sec_ex:
+            log_event("CRITICAL", f"Ensemble security integrity error: {sec_ex}")
+            raise sec_ex
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
@@ -1106,6 +1122,9 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
                     feature_names = m_data.get("feature_names") or m_data.get("surviving_features")
                 if n_features is None and feature_names:
                     n_features = len(feature_names)
+        except (RuntimeError, ValueError) as sec_ex:
+            log_event("CRITICAL", f"Ensemble security integrity error: {sec_ex}")
+            raise sec_ex
         except Exception as ex_ens:
             log_event("WARNING", f"Ensemble notice: {ex_ens}")
 

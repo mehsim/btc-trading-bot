@@ -135,7 +135,7 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
 MIN_FEATURE_HISTORY = 200 + 14 + 1
 _FEATURES_CACHE = {}
 
-def add_features(df, fetch_calendar_callback=None):
+def add_features(df, fetch_calendar_callback=None, symbol=None):
     if df is not None and len(df) < MIN_FEATURE_HISTORY:
         raise ValueError(f"add_features requires >= {MIN_FEATURE_HISTORY} bars, got {len(df)}")
         
@@ -233,14 +233,15 @@ def add_features(df, fetch_calendar_callback=None):
     m_4h = max(1, 240 // max(1, base_iv_min))
     m_1d = max(1, 1440 // max(1, base_iv_min))
 
-    w_144 = min(max(5, len(df) - 1), 9 * m_4h)
-    w_336 = min(max(10, len(df) - 1), 21 * m_4h)
-    w_800 = min(max(15, len(df) - 1), 50 * m_4h)
-    w_500 = min(max(20, len(df) - 1), 50 * m_1d)
-    ema_144 = EMAIndicator(df["close"], window=w_144).ema_indicator()
-    ema_336 = EMAIndicator(df["close"], window=w_336).ema_indicator()
-    ema_800 = EMAIndicator(df["close"], window=w_800).ema_indicator()
-    ema_500 = EMAIndicator(df["close"], window=w_500).ema_indicator()
+    def _safe_ema(series, target_w):
+        if len(series) > target_w and target_w >= 2:
+            return EMAIndicator(series, window=target_w).ema_indicator()
+        return pd.Series(np.nan, index=series.index)
+
+    ema_144 = _safe_ema(df["close"], 9 * m_4h)
+    ema_336 = _safe_ema(df["close"], 21 * m_4h)
+    ema_800 = _safe_ema(df["close"], 50 * m_4h)
+    ema_500 = _safe_ema(df["close"], min(200, 50 * m_1d))
 
     df["htf_4h_ema_alignment"] = (ema_144 / (ema_336 + 1e-8) - 1.0).fillna(0.0)
     df["htf_4h_trend_dir"] = np.where(ema_144 > ema_336, 1.0, np.where(ema_144 < ema_336, -1.0, 0.0))
@@ -373,7 +374,7 @@ def add_features(df, fetch_calendar_callback=None):
     try:
         import sqlite3, os
         db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.db")
-        sym = df.attrs.get("symbol", "BTCUSDT") if hasattr(df, "attrs") else "BTCUSDT"
+        sym = symbol or (str(df["symbol"].iloc[-1]) if ("symbol" in df.columns and len(df) > 0) else (df.attrs.get("symbol", "BTCUSDT") if hasattr(df, "attrs") else "BTCUSDT"))
         with sqlite3.connect(db_path, timeout=10) as conn:
             of_df = pd.read_sql_query(
                 "SELECT timestamp, cvd, ofi, ob_imbalance_L2, ob_spread_L2, liq_long_1h, liq_short_1h FROM historical_order_flow WHERE symbol=? ORDER BY timestamp ASC",
@@ -554,7 +555,7 @@ def add_features(df, fetch_calendar_callback=None):
         df = high_alpha_feature_engine.compute_all_high_alpha_features(df)
     except Exception as e:
         print(f"[Features Warning] Failed computing high alpha features: {e}")
-    df = df.bfill().ffill()
+    df = df.ffill()
     df = sanitize_feature_matrix(df)
     if cache_key is not None:
         if len(_FEATURES_CACHE) > 50:
@@ -661,7 +662,7 @@ def sanitize_feature_matrix(X):
                 c_low = str(c).lower()
                 if "hours_to_news" in c_low:
                     fill_val = 72.0
-                elif "rsi" in c_low:
+                elif "rsi" in c_low and not any(z in c_low for z in ("_z", "zscore", "z_score")):
                     fill_val = 50.0
                 elif any(rc in c_low for rc in ratio_cols) and "to_btc" not in c_low:
                     fill_val = 1.0
@@ -675,7 +676,7 @@ def sanitize_feature_matrix(X):
             s_name = str(s.name or "").lower()
             if "hours_to_news" in s_name:
                 fill_val = 72.0
-            elif "rsi" in s_name:
+            elif "rsi" in s_name and not any(z in s_name for z in ("_z", "zscore", "z_score")):
                 fill_val = 50.0
             elif any(rc in s_name for rc in ratio_cols) and "to_btc" not in s_name:
                 fill_val = 1.0

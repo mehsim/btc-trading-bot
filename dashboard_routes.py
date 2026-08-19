@@ -124,44 +124,30 @@ class StdoutRedirector:
 
 import hmac
 
-def is_request_local():
-    trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
-    if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
-        client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
-    else:
-        client_ip = request.remote_addr
-    return client_ip in ["127.0.0.1", "::1", "localhost"]
-
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if is_request_local():
-            return f(*args, **kwargs)
-
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
         if not expected_key:
-            return jsonify({"error": "Unauthorized", "message": "Remote access disabled: DASHBOARD_API_KEY not configured."}), 401
+            return jsonify({"error": "Unauthorized", "message": "DASHBOARD_API_KEY is unset or empty."}), 401
         
-        client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
+        client_key = request.headers.get("X-API-KEY")
         if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
             return f(*args, **kwargs)
-        return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
+        return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key. Header X-API-KEY required."}), 401
     return decorated_function
 
 def require_admin_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if is_request_local():
-            return f(*args, **kwargs)
-
         expected_key = get_secure_env("DASHBOARD_ADMIN_KEY", "").strip() or get_secure_env("DASHBOARD_API_KEY", "").strip()
         if not expected_key:
-            return jsonify({"error": "Unauthorized", "message": "Admin remote access disabled: DASHBOARD_ADMIN_KEY not configured."}), 401
+            return jsonify({"error": "Unauthorized", "message": "DASHBOARD_ADMIN_KEY is unset or empty."}), 401
 
-        client_key = request.headers.get("X-ADMIN-KEY") or request.headers.get("X-API-KEY") or request.args.get("admin_key")
+        client_key = request.headers.get("X-ADMIN-KEY") or request.headers.get("X-API-KEY")
         if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
             return f(*args, **kwargs)
-        return jsonify({"error": "Unauthorized", "message": "Missing or invalid admin API key."}), 401
+        return jsonify({"error": "Unauthorized", "message": "Missing or invalid admin API key. Header required."}), 401
     return decorated_function
 
 
@@ -1400,12 +1386,16 @@ def api_institutional_summary():
         "feature_importance_drift": (lambda: mlops_engine.calculate_feature_importance_drift())(),
         "decomposed_trade_quality": (lambda: calculate_decomposed_trade_quality(valid_trades[-1] if valid_trades else {}))(),
         "capital_efficiency": (lambda: portfolio_risk_engine.calculate_capital_efficiency(active_positions, sim_balance))(),
-        "decision_stability": (lambda: statistical_validation.compute_decision_stability(None, {}, "Bullish", 0.85))(),
-        "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": "live_v1"}))(),
+        "decision_stability": (lambda: statistical_validation.compute_decision_stability(None, {}, "Bullish", float(state_manager.get("last_calibrated_conf", 0.85) or 0.85)))(),
+        "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": str(valid_trades[-1].get("trade_id", "live_v1") if valid_trades else "live_v1")}))(),
         "model_health_index": (lambda: strategy_health_engine.calculate_model_health_index(rolling_pf=calculated_pf, expectancy_r=exp_r_val, trades_count=total_trades_count))(),
-        "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(164, 98, 114))(),
-        "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=float(state_manager.get("last_brier_score", 0.214))))(),
-        "uncertainty_execution_policy": (lambda: exit_policy_engine.calculate_uncertainty_execution_policy(0.0609))(),
+        "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(
+            max(1, sum(1 for t in valid_trades if float(t.get("pnl_usd", 0.0) or t.get("venue_closed_pnl", 0.0)) > 0)),
+            max(1, sum(1 for t in valid_trades if float(t.get("pnl_usd", 0.0) or t.get("venue_closed_pnl", 0.0)) < 0)),
+            max(1, len(valid_trades))
+        ))(),
+        "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=float(state_manager.get("last_brier_score", 0.214) or 0.214)))(),
+        "uncertainty_execution_policy": (lambda: exit_policy_engine.calculate_uncertainty_execution_policy(float(state_manager.get("last_uncertainty", 0.0609) or 0.0609)))(),
         "expected_r_meta_model": (lambda: mlops_engine.estimate_expected_r_multiple({
             "total_uncertainty_u": state_manager.get("last_uncertainty"),
             "symbol_alpha_score": state_manager.get("alpha_score"),

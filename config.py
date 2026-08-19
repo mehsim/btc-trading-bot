@@ -45,8 +45,8 @@ MODEL_GOVERNANCE = {
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
 TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "default": 0.050}
 TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.350, "default": 0.360}
-TIMEFRAME_MIN_HOLDOUT_MCC = {"15": -0.02, "30": -0.01, "default": 0.02}
-TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.320, "30": 0.330, "default": 0.340}
+TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.010, "30": 0.015, "default": 0.020}
+TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.335, "30": 0.338, "default": 0.340}
 
 # Dynamic Regime-Based Model Routing (Trending vs Ranging)
 # When False (Default): Routes to validated universal/trending models across all market regimes.
@@ -486,8 +486,8 @@ CVAR_TAIL_PERCENTILE = 0.05
 CVAR_FALLBACK = 0.03
 DAILY_LOSS_BUDGET_FRAC = 0.05
 MAX_CONCURRENT_POSITIONS = int(os.environ.get("MAX_CONCURRENT_POSITIONS", "3"))
-MAX_LIVE_TRADES_CAP = int(os.environ.get("MAX_LIVE_TRADES_CAP", "10000"))
-MAX_LIVE_LOSS_CAP = float(os.environ.get("MAX_LIVE_LOSS_CAP", "50.0"))
+MAX_LIVE_TRADES_CAP = int(os.environ.get("MAX_LIVE_TRADES_CAP", "60"))
+MAX_LIVE_LOSS_CAP = float(os.environ.get("MAX_LIVE_LOSS_CAP", "15.0"))
 
 
 

@@ -548,42 +548,7 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
 from functools import wraps
 import hmac
 
-def require_api_key(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
-        if not expected_key:
-            return f(*args, **kwargs)
-        
-        client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
-        if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
-            return f(*args, **kwargs)
-        return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
-    return decorated_function
 
-def require_ip_whitelist(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        allowed_ips = get_secure_env("ALLOWED_DASHBOARD_IPS", "").strip()
-        if allowed_ips:
-            ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-            trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
-            if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
-                client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
-            else:
-                client_ip = request.remote_addr
-            if client_ip not in ip_list and client_ip not in ["127.0.0.1", "::1"]:
-                return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-
-@app.route("/killswitch", methods=["POST"])
-@require_api_key
-def killswitch_endpoint():
-    trigger_emergency_kill_switch("HTTP /killswitch Request")
-    return jsonify({"status": "KILL_SWITCH_ACTIVATED", "message": "All orders cancelled and bot halted."})
 
 
 cached_news_sentiment = "Neutral"
@@ -881,7 +846,14 @@ def load_history():
                 for tf_key in ACTIVE_TRADE_TF_KEYS:
                     migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                     
-                bot_state["bot_running"] = data.get("bot_running", True)
+                sqlite_running = database.get_setting("bot_running")
+                if sqlite_running is not None:
+                    bot_state["bot_running"] = sqlite_running == "True"
+                else:
+                    bot_state["bot_running"] = data.get("bot_running", True)
+                sqlite_stopped = database.get_setting("bot_stopped")
+                if sqlite_stopped is not None:
+                    bot_state["bot_stopped"] = sqlite_stopped == "True"
                 bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                 
                 active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ACTIVE_TRADE_TF_KEYS for t in bot_state.get(f"active_trade_{tf_key}", []))
@@ -1292,6 +1264,20 @@ def get_bybit_order_details(symbol, order_id):
             return orders[0]
     return None
 
+def wait_for_order_fill(symbol, order_id, timeout_sec=2.0):
+    """Polls Bybit order status until filled, partially filled, or timeout expires."""
+    start_t = time.time()
+    while time.time() - start_t < timeout_sec:
+        details = get_bybit_order_details(symbol, order_id)
+        if details:
+            status = details.get("orderStatus")
+            if status in ["Filled", "PartiallyFilled"]:
+                return True
+            elif status in ["Cancelled", "Rejected"]:
+                return False
+        time.sleep(0.2)
+    return False
+
 def cancel_bybit_order(symbol, order_id):
     cancel_payload = {
         "category": "linear",
@@ -1603,6 +1589,18 @@ def get_bybit_bid_ask(symbol):
             last = float(tick.get("lastPrice", 0.0))
             return bid, ask, last
     return None, None, None
+
+def get_chase_limit_price(symbol, side, chase, entry_price):
+    """Calculates dynamic Limit Maker price using real-time bid/ask orderbook."""
+    bid, ask, last = get_bybit_bid_ask(symbol)
+    if bid is not None and ask is not None and bid > 0 and ask > 0:
+        spread = max(1e-6, ask - bid)
+        step = spread * 0.1 * chase
+        if side in ["Buy", "Bullish"]:
+            return min(ask - 1e-6, bid + step)
+        else:
+            return max(bid + 1e-6, ask - step)
+    return float(entry_price)
 
 def get_bybit_last_execution(symbol):
     res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "limit": 1})
@@ -1926,10 +1924,26 @@ def run_daily_backup_scheduler():
             with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 if os.path.exists(DB_FILE):
                     zipf.write(DB_FILE, os.path.basename(DB_FILE))
+                if os.path.exists(DB_FILE + "-wal"):
+                    zipf.write(DB_FILE + "-wal", os.path.basename(DB_FILE + "-wal"))
+                if os.path.exists(DB_FILE + "-shm"):
+                    zipf.write(DB_FILE + "-shm", os.path.basename(DB_FILE + "-shm"))
                 if os.path.exists(JOURNAL_PATH):
                     zipf.write(JOURNAL_PATH, os.path.basename(JOURNAL_PATH))
                     
             print(f"[Backup Scheduler] Created local compressed backup: {zip_filename}")
+            
+            # Prune local backups older than 7 days
+            try:
+                now_t = time.time()
+                for fname in os.listdir(backup_dir):
+                    fpath = os.path.join(backup_dir, fname)
+                    if fname.startswith("backup_") and fname.endswith(".zip"):
+                        if os.path.isfile(fpath) and (now_t - os.path.getmtime(fpath)) > 7 * 86400:
+                            os.remove(fpath)
+                            print(f"[Backup Scheduler] Pruned old backup: {fname}")
+            except Exception as prune_err:
+                print(f"[Backup Scheduler Warning] Failed pruning old backups: {prune_err}")
             
             # Optional S3 upload
             s3_bucket = os.environ.get("AWS_S3_BUCKET")
@@ -1970,17 +1984,23 @@ def run_daily_summary_scheduler():
     while True:
         try:
             now_gm = time.gmtime()
-            today_date_str = time.strftime("%Y-%m-%d", now_gm)
             # Sleep until next midnight UTC
             seconds_to_midnight = 86400 - (now_gm.tm_hour * 3600 + now_gm.tm_min * 60 + now_gm.tm_sec)
             time.sleep(max(1, seconds_to_midnight))
             
+            # Re-read time upon waking up
+            wake_gm = time.gmtime()
+            today_date_str = time.strftime("%Y-%m-%d", wake_gm)
+            should_send = False
             with bot_state_lock:
                 last_date = bot_state.get("last_daily_summary_date", "")
                 if last_date != today_date_str:
                     bot_state["last_daily_summary_date"] = today_date_str
-                    print(f"[Daily Summary Scheduler] Midnight UTC detected ({today_date_str}). Sending daily summary...")
-                    send_daily_summary()
+                    should_send = True
+            
+            if should_send:
+                print(f"[Daily Summary Scheduler] Midnight UTC detected ({today_date_str}). Sending daily summary...")
+                send_daily_summary()
         except Exception as e:
             print(f"[Daily Summary Scheduler Error] Exception in scheduler loop: {e}")
             time.sleep(60)
@@ -4345,6 +4365,13 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     actual_qty = raw_qty
     order_res = {}
     
+    sl_source = "STRUCTURE"
+    sl_override_reason = "None"
+    min_sl_pct = 0.005
+    atr_sl_dist = atr_dollars * sl_multiplier_adjusted
+    min_sl_dist = atr_dollars * 0.60
+    raw_sl_dist = abs(entry_price - stop_loss_price) if stop_loss_price is not None else atr_sl_dist
+    
     # 1. Live Exchange Position Guard
     try:
         pos_list = get_all_bybit_positions()
@@ -4488,10 +4515,29 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             stop_loss_price = (entry_price - sl_dist) if ml_trend == "Bullish" else (entry_price + sl_dist)
             take_profit_price = (entry_price + tp_dist) if ml_trend == "Bullish" else (entry_price - tp_dist)
 
-            # Set SL/TP on active position on Bybit
+            # Set SL/TP on active position on Bybit with return verification and fail-safe flatten
             temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
-            update_bybit_stop_loss(symbol, stop_loss_price, active_trade=temp_trade)
-            update_bybit_take_profit(symbol, take_profit_price, active_trade=temp_trade)
+            sl_ok = update_bybit_stop_loss(symbol, stop_loss_price, active_trade=temp_trade)
+            if not sl_ok:
+                time.sleep(0.5)
+                sl_ok = update_bybit_stop_loss(symbol, stop_loss_price, active_trade=temp_trade)
+                if not sl_ok:
+                    log_event("CRITICAL", f"[{symbol} {iv}m] Failed to place Stop Loss on Bybit after fill! Emergency flattening position.")
+                    send_telegram_alert(
+                        f"🚨 *CRITICAL SL FAILURE - EMERGENCY FLATTEN* 🚨\n"
+                        f"• *Asset*: {symbol}\n"
+                        f"• *Detail*: Stop loss placement failed twice on Bybit after fill. Emergency flattening position to prevent unstopped exposure."
+                    )
+                    flatten_side = "Sell" if ml_trend == "Bullish" else "Buy"
+                    emergency_flatten_position(symbol, flatten_side, format_bybit_qty(symbol, actual_qty))
+                    return
+
+            tp_ok = update_bybit_take_profit(symbol, take_profit_price, active_trade=temp_trade)
+            if not tp_ok:
+                time.sleep(0.5)
+                tp_ok = update_bybit_take_profit(symbol, take_profit_price, active_trade=temp_trade)
+                if not tp_ok:
+                    log_event("WARNING", f"[{symbol} {iv}m] Failed to place Take Profit on Bybit after fill (SL is active).")
             
             # Place scale-out limit order on Bybit
             limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
@@ -4549,10 +4595,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             },
             "sl_multiplier": float(sl_multiplier_adjusted),
             "tp_multiplier": float(tp_multiplier_adjusted),
-            "sl_source": str(sl_source),
-            "min_sl_pct": float(min_sl_pct),
-            "atr_sl_dist": float(atr_sl_dist),
-            "min_sl_dist": float(min_sl_dist),
+            "sl_source": str(locals().get("sl_source", "STRUCTURE")),
+            "min_sl_pct": float(locals().get("min_sl_pct", 0.005)),
+            "atr_sl_dist": float(locals().get("atr_sl_dist", atr_dollars * sl_multiplier_adjusted)),
+            "min_sl_dist": float(locals().get("min_sl_dist", atr_dollars * 0.60)),
             "initial_planned_rr": float(init_planned_rr),
             "entry_regime": str(bot_state.get(f"regime_{symbol}_{iv}", bot_state.get(f"regime_{iv}", "Trending"))),
             "direction": str(ml_trend),
@@ -5171,6 +5217,9 @@ def main():
                                     if close_res.get("retCode") == 0:
                                         bybit_closed = True
                                         time.sleep(0.5)
+                                    else:
+                                        log_event("ERROR", f"[{active_symbol} {iv}m] Market close order failed: {close_res.get('retMsg')}")
+                                        active_trade["close_failed"] = True
 
                         if bybit_closed:
                             entry_time_ms = active_trade.get("entry_time")
@@ -5205,7 +5254,10 @@ def main():
                             else:
                                 exit_reason = "STOP LOSS HIT [FAIL]"
     
-                    is_exited = (exit_reason is not None) or bybit_closed
+                    if TRADE_MODE == "simulation":
+                        is_exited = (exit_reason is not None)
+                    else:
+                        is_exited = (exit_reason is not None and bybit_closed) or bybit_closed
                     if is_exited:
                         # Maker vs Taker execution logic
                         is_stop_loss = "STOP LOSS" in str(exit_reason).upper() if exit_reason else True
@@ -5241,9 +5293,6 @@ def main():
                             realized_pnl = -position_size_usd
                             net_return_pct = -100.0
                         
-                        # Log trade into KellyTracker for dynamic Quarter-Kelly sizing
-                        global_kelly_tracker.log_trade(active_symbol, str(iv), realized_pnl, net_return_pct)
-                        
                         # Aggregate PnL and size for trade history logging if scaled out
                         original_size = float(active_trade.get("original_size", position_size_usd))
                         scaled_out_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
@@ -5256,6 +5305,9 @@ def main():
                         else:
                             total_pnl = round(realized_pnl + scaled_out_pnl, 2)
                             total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
+                        
+                        # Log trade into KellyTracker with authoritative reconciled PnL for dynamic Quarter-Kelly sizing
+                        global_kelly_tracker.log_trade(active_symbol, str(iv), realized_pnl, net_return_pct)
                         
                         # Update simulated balance (only in simulation)
                         if TRADE_MODE == "simulation":
@@ -5794,6 +5846,7 @@ def main():
                 database.set_setting("bot_stopped", "True")
                 log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
                 print(f"[TRADING_LOOP] Hard Circuit Breaker Triggered (Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
+                time.sleep(10)
                 return
         except Exception as ex_cb:
             log_event("WARNING", f"[TRADING_LOOP] Circuit breaker check exception: {ex_cb}")
@@ -5857,10 +5910,31 @@ def main():
                         latest_candle = df.iloc[-1]
                         
                         # S-3 Data Continuity Guard: Refuse evaluation if candle series has unserviceable gaps (> 3 bars)
+                        gap_exceeded = False
+                        max_g = 0
                         if getattr(df, "attrs", {}).get("gap_exceeded", False):
+                            gap_exceeded = True
                             max_g = df.attrs.get("max_consecutive_synthetic_bars", 0)
+                        elif "timestamp" in df.columns and len(df) > 1:
+                            expected_step_ms = int(iv) * 60 * 1000
+                            ts_diffs = df["timestamp"].diff().dropna()
+                            max_diff = ts_diffs.max() if len(ts_diffs) > 0 else expected_step_ms
+                            if max_diff > expected_step_ms * 3.5:
+                                gap_exceeded = True
+                                max_g = int(round(max_diff / expected_step_ms)) - 1
+                        
+                        if gap_exceeded:
                             print(f"[{symbol} {iv}m Gap Guard] Window contains {max_g} consecutive missing bars (> 3). Abstaining from signal evaluation (Fail-Closed).")
                             log_event("WARNING", f"[{symbol} {iv}m] Unserviceable gap ({max_g} bars) in candle history — abstaining (Fail-Closed)")
+                            continue
+                    
+                        from data_quality_engine import DataQualityEngine
+                        dq_res = DataQualityEngine().evaluate_data_quality(
+                            missing_candles_count=max_g if gap_exceeded else 0,
+                            zero_price_detected=bool(float(latest_candle.get("close", 0.0)) <= 0.0)
+                        )
+                        if dq_res.get("severity") == "CRITICAL":
+                            log_event("CRITICAL", f"[{symbol} {iv}m DataQualityEngine] {dq_res.get('detail')}")
                             continue
                     
                         # Dynamic Regime Routing based on GMM Unsupervised Classifier
@@ -5966,13 +6040,13 @@ def main():
                                 prob_neutral = 0.0
                                 prob_bullish = float(probs[1])
                             else:
-                                prob_bearish = float(probs[0]) if float(probs[0]) < 0.5 else 0.0
+                                val = float(probs[0])
+                                prob_bearish = val if val < 0.5 else 0.0
                                 prob_neutral = 0.0
-                                prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
+                                prob_bullish = val if val >= 0.5 else 0.0
 
-                            _p = {"Bearish": prob_bearish, "Neutral": prob_neutral, "Bullish": prob_bullish}
-                            ml_trend = max(_p, key=_p.get)
-                            ml_confidence = _p[ml_trend]
+                            from ensemble import resolve_direction
+                            ml_trend, ml_confidence = resolve_direction(probs)
 
                             # 1. Calibrate the RAW probability first (using Beta or Isotonic calibrator)
                             calibrated_confidence = ml_confidence
@@ -6053,7 +6127,7 @@ def main():
 
                             rec.regime = str(regime_name)
                             rec.direction = str(ml_trend)
-                            rec.raw_conf = float(ml_confidence)
+                            rec.raw_confidence = float(ml_confidence)
                             rec.calibrated_conf = float(calibrated_confidence)
                             rec.signal_source = str(pred_entry_dict.get("signal_source") or "UNSET")
                             rec.is_fallback = int(pred_entry_dict.get("is_fallback", False))
@@ -6423,7 +6497,7 @@ def main():
                             # Bound final threshold relative to economic base
                             from config import MAX_THRESHOLD_UPLIFT
                             max_allowed_threshold = min(0.85, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
-                            dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(0.40, dynamic_conf_threshold)), 4))
+                            dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(economic_base_threshold, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
                             for k_suffix in [str(tf), str(iv)]:
@@ -6522,7 +6596,7 @@ def main():
                                     mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
                                     current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
                                     u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
-                                    exp_r_val = abs(float(expected_pct_change)) / max(1e-4, atr_norm_val)
+                                    exp_r_val = (abs(float(expected_pct_change)) / 100.0) / max(1e-6, atr_norm_val)
 
                                     # C-2: estimate per-symbol 24h ADV from candle volume * price
                                     _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
@@ -6555,6 +6629,7 @@ def main():
                                 if in_news_window:
                                     print(f"[{iv}m News Block] Trade skipped: high-impact news event window active ({news_event}).")
                                     status_msg = "Skipped (News Block)"
+                                    continue
                                 
                                 with news_sentiment_lock:
                                     news_sentiment = cached_news_sentiment
@@ -6834,7 +6909,7 @@ def main():
 
                                         # 3. Concurrent Position Limit Check
                                         from config import MAX_CONCURRENT_POSITIONS
-                                        total_active_count = sum(len(bot_state.get(f"active_trade_{tf_k}", [])) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"])
+                                        total_active_count = sum(len(bot_state.get(f"active_trade_{tf_k}", [])) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"]) + len(active_execution_symbols)
 
                                         # Ensure total size of active trades does not exceed the wallet balance
                                         min_bal_limit = 2.0
@@ -7022,15 +7097,15 @@ def main():
                                             required_margin = (qty_val * entry_price) / max(1e-8, leverage_val)
                                         
                                             # Post-Floor Geometry & Economic Viability Recheck
-                                            all_pass = True
+                                            post_floor_pass = True
                                             try:
                                                 trade_calculators.assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=f"{symbol} {iv}m")
                                             except ValueError as geom_err:
                                                 log_event("ERROR", str(geom_err))
                                                 status_msg = f"Skipped (Invalid {ml_trend} Geometry)"
-                                                all_pass = False
+                                                post_floor_pass = False
                                         
-                                            if all_pass:
+                                            if post_floor_pass and all_pass:
                                                 # Post-Floor R:R & Economic Re-check (Closing the loop on widened SL)
                                                 from trade_calculators import passes_economic_gate, calculate_required_p
                                                 if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
@@ -7040,9 +7115,9 @@ def main():
                                                     _req_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
                                                     log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {_req_p:.3f}. Aborting entry.")
                                                     status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
-                                                    all_pass = False
+                                                    post_floor_pass = False
                                         
-                                            if not all_pass:
+                                            if not post_floor_pass or not all_pass:
                                                 wallet_exceeded = True
                                         
                                             if not wallet_exceeded and required_margin > current_bal * 0.90:
@@ -7130,12 +7205,35 @@ def main():
                                                 wallet_exceeded = True
                                                 bybit_success = False
                                             else:
-                                                position_size_usd = capped_size * dd_mult
+                                                from execution_validator import ExecutionValidator
+                                                ev_valid, ev_msg = ExecutionValidator().validate_order(
+                                                    symbol=symbol,
+                                                    direction=ml_trend,
+                                                    entry_price=entry_price,
+                                                    stop_loss_price=stop_loss_price,
+                                                    take_profit_price=take_profit_price,
+                                                    position_size_usd=position_size_usd,
+                                                    live_price=entry_price,
+                                                    atr_norm=float(atr_norm) if atr_norm is not None else 0.01
+                                                )
+                                                if not ev_valid:
+                                                    print(f"[{symbol} {iv}m ExecutionValidator] REJECTED: {ev_msg}")
+                                                    log_event("WARNING", f"[{symbol} {iv}m ExecutionValidator] {ev_msg}")
+                                                    status_msg = f"Skipped ({ev_msg})"
+                                                    wallet_exceeded = True
+                                                    bybit_success = False
+                                                else:
+                                                    position_size_usd = capped_size * dd_mult
+                                                    leveraged_size = position_size_usd * leverage_val
+                                                    raw_qty = float(leveraged_size / entry_price) if entry_price > 0 else 0.0
+                                                    qty_str = format_bybit_qty(symbol, raw_qty)
+                                                    raw_qty = float(qty_str) if qty_str else raw_qty
+                                                    actual_qty = raw_qty
 
-                                                # Set Bybit Leverage and Place Order if in live/testnet mode
-                                                bybit_success = True
-                                                bybit_order_id = None
-                                                bybit_scale_out_order_id = None
+                                                    # Set Bybit Leverage and Place Order if in live/testnet mode
+                                                    bybit_success = True
+                                                    bybit_order_id = None
+                                                    bybit_scale_out_order_id = None
                                             
                                                 if TRADE_MODE != "simulation":
                                                     # Live trading execution offloaded to background thread to minimize latency
@@ -7479,6 +7577,8 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_backup_scheduler, name="daily-backup-scheduler", daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread
     threading.Thread(target=run_daily_summary_scheduler, name="daily-summary-scheduler", daemon=True).start()
+    # Start pain feedback verifier background thread
+    threading.Thread(target=run_pain_feedback_verifier, name="pain-feedback-verifier", daemon=True).start()
     # Note: Primary evaluation is driven authoritatively by the main candle processing loop to prevent state-key race conditions.
 
     # Keep main thread alive

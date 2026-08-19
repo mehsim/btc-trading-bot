@@ -23,7 +23,7 @@ class TestDecisionJournal(unittest.TestCase):
                 conn.commit()
             finally:
                 conn.close()
-        init_decision_journal_db()
+        init_decision_journal_db(force=True)
 
     def test_gate_defaults_are_none_null(self):
         """Invariant Check: All gate columns MUST default to None (NULL), never 0 or 1."""

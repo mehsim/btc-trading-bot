@@ -116,10 +116,13 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         pred_pct_rn_all = models_ranging["price"].predict(X_matrix_ranging)
 
     adx_enter_map = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
-    adx_enter = adx_enter_map.get(str(interval), 28.0)
+    adx_exit_map = getattr(config, "REGIME_ADX_EXIT_BY_INTERVAL", {})
+    adx_enter = adx_enter_map.get(str(interval), getattr(config, "STRONG_TREND_ADX_ENTER", 28.0))
+    adx_exit = adx_exit_map.get(str(interval), getattr(config, "STRONG_TREND_ADX_EXIT", 24.0))
     _routing = getattr(config, "ENABLE_DYNAMIC_REGIME_ROUTING", False) or \
                str(interval) in getattr(config, "DYNAMIC_REGIME_ROUTING_INTERVALS", set())
 
+    is_trending_state = False
     active_until_idx = -1
     i = 3
     total_candles = len(df)
@@ -130,7 +133,12 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         adx_val = df.loc[i, "ADX"]
         close_price = df.loc[i, "close"]
         
-        if (not _routing) or adx_val >= adx_enter:
+        if not is_trending_state and adx_val >= adx_enter:
+            is_trending_state = True
+        elif is_trending_state and adx_val <= adx_exit:
+            is_trending_state = False
+            
+        if (not _routing) or is_trending_state:
             if probs_tr_all is None:
                 i += 1
                 continue

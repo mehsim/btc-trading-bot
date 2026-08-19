@@ -25,35 +25,64 @@ def round_monetary(val: Any, decimals: int = 4) -> float:
             log_event("WARNING", f"database notice: {ex_database}")
             return 0.0
 
-DB_FILE = "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
+def get_db_path() -> str:
+    env_path = os.getenv("DATABASE_PATH")
+    if env_path:
+        return env_path
+    return "/data/trading_bot.db" if os.path.exists("/data") and os.access("/data", os.W_OK) else "trading_bot.db"
+
+DB_FILE = get_db_path()
 db_lock = threading.RLock()
 
 
 def get_db_connection():
-    for attempt in range(3):
+    target_db = get_db_path()
+    for attempt in range(5):
         conn = None
         try:
-            conn = sqlite3.connect(DB_FILE, timeout=60.0)
+            conn = sqlite3.connect(target_db, timeout=60.0)
             conn.execute("PRAGMA busy_timeout = 60000;")
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.row_factory = sqlite3.Row
             return conn
-        except sqlite3.DatabaseError as e:
-            print(f"[Database Auto-Recovery] Detected corruption/lock ({e}). Rebuilding DB file {DB_FILE}...")
+        except sqlite3.OperationalError as op_err:
+            # Handle transient database lock / contention with exponential backoff
+            if "locked" in str(op_err).lower() or "busy" in str(op_err).lower():
+                time.sleep(0.2 * (2 ** attempt))
+                continue
             try:
                 if conn is not None:
                     conn.close()
-            except Exception as ex_database:
-                log_event("WARNING", f"database notice: {ex_database}")
-            for ext in ["", "-wal", "-shm"]:
-                target = f"{DB_FILE}{ext}"
-                if os.path.exists(target):
-                    try:
-                        os.remove(target)
-                    except Exception as ex_database:
-                        log_event("WARNING", f"database notice: {ex_database}")
+            except Exception:
+                pass
             time.sleep(0.5)
-    conn = sqlite3.connect(DB_FILE, timeout=60.0)
+        except sqlite3.DatabaseError as e:
+            err_msg = str(e).lower()
+            # Only quarantine file if error indicates genuine file malformation/corruption
+            if "malformed" in err_msg or "file is not a database" in err_msg:
+                print(f"[Database Auto-Recovery] Detected genuine database corruption ({e}). Quarantining DB file {target_db}...")
+                try:
+                    if conn is not None:
+                        conn.close()
+                except Exception:
+                    pass
+                timestamp = int(time.time())
+                for ext in ["", "-wal", "-shm"]:
+                    target = f"{target_db}{ext}"
+                    if os.path.exists(target):
+                        try:
+                            os.rename(target, f"{target}.corrupt.{timestamp}")
+                        except Exception as ren_err:
+                            print(f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
+                time.sleep(0.5)
+            else:
+                try:
+                    if conn is not None:
+                        conn.close()
+                except Exception:
+                    pass
+                time.sleep(0.5 * (attempt + 1))
+    conn = sqlite3.connect(target_db, timeout=60.0)
     conn.execute("PRAGMA busy_timeout = 60000;")
     conn.execute("PRAGMA journal_mode = WAL;")
     conn.row_factory = sqlite3.Row
@@ -306,24 +335,26 @@ def init_db():
 
 def get_completed_trades(limit: int = 100) -> List[Dict[str, Any]]:
     """Retrieve recent completed trades from SQLite database, deduplicated by symbol, exit_time, entry & exit price."""
-    try:
+    with db_lock:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM completed_trades 
-            WHERE rowid IN (
-                SELECT MIN(rowid) 
-                FROM completed_trades 
-                GROUP BY symbol, round(exit_time / 60), round(entry_price, 4), round(exit_price, 4)
-            )
-            ORDER BY exit_time DESC LIMIT ?;
-        """, (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
-    except Exception as ex:
-        log_event("WARNING", f"database get_completed_trades failed: {ex}")
-        return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM completed_trades 
+                WHERE rowid IN (
+                    SELECT MIN(rowid) 
+                    FROM completed_trades 
+                    GROUP BY symbol, round(exit_time / 60), round(entry_price, 4), round(exit_price, 4)
+                )
+                ORDER BY exit_time DESC LIMIT ?;
+            """, (limit,))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as ex:
+            log_event("WARNING", f"database get_completed_trades failed: {ex}")
+            return []
+        finally:
+            conn.close()
 
 
 def save_prediction(pred) -> bool:
@@ -596,17 +627,18 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
             
             # Step 2: Delete from active_trades
             clean_tf = str(tf).replace("m", "")
-            conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR symbol = ? OR replace(tf, 'm', '') = ?;", (t_id, symbol, clean_tf))
+            conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR (symbol = ? AND replace(tf, 'm', '') = ?);", (t_id, symbol, clean_tf))
             
             # Step 3: Pending pain check if applicable
             if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
                 conn.execute("""
                     INSERT OR REPLACE INTO pending_pain_checks (
-                        trade_id, symbol, exit_time, exit_price, direction, reason, initial_floor, highest_post_exit_price, raw_data
+                        trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
-                    t_id, symbol, trade.get("exit_time"), round_monetary(trade.get("exit_price"), 4),
-                    trade.get("direction"), trade.get("reason"), 0.008, round_monetary(trade.get("exit_price"), 4), json.dumps(trade)
+                    t_id, symbol, round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                    round_monetary(trade.get("take_profit"), 4), round_monetary(trade.get("stop_loss"), 4),
+                    trade.get("exit_time"), trade.get("direction"), trade.get("reason")
                 ))
             
             conn.commit()
@@ -813,6 +845,8 @@ def get_cached_sentiment(since_ts):
         except Exception as e:
             print(f"[Database Error] Failed to fetch cached sentiment: {e}")
             return []
+        finally:
+            conn.close()
 
 def purge_old_order_flow_logs(retention_days: int = 60) -> int:
     """

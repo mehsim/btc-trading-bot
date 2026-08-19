@@ -25,7 +25,9 @@ def safe_float(val, default=0.0):
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 
 def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
-    """Raises ValueError if SL/TP sit on the wrong side of entry."""
+    """Raises ValueError if SL/TP sit on the wrong side of entry or have un-economical magnitude/R:R."""
+    if entry <= 0 or sl <= 0 or tp <= 0:
+        raise ValueError(f"[{symbol}] Non-positive prices in geometry: entry={entry}, sl={sl}, tp={tp}")
     direction_clean = str(direction).strip().title()
     if direction_clean in ("Bullish", "Long", "Buy"):
         ok = sl < entry < tp
@@ -33,6 +35,13 @@ def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
         ok = sl > entry > tp
     if not ok:
         raise ValueError(f"[{symbol}] Invalid {direction} geometry: SL={sl}, entry={entry}, TP={tp}")
+    sl_dist = abs(entry - sl)
+    tp_dist = abs(tp - entry)
+    if sl_dist == 0 or tp_dist == 0:
+        raise ValueError(f"[{symbol}] Zero stop-loss or take-profit distance: entry={entry}, sl={sl}, tp={tp}")
+    rr = tp_dist / sl_dist
+    if rr < 0.40:
+        raise ValueError(f"[{symbol}] Un-economical R:R ratio ({rr:.2f} < 0.40): entry={entry}, sl={sl}, tp={tp}")
     return True
 
 REALIZED_RR_HAIRCUT = 0.58  # 1.30 realized / 2.24 nominal, measured over 4.5 years
@@ -390,18 +399,20 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
         try:
             from trade_frequency_optimizer import trade_frequency_optimizer
             opt_tp, new_rr, adjusted_flag = trade_frequency_optimizer.optimize_tp_target_for_rr(
-                entry_price=entry_price, stop_price=adjusted["stop_price"], atr_dollars=atr_dollars, direction=direction, min_rr_required=min_rr
+                entry_price=entry_price, stop_price=adjusted["stop_price"], atr_dollars=atr_dollars, direction=direction, min_rr_required=min_rr, max_allowed_tp_dist=max_allowed_tp_dist
             )
             if adjusted_flag:
                 adjusted["tp_price"] = opt_tp
                 adjusted["tp_dist"] = abs(opt_tp - entry_price)
-                current_rr = min_rr
+                current_rr = new_rr
                 logs.append(f"[TP_OPTIMIZED_RR] {symbol} {interval} TP target adjusted to ${opt_tp:.4f} to satisfy {min_rr:.1f}:1 R:R floor")
+            else:
+                current_rr = new_rr
         except Exception as e:
             logs.append(f"[TP_OPTIMIZE_WARNING] {symbol} {interval}: {e}")
 
     if current_rr < min_rr:
-        logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1")
+        logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1 (Unreachable target)")
         return False, adjusted, "; ".join(logs)
 
     return True, adjusted, "; ".join(logs) if logs else "OK"
@@ -1068,11 +1079,15 @@ class TransactionCostModel:
             volume_24h_usd=volume_24h_usd,
             is_maker=is_maker
         )
+        fee_val = float(res.get("fee_bp", 1.0 if is_maker else 6.0))
+        spread_val = float(res.get("half_spread_bp", 0.75))
+        impact_val = float(res.get("market_impact_bp", 0.35))
+        total_val = float(res.get("total_cost_bp", res.get("total_cost_bps", fee_val + spread_val + impact_val)))
         return {
-            "fee_bps": float(res.get("fee_bp", 1.0 if is_maker else 6.0)),
-            "slippage_bps": float(res.get("slippage_bp", 0.75)),
-            "market_impact_bps": float(res.get("market_impact_bp", 0.35)),
-            "total_cost_bps": float(res.get("total_cost_bps", 2.1)),
+            "fee_bps": fee_val,
+            "slippage_bps": spread_val + impact_val,
+            "market_impact_bps": impact_val,
+            "total_cost_bps": total_val,
         }
 
 

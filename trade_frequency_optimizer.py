@@ -30,10 +30,12 @@ class TradeFrequencyOptimizer:
         stop_price: float,
         atr_dollars: float,
         direction: str,
-        min_rr_required: float = 2.0
+        min_rr_required: float = 2.0,
+        max_allowed_tp_dist: Optional[float] = None
     ) -> Tuple[float, float, bool]:
         """
-        Dynamically adjusts TP target price to ensure R:R >= min_rr_required (2.0:1).
+        Dynamically adjusts TP target price to ensure R:R >= min_rr_required (2.0:1)
+        if and only if the resulting TP distance is within the max_allowed_tp_dist reachability horizon.
         Returns: (optimized_tp_price, new_rr_ratio, target_adjusted)
         """
         stop_dist = abs(entry_price - stop_price)
@@ -41,6 +43,12 @@ class TradeFrequencyOptimizer:
             return entry_price * (1.02 if direction == "Bullish" else 0.98), 2.0, False
 
         required_tp_dist = stop_dist * min_rr_required
+
+        if max_allowed_tp_dist is not None and required_tp_dist > max_allowed_tp_dist:
+            # Cannot reach required R:R without violating reachability / maximum barrier constraints
+            unoptimized_tp = (entry_price + max_allowed_tp_dist) if direction == "Bullish" else (entry_price - max_allowed_tp_dist)
+            current_achievable_rr = max_allowed_tp_dist / max(1e-9, stop_dist)
+            return unoptimized_tp, current_achievable_rr, False
 
         if direction == "Bullish":
             optimized_tp = entry_price + required_tp_dist

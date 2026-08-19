@@ -106,14 +106,15 @@ def run_60m_grid_backtest():
 
                 all_trades = []
 
-                for df, probs_all in dataset_preds:
+                for df, probs_trending, probs_ranging in dataset_preds:
                     highs = df["high"].values
                     lows = df["low"].values
                     closes = df["close"].values
                     atrs = df["ATR"].values if "ATR" in df.columns else closes * 0.01
+                    adxs = df["ADX"].values if "ADX" in df.columns else np.full(len(df), 25.0)
 
                     for i in range(50, len(df) - lookahead):
-                        probs = probs_all[i]
+                        probs = probs_trending[i] if adxs[i] >= 25.0 else probs_ranging[i]
                         p_bear, p_neut, p_bull = float(probs[0]), float(probs[1]), float(probs[2]) if len(probs)>=3 else (float(probs[0]), 0.0, float(probs[1]))
                         
                         direction = "Bullish" if p_bull >= max(p_bear, p_neut) else ("Bearish" if p_bear >= max(p_bull, p_neut) else "Neutral")

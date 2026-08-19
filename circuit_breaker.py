@@ -52,4 +52,22 @@ class CircuitBreaker:
         self.active_reason = "HEALTHY"
         return True, "HEALTHY"
 
+    def evaluate_micro_run_caps(
+        self,
+        closed_trade_count: int,
+        cumulative_loss: float,
+        max_trades_cap: int = 60,
+        max_loss_cap: float = 15.0
+    ) -> Tuple[bool, str]:
+        """Evaluates live trade count and loss limits."""
+        if closed_trade_count >= max_trades_cap:
+            self.is_circuit_active = True
+            self.active_reason = f"MAX_TRADES_EXCEEDED: Completed {closed_trade_count} trades >= cap {max_trades_cap}"
+            return False, self.active_reason
+        if cumulative_loss >= max_loss_cap:
+            self.is_circuit_active = True
+            self.active_reason = f"MAX_LOSS_EXCEEDED: Cumulative loss ${cumulative_loss:.2f} >= cap ${max_loss_cap:.2f}"
+            return False, self.active_reason
+        return True, "HEALTHY"
+
 circuit_breaker = CircuitBreaker()

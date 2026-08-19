@@ -270,12 +270,19 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
     if not MLFLOW_AVAILABLE and (cand is None or champ is None):
         return True, "MLflow unavailable; falling back to local verification"
 
-    try:
-        if cand is None:
+    client = None
+    if MLFLOW_AVAILABLE:
+        try:
             from mlflow.tracking import MlflowClient
             tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
             client = MlflowClient(tracking_uri=tracking_uri)
+        except Exception as _ce:
+            print(f"[MLflow Client Warning] {_ce}")
 
+    try:
+        if cand is None:
+            if client is None:
+                return False, "REJECTED: MLflow client unavailable to fetch candidate metrics"
             mv = client.get_model_version(name, challenger_version)
             cand_run = client.get_run(mv.run_id)
             cand = cand_run.data.metrics
@@ -311,7 +318,7 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         if cand_sharpe < min_oos_sharpe_floor:
             return False, f"OOS Sharpe {cand_sharpe:.2f} below floor ({min_oos_sharpe_floor:.2f})"
 
-        if champ is None and MLFLOW_AVAILABLE:
+        if champ is None and client is not None:
             champs = client.get_latest_versions(name, stages=["Production"])
             if champs:
                 inc_run = client.get_run(champs[0].run_id)
@@ -322,14 +329,14 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
             if inc_mcc is not None and cand_mcc < float(inc_mcc) - tol:
                 return False, f"REJECTED: MCC regression {float(inc_mcc):.4f} → {cand_mcc:.4f} (tol {tol})"
 
-        if MLFLOW_AVAILABLE and challenger_version:
+        if client is not None and challenger_version:
             client.transition_model_version_stage(
                 name, challenger_version, "Production", archive_existing_versions=True
             )
         return True, f"Promoted {name} version {challenger_version} to Production"
     except Exception as e:
-        print(f"[MLflow Promotion Warning] {e}")
-        return True, f"Local promotion fallback (MLflow check skipped: {e})"
+        print(f"[MLflow Promotion Error] {e}")
+        return False, f"REJECTED: promotion gate could not be evaluated: {e}"
 
 
 _mlflow_unreachable = False

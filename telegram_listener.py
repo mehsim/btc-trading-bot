@@ -261,7 +261,18 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
         else:
             final_tp = final_entry + (2.0 * atr_dollars) if ml_trend == "Bullish" else final_entry - (2.0 * atr_dollars)
 
-        final_lev = float(leverage) if leverage is not None and float(leverage) > 0 else 5.0
+        from risk_limits import HARD_TIMEFRAME_MAX_LEVERAGE_CAPS
+        tf_cap = HARD_TIMEFRAME_MAX_LEVERAGE_CAPS.get(str(iv), 5.0)
+        req_lev = float(leverage) if leverage is not None and float(leverage) > 0 else tf_cap
+        final_lev = min(req_lev, tf_cap)
+
+        # Check circuit breaker and halt states
+        if bot_state:
+            with (bot_state_lock if bot_state_lock else threading.Lock()):
+                if bot_state.get("circuit_breaker_active", False):
+                    return "❌ Order Rejected: Circuit Breaker is active."
+                if bot_state.get("bot_stopped", False):
+                    return "❌ Order Rejected: Bot is in STOPPED / Emergency Halt state."
 
         # Validate geometry
         assert_valid_geometry(ml_trend, final_entry, final_sl, final_tp, symbol=sym)
@@ -512,7 +523,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                     if cb_query:
                         cb_chat_id = str(cb_query.get("message", {}).get("chat", {}).get("id"))
                         cb_data = str(cb_query.get("data", ""))
-                        if cb_chat_id in allowed_chat_ids or len(allowed_chat_ids) == 0:
+                        if allowed_chat_ids and cb_chat_id in allowed_chat_ids:
                             if cb_data.startswith("skipped_"):
                                 tf_choice = cb_data.replace("skipped_", "")
                                 rep = get_skipped_trades_report(tf_choice)

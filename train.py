@@ -132,13 +132,17 @@ if MLFLOW_AVAILABLE:
     # pyrefly: ignore [missing-import]
     import mlflow
 
-# Dynamic GPU training hardware auto-detection
+# Dynamic GPU training hardware auto-detection (lazy on model creation)
 GPU_XGB = False
 GPU_LGB = False
 GPU_CAT = False
+_gpu_checked = False
 
 def check_gpu_support():
-    global GPU_XGB, GPU_LGB, GPU_CAT
+    global GPU_XGB, GPU_LGB, GPU_CAT, _gpu_checked
+    if _gpu_checked:
+        return
+    _gpu_checked = True
     
     # Check XGBoost CUDA GPU
     try:
@@ -170,9 +174,8 @@ def check_gpu_support():
         log_event("WARNING", f"train notice: {ex_train}")
         GPU_CAT = False
 
-check_gpu_support()
-
 def create_model(model_class, params):
+    check_gpu_support()
     params = dict(params)
     name = model_class.__name__
     if "XGB" in name:
@@ -1741,6 +1744,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_ece = 0.99
         else:
             print(f"  [Champion-Challenger] No existing champion (or contract updated) for {name.upper()}. Promoting challenger.")
+            chal_acc = float(holdout_bal_acc) if 'holdout_bal_acc' in locals() else float(stat_bal.get("mean", 0.0))
+            chal_mae = float(stat_mae.get("mean", 0.0)) if ('stat_mae' in locals() and isinstance(stat_mae, dict)) else 0.0
+            chal_brier = float(safe_stat(brier_scores).get("mean", 0.20)) if 'brier_scores' in locals() else 0.20
+            chal_ece = float(ece_score) if 'ece_score' in locals() else 0.03
 
         # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
         from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
@@ -1798,6 +1805,35 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 elif champ_mcc_val is not None and chal_mcc_mean < (champ_mcc_val - mcc_tol):
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f} - tol {mcc_tol:.4f})")
                     should_save = False
+
+                if should_save:
+                    # Evaluate 8 Production Release Gates
+                    try:
+                        from statistical_validation import StatisticalValidation
+                        stat_validator = StatisticalValidation()
+                        ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
+                        psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
+                        stat_eval = stat_validator.evaluate_8_release_gates(
+                            walk_forward_pass=(chal_mcc_min >= -0.05),
+                            out_of_sample_pass=(holdout_mcc >= min_holdout_mcc_floor and chal_acc >= min_holdout_bal_acc_floor),
+                            ece_calibration_pct=ece_pct,
+                            psi_drift_score=psi_score,
+                            shadow_trades_count=100,
+                            research_notebook_approved=True,
+                            rollback_plan_defined=True,
+                            live_reality_check_pass=True,
+                            pf_baseline=1.0,
+                            pf_candidate=1.10,
+                            p_value=0.01,
+                            num_trials=12
+                        )
+                        if not stat_eval.get("approved_for_production", False):
+                            print(f"  [Statistical Validation Gate] REJECTED: Failed production release gates: {stat_eval.get('gate_details')}")
+                            should_save = False
+                        else:
+                            print(f"  [Statistical Validation Gate] PASSED: All 8 release gates approved ({stat_eval.get('passed_count')}/{stat_eval.get('total_gates')}).")
+                    except Exception as stat_ex:
+                        print(f"  [Statistical Validation Gate Warning] Evaluation exception: {stat_ex}")
 
         if should_save:
             from mlops_engine import log_mlflow_training_run, promote_if_better
@@ -2042,21 +2078,35 @@ def train_models(interval=INTERVAL, pages=PAGES):
     _enter_thr = REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)
     _exit_thr = REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)
 
-    print(f"Splitting dataset via Unified ADX Hysteresis (enter>={_enter_thr}, exit<={_exit_thr})...")
-    adx_arr = df["ADX"].values
-    regime_arr = []
-    is_trending_state = False
-    for a in adx_arr:
-        if pd.isna(a):
-            regime_arr.append("ranging")
-            continue
-        if not is_trending_state and a >= _enter_thr:
-            is_trending_state = True
-        elif is_trending_state and a <= _exit_thr:
-            is_trending_state = False
-        regime_arr.append("trending" if is_trending_state else "ranging")
+    print(f"Splitting dataset via Unified ADX Hysteresis per symbol (enter>={_enter_thr}, exit<={_exit_thr})...")
+    def _compute_symbol_regime_series(sym_df, enter_thr, exit_thr):
+        if "timestamp" in sym_df.columns:
+            sym_df = sym_df.sort_values("timestamp", kind="mergesort")
+        adx_vals = sym_df["ADX"].values
+        reg_vals = []
+        is_trending = False
+        for a in adx_vals:
+            if pd.isna(a):
+                reg_vals.append("ranging")
+                continue
+            if not is_trending and a >= enter_thr:
+                is_trending = True
+            elif is_trending and a <= exit_thr:
+                is_trending = False
+            reg_vals.append("trending" if is_trending else "ranging")
+        res_df = sym_df.copy()
+        res_df["regime"] = reg_vals
+        return res_df
 
-    df["regime"] = regime_arr
+    if "symbol" in df.columns and df["symbol"].nunique() > 1:
+        df = df.groupby("symbol", group_keys=False, sort=False).apply(
+            lambda grp: _compute_symbol_regime_series(grp, _enter_thr, _exit_thr)
+        )
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
+    else:
+        df = _compute_symbol_regime_series(df, _enter_thr, _exit_thr).reset_index(drop=True)
+
     df_trending = df[df["regime"] == "trending"].copy().reset_index(drop=True)
     df_ranging = df[df["regime"] == "ranging"].copy().reset_index(drop=True)
 

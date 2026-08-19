@@ -96,7 +96,7 @@ def run_soak_replay(days: int = 30, report_file: str = "soak.json") -> dict:
         journal.signal_source = "ML_ENSEMBLE"
 
         try:
-            passed, size_usd, lev, reason = evaluate_pre_trade_checklist(
+            passed, reason, dd_mult, capped_size = evaluate_pre_trade_checklist(
                 symbol="BTCUSDT",
                 position_size_usd=500.0,
                 leverage_val=5.0,

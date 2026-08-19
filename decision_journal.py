@@ -108,8 +108,15 @@ class DecisionRecord:
         return self
 
 
-def init_decision_journal_db():
+_db_initialized = False
+
+def init_decision_journal_db(force: bool = False):
+    global _db_initialized
+    if _db_initialized and not force:
+        return
     with db_lock:
+        if _db_initialized and not force:
+            return
         conn = get_db_connection()
         try:
             conn.execute("""

@@ -339,10 +339,15 @@ class ExitPolicyEngine:
         """Runs shadow candidate policies in parallel without sending real exchange orders."""
         for p_id, shadow_cfg in self.shadow_configs.items():
             try:
-                # Shadow simulation evaluation (logs metric trace internally)
                 shadow_params = shadow_cfg.get("parameters", {}).get(regime.upper(), {})
-                # Keeps shadow policy metrics updated for MLOps governance comparison
-                pass
+                if not hasattr(self, "_shadow_evaluations"):
+                    self._shadow_evaluations = {}
+                self._shadow_evaluations[p_id] = {
+                    "last_eval_time": current_time,
+                    "last_price": current_price,
+                    "regime": regime,
+                    "active_trade_id": active_trade.get("trade_id", "none")
+                }
             except Exception as shadow_err:
                 pass
 

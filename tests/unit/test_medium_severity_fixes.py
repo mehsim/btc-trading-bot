@@ -51,6 +51,9 @@ def test_live_order_execution_path_resolves_config():
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
          patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_123"}}), \
+         patch("main.wait_for_order_fill", return_value=True), \
+         patch("main.update_bybit_stop_loss", return_value=True), \
+         patch("main.update_bybit_take_profit", return_value=True), \
          patch("main.get_bybit_order_details", return_value={"orderStatus": "Filled", "avgPrice": 50000.0, "cumExecQty": 0.02}), \
          patch("main.send_telegram_alert"), \
          patch("main.sync_active_positions_from_bybit"):
@@ -59,8 +62,8 @@ def test_live_order_execution_path_resolves_config():
         df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
         main._execute_bybit_trade_async_inner(
             symbol="BTCUSDT", iv="15", tf="15m", ml_trend="Bullish", leverage_val=10.0,
-            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49000.0,
-            take_profit_price=52000.0, position_size_usd=1000.0, kelly_fraction=0.1,
+            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49750.0,
+            take_profit_price=50500.0, position_size_usd=1000.0, kelly_fraction=0.1,
             calibrated_confidence=0.8, ml_confidence=0.8, dynamic_conf_threshold=0.6,
             latest_completed_ts=1700000000, latest_candle={"close": 50000.0, "ATR_norm": 0.005},
             pred_change=0.01, predicted_price=50500.0, atr_dollars=250.0,
@@ -80,11 +83,12 @@ def test_live_order_partial_fill_reversal():
     import pandas as pd
 
     df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
-    mock_ioc = MagicMock()
+    mock_ioc = MagicMock(return_value={"retCode": 0})
 
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
          patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_partial_123"}}), \
+         patch("main.wait_for_order_fill", return_value=True), \
          patch("main.get_bybit_order_details", return_value={"orderStatus": "PartiallyFilled", "avgPrice": 50000.0, "cumExecQty": 0.008}), \
          patch("main.place_bybit_taker_ioc_order", mock_ioc), \
          patch("main.send_telegram_alert"), \
@@ -94,8 +98,8 @@ def test_live_order_partial_fill_reversal():
         
         main._execute_bybit_trade_async_inner(
             symbol="BTCUSDT", iv="15", tf="15m", ml_trend="Bullish", leverage_val=10.0,
-            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49000.0,
-            take_profit_price=52000.0, position_size_usd=1000.0, kelly_fraction=0.1,
+            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49750.0,
+            take_profit_price=50500.0, position_size_usd=1000.0, kelly_fraction=0.1,
             calibrated_confidence=0.8, ml_confidence=0.8, dynamic_conf_threshold=0.6,
             latest_completed_ts=1700000000, latest_candle={"close": 50000.0, "ATR_norm": 0.005},
             pred_change=0.01, predicted_price=50500.0, atr_dollars=250.0,

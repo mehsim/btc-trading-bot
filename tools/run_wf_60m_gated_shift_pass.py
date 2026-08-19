@@ -67,9 +67,9 @@ for s in SUPPORTED_SYMBOLS:
         
         if len(df_4h) > 15:
             adx_4h_series = ADXIndicator(df_4h["high"], df_4h["low"], df_4h["close"], window=14).adx()
-            df_4h["adx_4h"] = adx_4h_series
+            df_4h["adx_4h"] = adx_4h_series.shift(1)
             df_dt = df_dt.join(df_4h[["adx_4h"]], how="left")
-            df_dt["adx_4h"] = df_dt["adx_4h"].ffill().bfill().fillna(0.0)
+            df_dt["adx_4h"] = df_dt["adx_4h"].ffill().fillna(0.0)
             df_s["adx_4h"] = df_dt["adx_4h"].values
         else:
             df_s["adx_4h"] = df_s["ADX"]
@@ -275,10 +275,10 @@ for i in range(N_WINDOWS):
 
 print("=" * 105)
 
-mean_wr_n = df_normal["win_rate"].replace(0.0, np.nan).dropna().mean() if len(df_normal[df_normal['taken'] > 0]) > 0 else 0.0
+mean_wr_n = df_normal[df_normal['taken'] > 0]["win_rate"].mean() if len(df_normal[df_normal['taken'] > 0]) > 0 else 0.0
 mean_pf_n = df_normal[df_normal['taken'] > 0]["pf"].mean() if len(df_normal[df_normal['taken'] > 0]) > 0 else 0.0
 
-mean_wr_f = df_flipped["win_rate"].replace(0.0, np.nan).dropna().mean() if len(df_flipped[df_flipped['taken'] > 0]) > 0 else 0.0
+mean_wr_f = df_flipped[df_flipped['taken'] > 0]["win_rate"].mean() if len(df_flipped[df_flipped['taken'] > 0]) > 0 else 0.0
 mean_pf_f = df_flipped[df_flipped['taken'] > 0]["pf"].mean() if len(df_flipped[df_flipped['taken'] > 0]) > 0 else 0.0
 
 print(f"\nSHIFTED AGGREGATED STATS (GATED NORMAL):")

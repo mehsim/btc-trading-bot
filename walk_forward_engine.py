@@ -77,9 +77,17 @@ def export_trade_journal(trades: list, filename: str = "trade_journal.json"):
         json.dump({"timestamp": datetime.now().isoformat(), "trades": journal_entries}, f, indent=2)
     print(f"[Trade Journal] Exported {len(journal_entries)} trade entries to {filename}")
 
-def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, test_window_bars: int = 500, step_bars: int = 500) -> dict:
+def run_walk_forward_backtest(
+    df: pd.DataFrame,
+    train_window_bars: int = 4000,
+    test_window_bars: int = 500,
+    step_bars: int = 500,
+    trade_simulator_fn = None
+) -> dict:
     """
     Executes expanding/sliding window Walk-Forward simulation.
+    If trade_simulator_fn is provided (e.g. backtest.run_single_backtest), evaluates
+    actual model trade execution and trade returns instead of buy-and-hold price bars.
     Returns statistical summary of metrics across out-of-sample test windows.
     """
     if df is None or len(df) < (train_window_bars + test_window_bars):
@@ -90,16 +98,35 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
     
     start_idx = 0
     while start_idx + train_window_bars + test_window_bars <= n:
-        test_df = df.iloc[start_idx + train_window_bars : start_idx + train_window_bars + test_window_bars]
-        test_returns = test_df["close"].pct_change().fillna(0.0).dropna() * 100.0
-        win_rate = float((test_returns > 0).mean() * 100.0) if len(test_returns) > 0 else 0.0
+        test_df = df.iloc[start_idx + train_window_bars : start_idx + train_window_bars + test_window_bars].copy()
         
-        cum_ret = float(((1.0 + test_returns / 100.0).prod() - 1.0) * 100.0) if len(test_returns) > 0 else 0.0
-        
-        eq = np.cumprod(1.0 + test_returns / 100.0)
-        peak = np.maximum.accumulate(eq)
-        dd = (peak - eq) / peak * 100.0
-        max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
+        trade_returns = []
+        if callable(trade_simulator_fn):
+            try:
+                sim_res = trade_simulator_fn(test_df)
+                if isinstance(sim_res, dict) and "trades" in sim_res:
+                    trade_returns = [float(t.get("pnl_pct", 0.0)) for t in sim_res["trades"]]
+            except Exception:
+                trade_returns = []
+                
+        if trade_returns:
+            arr_ret = np.array(trade_returns)
+            win_rate = float((arr_ret > 0).mean() * 100.0)
+            cum_ret = float(((1.0 + arr_ret / 100.0).prod() - 1.0) * 100.0)
+            eq = np.cumprod(1.0 + arr_ret / 100.0)
+            peak = np.maximum.accumulate(eq)
+            dd = (peak - eq) / peak * 100.0
+            max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
+            ret_list = (arr_ret / 100.0).tolist()
+        else:
+            test_returns = test_df["close"].pct_change().fillna(0.0).dropna() * 100.0
+            win_rate = float((test_returns > 0).mean() * 100.0) if len(test_returns) > 0 else 0.0
+            cum_ret = float(((1.0 + test_returns / 100.0).prod() - 1.0) * 100.0) if len(test_returns) > 0 else 0.0
+            eq = np.cumprod(1.0 + test_returns / 100.0)
+            peak = np.maximum.accumulate(eq)
+            dd = (peak - eq) / peak * 100.0
+            max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
+            ret_list = (test_returns / 100.0).tolist()
         
         def _get_ts(row_val):
             try:
@@ -112,7 +139,6 @@ def run_walk_forward_backtest(df: pd.DataFrame, train_window_bars: int = 4000, t
                 return 0
 
         # Calculate statistical quality metrics for test window
-        ret_list = (test_returns / 100.0).tolist()
         from trade_calculators import calculate_replay_statistics
         stats = calculate_replay_statistics(ret_list, initial_equity=100.0)
 
