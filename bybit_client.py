@@ -356,11 +356,11 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
     return execute_bybit_order_ws_or_rest("/v5/order/create", payload)
 
 
-def place_bybit_limit_order(symbol: str, side: str, qty: float, price: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False) -> Dict[str, Any]:
-    return place_bybit_order(symbol=symbol, side=side, qty=qty, price=price, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Limit")
+def place_bybit_limit_order(symbol: str, side: str, qty: float, price: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, post_only: bool = False, **kwargs) -> Dict[str, Any]:
+    return place_bybit_order(symbol=symbol, side=side, qty=qty, price=price, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Limit", post_only=post_only)
 
 
-def place_bybit_taker_ioc_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False) -> Dict[str, Any]:
+def place_bybit_taker_ioc_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, **kwargs) -> Dict[str, Any]:
     return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Market", post_only=False)
 
 

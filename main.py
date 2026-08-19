@@ -1521,7 +1521,7 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         print(f"[Bybit API Error] Failed to update Take Profit for {symbol}: {res.get('retMsg')}")
         return False
 
-def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_only=False):
+def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_only=False, post_only=False, **kwargs):
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -1529,7 +1529,7 @@ def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_o
         "orderType": "Limit",
         "qty": str(qty),
         "price": format_bybit_price(symbol, price),
-        "timeInForce": "GTC",
+        "timeInForce": "PostOnly" if post_only else "GTC",
         "positionIdx": 0
     }
     if reduce_only:
@@ -1541,7 +1541,7 @@ def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_o
     res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
 
-def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only=False):
+def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only=False, **kwargs):
     payload = {
         "category": "linear",
         "symbol": symbol,

@@ -122,3 +122,25 @@ def test_trade_execution_signature_match():
     required = [p for p in sig.parameters.values() if p.default is inspect._empty]
     # main.py Thread call site passes exactly 27 positional arguments
     assert len(required) <= 27, f"Execution inner expects {len(required)} required params, Thread passes 27"
+
+
+def test_place_bybit_limit_order_post_only_payload():
+    """Verify place_bybit_limit_order accepts post_only=True and sets timeInForce='PostOnly'."""
+    from unittest.mock import patch
+    import main
+
+    with patch("main.execute_bybit_order_ws_or_rest") as mock_exec:
+        mock_exec.return_value = {"retCode": 0, "result": {"orderId": "test_order_1"}}
+        res = main.place_bybit_limit_order("BTCUSDT", "Buy", "0.01", 60000.0, post_only=True)
+        assert mock_exec.called
+        payload = mock_exec.call_args[0][1]
+        assert payload.get("timeInForce") == "PostOnly"
+        assert payload.get("orderType") == "Limit"
+
+    with patch("main.execute_bybit_order_ws_or_rest") as mock_exec_gtc:
+        mock_exec_gtc.return_value = {"retCode": 0, "result": {"orderId": "test_order_2"}}
+        res = main.place_bybit_limit_order("BTCUSDT", "Buy", "0.01", 60000.0, post_only=False)
+        assert mock_exec_gtc.called
+        payload = mock_exec_gtc.call_args[0][1]
+        assert payload.get("timeInForce") == "GTC"
+
