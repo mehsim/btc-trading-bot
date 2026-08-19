@@ -13,6 +13,8 @@ def test_circuit_breaker_halts_on_max_trades_cap():
     
     with patch("database.get_setting", return_value=str(time.time() - 1000)), \
          patch("database.get_completed_trades", return_value=mock_trades), \
+         patch.object(config, "MAX_LIVE_TRADES_CAP", 60), \
+         patch.object(config, "MAX_LIVE_LOSS_CAP", 15.0), \
          patch("database.set_setting") as mock_set_setting:
         
         micro_ts = time.time() - 1000
@@ -46,6 +48,8 @@ def test_circuit_breaker_halts_on_max_loss_cap():
     
     with patch("database.get_setting", return_value=str(time.time() - 1000)), \
          patch("database.get_completed_trades", return_value=mock_trades), \
+         patch.object(config, "MAX_LIVE_TRADES_CAP", 60), \
+         patch.object(config, "MAX_LIVE_LOSS_CAP", 15.0), \
          patch("database.set_setting") as mock_set_setting:
         
         micro_ts = time.time() - 1000

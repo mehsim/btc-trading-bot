@@ -4357,12 +4357,34 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     except Exception as pos_check_err:
         print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
 
-    # SL/TP Geometry Direction Guard (Hard Abort — Do NOT auto-correct)
+    # 1. Pre-Flight Geometry Assertion (Hard Abort — Do NOT place order if invalid)
     try:
         trade_calculators.assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol=f"{symbol} {iv}m")
     except ValueError as geom_err:
         log_event("ERROR", str(geom_err))
         send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
+        return
+
+    # 2. Pre-Flight Horizon Reachability Guard
+    import math
+    from config import TIMEFRAME_CONFIG
+    cfg = TIMEFRAME_CONFIG.get(str(iv), {})
+    lookahead = cfg.get("lookahead", 10)
+    reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
+    max_reachable = math.sqrt(lookahead) * atr_dollars * reach_factor
+    preflight_tp_dist = abs(take_profit_price - entry_price)
+    if preflight_tp_dist > max_reachable:
+        log_event("WARNING", f"[{symbol} {iv}m Reachability Guard] Pre-flight TP distance (${preflight_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}). Aborting trade entry.")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted pre-flight — TP target (${preflight_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}).")
+        return
+
+    # 3. Pre-Flight Economic Gate (Realized R:R with haircut)
+    from trade_calculators import passes_economic_gate, calculate_required_p
+    if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
+        _sl_dist = abs(entry_price - stop_loss_price)
+        _required_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
+        log_event("WARNING", f"[{symbol} {iv}m Pre-Flight Economic Gate] Realized R:R gate failed (nominal R:R {preflight_tp_dist/max(1e-9, _sl_dist):.2f} with haircut requires {_required_p:.3f}, have {calibrated_confidence:.3f}). Aborting.")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted pre-flight — Realized R:R requires {_required_p:.3f}, have {calibrated_confidence:.3f}")
         return
 
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
@@ -4398,187 +4420,75 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         else:
             # Normal Volatility: Place Limit Maker entry order with dynamic price chasing
             for chase in range(5):
-                bid, ask, last = get_bybit_bid_ask(symbol)
-                if bid is None or ask is None:
-                    bid, ask = entry_price, entry_price
-                limit_price = bid if side == "Buy" else ask
-                print(f"[{symbol} {iv}m API] Placing Limit Maker order at ${limit_price:.4f} (Chase {chase+1}/5)...")
-                order_res = place_bybit_limit_order(symbol, side, qty_str, limit_price)
+                limit_entry_price = get_chase_limit_price(symbol, side, chase, entry_price)
+                print(f"[{symbol} {iv}m API] Chase {chase+1}/5: Placing Limit Maker order for {qty_str} at {limit_entry_price:.2f}...")
+                order_res = place_bybit_limit_order(symbol, side, qty_str, limit_entry_price, post_only=True)
+                
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
-                    filled = False
-                    for idx in range(24):
-                        time.sleep(0.5)
-                        with _ws_filled_orders_lock:
-                            ws_details = _ws_filled_orders.get(bybit_order_id)
-                        if ws_details:
-                            entry_price = float(ws_details.get("avgPrice", limit_price))
-                            actual_qty = float(ws_details.get("cumExecQty", raw_qty))
-                            filled = True
-                            bybit_success = True
-                            print(f"[{symbol} {iv}m API] Order fill detected via WebSocket in {idx*0.5:.1f}s.")
-                            break
-                        if idx > 0 and idx % 6 == 0:
-                            order_details = get_bybit_order_details(symbol, bybit_order_id)
-                            if order_details:
-                                status = order_details.get("orderStatus")
-                                if status == "Filled":
-                                    entry_price = float(order_details.get("avgPrice", limit_price))
-                                    actual_qty = float(order_details.get("cumExecQty", raw_qty))
-                                    filled = True
-                                    bybit_success = True
-                                    break
-                                elif status in ["Cancelled", "Rejected"]:
-                                    break
+                    filled = wait_for_order_fill(symbol, bybit_order_id, timeout_sec=2.0)
                     if filled:
-                        print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled at ${entry_price:.4f}.")
-                        break
-                    else:
-                        print(f"[{symbol} {iv}m API] Order unfilled after 12s. Cancelling and re-quoting...")
-                        cancel_bybit_order(symbol, bybit_order_id)
-                        time.sleep(0.5)
-                        final_details = get_bybit_order_details(symbol, bybit_order_id)
-                        if final_details:
-                            status = final_details.get("orderStatus")
-                            cum_qty = float(final_details.get("cumExecQty", 0.0))
-                            if status == "Filled" or cum_qty > 0:
-                                entry_price = float(final_details.get("avgPrice", limit_price))
-                                actual_qty = cum_qty if cum_qty > 0 else raw_qty
-                                filled = True
-                                bybit_success = True
-                                print(f"[{symbol} {iv}m API] Success! Maker Limit Order filled/partially filled during cancel request at ${entry_price:.4f} (Qty: {actual_qty}).")
-                                break
-                else:
-                    print(f"[{symbol} {iv}m API WARNING] Limit order placement failed: {order_res.get('retMsg')} (waiting 2s before retry)")
-                    time.sleep(2)
-                    
-            # Fallback to Market order if limit chases failed (re-check WS fill cache first to prevent race condition)
-            if not bybit_success:
-                with _ws_filled_orders_lock:
-                    if bybit_order_id and bybit_order_id in _ws_filled_orders:
                         bybit_success = True
-                        print(f"[{symbol} {iv}m API] Order fill confirmed in WS cache. Skipping market order fallback.")
-            
-            if not bybit_success:
-                atr_norm = float(latest_candle.get("ATR_norm", 0.0))
-                if atr_norm >= 0.015:
-                    print(f"[{symbol} {iv}m API BLOCK] Limit chases failed. Market fallback blocked due to extreme volatility (ATR_norm: {atr_norm:.4f} >= 0.015).")
-                else:
-                    print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
-                    order_res = place_bybit_order(symbol, side, qty_str)
-                    if order_res.get("retCode") == 0:
-                        bybit_order_id = order_res.get("result", {}).get("orderId")
-                        bybit_success = True
-                        time.sleep(0.5)
+                        time.sleep(0.3)
                         order_details = get_bybit_order_details(symbol, bybit_order_id)
                         if order_details:
-                            entry_price = float(order_details.get("avgPrice", entry_price))
+                            entry_price = float(order_details.get("avgPrice", limit_entry_price))
                             actual_qty = float(order_details.get("cumExecQty", raw_qty))
                         else:
                             fill_exec = get_bybit_last_execution(symbol)
                             if fill_exec:
-                                entry_price = float(fill_exec.get("execPrice", entry_price))
+                                entry_price = float(fill_exec.get("execPrice", limit_entry_price))
                             actual_qty = raw_qty
-                            
+                        break
+                    else:
+                        print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s. Cancelling and recalculating price...")
+                        cancel_bybit_order(symbol, bybit_order_id)
+                elif order_res.get("retCode") == 10006 or "PostOnly" in str(order_res.get("retMsg")):
+                    print(f"[{symbol} {iv}m API] Maker PostOnly would cross spread. Retrying next chase tick...")
+                else:
+                    print(f"[{symbol} {iv}m API ERROR] Limit order placement failed: {order_res.get('retMsg')}")
+                    break
+                    
+            # Fallback to Taker IOC if all 5 Limit Maker chase attempts fail
+            if not bybit_success:
+                print(f"[{symbol} {iv}m API] Limit Maker chasing exhausted. Executing fallback Taker IOC entry...")
+                order_res = place_bybit_taker_ioc_order(symbol, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
+                if order_res.get("retCode") == 0:
+                    bybit_order_id = order_res.get("result", {}).get("orderId")
+                    bybit_success = True
+                    time.sleep(0.5)
+                    order_details = get_bybit_order_details(symbol, bybit_order_id)
+                    if order_details:
+                        entry_price = float(order_details.get("avgPrice", entry_price))
+                        actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                    else:
+                        fill_exec = get_bybit_last_execution(symbol)
+                        if fill_exec:
+                            entry_price = float(fill_exec.get("execPrice", entry_price))
+                        actual_qty = raw_qty
+                        
         min_fill_pct = getattr(config, "MIN_ACCEPTABLE_FILL_PCT", 0.60)
         fill_ratio = (actual_qty / raw_qty) if (raw_qty > 0 and actual_qty > 0) else (1.0 if bybit_success else 0.0)
         if bybit_success and fill_ratio < min_fill_pct:
             log_event("WARNING", f"[{symbol} {iv}m API] Fill ratio {fill_ratio*100:.1f}% below {min_fill_pct*100:.0f}% threshold. Reversing partial fill...")
             if getattr(config, "RESIDUAL_ACTION", "CLOSE") == "CLOSE":
                 opp_side = "Sell" if side == "Buy" else "Buy"
-                emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                bybit_success = False
+                flatten_ok = emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
+                if not flatten_ok:
+                    log_event("CRITICAL", f"[{symbol} {iv}m] Emergency flatten returned False — retaining position with active SL/TP protection.")
+                    bybit_success = True
+                else:
+                    bybit_success = False
 
         if bybit_success:
-            # F-7: Timeframe-Adaptive Minimum Stop Floor via config.MIN_SL_PCT_CONFIG
-            min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
-            min_sl_pct = min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)) * 100.0
+            # Preserve approved pre-flight stop loss and take profit targets, adjusted for actual fill entry price
+            sl_dist = abs(entry_price - stop_loss_price) if stop_loss_price is not None else (sl_multiplier_adjusted * atr_dollars)
+            tp_dist = abs(take_profit_price - entry_price) if take_profit_price is not None else (tp_multiplier_adjusted * atr_dollars)
 
-            min_sl_dist = entry_price * (min_sl_pct / 100.0)
-            atr_sl_dist = sl_multiplier_adjusted * atr_dollars
-            
-            # Preserve approved pre-flight stop loss if provided
-            preflight_sl = stop_loss_price
-            preflight_sl_dist = abs(entry_price - float(preflight_sl)) if preflight_sl is not None else 0.0
+            stop_loss_price = (entry_price - sl_dist) if ml_trend == "Bullish" else (entry_price + sl_dist)
+            take_profit_price = (entry_price + tp_dist) if ml_trend == "Bullish" else (entry_price - tp_dist)
 
-            if min_sl_dist > max(preflight_sl_dist, atr_sl_dist):
-                raw_sl_dist = min_sl_dist
-                sl_source = "MIN_FLOOR"
-                sl_override_reason = f"Minimum Risk Floor ({min_sl_pct:.2f}%) Triggered"
-            elif preflight_sl_dist > 0:
-                raw_sl_dist = preflight_sl_dist
-                sl_source = "PREFLIGHT_APPROVED"
-                sl_override_reason = "Pre-flight Approved SL Preserved"
-            else:
-                raw_sl_dist = atr_sl_dist
-                sl_source = "ATR"
-                sl_override_reason = "ATR Multiplier Applied"
-            
-            # Institutional Meta Exit Policy & Unified Target Generator
-            current_regime = "STRONG_TREND" if tp_multiplier_adjusted > 1.8 else "RANGING"
-            policy_vec = generate_continuous_policy_vector(current_regime, confidence=calibrated_confidence)
-            
-            cand_sl = (entry_price - raw_sl_dist) if ml_trend == "Bullish" else (entry_price + raw_sl_dist)
-            
-            unified_res = UnifiedTargetGenerator.compute_targets(
-                policy_vector=policy_vec,
-                entry_price=entry_price,
-                direction=ml_trend,
-                atr_dollars=atr_dollars,
-                symbol=symbol,
-                df_history=df_completed,
-                interval=str(iv)
-            )
-            
-            stop_loss_price = cand_sl
-            take_profit_price = unified_res["take_profit_price"]
-
-            # F-2: Scale TP target with SL floor expansion & check horizon reachability
-            if sl_source == "MIN_FLOOR":
-                from config import TIMEFRAME_CONFIG
-                import math
-                cfg = TIMEFRAME_CONFIG.get(str(iv), {})
-                regime_detected = bot_state.get(f"regime_{symbol}_{iv}") or bot_state.get(f"regime_{symbol}") or "Trending"
-                tp_key = "tp_mult_ranging" if "ranging" in str(regime_detected).lower() else "tp_mult_trending"
-                target_rr = cfg.get(tp_key, 1.85) / max(1e-9, cfg.get("sl_mult", 0.8))
-                final_sl_dist = abs(entry_price - stop_loss_price)
-                new_tp_dist = final_sl_dist * target_rr
-                
-                lookahead = cfg.get("lookahead", 10)
-                reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
-                max_reachable = math.sqrt(lookahead) * atr_dollars * reach_factor
-                
-                if new_tp_dist > max_reachable:
-                    log_event("WARNING", f"[{symbol} {iv}m F-2 Reachability Guard] Floor-scaled TP distance (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}). Aborting trade entry.")
-                    send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — floor-scaled TP target (${new_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}).")
-                    opp_side = "Sell" if side == "Buy" else "Buy"
-                    emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                    return
-                
-                take_profit_price = (entry_price + new_tp_dist) if ml_trend == "Bullish" else (entry_price - new_tp_dist)
-                is_floor_scaled = True
-                log_event("INFO", f"[{symbol} {iv}m F-2 Target Scaling] Scaled TP to ${take_profit_price:.4f} (R:R {target_rr:.2f}) to match MIN_FLOOR SL (${stop_loss_price:.4f}).")
-                
-            from trade_calculators import passes_economic_gate, calculate_required_p, assert_valid_geometry
-            try:
-                assert_valid_geometry(ml_trend, entry_price, stop_loss_price, take_profit_price, symbol)
-            except ValueError as geo_err:
-                log_event("WARNING", f"[{symbol} {iv}m] Geometry assertion failed: {geo_err}. Aborting.")
-                opp_side = "Sell" if side == "Buy" else "Buy"
-                emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                return
-
-            if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
-                _sl_dist = abs(entry_price - stop_loss_price)
-                _tp_dist = abs(take_profit_price - entry_price)
-                _required_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
-                log_event("WARNING", f"[{symbol} {iv}m] Realized R:R gate failed (nominal R:R {_tp_dist/_sl_dist:.2f} with haircut requires {_required_p:.3f}, have {calibrated_confidence:.3f}). Aborting.")
-                send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted — Realized R:R requires {_required_p:.3f}, have {calibrated_confidence:.3f}")
-                opp_side = "Sell" if side == "Buy" else "Buy"
-                emergency_flatten_position(symbol, opp_side, format_bybit_qty(symbol, actual_qty))
-                return
-
-            # 4. Set SL/TP on active position on Bybit
+            # Set SL/TP on active position on Bybit
             temp_trade = {"qty": str(actual_qty), "direction": ml_trend}
             update_bybit_stop_loss(symbol, stop_loss_price, active_trade=temp_trade)
             update_bybit_take_profit(symbol, take_profit_price, active_trade=temp_trade)

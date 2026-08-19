@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description="BTC Trading Bot Backtester")
 parser.add_argument("--interval", default="60", choices=["15", "30", "60", "120", "240", "360"], help="Trading interval in minutes")
 parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol")
 parser.add_argument("--fee-rate", type=float, default=0.002, help="Trading fee rate")
-parser.add_argument("--min-confidence", type=float, default=0.35, help="Minimum confidence threshold")
+parser.add_argument("--min-confidence", type=float, default=0.40, help="Minimum confidence threshold")
 parser.add_argument("--pages", type=int, default=40, help="History pages count")
 parser.add_argument("--pessimistic", action="store_true", default=True, help="Use pessimistic fill model (next-bar open + spread/slippage)")
 parser.add_argument("--optimistic", action="store_true", default=False, help="Use optimistic fill model (signal close price)")
@@ -155,10 +155,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
             ml_confidence = min(0.95, ml_confidence * (1.0 - prob_neutral * neutral_coeff))
 
-        # B-3: Live Isotonic calibration alignment
+        # B-3: Live Calibration alignment using Beta / Isotonic engine
         calibrated_confidence = ml_confidence
-        if calibrator is not None and "X" in calibrator and "y" in calibrator and ml_trend in ["Bullish", "Bearish"]:
-            calibrated_confidence = float(np.interp(ml_confidence, calibrator["X"], calibrator["y"]))
+        if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
+            from tools.beta_calibrator import calibrate_probability
+            calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
         calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
         if feat_ranks is not None:
@@ -173,86 +174,41 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                 ml_trend = "Neutral"
                 calibrated_confidence = 0.0
 
-        expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
-
-        # 1. Confidence threshold
-        if calibrated_confidence < min_confidence:
+        if ml_trend == "Neutral":
             i += 1
             continue
 
-        # 2. Daily Trend Alignment
+        expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
+
+        # 1. Confidence threshold (enforce production floor and timeframe base threshold)
+        tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {})
+        base_conf_floor = float(tf_cfg.get("base_confidence_threshold", 0.40))
+        effective_min_conf = max(min_confidence, max(0.40, base_conf_floor))
+        if calibrated_confidence < effective_min_conf:
+            i += 1
+            continue
+
+        # 2. ADX Regime Floor Filter (mirrors live production main.py)
+        min_adx_thresh = float(tf_cfg.get("min_adx", 20.0))
+        adx_val = float(df.loc[i, "ADX"]) if "ADX" in df.columns else 25.0
+        if adx_val < min_adx_thresh:
+            i += 1
+            continue
+
+        # 3. Macro Trend Alignment (when enabled)
         if require_trend_alignment and "EMA_9_1d" in df.columns and "EMA_21_1d" in df.columns:
             trend_1d = "Bullish" if df.loc[i, "EMA_9_1d"] > df.loc[i, "EMA_21_1d"] else "Bearish"
             if ml_trend != trend_1d:
                 i += 1
                 continue
 
-        # 3. 4h Trend Alignment
-        if require_trend_alignment and "EMA_9_4h" in df.columns and "EMA_21_4h" in df.columns:
-            trend_4h = "Bullish" if df.loc[i, "EMA_9_4h"] > df.loc[i, "EMA_21_4h"] else "Bearish"
-            if ml_trend != trend_4h:
-                i += 1
-                continue
-
-        # 4. 4h RSI
-        if "RSI_4h" in df.columns:
-            rsi_4h = df.loc[i, "RSI_4h"]
-            if ml_trend == "Bullish" and rsi_4h >= 70.0:
-                i += 1
-                continue
-            if ml_trend == "Bearish" and rsi_4h <= 30.0:
-                i += 1
-                continue
-
-        # 5. 1h RSI
-        rsi_1h = df.loc[i, "RSI"]
-        if ml_trend == "Bullish" and rsi_1h >= 70.0:
-            i += 1
-            continue
-        if ml_trend == "Bearish" and rsi_1h <= 30.0:
-            i += 1
-            continue
-
-        # 6. Volume
-        if not df.loc[i, "volume_pass"]:
-            i += 1
-            continue
-
-        # 7. BB Edge
-        bb_pct = df.loc[i, "BB_pct"]
-        if ml_trend == "Bullish" and bb_pct >= 0.95:
-            i += 1
-            continue
-        if ml_trend == "Bearish" and bb_pct <= 0.05:
-            i += 1
-            continue
-
-        # 8. Counter Momentum
-        c1_red = df.loc[i-1, "close"] < df.loc[i-1, "open"]
-        c2_red = df.loc[i-2, "close"] < df.loc[i-2, "open"]
-        c3_red = df.loc[i-3, "close"] < df.loc[i-3, "open"]
-        if ml_trend == "Bullish" and c1_red and c2_red and c3_red:
-            i += 1
-            continue
-        if ml_trend == "Bearish" and (not c1_red) and (not c2_red) and (not c3_red):
-            i += 1
-            continue
-
-        # 9. Volatility Guard (Removed ATR percentile filter to mirror production live behavior)
+        # 4. Volatility & Fee check
         atr_norm = df.loc[i, "ATR_norm"]
-
-        # 10. ADX (Decoupled to allow routing to models_ranging)
-        # if df.loc[i, "ADX"] < 20.0:
-        #     i += 1
-        #     continue
-
-        # 11. Fee check
         if use_regressor_fee_check:
             if expected_pct_change < 0.25:
                 i += 1
                 continue
         else:
-            # Volatility-based check: ATR must be >= 0.25%
             if atr_norm < 0.0025:
                 i += 1
                 continue
@@ -263,42 +219,33 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             if i + 1 >= total_candles:
                 break
             raw_entry = df.loc[i + 1, "open"]
-            half_spread = 0.00015  # 0.015% half spread floor
-            taker_fee = fee_rate / 2.0
-            vol_slippage = calculate_backtest_slippage(interval, atr_norm)
-            
-            if ml_trend == "Bullish":
-                entry_price = raw_entry * (1.0 + half_spread + vol_slippage)
-            else:
-                entry_price = raw_entry * (1.0 - half_spread - vol_slippage)
+            half_spread = (FEE_RATE / 4.0) * raw_entry
+            entry_price = raw_entry + half_spread if ml_trend == "Bullish" else raw_entry - half_spread
         else:
             entry_price = close_price
-            half_spread = 0.0
-            taker_fee = fee_rate / 2.0
-            vol_slippage = 0.0
 
         atr_dollars = atr_norm * entry_price
-        
-        # Regime-Adaptive Take-Profit & Stop-Loss Multipliers from TIMEFRAME_CONFIG
         cfg = TIMEFRAME_CONFIG.get(str(interval), {})
-        adx_enter_map = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
-        adx_enter = adx_enter_map.get(str(interval), 22.0)
 
-        sl_mult = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 1.5)
-        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else (cfg.get("tp_mult_trending", 2.5) if ((not _routing) or adx_val >= adx_enter) else cfg.get("tp_mult_ranging", 1.5))
+        # ATR-based Stop Loss and Take Profit with production TP resolution
+        sl_multiplier = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 0.8)
+        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else (cfg.get("tp_mult_trending", 1.85) if (regime_detected == "trending") else cfg.get("tp_mult_ranging", 1.25))
 
-        raw_sl_dist = sl_mult * atr_dollars
-        min_sl_pct = config.resolve_min_sl_pct(SYMBOL, interval)
-        min_sl_dist = entry_price * (min_sl_pct / 100.0)
-        
-        if raw_sl_dist < min_sl_dist:
+        from trade_calculators import UnifiedTargetGenerator
+        tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+            interval=str(interval), entry_price=entry_price,
+            atr_dollars=atr_dollars, base_tp_m=tp_multiplier
+        )
+        sl_dist = sl_multiplier * atr_dollars
+        tp_dist = tp_m * atr_dollars
+
+        # S-01: Timeframe-Adaptive Minimum Stop Loss Floor
+        min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+        min_sl_pct = min_sl_cfg.get(str(interval), min_sl_cfg.get("default", 0.008))
+        min_sl_dist = entry_price * min_sl_pct
+        if sl_dist < min_sl_dist:
             sl_dist = min_sl_dist
-            target_rr = tp_multiplier / max(1e-9, sl_mult)
-            tp_dist = sl_dist * target_rr
-        else:
-            sl_dist = raw_sl_dist
-            tp_dist = tp_multiplier * atr_dollars
-            
+
         if ml_trend == "Bullish":
             stop_loss = entry_price - sl_dist
             take_profit = entry_price + tp_dist
@@ -306,11 +253,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             stop_loss = entry_price + sl_dist
             take_profit = entry_price - tp_dist
 
-        # Post-floor economic gate (mirrors live production abort)
-        _sl_frac = sl_dist / max(1e-9, entry_price)
-        _tp_frac = abs(take_profit - entry_price) / max(1e-9, entry_price)
-        required_p = (_sl_frac + 0.0016) / max(1e-9, (_sl_frac + _tp_frac))
-        if calibrated_confidence < required_p:
+        # Post-floor economic gate (mirrors live production abort with REALIZED_RR_HAIRCUT)
+        from trade_calculators import passes_economic_gate
+        if not passes_economic_gate(entry=entry_price, tp=take_profit, sl=stop_loss, conf=calibrated_confidence):
             i += 1
             continue
 
@@ -578,19 +523,19 @@ def run_backtest():
     
     scenarios = {
         "A (Production Baseline: Economic Gate p*, Trend Align)": {
-            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": True, "require_trend_alignment": True
+            "min_confidence": max(0.40, MIN_CONFIDENCE), "use_regressor_fee_check": True, "require_trend_alignment": True
         },
         "B (Pure Economic Gate p*, Trend Align)": {
-            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": True
+            "min_confidence": max(0.40, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": True
         },
-        "C (High Conviction: Conf >= 38%, Trend Align)": {
-            "min_confidence": max(0.38, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": True
+        "C (High Conviction: Base Conf + 5%, Trend Align)": {
+            "min_confidence": max(0.45, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": True
         },
-        "D (Pure Model Signals: Conf >= min_conf, No HTF Filter)": {
-            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": False
+        "D (Pure Model Signals: Production Floor, No HTF Filter)": {
+            "min_confidence": max(0.40, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": False
         },
-        "E (High Conviction: Conf >= 38%, No HTF Filter)": {
-            "min_confidence": max(0.38, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": False
+        "E (High Conviction: Base Conf + 5%, No HTF Filter)": {
+            "min_confidence": max(0.45, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": False
         }
     }
 

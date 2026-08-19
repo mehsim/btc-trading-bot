@@ -124,12 +124,23 @@ class StdoutRedirector:
 
 import hmac
 
+def is_request_local():
+    trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
+    if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
+        client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
+    else:
+        client_ip = request.remote_addr
+    return client_ip in ["127.0.0.1", "::1", "localhost"]
+
 def require_api_key(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if is_request_local():
+            return f(*args, **kwargs)
+
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip()
         if not expected_key:
-            return f(*args, **kwargs)
+            return jsonify({"error": "Unauthorized", "message": "Remote access disabled: DASHBOARD_API_KEY not configured."}), 401
         
         client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
         if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
@@ -137,7 +148,21 @@ def require_api_key(f):
         return jsonify({"error": "Unauthorized", "message": "Missing or invalid API key."}), 401
     return decorated_function
 
-require_admin_key = require_api_key
+def require_admin_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if is_request_local():
+            return f(*args, **kwargs)
+
+        expected_key = get_secure_env("DASHBOARD_ADMIN_KEY", "").strip() or get_secure_env("DASHBOARD_API_KEY", "").strip()
+        if not expected_key:
+            return jsonify({"error": "Unauthorized", "message": "Admin remote access disabled: DASHBOARD_ADMIN_KEY not configured."}), 401
+
+        client_key = request.headers.get("X-ADMIN-KEY") or request.headers.get("X-API-KEY") or request.args.get("admin_key")
+        if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+            return f(*args, **kwargs)
+        return jsonify({"error": "Unauthorized", "message": "Missing or invalid admin API key."}), 401
+    return decorated_function
 
 
 def require_ip_whitelist(f):
