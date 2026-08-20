@@ -6125,6 +6125,13 @@ def main():
                                 _avail = [f for f in _features_to_use if f in latest_candle_weighted.index]
                                 X_live_full = latest_candle_weighted[_avail].to_frame().T if isinstance(latest_candle_weighted[_avail], pd.Series) else latest_candle_weighted[_avail]
 
+                            # Coerce all columns to float64 before inference.
+                            # Live API data can return object-typed columns (e.g. JSON strings,
+                            # None values) that survive .to_frame().T and .reindex(). XGBoost
+                            # hard-rejects any non-numeric dtype with the
+                            # "DataFrame.dtypes for data must be int, float, bool" error.
+                            X_live_full = X_live_full.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
                             X_live = _slice_model_input(active_model_trend, X_live_full)
 
                             # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
@@ -6149,8 +6156,12 @@ def main():
                                     conformal_unc_score = 0.0
                                     conformal_is_uncertain = False
                             except Exception as pred_err:
-                                print(f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] Model prediction exception: {pred_err}. Aborting trade entry (Fail-Closed).")
-                                status_msg = "Skipped (Prediction Error)"
+                                import traceback
+                                err_msg = f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] {type(pred_err).__name__}: {pred_err}"
+                                log_event("WARNING", f"{err_msg}\n{traceback.format_exc()}")
+                                print(f"{err_msg}. Aborting trade entry (Fail-Closed).")
+                                status_msg = f"Skipped (Prediction Error: {type(pred_err).__name__} {pred_err})"
+                                rec.reject_reason = status_msg
                                 all_pass = False
                                 continue
                         
