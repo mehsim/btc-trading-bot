@@ -1741,7 +1741,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 from config import MODEL_GOVERNANCE
                 _min_h_mcc = MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02)
                 _min_h_balacc = MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.35)
-                is_full_population = len(SUPPORTED_SYMBOLS) > 1 or SUPPORTED_SYMBOLS == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
+                is_full_population = len(SUPPORTED_SYMBOLS) > 1 or list(SUPPORTED_SYMBOLS) == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
                 if champ_mcc < _min_h_mcc or champ_acc < _min_h_balacc:
                     if is_full_population:
@@ -1917,7 +1917,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     except Exception as stat_ex:
                         print(f"  [Statistical Validation Gate Error] Evaluation exception: {stat_ex}. Failing closed.")
                         try:
-                            from logger import log_event
                             log_event("CRITICAL", f"[Statistical Validation Gate] Evaluation raised {stat_ex} — failing closed")
                         except Exception:
                             pass
