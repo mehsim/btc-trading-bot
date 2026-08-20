@@ -204,19 +204,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         # 1. Confidence threshold (enforce production floor and timeframe base threshold)
         tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {})
         base_conf_floor = float(tf_cfg.get("base_confidence_threshold", 0.40))
-        target_thresh = min_confidence if min_confidence is not None else base_conf_floor
-
-        if calibrator is not None and isinstance(calibrator, dict) and "y" in calibrator:
-            y_vals = [float(v) for v in calibrator.get("y", []) if v is not None]
-            y_max = max(y_vals) if y_vals else 1.0
-            y_min = min(y_vals) if y_vals else 0.0
-            if target_thresh > y_max and (y_max - y_min) > 1e-4:
-                rel_frac = float(np.clip((target_thresh - 0.40) / 0.40, 0.0, 1.0))
-                effective_min_conf = y_min + rel_frac * (y_max - y_min)
-            else:
-                effective_min_conf = target_thresh
-        else:
-            effective_min_conf = target_thresh
+        effective_min_conf = min_confidence if min_confidence is not None else base_conf_floor
 
         if calibrated_confidence < effective_min_conf:
             i += 1

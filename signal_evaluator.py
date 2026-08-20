@@ -324,8 +324,9 @@ class SignalEvaluator:
                             direction = "Neutral"
 
                     calibrator = models.get("calibrator")
-                    if calibrator is not None and isinstance(calibrator, dict) and "X" in calibrator and "y" in calibrator and direction in ["Bullish", "Bearish"]:
-                        calibrated_conf = float(np.interp(raw_conf, calibrator["X"], calibrator["y"]))
+                    if calibrator is not None and isinstance(calibrator, dict) and direction in ["Bullish", "Bearish"]:
+                        from tools.beta_calibrator import calibrate_probability
+                        calibrated_conf = float(calibrate_probability(raw_conf, calibrator))
                     else:
                         calibrated_conf = float(raw_conf)
 

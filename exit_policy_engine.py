@@ -166,16 +166,20 @@ class ExitPolicyEngine:
     ) -> float:
         """
         Evaluates Hybrid Market Structure + ATR Trailing Stop:
-        Long:  max(Swing Low - 0.25*ATR, ATR Trailing SL, current_SL)
-        Short: min(Swing High + 0.25*ATR, ATR Trailing SL, current_SL)
+        Long:  max(Swing Low - 0.25*ATR, ATR Trailing SL, current_SL) (requires current_price > entry_price)
+        Short: min(Swing High + 0.25*ATR, ATR Trailing SL, current_SL) (requires current_price < entry_price)
         """
         atr_buffer = 0.25 * atr_dollars
         if direction == "Bullish":
+            if current_price <= entry_price:
+                return stop_loss
             atr_trail = current_price - (1.5 * atr_dollars)
             struct_trail = (swing_price - atr_buffer) if swing_price and swing_price > 0 else atr_trail
             candidate_sl = max(atr_trail, struct_trail)
             return max(stop_loss, candidate_sl)
         else:
+            if current_price >= entry_price:
+                return stop_loss
             atr_trail = current_price + (1.5 * atr_dollars)
             struct_trail = (swing_price + atr_buffer) if swing_price and swing_price > 0 else atr_trail
             candidate_sl = min(atr_trail, struct_trail)

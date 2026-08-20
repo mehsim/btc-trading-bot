@@ -1880,6 +1880,25 @@ def run_funding_rate_arbitrage_monitor():
                 existing = bot_state.get(arb_key)
 
                 if rate > FUNDING_ARB_THRESHOLD and not existing:
+                    # Check Circuit Breaker
+                    if circuit_breaker.is_circuit_active(symbol=sym):
+                        print(f"[Funding Arb] {sym} circuit breaker active. Skipping arb open.")
+                        continue
+                    # Check Pre-trade Checklist
+                    chk_passed, chk_msg, _, _ = risk_engine.evaluate_pre_trade_checklist(
+                        symbol=sym,
+                        position_size_usd=FUNDING_ARB_SIZE_USD,
+                        leverage_val=1.0,
+                        active_trades=bot_state.get("active_trades", []),
+                        bot_state=bot_state,
+                        df_dict={},
+                        interval="60",
+                        direction="Bearish"
+                    )
+                    if not chk_passed:
+                        print(f"[Funding Arb] {sym} pre-trade checklist blocked: {chk_msg}")
+                        continue
+
                     # High positive funding — shorts earn. Open small short.
                     print(f"[Funding Arb] {sym} funding rate {rate*100:.4f}% > 0.1%. Opening arb short.")
                     if TRADE_MODE == "live":

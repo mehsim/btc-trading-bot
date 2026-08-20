@@ -478,6 +478,8 @@ def api_status():
 
         # Map symbol-specific predictions, regime, adx, and confluence to default UI keys
         active_sym = request.args.get("symbol") or status_data.get("active_symbol", "BTCUSDT")
+        status_data["active_symbol"] = active_sym
+        state_manager["active_symbol"] = active_sym
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
             sym_pred = status_data.get(f"latest_prediction_{active_sym}_{tf}") or status_data.get(f"latest_prediction_BTCUSDT_{tf}")
             if sym_pred:
