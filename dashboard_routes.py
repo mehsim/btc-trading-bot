@@ -1403,12 +1403,12 @@ def api_institutional_summary():
         "live_vs_replay_checksum": (lambda: statistical_validation.compute_live_vs_replay_checksum({"trade_id": str(valid_trades[-1].get("trade_id", "live_v1") if valid_trades else "live_v1")}))(),
         "model_health_index": (lambda: strategy_health_engine.calculate_model_health_index(rolling_pf=calculated_pf, expectancy_r=exp_r_val, trades_count=total_trades_count))(),
         "bayesian_posterior": (lambda: champion_challenger_framework.evaluate_bayesian_dual_governance_gate(
-            max(1, sum(1 for t in valid_trades if float(t.get("pnl_usd", 0.0) or t.get("venue_closed_pnl", 0.0)) > 0)),
-            max(1, sum(1 for t in valid_trades if float(t.get("pnl_usd", 0.0) or t.get("venue_closed_pnl", 0.0)) < 0)),
+            max(1, sum(1 for t in valid_trades if safe_float(t.get("pnl_usd") if t.get("pnl_usd") is not None else t.get("venue_closed_pnl", 0.0)) > 0)),
+            max(1, sum(1 for t in valid_trades if safe_float(t.get("pnl_usd") if t.get("pnl_usd") is not None else t.get("venue_closed_pnl", 0.0)) < 0)),
             max(1, len(valid_trades))
         ))(),
-        "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=float(state_manager.get("last_brier_score", 0.214) or 0.214)))(),
-        "uncertainty_execution_policy": (lambda: exit_policy_engine.calculate_uncertainty_execution_policy(float(state_manager.get("last_uncertainty", 0.0609) or 0.0609)))(),
+        "ensemble_uncertainty": (lambda: statistical_validation.compute_ensemble_uncertainty_weighting(brier_score=safe_float(state_manager.get("last_brier_score"), 0.214)))(),
+        "uncertainty_execution_policy": (lambda: exit_policy_engine.calculate_uncertainty_execution_policy(safe_float(state_manager.get("last_uncertainty"), 0.0609)))(),
         "expected_r_meta_model": (lambda: mlops_engine.estimate_expected_r_multiple({
             "total_uncertainty_u": state_manager.get("last_uncertainty"),
             "symbol_alpha_score": state_manager.get("alpha_score"),
@@ -1535,12 +1535,12 @@ def api_exit_analytics():
     total_valid = max(1, len(valid_trades))
     
     for t in valid_trades:
-        entry = float(t.get("entry_price", 0.0))
-        sl = float(t.get("stop_loss", 0.0))
-        tp = float(t.get("take_profit", 0.0))
-        atr = float(t.get("atr_dollars", 0.0))
-        pnl_usd = float(t.get("pnl_usd", 0.0))
-        pos_usd = float(t.get("position_size_usd", 15.0))
+        entry = safe_float(t.get("entry_price"), 0.0)
+        sl = safe_float(t.get("stop_loss"), 0.0)
+        tp = safe_float(t.get("take_profit"), 0.0)
+        atr = safe_float(t.get("atr_dollars"), 0.0)
+        pnl_usd = safe_float(t.get("pnl_usd"), 0.0)
+        pos_usd = safe_float(t.get("position_size_usd"), 15.0)
 
         if entry > 0 and sl > 0 and abs(entry - sl) > 0:
             risk_dist = abs(entry - sl)
