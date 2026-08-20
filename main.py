@@ -1938,13 +1938,14 @@ def run_daily_backup_scheduler():
             timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
             zip_filename = os.path.join(backup_dir, f"backup_{timestamp_str}.zip")
             
+            current_db = database.get_db_path()
             with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                if os.path.exists(DB_FILE):
-                    zipf.write(DB_FILE, os.path.basename(DB_FILE))
-                if os.path.exists(DB_FILE + "-wal"):
-                    zipf.write(DB_FILE + "-wal", os.path.basename(DB_FILE + "-wal"))
-                if os.path.exists(DB_FILE + "-shm"):
-                    zipf.write(DB_FILE + "-shm", os.path.basename(DB_FILE + "-shm"))
+                if os.path.exists(current_db):
+                    zipf.write(current_db, os.path.basename(current_db))
+                if os.path.exists(current_db + "-wal"):
+                    zipf.write(current_db + "-wal", os.path.basename(current_db + "-wal"))
+                if os.path.exists(current_db + "-shm"):
+                    zipf.write(current_db + "-shm", os.path.basename(current_db + "-shm"))
                 if os.path.exists(JOURNAL_PATH):
                     zipf.write(JOURNAL_PATH, os.path.basename(JOURNAL_PATH))
                     

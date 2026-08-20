@@ -355,7 +355,10 @@ def load_production_model_from_registry(interval: str, regime: str, live_feature
             tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
             client = MlflowClient(tracking_uri=tracking_uri)
 
-            champs = client.get_latest_versions(name, stages=["Production"])
+            try:
+                champs = client.search_model_versions(f"name = '{name}' and current_stage = 'Production'")
+            except Exception:
+                champs = client.get_latest_versions(name, stages=["Production"])
             if champs:
                 mv = champs[0]
                 run = client.get_run(mv.run_id)

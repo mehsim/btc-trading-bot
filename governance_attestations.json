@@ -1,0 +1,50 @@
+{
+  "trending_15": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "ranging_15": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "trending_30": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "ranging_30": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "trending_60": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "ranging_60": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "trending_120": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "ranging_120": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "trending_240": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "ranging_240": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "trending_360": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  },
+  "ranging_360": {
+    "research_notebook_approved": false,
+    "rollback_plan_defined": false
+  }
+}

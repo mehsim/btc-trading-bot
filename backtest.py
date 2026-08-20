@@ -60,7 +60,7 @@ def calculate_backtest_slippage(interval: str, atr_norm: float = 0.0) -> float:
     return base + volatility_premium
 
 
-def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.70, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True, rule_feature=None):
+def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.40, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True, rule_feature=None, return_trades=False):
     df = df.reset_index(drop=True)
     trades = []
     equity_compounded = 100.0
@@ -158,16 +158,17 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         winning_class = int(np.argmax(probs))
         from ensemble import resolve_direction
         ml_trend, ml_confidence = resolve_direction(probs)
+        raw_class_prob = float(probs[winning_class]) if winning_class < len(probs) else ml_confidence
         prob_neutral = float(probs[1]) if len(probs) >= 2 else 0.0
         neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
         if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
-            ml_confidence = min(0.95, ml_confidence * (1.0 - prob_neutral * neutral_coeff))
+            raw_class_prob = min(0.95, raw_class_prob * (1.0 - prob_neutral * neutral_coeff))
 
-        # B-3: Live Calibration alignment using Beta / Isotonic engine
-        calibrated_confidence = ml_confidence
+        # B-3: Live Calibration alignment using Beta / Isotonic engine (matches main.py:6130)
+        calibrated_confidence = raw_class_prob
         if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
             from tools.beta_calibrator import calibrate_probability
-            calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
+            calibrated_confidence = calibrate_probability(raw_class_prob, calibrator)
         calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
         if feat_ranks is not None:
@@ -191,7 +192,20 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         # 1. Confidence threshold (enforce production floor and timeframe base threshold)
         tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {})
         base_conf_floor = float(tf_cfg.get("base_confidence_threshold", 0.40))
-        effective_min_conf = max(min_confidence, max(0.40, base_conf_floor))
+        target_thresh = min_confidence if min_confidence is not None else base_conf_floor
+
+        if calibrator is not None and isinstance(calibrator, dict) and "y" in calibrator:
+            y_vals = [float(v) for v in calibrator.get("y", []) if v is not None]
+            y_max = max(y_vals) if y_vals else 1.0
+            y_min = min(y_vals) if y_vals else 0.0
+            if target_thresh > y_max and (y_max - y_min) > 1e-4:
+                rel_frac = float(np.clip((target_thresh - 0.40) / 0.40, 0.0, 1.0))
+                effective_min_conf = y_min + rel_frac * (y_max - y_min)
+            else:
+                effective_min_conf = target_thresh
+        else:
+            effective_min_conf = target_thresh
+
         if calibrated_confidence < effective_min_conf:
             i += 1
             continue
@@ -359,7 +373,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     from trade_calculators import calculate_replay_statistics
     stats = calculate_replay_statistics(returns, initial_equity=100.0)
     
-    return (
+    stat_tuple = (
         stats.get("total_trades", 0),
         stats.get("win_rate", 0.0),
         stats.get("profit_factor", 0.0),
@@ -371,6 +385,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         stats.get("calmar_ratio", 0.0),
         stats.get("recovery_factor", 0.0)
     )
+    if return_trades:
+        return {"trades": trades, "stats": stats, "metrics": stat_tuple}
+    return stat_tuple
 
 def run_backtest():
     print("=" * 60)
@@ -534,19 +551,19 @@ def run_backtest():
     
     scenarios = {
         "A (Production Baseline: Economic Gate p*, Trend Align)": {
-            "min_confidence": max(0.40, MIN_CONFIDENCE), "use_regressor_fee_check": True, "require_trend_alignment": True
+            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": True, "require_trend_alignment": True
         },
         "B (Pure Economic Gate p*, Trend Align)": {
-            "min_confidence": max(0.40, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": True
+            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": True
         },
-        "C (High Conviction: Base Conf + 5%, Trend Align)": {
-            "min_confidence": max(0.45, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": True
+        "C (High Conviction: Base Conf + 3%, Trend Align)": {
+            "min_confidence": (MIN_CONFIDENCE + 0.03 if MIN_CONFIDENCE is not None else 0.43), "use_regressor_fee_check": False, "require_trend_alignment": True
         },
         "D (Pure Model Signals: Production Floor, No HTF Filter)": {
-            "min_confidence": max(0.40, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": False
+            "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": False
         },
-        "E (High Conviction: Base Conf + 5%, No HTF Filter)": {
-            "min_confidence": max(0.45, MIN_CONFIDENCE), "use_regressor_fee_check": False, "require_trend_alignment": False
+        "E (High Conviction: Base Conf + 3%, No HTF Filter)": {
+            "min_confidence": (MIN_CONFIDENCE + 0.03 if MIN_CONFIDENCE is not None else 0.43), "use_regressor_fee_check": False, "require_trend_alignment": False
         }
     }
 
@@ -643,9 +660,21 @@ def run_backtest():
     }
     try:
         from walk_forward_engine import run_walk_forward_backtest
-        def _wf_sim_fn(sub_df):
-            return run_single_backtest(sub_df, models_trending, models_ranging, p95, max_conf, min_confidence=MIN_CONFIDENCE, interval=INTERVAL, rule_feature=RULE_FEATURE, pessimistic_mode=True)
-        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=_wf_sim_fn)
+        from functools import partial
+        sim_fn = partial(
+            run_single_backtest,
+            models_trending=models_trending,
+            models_ranging=models_ranging,
+            p95=p95,
+            max_conf=max_conf,
+            min_confidence=MIN_CONFIDENCE,
+            fee_rate=FEE_RATE,
+            interval=INTERVAL,
+            rule_feature=RULE_FEATURE,
+            pessimistic_mode=True,
+            return_trades=True
+        )
+        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn)
         if wf_summary.get("status") == "success":
             print("=" * 90)
             print("WALK-FORWARD SLIDING WINDOW VALIDATION SUMMARY")

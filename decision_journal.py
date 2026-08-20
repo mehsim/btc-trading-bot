@@ -108,14 +108,16 @@ class DecisionRecord:
         return self
 
 
-_db_initialized = False
+_last_initialized_db = None
 
 def init_decision_journal_db(force: bool = False):
-    global _db_initialized
-    if _db_initialized and not force:
+    global _last_initialized_db
+    import database
+    curr_db = getattr(database, "DB_FILE", None)
+    if _last_initialized_db == curr_db and not force:
         return
     with db_lock:
-        if _db_initialized and not force:
+        if _last_initialized_db == curr_db and not force:
             return
         conn = get_db_connection()
         try:
@@ -183,7 +185,7 @@ def init_decision_journal_db(force: bool = False):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dj_trade     ON decision_journal(trade_id);")
 
             conn.commit()
-            _db_initialized = True
+            _last_initialized_db = curr_db
         except Exception as e:
             print(f"[DecisionJournal ERROR] DB Init failed: {e}")
         finally:

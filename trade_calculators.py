@@ -64,7 +64,13 @@ def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_f
     Returns True if conf >= required_p, False otherwise.
     """
     required_p = calculate_required_p(entry, tp, sl, cost_frac=cost_frac, realized_rr_haircut=realized_rr_haircut)
-    return conf >= required_p
+    # If conf is on a 3-class empirical scale (< 0.50), convert to directional 2-class win rate
+    # E.g. A 3-class probability of 0.3789 against 0.3333 baseline maps to ~0.5342 2-class win rate
+    effective_conf = conf
+    if 0.0 < conf < 0.50:
+        p_base = 1.0 / 3.0
+        effective_conf = 0.50 + 0.50 * max(0.0, (conf - p_base) / (1.0 - p_base))
+    return effective_conf >= required_p
 
 MAX_RR_RATIO = {
     "5m": 3.0,

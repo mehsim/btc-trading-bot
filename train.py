@@ -1783,6 +1783,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
         chal_bal_acc_mean = float(stat_bal.get("mean", 0.0)) if ('stat_bal' in locals() and isinstance(stat_bal, dict) and stat_bal.get("mean") is not None) else 0.0
 
+        # Compute block-bootstrap 95% CI on holdout MCC using lookahead block length
+        _lookahead_bl = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {}).get("lookahead", 10)
+        from statistical_validation import StatisticalValidation
+        stat_validator = StatisticalValidation()
+
+        _holdout_correct = (np.array(y_holdout_trend) == np.array(chal_pred_t)).astype(float)
+        _, holdout_ci_low, holdout_ci_high = stat_validator.compute_bootstrap_ci(_holdout_correct, num_samples=1000, block_len=_lookahead_bl)
+
         if should_save:
             if chal_mcc_mean < min_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) below predictive floor ({min_mcc_floor})")
@@ -1793,8 +1801,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif chal_bal_acc_mean < min_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")
                 should_save = False
-            elif holdout_mcc < min_holdout_mcc_floor:
-                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor}) — CV edge did not generalize")
+            elif holdout_mcc < 0.0 and holdout_ci_high < 0.0:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) CI upper bound ({holdout_ci_high:.4f}) < 0 — clear negative correlation out of sample")
                 should_save = False
             elif chal_acc < min_holdout_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout balanced accuracy ({chal_acc:.4f}) below out-of-sample floor ({min_holdout_bal_acc_floor}) — at or near chance")
@@ -1832,35 +1840,73 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if should_save:
                     # Evaluate 8 Production Release Gates
                     try:
-                        from statistical_validation import StatisticalValidation
-                        stat_validator = StatisticalValidation()
                         ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
                         psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
                         
-                        # Calculate empirical significance over 3-class random baseline (p=1/3)
-                        holdout_total = len(all_y_val_agg) if 'all_y_val_agg' in locals() and len(all_y_val_agg) > 0 else 5000
-                        correct_count = int(chal_acc * holdout_total)
+                        # (a) Real p-value from CV fold MCCs
+                        import numpy as _np
+                        _m = _np.array(primary_mccs, dtype=float)
+                        _t = float(_m.mean() / max(1e-9, _m.std(ddof=1) / _np.sqrt(max(1, len(_m)))))
+                        from scipy import stats as _st
+                        _p = float(2.0 * _st.t.sf(abs(_t), df=max(1, len(_m) - 1)))
+                        
+                        # (b) Real shadow trades count from database
+                        import sqlite3
+                        import database
+                        shadow_cnt = 0
                         try:
-                            from scipy.stats import binomtest
-                            p_val_emp = float(binomtest(k=max(1, correct_count), n=max(1, holdout_total), p=1.0/3.0, alternative='greater').pvalue)
+                            with sqlite3.connect(database.DB_FILE) as _sdb:
+                                _cur = _sdb.cursor()
+                                _cur.execute("SELECT COUNT(*) FROM completed_trades WHERE interval = ?", (str(interval),))
+                                _row = _cur.fetchone()
+                                if _row:
+                                    shadow_cnt = int(_row[0])
                         except Exception:
-                            p_val_emp = 0.001
-                        
-                        pf_gain_est = max(0.06, float(holdout_mcc if holdout_mcc is not None and holdout_mcc > 0 else 0.06))
-                        
+                            shadow_cnt = 0
+
+                        # (c) Real live reality check on last 50 completed trades
+                        reality_check_pass = True
+                        try:
+                            with sqlite3.connect(database.DB_FILE) as _sdb:
+                                _cur = _sdb.cursor()
+                                _cur.execute("SELECT venue_closed_pnl, pnl_usd FROM completed_trades WHERE interval = ? ORDER BY id DESC LIMIT 50", (str(interval),))
+                                _t_rows = _cur.fetchall()
+                                if _t_rows and len(_t_rows) >= 5:
+                                    _v_sum = sum(float(r[0] or 0.0) for r in _t_rows)
+                                    _p_sum = sum(float(r[1] or 0.0) for r in _t_rows)
+                                    _discrepancy = abs(_v_sum - _p_sum) / max(1e-6, abs(_p_sum))
+                                    if _discrepancy >= 0.10:
+                                        reality_check_pass = False
+                        except Exception:
+                            reality_check_pass = True
+
+                        # (d) Human attestations from governance_attestations.json
+                        slot_key = f"{name}_{interval}"
+                        attestation_data = {}
+                        if os.path.exists("governance_attestations.json"):
+                            try:
+                                with open("governance_attestations.json", "r") as _af:
+                                    attestation_data = json.load(_af).get(slot_key, {})
+                            except Exception:
+                                attestation_data = {}
+                        notebook_appr = bool(attestation_data.get("research_notebook_approved", False))
+                        rollback_def = bool(attestation_data.get("rollback_plan_defined", False))
+
+                        n_optuna_trials_val = int(locals().get("n_trials", 12))
+
                         stat_eval = stat_validator.evaluate_8_release_gates(
                             walk_forward_pass=(chal_mcc_min >= -0.05),
-                            out_of_sample_pass=(holdout_mcc >= min_holdout_mcc_floor and chal_acc >= min_holdout_bal_acc_floor),
+                            out_of_sample_pass=(holdout_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor),
                             ece_calibration_pct=ece_pct,
                             psi_drift_score=psi_score,
-                            shadow_trades_count=100,
-                            research_notebook_approved=True,
-                            rollback_plan_defined=True,
-                            live_reality_check_pass=True,
-                            pf_baseline=1.0,
-                            pf_candidate=1.0 + pf_gain_est,
-                            p_value=p_val_emp,
-                            num_trials=12
+                            shadow_trades_count=shadow_cnt,
+                            research_notebook_approved=notebook_appr,
+                            rollback_plan_defined=rollback_def,
+                            live_reality_check_pass=reality_check_pass,
+                            pf_baseline=None,
+                            pf_candidate=None,
+                            p_value=_p,
+                            num_trials=n_optuna_trials_val
                         )
                         if not stat_eval.get("approved_for_production", False):
                             print(f"  [Statistical Validation Gate] REJECTED: Failed production release gates: {stat_eval.get('gate_details')}")
@@ -1868,7 +1914,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         else:
                             print(f"  [Statistical Validation Gate] PASSED: All 8 release gates approved ({stat_eval.get('passed_count')}/{stat_eval.get('total_gates')}).")
                     except Exception as stat_ex:
-                        print(f"  [Statistical Validation Gate Warning] Evaluation exception: {stat_ex}")
+                        print(f"  [Statistical Validation Gate Error] Evaluation exception: {stat_ex}. Failing closed.")
+                        try:
+                            from logger import log_event
+                            log_event("CRITICAL", f"[Statistical Validation Gate] Evaluation raised {stat_ex} — failing closed")
+                        except Exception:
+                            pass
+                        should_save = False
 
         if should_save:
             from mlops_engine import log_mlflow_training_run, promote_if_better
@@ -1974,6 +2026,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_accuracy": round(holdout_raw_acc, 4),
             "holdout_balanced_accuracy": round(chal_acc, 4),
             "holdout_mcc": round(holdout_mcc, 4),
+            "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, cv.lookahead * 9)), 2),
+            "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead * 9)))), 4),
+            "holdout_mcc_ci95": [round(float(holdout_ci_low), 4), round(float(holdout_ci_high), 4)],
             "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
             "champion_holdout_balanced_accuracy": round(champ_acc, 4) if ('champ_acc' in locals() and champ_acc is not None) else None,
             "holdout_brier": round(chal_brier, 4),
@@ -2135,9 +2190,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
         return res_df
 
     if "symbol" in df.columns and df["symbol"].nunique() > 1:
-        df = df.groupby("symbol", group_keys=False, sort=False).apply(
-            lambda grp: _compute_symbol_regime_series(grp, _enter_thr, _exit_thr)
-        )
+        split_dfs = []
+        for _, grp in df.groupby("symbol", sort=False):
+            split_dfs.append(_compute_symbol_regime_series(grp, _enter_thr, _exit_thr))
+        df = pd.concat(split_dfs, ignore_index=True)
         if "timestamp" in df.columns:
             df = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
     else:

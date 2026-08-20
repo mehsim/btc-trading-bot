@@ -22,6 +22,12 @@ except (AttributeError, RuntimeError, OSError):
 
 import os
 
+os.environ["TRADE_MODE"] = "simulation"
+os.environ["BYBIT_API_KEY"] = "mock_test_key"
+os.environ["BYBIT_API_SECRET"] = "mock_test_secret"
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_CHAT_ID"] = ""
+
 if os.path.exists(".manifest_hmac_secret"):
     with open(".manifest_hmac_secret", "r") as f:
         _sec = f.read().strip()

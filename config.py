@@ -77,6 +77,7 @@ MODEL_SLOT_DENYLIST = {
 }.union(_persisted_denylist)
 
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
+SPRT_MIN_DETECTABLE_D = 0.20                  # Pre-registered minimum detectable effect size for SPRT sequential testing
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
 CONSERVATIVE_LEVERAGE_CAPS = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "default": 3.0}
 MIN_SL_PCT_CONFIG = {"15": 0.006, "30": 0.008, "60": 0.010, "120": 0.012, "240": 0.015, "360": 0.015, "default": 0.008}
@@ -320,8 +321,8 @@ TIMEFRAME_CONFIG = {
     "60": {   # 1H Timeframe - High-Conviction Swing (Targets ~3-4 trades/day across portfolio)
         "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 10)),
         "sl_mult": _get_tf_env("TF_60M_SL_MULT", 1.00),
-        "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.70),
-        "min_adx": _get_tf_env("TF_60M_MIN_ADX", 35.0),
+        "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.40),
+        "min_adx": _get_tf_env("TF_60M_MIN_ADX", 24.0),
         "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.20),
         "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.40)
     },

@@ -106,9 +106,14 @@ def run_daily_backup_scheduler():
             timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
             zip_filename = os.path.join(backup_dir, f"backup_{timestamp_str}.zip")
             
+            current_db = database.get_db_path()
             with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                if os.path.exists(DB_FILE):
-                    zipf.write(DB_FILE, os.path.basename(DB_FILE))
+                if os.path.exists(current_db):
+                    zipf.write(current_db, os.path.basename(current_db))
+                if os.path.exists(current_db + "-wal"):
+                    zipf.write(current_db + "-wal", os.path.basename(current_db + "-wal"))
+                if os.path.exists(current_db + "-shm"):
+                    zipf.write(current_db + "-shm", os.path.basename(current_db + "-shm"))
                 if os.path.exists(JOURNAL_PATH):
                     zipf.write(JOURNAL_PATH, os.path.basename(JOURNAL_PATH))
                     
@@ -200,3 +205,44 @@ def run_rolling_retrain_scheduler(retrain_models_thread_func=None):
             print(f"[Scheduler] Error in weekly retraining scheduler: {e}")
         
         time.sleep(900)
+
+
+def run_statistical_governance_scheduler():
+    """
+    Periodic background scheduler that evaluates live trade distributions per interval slot.
+    If a slot produces statistically confirmed negative expectancy (REJECT), it persists the slot
+    to governance_denylist.json to automatically offline the model on next execution cycle.
+    """
+    print("[Scheduler] Automated statistical governance monitoring scheduler started.")
+    intervals_to_monitor = ["15", "30", "60", "120", "240", "360"]
+    while True:
+        try:
+            import database
+            from statistical_validation import statistical_validation
+            from train import _record_to_governance_denylist
+            
+            all_trades = database.get_completed_trades(limit=1000)
+            if all_trades:
+                for iv in intervals_to_monitor:
+                    slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv]
+                    n_trades = len(slot_trades)
+                    if n_trades >= 5:
+                        returns = [float(t.get("change_pct", t.get("pnl_pct", 0.0))) for t in slot_trades]
+                        baseline_rets = [0.0] * n_trades
+                        matrix_res = statistical_validation.calculate_governed_validation_matrix(
+                            component_name=f"live_{iv}",
+                            baseline_returns=baseline_rets,
+                            component_returns=returns,
+                            completed_trades=n_trades,
+                            module_uuid=f"LIVE_{iv}",
+                            num_trials=1
+                        )
+                        decision = matrix_res.get("governance", {}).get("decision")
+                        if decision == "REJECT":
+                            reasons_str = "; ".join(matrix_res.get("governance", {}).get("reasons", ["Statistical rejection"]))
+                            print(f"[Statistical Governance Live Gate] Denylisting trending_{iv} due to statistical rejection: {reasons_str}")
+                            _record_to_governance_denylist(f"trending_{iv}", reason=f"Live statistical rejection: {reasons_str}")
+        except Exception as e:
+            print(f"[Statistical Governance Scheduler Error] {e}")
+
+        time.sleep(3600)  # Check hourly

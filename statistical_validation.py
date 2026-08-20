@@ -2,8 +2,8 @@
 statistical_validation.py
 --------------------------
 Component 1: Statistical Validation Layer & 8 Production Release Gates
-Evaluates Bootstrap 95% Confidence Intervals, Practical Significance (PF Gain >= +0.05), 
-Benjamini-Hochberg FDR Correction, and 8 Production Release Gates.
+Evaluates Circular Block Bootstrap Confidence Intervals, Practical Significance (PF Gain >= +0.05),
+Family-Wise Multiple Testing Corrections (Bonferroni / Benjamini-Hochberg), and 8 Production Release Gates.
 """
 
 import numpy as np
@@ -20,22 +20,37 @@ class StatisticalValidation:
         self.min_pf_gain = min_pf_gain
         self.fdr_alpha = fdr_alpha
 
-    def compute_bootstrap_ci(self, returns: List[float], num_samples: int = 1000, ci_level: float = 0.95) -> Tuple[float, float, float]:
+    def compute_bootstrap_ci(
+        self,
+        returns: List[float],
+        num_samples: int = 1000,
+        ci_level: float = 0.95,
+        block_len: int = 1
+    ) -> Tuple[float, float, float]:
         """
-        Computes 95% Bootstrap Confidence Interval for Profit Factor / Returns.
+        Computes Bootstrap Confidence Interval with stationary/circular block bootstrap
+        to account for autocorrelation across overlapping lookahead bars.
         Returns: (mean_return, lower_bound_95, upper_bound_95)
         """
         if not returns or len(returns) < 5:
             return 0.0, 0.0, 0.0
         
-        arr = np.array(returns)
+        arr = np.array(returns, dtype=float)
         boot_means = []
         n = len(arr)
         np.random.seed(42)
+        b_len = max(1, min(n, int(block_len)))
         
-        for _ in range(num_samples):
-            sample = np.random.choice(arr, size=n, replace=True)
-            boot_means.append(np.mean(sample))
+        if b_len == 1:
+            for _ in range(num_samples):
+                sample = np.random.choice(arr, size=n, replace=True)
+                boot_means.append(float(np.mean(sample)))
+        else:
+            n_blocks = int(np.ceil(n / float(b_len)))
+            for _ in range(num_samples):
+                starts = np.random.randint(0, n, size=n_blocks)
+                idx = ((starts[:, None] + np.arange(b_len)[None, :]) % n).ravel()[:n]
+                boot_means.append(float(np.mean(arr[idx])))
             
         boot_means = np.sort(boot_means)
         alpha = (1.0 - ci_level) / 2.0
@@ -43,6 +58,37 @@ class StatisticalValidation:
         high_idx = int((1.0 - alpha) * num_samples)
         
         return float(np.mean(arr)), float(boot_means[low_idx]), float(boot_means[high_idx])
+
+    def benjamini_hochberg(self, p_values: List[float], alpha: float = 0.05) -> List[float]:
+        """
+        Benjamini-Hochberg (BH) False Discovery Rate (FDR) control for a vector of p-values.
+        Computes q_val = min_{j >= i} (p_{(j)} * m / j), bounded by [0.0, 1.0].
+        Returns adjusted q-values in original input order.
+        """
+        if not p_values:
+            return []
+        m = len(p_values)
+        if m == 1:
+            return [min(1.0, max(0.0, float(p_values[0])))]
+        
+        indexed_p = sorted(enumerate(p_values), key=lambda x: x[1])
+        q_sorted = [0.0] * m
+        
+        # Step-up procedure from largest to smallest
+        running_min = 1.0
+        for rank_1idx in range(m, 0, -1):
+            orig_idx, p_val = indexed_p[rank_1idx - 1]
+            q_raw = float(p_val) * m / float(rank_1idx)
+            running_min = min(running_min, q_raw)
+            q_sorted[rank_1idx - 1] = min(1.0, max(0.0, running_min))
+            
+        # Reorder to original indices
+        q_result = [0.0] * m
+        for rank_1idx in range(m):
+            orig_idx = indexed_p[rank_1idx][0]
+            q_result[orig_idx] = q_sorted[rank_1idx]
+            
+        return q_result
 
     def evaluate_8_release_gates(
         self,
@@ -54,21 +100,27 @@ class StatisticalValidation:
         research_notebook_approved: bool,
         rollback_plan_defined: bool,
         live_reality_check_pass: bool,
-        pf_baseline: float,
-        pf_candidate: float,
-        p_value: float,
+        pf_baseline: Optional[float] = None,
+        pf_candidate: Optional[float] = None,
+        p_value: float = 0.01,
         num_trials: int = 12
     ) -> Dict[str, Any]:
         """
         Evaluates 8 Mandatory Production Release Gates including Dual-Significance.
         """
-        pf_gain = pf_candidate - pf_baseline
-        practical_pass = pf_gain >= self.min_pf_gain
-        
-        # Dynamic family size multiple-testing correction (Optuna trial count)
+        # Multiple-testing Bonferroni correction over candidate search trials
         m_trials = max(1, num_trials)
-        fdr_q_val = min(1.0, float(p_value * m_trials))
-        statistical_pass = fdr_q_val < self.fdr_alpha
+        bonferroni_p = min(1.0, float(p_value * m_trials))
+        statistical_pass = bonferroni_p < self.fdr_alpha
+
+        if pf_baseline is not None and pf_candidate is not None:
+            pf_gain = float(pf_candidate - pf_baseline)
+            practical_pass = pf_gain >= self.min_pf_gain
+            dual_sig_val = practical_pass and statistical_pass
+        else:
+            pf_gain = None
+            practical_pass = False
+            dual_sig_val = "NOT_EVALUABLE"
 
         gate_results = {
             "Gate 1 (Walk-Forward)": walk_forward_pass,
@@ -79,16 +131,17 @@ class StatisticalValidation:
             "Gate 6 (Notebook Approved)": research_notebook_approved,
             "Gate 7 (Rollback Defined)": rollback_plan_defined,
             "Gate 8 (Live Reality Check)": live_reality_check_pass,
-            "Dual-Significance (PF Gain >= 0.05)": practical_pass and statistical_pass
+            "Dual-Significance (PF Gain >= 0.05)": dual_sig_val
         }
 
-        all_passed = all(gate_results.values())
+        # Treat any non-True value (e.g. False or "NOT_EVALUABLE") as failure for production approval
+        all_passed = all(v is True for v in gate_results.values())
         return {
             "approved_for_production": all_passed,
-            "passed_count": sum(1 for v in gate_results.values() if v),
+            "passed_count": sum(1 for v in gate_results.values() if v is True),
             "total_gates": len(gate_results),
             "gate_details": gate_results,
-            "pf_gain": round(pf_gain, 4),
+            "pf_gain": round(pf_gain, 4) if pf_gain is not None else "N/A",
             "practical_significance": practical_pass,
             "statistical_significance": statistical_pass
         }
@@ -289,14 +342,15 @@ class StatisticalValidation:
         baseline_returns: List[float],
         component_returns: List[float],
         num_samples: int = 10000,
-        ci_level: float = 0.95
+        ci_level: float = 0.95,
+        block_len: int = 1
     ) -> Dict[str, float]:
         """
-        Calculates 10,000-sample Non-Parametric Bootstrap Confidence Interval & Distribution Diagnostics:
-        bootstrap_mean, median, std, skewness, and kurtosis.
+        Calculates 10,000-sample Non-Parametric Bootstrap Confidence Interval & Distribution Diagnostics
+        using circular block bootstrapping to account for autocorrelation across overlapping bars.
         """
-        arr_base = np.array(baseline_returns)
-        arr_comp = np.array(component_returns)
+        arr_base = np.array(baseline_returns, dtype=float)
+        arr_comp = np.array(component_returns, dtype=float)
         n = min(len(arr_base), len(arr_comp))
 
         if n < 5:
@@ -304,10 +358,21 @@ class StatisticalValidation:
 
         np.random.seed(42)
         diff_means = []
-        for _ in range(num_samples):
-            idx1 = np.random.choice(len(arr_comp), size=n, replace=True)
-            idx2 = np.random.choice(len(arr_base), size=n, replace=True)
-            diff_means.append(float(np.mean(arr_comp[idx1]) - np.mean(arr_base[idx2])))
+        b_len = max(1, min(n, int(block_len)))
+
+        if b_len == 1:
+            for _ in range(num_samples):
+                idx1 = np.random.choice(len(arr_comp), size=n, replace=True)
+                idx2 = np.random.choice(len(arr_base), size=n, replace=True)
+                diff_means.append(float(np.mean(arr_comp[idx1]) - np.mean(arr_base[idx2])))
+        else:
+            n_blocks = int(np.ceil(n / float(b_len)))
+            for _ in range(num_samples):
+                starts1 = np.random.randint(0, len(arr_comp), size=n_blocks)
+                starts2 = np.random.randint(0, len(arr_base), size=n_blocks)
+                idx1 = ((starts1[:, None] + np.arange(b_len)[None, :]) % len(arr_comp)).ravel()[:n]
+                idx2 = ((starts2[:, None] + np.arange(b_len)[None, :]) % len(arr_base)).ravel()[:n]
+                diff_means.append(float(np.mean(arr_comp[idx1]) - np.mean(arr_base[idx2])))
 
         diff_arr = np.sort(np.array(diff_means))
         alpha = (1.0 - ci_level) / 2.0
@@ -334,29 +399,27 @@ class StatisticalValidation:
 
     def calculate_effect_stability_score(
         self,
-        rolling_cohen_ds: List[float],
-        rolling_delta_pfs: List[float]
-    ) -> float:
+        rolling_cohen_ds: Optional[List[float]] = None,
+        rolling_delta_pfs: Optional[List[float]] = None,
+        fold_mccs: Optional[List[float]] = None
+    ) -> Optional[float]:
         """
-        Calculates Effect Stability Score (0-100) using explicit documented formula:
-        StabilityScore = 100 * (0.40 * SignConsistency + 0.40 * [1 - min(1, CV(d)/2)] + 0.20 * [1 - min(1, Var(DeltaPF))])
+        Calculates Effect Stability Score (0-100) using genuine per-fold cross-validation metrics.
+        Returns None if genuine fold series is not provided.
         """
-        if not rolling_cohen_ds or len(rolling_cohen_ds) < 2:
-            return 85.0
+        series = fold_mccs if (fold_mccs is not None and len(fold_mccs) >= 2) else rolling_cohen_ds
+        if series is None or len(series) < 2:
+            return None
 
-        arr_d = np.array(rolling_cohen_ds)
-        arr_pf = np.array(rolling_delta_pfs)
-
-        sign_consistency = float(np.mean(arr_d > 0))
-        mean_d = abs(float(np.mean(arr_d)))
-        std_d = float(np.std(arr_d))
-        cv_d = std_d / max(1e-4, mean_d)
-        var_pf = float(np.var(arr_pf))
+        arr_s = np.array(series, dtype=float)
+        sign_consistency = float(np.mean(arr_s > 0))
+        mean_s = abs(float(np.mean(arr_s)))
+        std_s = float(np.std(arr_s))
+        cv_s = std_s / max(1e-4, mean_s)
 
         score = 100.0 * (
-            0.40 * sign_consistency +
-            0.40 * max(0.0, 1.0 - min(1.0, cv_d / 2.0)) +
-            0.20 * max(0.0, 1.0 - min(1.0, var_pf))
+            0.50 * sign_consistency +
+            0.50 * max(0.0, 1.0 - min(1.0, cv_s / 2.0))
         )
         return round(max(0.0, min(100.0, score)), 1)
 
@@ -365,14 +428,14 @@ class StatisticalValidation:
         n_samples: int,
         diff_mean: float,
         std_dev: float,
-        effect_d: float,
+        d_target_registered: float = 0.20,
         alpha: float = 0.05,
         beta: float = 0.20
     ) -> Dict[str, Any]:
         """
-        Wald's Sequential Probability Ratio Test (SPRT) Peeking Protection.
+        Wald's Sequential Probability Ratio Test (SPRT) with Pre-Registered Alternative.
         Boundaries: A = ln((1-beta)/alpha) = 2.772 (Accept H1), B = ln(beta/(1-alpha)) = -1.558 (Reject H1).
-        Includes Expected Remaining Samples calculation.
+        Standardizes raw diff_mean before evaluating LLR.
         """
         if n_samples < 5 or std_dev <= 0:
             return {
@@ -385,8 +448,9 @@ class StatisticalValidation:
                 "expected_remaining_samples": 30
             }
 
-        d_target = max(0.20, abs(effect_d))
-        log_likelihood_ratio = float((n_samples * d_target / (std_dev ** 2)) * (diff_mean - 0.5 * d_target))
+        d_target = float(d_target_registered)
+        z_mean = diff_mean / max(1e-9, std_dev)
+        log_likelihood_ratio = float(n_samples * d_target * (z_mean - 0.5 * d_target))
 
         upper_bound = float(np.log((1.0 - beta) / alpha))     # ~ 2.772
         lower_bound = float(np.log(beta / (1.0 - alpha)))     # ~ -1.558
@@ -394,8 +458,7 @@ class StatisticalValidation:
         dist_upper = round(max(0.0, upper_bound - log_likelihood_ratio), 3)
         dist_lower = round(max(0.0, log_likelihood_ratio - lower_bound), 3)
 
-        # Expected remaining samples estimation
-        mean_step_increment = max(1e-4, (d_target ** 2) / (2.0 * max(1e-4, std_dev ** 2)))
+        mean_step_increment = max(1e-4, 0.5 * (d_target ** 2))
         exp_remaining = int(np.ceil(dist_upper / mean_step_increment)) if log_likelihood_ratio < upper_bound else 0
 
         if log_likelihood_ratio >= upper_bound:
@@ -422,7 +485,8 @@ class StatisticalValidation:
         component_returns: List[float],
         completed_trades: int = 45,
         module_uuid: str = "STR_STOP_15M_V4",
-        num_trials: int = 12
+        num_trials: int = 12,
+        fold_mccs: Optional[List[float]] = None
     ) -> Dict[str, Any]:
         """
         Governed Statistical Validation Schema with Audit Trail integration.
@@ -430,14 +494,14 @@ class StatisticalValidation:
         """
         if not baseline_returns or not component_returns or len(component_returns) < 5:
             return {
-                "governance": {"decision": "NEED_MORE_DATA", "reasons": ["Insufficient completed trade observations (N < 5)"]},
-                "statistics": {"p_value": 1.0, "bayes_factor_bf10": 1.0, "bayes_factor_bf01": 1.0, "bayes_interpretation": "Anecdotal Evidence for H0 (Null)", "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "bootstrap_diagnostics": {}, "mde": 0.20, "effect_stability_score": 0.0, "sprt_diagnostics": {}},
+                "governance": {"decision": "NEED_MORE_DATA", "reasons": ["Insufficient completed trade observations (N < 5)"], "promotion_triggers": []},
+                "statistics": {"p_value": 1.0, "bayes_factor_bf10": 1.0, "bayes_factor_bf01": 1.0, "bayes_interpretation": "Anecdotal Evidence for H0 (Null)", "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "bootstrap_diagnostics": {}, "mde": 0.20, "effect_stability_score": None, "sprt_diagnostics": {}},
                 "performance": {"delta_pf_raw": 0.0, "delta_pf_winsorized": 0.0, "delta_sharpe": 0.0, "delta_expectancy": 0.0},
                 "multiple_testing": {"experiment_family": "15m_strategy_experiments", "num_tests": max(1, num_trials), "fdr_method": "Bonferroni", "alpha": 0.05, "q_value": 1.0}
             }
 
-        arr_base = np.array(baseline_returns)
-        arr_comp = np.array(component_returns)
+        arr_base = np.array(baseline_returns, dtype=float)
+        arr_comp = np.array(component_returns, dtype=float)
 
         mean_base, mean_comp = float(np.mean(arr_base)), float(np.mean(arr_comp))
         std_base, std_comp = float(np.std(arr_base)), float(np.std(arr_comp))
@@ -474,13 +538,14 @@ class StatisticalValidation:
         delta_pf_win = round(pf_comp_win - pf_base_win, 3)
         delta_sharpe = round(float((mean_comp / max(1e-6, std_comp)) - (mean_base / max(1e-6, std_base))), 3)
 
-        # Power & SPRT
+        # Power & Pre-Registered SPRT
         power_dict = self.calculate_dynamic_sample_power(cohen_d, float(np.var(arr_comp)), completed_trades=completed_trades)
         power_val = power_dict["statistical_power"]
-        sprt_res = self.run_sprt_sequential_test(len(arr_comp), diff_mean, s_pooled, cohen_d)
+        sprt_min_d = getattr(config, "SPRT_MIN_DETECTABLE_D", 0.20)
+        sprt_res = self.run_sprt_sequential_test(len(arr_comp), diff_mean, s_pooled, d_target_registered=sprt_min_d)
 
-        # Effect stability score
-        stability_score = self.calculate_effect_stability_score([cohen_d, cohen_d * 0.9, cohen_d * 1.1], [delta_pf_win, delta_pf_win * 0.95, delta_pf_win * 1.05])
+        # Effect stability score from genuine fold metrics
+        stability_score = self.calculate_effect_stability_score(fold_mccs=fold_mccs)
 
         # Governance Decision Logic
         reasons = []
@@ -501,8 +566,7 @@ class StatisticalValidation:
             promotion_triggers.append(f"10k Bootstrap 95% CI [{ci_low}, {ci_high}] excludes zero")
 
         if abs(cohen_d) >= 0.20:
-            reasons.append(f"Cohen d ({cohen_d:.3f}) indicates moderate practical effect size")
-            promotion_triggers.append(f"Cohen d ({cohen_d:.3f}) >= 0.20")
+            promotion_triggers.append(f"Cohen d ({cohen_d:.3f}) >= 0.20 (meaningful effect)")
 
         if sprt_res["sprt_decision"] == "ACCEPT_H1_PROMOTE":
             promotion_triggers.append("Wald SPRT accepted H1")
@@ -516,6 +580,7 @@ class StatisticalValidation:
         else:
             decision = "REJECT"
 
+        bonferroni_adj_p = min(1.0, round(float(p_val * max(1, num_trials)), 4))
         result = {
             "governance": {
                 "decision": decision,
@@ -528,12 +593,11 @@ class StatisticalValidation:
                 "bayes_factor_bf10": bf10,
                 "bayes_factor_bf01": bf01,
                 "bayes_interpretation": bf_interp,
-                "fdr_q_value": min(1.0, round(float(p_val * max(1, num_trials)), 4)),
+                "bonferroni_adjusted_p_value": bonferroni_adj_p,
                 "cohen_d": round(cohen_d, 3),
                 "bootstrap_ci_95": [ci_low, ci_high],
                 "bootstrap_diagnostics": boot_diag,
                 "trial_adjusted_effect_penalty": round(float(np.exp(-abs(cohen_d) * 0.5 * np.sqrt(max(1, num_trials) / BENCHMARK_OPTUNA_TRIALS))), 4),
-                "bonferroni_adjusted_p_value": min(1.0, round(float(p_val * max(1, num_trials)), 4)),
                 "mde": round(2.8 / max(1e-4, np.sqrt(n1 + n2)), 3),
                 "effect_stability_score": stability_score,
                 "sprt_diagnostics": sprt_res
@@ -545,11 +609,11 @@ class StatisticalValidation:
                 "delta_expectancy": round(diff_mean, 4)
             },
             "multiple_testing": {
-                "experiment_family": "15m_strategy_experiments",
+                "experiment_family": f"{component_name}_experiments",
                 "num_tests": max(1, num_trials),
-                "fdr_method": "Bonferroni",
+                "correction_method": "Bonferroni",
                 "alpha": 0.05,
-                "q_value": min(1.0, round(float(p_val * max(1, num_trials)), 4))
+                "bonferroni_p": bonferroni_adj_p
             }
         }
 
@@ -572,28 +636,31 @@ class StatisticalValidation:
 
         return result
 
-
     def calculate_dynamic_sample_power(
         self,
         effect_size_d: float,
-        variance: float,
+        variance: float = 1.0,
         alpha: float = 0.05,
         target_power: float = 0.80,
         completed_trades: int = 45
     ) -> Dict[str, Any]:
         """
-        Pillar 4: Dynamic Sample Power Analysis (Variable N_required).
-        N_required = (2 * (z_{1-alpha/2} + z_{1-beta})^2 * sigma^2) / delta^2
+        Pillar 4: Dynamic Sample Power Analysis.
+        N_required = 2 * (z_{1-alpha/2} + z_{1-beta})^2 / d^2
+        Power is computed using exact normal-CDF with non-centrality parameter ncp = d * sqrt(N/2).
         """
-        d_abs = max(0.05, abs(effect_size_d))
-        z_alpha = 1.96  # 95% confidence
-        z_beta = 0.84   # 80% power
+        d_abs = max(0.001, abs(effect_size_d))
+        z_alpha = 1.959964  # 95% confidence (two-sided alpha=0.05)
+        z_beta = 0.841621   # 80% target power
 
-        n_required = int(np.ceil((2.0 * ((z_alpha + z_beta) ** 2) * max(0.01, variance)) / (d_abs ** 2)))
-        n_required = max(30, min(500, n_required))
+        n_required = int(np.ceil(2.0 * ((z_alpha + z_beta) ** 2) / (d_abs ** 2)))
+        n_required = max(10, n_required)
 
-        power_achieved = round(min(0.99, float(completed_trades / max(1, n_required))), 3)
-        is_sufficient = completed_trades >= n_required
+        from scipy.stats import norm
+        ncp = d_abs * np.sqrt(max(1, completed_trades) / 2.0)
+        power_achieved = float(norm.sf(z_alpha - ncp) + norm.cdf(-z_alpha - ncp))
+        power_achieved = round(min(0.999, max(0.001, power_achieved)), 4)
+        is_sufficient = (completed_trades >= n_required) and (power_achieved >= target_power)
 
         return {
             "effect_size_cohen_d": round(effect_size_d, 3),

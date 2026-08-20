@@ -47,14 +47,14 @@ def get_db_connection():
             return conn
         except sqlite3.OperationalError as op_err:
             # Handle transient database lock / contention with exponential backoff
-            if "locked" in str(op_err).lower() or "busy" in str(op_err).lower():
-                time.sleep(0.2 * (2 ** attempt))
-                continue
             try:
                 if conn is not None:
                     conn.close()
             except Exception:
                 pass
+            if "locked" in str(op_err).lower() or "busy" in str(op_err).lower():
+                time.sleep(0.2 * (2 ** attempt))
+                continue
             time.sleep(0.5)
         except sqlite3.DatabaseError as e:
             err_msg = str(e).lower()
@@ -74,6 +74,10 @@ def get_db_connection():
                             os.rename(target, f"{target}.corrupt.{timestamp}")
                         except Exception as ren_err:
                             print(f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
+                try:
+                    init_db()
+                except Exception as init_err:
+                    print(f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
                 time.sleep(0.5)
             else:
                 try:
@@ -953,12 +957,13 @@ def backup_database(dest_path=None) -> bool:
     Creates an automated online snapshot of trading_bot.db for RPO < 1 min disaster recovery.
     Uses SQLite's native online backup API to avoid blocking concurrent database access.
     """
+    target_db = get_db_path()
     if dest_path is None:
-        db_dir = os.path.dirname(DB_FILE) if os.path.dirname(DB_FILE) else "."
+        db_dir = os.path.dirname(target_db) if os.path.dirname(target_db) else "."
         dest_path = os.path.join(db_dir, "trading_bot_backup.db")
     with db_lock:
         try:
-            source_conn = sqlite3.connect(DB_FILE, timeout=10)
+            source_conn = sqlite3.connect(target_db, timeout=10)
             backup_conn = sqlite3.connect(dest_path, timeout=10)
             with backup_conn:
                 source_conn.backup(backup_conn)

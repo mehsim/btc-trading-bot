@@ -447,20 +447,22 @@ def add_features(df, fetch_calendar_callback=None, symbol=None):
     df["upper_wick_volume_ratio"] = upper_wick_vol / (upper_wick_vol.rolling(20).mean() + 1e-8)
     df["lower_wick_volume_ratio"] = lower_wick_vol / (lower_wick_vol.rolling(20).mean() + 1e-8)
     
-    # Ensure source correlation features exist
+    # Ensure source correlation features exist without DataFrame fragmentation
+    missing_cols = {}
     for col in ["oi_change_1h", "oi_change_4h", "btc_close", "btc_volume", "btc_rsi", "hours_to_news"]:
         if col not in df.columns:
             if "hours_to_news" in col:
-                df[col] = 72.0
-
+                missing_cols[col] = 72.0
             elif "rsi" in col:
-                df[col] = 50.0
+                missing_cols[col] = 50.0
             elif "close" in col:
-                df[col] = df["close"]
+                missing_cols[col] = df["close"]
             elif "volume" in col:
-                df[col] = df["volume"]
+                missing_cols[col] = df["volume"]
             else:
-                df[col] = 0.0
+                missing_cols[col] = 0.0
+    if missing_cols:
+        df = df.assign(**missing_cols)
                 
     # Batch all lag and cyclical features into a single dictionary to eliminate DataFrame fragmentation
     new_lag_cols = {}
@@ -597,8 +599,8 @@ def add_candlestick_patterns(df):
     def _shift(arr, n):
         s = pd.Series(arr).shift(n)
         if s.dtype == bool or np.issubdtype(s.dtype, np.bool_) or isinstance(arr.iloc[0] if hasattr(arr, 'iloc') else arr[0], (bool, np.bool_)):
-            return s.fillna(False).astype(bool).values
-        return s.fillna(0.0).values
+            return s.astype('boolean').fillna(False).to_numpy(dtype=bool)
+        return s.fillna(0.0).to_numpy(dtype=float)
 
     # 2-candle patterns
     prev_o, prev_c = _shift(o, 1), _shift(c, 1)

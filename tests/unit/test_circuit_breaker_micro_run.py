@@ -36,8 +36,8 @@ def test_circuit_breaker_halts_on_max_trades_cap():
         is_healthy, reason = circuit_breaker.evaluate_micro_run_caps(
             closed_trade_count=closed_trade_count,
             cumulative_loss=cumulative_loss,
-            max_trades_cap=60,
-            max_loss_cap=15.0
+            max_trades_cap=config.MAX_LIVE_TRADES_CAP,
+            max_loss_cap=config.MAX_LIVE_LOSS_CAP
         )
         
         assert is_healthy is False
@@ -78,8 +78,8 @@ def test_circuit_breaker_halts_on_max_loss_cap():
         is_healthy, reason = circuit_breaker.evaluate_micro_run_caps(
             closed_trade_count=closed_trade_count,
             cumulative_loss=cumulative_loss,
-            max_trades_cap=60,
-            max_loss_cap=15.0
+            max_trades_cap=config.MAX_LIVE_TRADES_CAP,
+            max_loss_cap=config.MAX_LIVE_LOSS_CAP
         )
         
         assert is_healthy is False
