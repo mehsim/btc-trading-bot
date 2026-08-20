@@ -668,8 +668,9 @@ def sanitize_feature_matrix(X):
     try:
         if isinstance(X, pd.DataFrame):
             df = X.copy()
-            df = df.replace([np.inf, -np.inf], np.nan)
-            for c in df.columns:
+            num_cols = df.select_dtypes(include=[np.number]).columns
+            df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan)
+            for c in num_cols:
                 c_low = str(c).lower()
                 if "hours_to_news" in c_low:
                     fill_val = 72.0
@@ -679,22 +680,22 @@ def sanitize_feature_matrix(X):
                     fill_val = 1.0
                 else:
                     fill_val = 0.0
-                df[c] = df[c].fillna(fill_val)
-            return df.astype(float)
+                df[c] = df[c].fillna(fill_val).astype(float)
+            return df
         elif isinstance(X, pd.Series):
-            s = X.copy()
-            s = s.replace([np.inf, -np.inf], np.nan)
-            s_name = str(s.name or "").lower()
-            if "hours_to_news" in s_name:
-                fill_val = 72.0
-            elif "rsi" in s_name and not any(z in s_name for z in ("_z", "zscore", "z_score")):
-                fill_val = 50.0
-            elif any(rc in s_name for rc in ratio_cols) and "to_btc" not in s_name:
-                fill_val = 1.0
-            else:
-                fill_val = 0.0
-            s = s.fillna(fill_val)
-            return s.astype(float)
+            if pd.api.types.is_numeric_dtype(X):
+                s = X.copy().replace([np.inf, -np.inf], np.nan)
+                s_name = str(s.name or "").lower()
+                if "hours_to_news" in s_name:
+                    fill_val = 72.0
+                elif "rsi" in s_name and not any(z in s_name for z in ("_z", "zscore", "z_score")):
+                    fill_val = 50.0
+                elif any(rc in s_name for rc in ratio_cols) and "to_btc" not in s_name:
+                    fill_val = 1.0
+                else:
+                    fill_val = 0.0
+                return s.fillna(fill_val).astype(float)
+            return X
         elif isinstance(X, dict):
             clean_dict = {}
             for k, v in X.items():

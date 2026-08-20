@@ -133,9 +133,14 @@ def sanitize_feature_matrix(X):
         log_event("WARNING", f"Ensemble sanitization fallback notice: {ex_ens}")
         try:
             if isinstance(X, pd.DataFrame):
-                return X.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                df_out = X.copy()
+                num_cols = df_out.select_dtypes(include=[np.number]).columns
+                df_out[num_cols] = df_out[num_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                return df_out
             elif isinstance(X, pd.Series):
-                return X.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                if pd.api.types.is_numeric_dtype(X):
+                    return X.replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+                return X
             elif isinstance(X, dict):
                 return {k: (0.0 if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))) else float(v)) for k, v in X.items()}
             else:
