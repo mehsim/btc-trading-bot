@@ -32,7 +32,7 @@ class StatisticalValidation:
         to account for autocorrelation across overlapping lookahead bars.
         Returns: (mean_return, lower_bound_95, upper_bound_95)
         """
-        if not returns or len(returns) < 5:
+        if returns is None or len(returns) < 5:
             return 0.0, 0.0, 0.0
         
         arr = np.array(returns, dtype=float)
@@ -65,7 +65,7 @@ class StatisticalValidation:
         Computes q_val = min_{j >= i} (p_{(j)} * m / j), bounded by [0.0, 1.0].
         Returns adjusted q-values in original input order.
         """
-        if not p_values:
+        if p_values is None or len(p_values) == 0:
             return []
         m = len(p_values)
         if m == 1:
@@ -492,7 +492,7 @@ class StatisticalValidation:
         Governed Statistical Validation Schema with Audit Trail integration.
         Partitioned into governance, statistics, performance, and multiple_testing blocks.
         """
-        if not baseline_returns or not component_returns or len(component_returns) < 5:
+        if baseline_returns is None or component_returns is None or len(component_returns) < 5 or len(baseline_returns) < 5:
             return {
                 "governance": {"decision": "NEED_MORE_DATA", "reasons": ["Insufficient completed trade observations (N < 5)"], "promotion_triggers": []},
                 "statistics": {"p_value": 1.0, "bayes_factor_bf10": 1.0, "bayes_factor_bf01": 1.0, "bayes_interpretation": "Anecdotal Evidence for H0 (Null)", "fdr_q_value": 1.0, "cohen_d": 0.0, "bootstrap_ci_95": [0.0, 0.0], "bootstrap_diagnostics": {}, "mde": 0.20, "effect_stability_score": None, "sprt_diagnostics": {}},

@@ -2477,6 +2477,8 @@ if __name__ == "__main__":
         try:
             train_models(interval=iv, pages=args.pages)
         except Exception as train_err:
+            import traceback
+            traceback.print_exc()
             err_msg = str(train_err)[:200]
             print(f"[Train Error] Interval {iv} failed: {train_err}")
             errors.append(f"{iv}m: {err_msg}")
