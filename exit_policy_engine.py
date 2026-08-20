@@ -170,12 +170,14 @@ class ExitPolicyEngine:
         Short: min(Swing High + 0.25*ATR, ATR Trailing SL, current_SL) (requires current_price < entry_price)
         """
         atr_buffer = 0.25 * atr_dollars
+        min_sl_dist = 0.60 * atr_dollars
         if direction == "Bullish":
             if current_price <= entry_price:
                 return stop_loss
             atr_trail = current_price - (1.5 * atr_dollars)
             struct_trail = (swing_price - atr_buffer) if swing_price and swing_price > 0 else atr_trail
             candidate_sl = max(atr_trail, struct_trail)
+            candidate_sl = min(candidate_sl, current_price - min_sl_dist)
             return max(stop_loss, candidate_sl)
         else:
             if current_price >= entry_price:
@@ -183,6 +185,7 @@ class ExitPolicyEngine:
             atr_trail = current_price + (1.5 * atr_dollars)
             struct_trail = (swing_price + atr_buffer) if swing_price and swing_price > 0 else atr_trail
             candidate_sl = min(atr_trail, struct_trail)
+            candidate_sl = max(candidate_sl, current_price + min_sl_dist)
             return min(stop_loss, candidate_sl)
 
     def evaluate_exit(
@@ -344,13 +347,70 @@ class ExitPolicyEngine:
         for p_id, shadow_cfg in self.shadow_configs.items():
             try:
                 shadow_params = shadow_cfg.get("parameters", {}).get(regime.upper(), {})
+                if not shadow_params:
+                    shadow_params = shadow_cfg.get("parameters", {}).get("RANGING", {})
+
+                direction = active_trade.get("direction", "Bullish")
+                entry_price = float(active_trade.get("entry_price", current_price))
+                stop_loss = float(active_trade.get("stop_loss", current_price * 0.95))
+                take_profit = float(active_trade.get("take_profit", current_price * 1.05))
+                atr_dollars = float(active_trade.get("atr_dollars") or (entry_price * 0.01))
+
+                # 1. Shadow Trailing Stop Evaluation
+                shadow_sl = self.evaluate_hybrid_trailing_stop(
+                    direction=direction,
+                    current_price=current_price,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    swing_price=swing_price,
+                    atr_dollars=atr_dollars
+                )
+
+                # 2. Shadow Stagnation Check
+                stag_hours = float(shadow_params.get("stagnation_exit_hours", 2.0))
+                entry_time = float(active_trade.get("entry_time", current_time))
+                trade_age_hours = (current_time - entry_time) / 3600.0
+                is_long = direction == "Bullish"
+                pnl_usd = (current_price - entry_price) * float(active_trade.get("qty", 1.0)) if is_long else (entry_price - current_price) * float(active_trade.get("qty", 1.0))
+                price_dev = abs(current_price - entry_price)
+                entry_atr = float(active_trade.get("atr_dollars", atr_dollars))
+
+                stag_exit, stag_reason = self.evaluate_stagnation_gate(
+                    pnl_usd=pnl_usd,
+                    current_atr=atr_dollars,
+                    entry_atr=entry_atr,
+                    current_volume=current_volume,
+                    avg_volume=avg_volume,
+                    trade_age_hours=trade_age_hours,
+                    stagnation_age_hours=stag_hours,
+                    price_dev=price_dev,
+                    adx_val=adx_val,
+                    regime=regime
+                )
+
+                shadow_exit_reason = None
+                if stag_exit:
+                    shadow_exit_reason = stag_reason
+                elif is_long and current_price <= shadow_sl:
+                    shadow_exit_reason = "SHADOW_TRAILING_STOP_HIT"
+                elif is_long and current_price >= take_profit:
+                    shadow_exit_reason = "SHADOW_TAKE_PROFIT_HIT"
+                elif not is_long and current_price >= shadow_sl:
+                    shadow_exit_reason = "SHADOW_TRAILING_STOP_HIT"
+                elif not is_long and current_price <= take_profit:
+                    shadow_exit_reason = "SHADOW_TAKE_PROFIT_HIT"
+
                 if not hasattr(self, "_shadow_evaluations"):
                     self._shadow_evaluations = {}
                 self._shadow_evaluations[p_id] = {
                     "last_eval_time": current_time,
                     "last_price": current_price,
                     "regime": regime,
-                    "active_trade_id": active_trade.get("trade_id", "none")
+                    "active_trade_id": active_trade.get("trade_id", "none"),
+                    "shadow_sl": shadow_sl,
+                    "shadow_exit_reason": shadow_exit_reason,
+                    "stag_exit": stag_exit,
+                    "pnl_usd": pnl_usd
                 }
             except Exception as shadow_err:
                 pass

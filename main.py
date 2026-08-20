@@ -28,7 +28,7 @@ if hasattr(sys.stderr, "reconfigure"):
         log_event("WARNING", f"sys.stderr reconfigure exception: {ex}")
 
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from kelly_tracker import global_kelly_tracker
 from volatility_clusterer import volatility_clusterer
 from gmm_trail import gmm_trailing_engine
@@ -1577,17 +1577,24 @@ def emergency_flatten_position(symbol, opp_side, qty_str, max_retries=2):
             if ret_code == 0:
                 order_id = res.get("result", {}).get("orderId") if isinstance(res, dict) else None
                 if order_id:
-                    time.sleep(0.2)
+                    time.sleep(0.3)
                     details = get_bybit_order_details(symbol, order_id)
                     status = details.get("orderStatus") if isinstance(details, dict) else None
-                    if status in ["Filled", "PartiallyFilled", None]:
-                        log_event("INFO", f"[{symbol} Emergency Flatten] Successfully executed {opp_side} IOC (Qty: {qty_str}, Attempt {attempt}, Status: {status}).")
+                    if status == "Filled":
+                        log_event("INFO", f"[{symbol} Emergency Flatten] Successfully executed {opp_side} IOC (Qty: {qty_str}, Attempt {attempt}, Status: Filled).")
                         return True
                     else:
-                        log_event("WARNING", f"[{symbol} Emergency Flatten] Order {order_id} not filled (Status: {status}).")
+                        # Recheck live position on Bybit to verify if residual size is 0
+                        pos = get_bybit_position(symbol)
+                        if pos and float(pos.get("size", 0.0)) == 0.0:
+                            log_event("INFO", f"[{symbol} Emergency Flatten] Position confirmed flat on Bybit (Attempt {attempt}).")
+                            return True
+                        log_event("WARNING", f"[{symbol} Emergency Flatten] Order {order_id} not completely filled (Status: {status}, Pos size: {pos.get('size') if pos else 'none'}).")
                 else:
-                    log_event("INFO", f"[{symbol} Emergency Flatten] Successfully submitted {opp_side} IOC (Qty: {qty_str}, Attempt {attempt}).")
-                    return True
+                    pos = get_bybit_position(symbol)
+                    if pos and float(pos.get("size", 0.0)) == 0.0:
+                        log_event("INFO", f"[{symbol} Emergency Flatten] Successfully submitted IOC and position confirmed flat.")
+                        return True
             else:
                 log_event("WARNING", f"[{symbol} Emergency Flatten] Attempt {attempt} returned {res.get('retMsg', res)}")
         except Exception as ex:
@@ -3934,188 +3941,192 @@ def sync_active_positions_from_bybit():
         with active_execution_lock:
             with active_trades_lock:
                 matched_symbols = set()
-            
-            for tf_key in ACTIVE_TRADE_TF_KEYS:
-                current_trades = bot_state.get(f"active_trade_{tf_key}", [])
-                if not isinstance(current_trades, list):
-                    current_trades = []
-                
-                seen_symbols_in_tf = set()
-                updated_trades = []
-                for t in current_trades:
-                    symbol = t.get("symbol")
-                    if not symbol:
-                        continue
-                    if symbol in seen_symbols_in_tf:
-                        print(f"[De-duplication] Discarded duplicate active trade for {symbol} in timeframe {tf_key}.")
-                        continue
-                    seen_symbols_in_tf.add(symbol)
-                    if symbol in open_positions:
-                        pos = open_positions[symbol]
-                        t["bybit_closed"] = False
-                        
-                        conf_val = t.get("confidence", 0.0)
-                        is_zero_conf = False
-                        if conf_val is not None and conf_val != "MT":
-                            try:
-                                is_zero_conf = (float(conf_val) == 0.0)
-                            except (ValueError, TypeError):
-                                pass
-                        
-                        if is_zero_conf:
-                            trade_dir = t.get("direction", "Bullish")
-                            for p in reversed(bot_state.get("prediction_history", [])):
-                                if p.get("symbol") == symbol and p.get("direction") == trade_dir:
-                                    if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
-                                        t["confidence"] = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
-                                        print(f"[Sync Confidence Restore] Restored confidence for recovered {symbol} trade: {t['confidence']*100:.2f}%")
-                                        save_history()
-                                        break
-
-                        # Side Mismatch Guard: verify Bybit position side aligns with trade direction
-                        pos_side = pos.get("side") # "Buy" or "Sell"
-                        trade_direction = t.get("direction") # "Bullish" or "Bearish"
-                        mismatch = False
-                        if trade_direction == "Bullish" and pos_side != "Buy":
-                            mismatch = True
-                        elif trade_direction == "Bearish" and pos_side != "Sell":
-                            mismatch = True
-                            
-                        if mismatch:
-                            print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
-                            if TRADE_MODE != "simulation":
-                                close_side = "Sell" if pos_side == "Buy" else "Buy"
-                                place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])), reduce_only=True)
-                                if t.get("bybit_scale_out_order_id"):
-                                    cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
+                for tf_key in ACTIVE_TRADE_TF_KEYS:
+                    current_trades = bot_state.get(f"active_trade_{tf_key}", [])
+                    if not isinstance(current_trades, list):
+                        current_trades = []
+                    
+                    seen_symbols_in_tf = set()
+                    updated_trades = []
+                    for t in current_trades:
+                        symbol = t.get("symbol")
+                        if not symbol:
                             continue
-    
-                        t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
-                        t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
-                        t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
-                        t["qty"] = float(pos.get("size", t["qty"]))
-                        t["leverage"] = float(pos.get("leverage", t["leverage"]))
-                        
-                        # Sync TP/SL from Bybit exchange if they exist and are non-zero
-                        bybit_sl = float(pos.get("stopLoss", 0.0)) if pos.get("stopLoss") else 0.0
-                        bybit_tp = float(pos.get("takeProfit", 0.0)) if pos.get("takeProfit") else 0.0
-                        if bybit_sl > 0.0:
-                            if t.get("break_even_triggered", False):
-                                if t.get("direction") == "Bullish":
-                                    t["stop_loss"] = max(bybit_sl, t["entry_price"])
-                                else:
-                                    t["stop_loss"] = min(bybit_sl, t["entry_price"])
-                            else:
-                                t["stop_loss"] = bybit_sl
-                        if bybit_tp > 0.0:
-                            t["take_profit"] = bybit_tp
-                        
-                        pos_val = float(pos.get("positionValue", 0.0))
-                        t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
-                        t["qty"] = abs(float(pos.get("size", 0.0)))
-                        
-                        # Proportional Unrealized PnL calculation
-                        try:
-                            same_symbol_trades = []
-                            for tf_check in ACTIVE_TRADE_TF_KEYS:
-                                for t_item in bot_state.get(f"active_trade_{tf_check}", []):
-                                    if t_item.get("symbol") == symbol:
-                                        same_symbol_trades.append(t_item)
-                            total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
-                            position_pnl = float(pos.get("unrealisedPnl", 0.0))
-                            if total_lev_size > 0:
-                                this_lev_size = float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
-                                t["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
-                            else:
-                                t["bybit_unrealized_pnl"] = position_pnl
-                        except Exception:
-                            t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
-                        
-                        # Sanitize ATR, TP, and SL for active trades to prevent invalid/stuck parameters
-                        avg_price = t["entry_price"]
-                        mark_price = t["mark_price"]
-                        liq_price = t["liq_price"]
-                        direction = t.get("direction", "Bullish")
-                        
-                        # Fix ATR if it's unreasonably large or unset
-                        current_atr = t.get("atr_dollars", 0.0)
-                        if current_atr <= 0 or current_atr > 0.05 * avg_price:
-                            current_atr = 0.015 * avg_price
-                            t["atr_dollars"] = current_atr
+                        if symbol in seen_symbols_in_tf:
+                            print(f"[De-duplication] Discarded duplicate active trade for {symbol} in timeframe {tf_key}.")
+                            continue
+                        seen_symbols_in_tf.add(symbol)
+                        if symbol in open_positions:
+                            pos = open_positions[symbol]
+                            t["bybit_closed"] = False
                             
-                        # Fix Take Profit if it is unset (0.0)
-                        if t.get("take_profit", 0.0) == 0.0:
-                            if direction == "Bullish":
-                                t["take_profit"] = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
-                            else:
-                                t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
-                            if TRADE_MODE != "simulation":
-                                update_bybit_take_profit(symbol, t["take_profit"], t)
+                            conf_val = t.get("confidence", 0.0)
+                            is_zero_conf = False
+                            if conf_val is not None and conf_val != "MT":
+                                try:
+                                    is_zero_conf = (float(conf_val) == 0.0)
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            if is_zero_conf:
+                                trade_dir = t.get("direction", "Bullish")
+                                for p in reversed(bot_state.get("prediction_history", [])):
+                                    if p.get("symbol") == symbol and p.get("direction") == trade_dir:
+                                        if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
+                                            t["confidence"] = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
+                                            print(f"[Sync Confidence Restore] Restored confidence for recovered {symbol} trade: {t['confidence']*100:.2f}%")
+                                            save_history()
+                                            break
+
+                            # Side Mismatch Guard: verify Bybit position side aligns with trade direction
+                            pos_side = pos.get("side") # "Buy" or "Sell"
+                            trade_direction = t.get("direction") # "Bullish" or "Bearish"
+                            mismatch = False
+                            if trade_direction == "Bullish" and pos_side != "Buy":
+                                mismatch = True
+                            elif trade_direction == "Bearish" and pos_side != "Sell":
+                                mismatch = True
                                 
-                        # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
-                        sl_val = t.get("stop_loss", 0.0)
-                        sl_updated = False
-                        if direction == "Bullish":
-                            if sl_val <= 0.0 or (liq_price > 0.0 and sl_val <= liq_price) or sl_val < avg_price - 3.0 * current_atr:
-                                sl_val = avg_price - 0.75 * current_atr
-                                if liq_price > 0.0 and sl_val <= liq_price:
-                                    sl_val = liq_price + 0.2 * current_atr
-                                sl_updated = True
-                        else:
-                            if sl_val <= 0.0 or (liq_price > 0.0 and sl_val >= liq_price) or sl_val > avg_price + 3.0 * current_atr:
-                                sl_val = avg_price + 0.75 * current_atr
-                                if liq_price > 0.0 and sl_val >= liq_price:
-                                    sl_val = liq_price - 0.2 * current_atr
-                                sl_updated = True
-                                
-                        if sl_updated:
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(symbol, sl_val, t)
-                                if success:
-                                    t["stop_loss"] = sl_val
+                            if mismatch:
+                                print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
+                                if TRADE_MODE != "simulation":
+                                    close_side = "Sell" if pos_side == "Buy" else "Buy"
+                                    close_res = place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])), reduce_only=True)
+                                    if isinstance(close_res, dict) and close_res.get("retCode") == 0:
+                                        if t.get("bybit_scale_out_order_id"):
+                                            cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
+                                        continue
+                                    else:
+                                        log_event("CRITICAL", f"[Side Mismatch Guard] Close order failed for {symbol}: {close_res}. Retaining trade in state.")
+                                else:
+                                    continue
+        
+                            t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
+                            t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
+                            t["mark_price"] = float(pos.get("markPrice", 0.0)) if pos.get("markPrice") else 0.0
+                            t["qty"] = float(pos.get("size", t["qty"]))
+                            t["leverage"] = float(pos.get("leverage", t["leverage"]))
+                            
+                            # Sync TP/SL from Bybit exchange if they exist and are non-zero
+                            bybit_sl = float(pos.get("stopLoss", 0.0)) if pos.get("stopLoss") else 0.0
+                            bybit_tp = float(pos.get("takeProfit", 0.0)) if pos.get("takeProfit") else 0.0
+                            if bybit_sl > 0.0:
+                                if t.get("break_even_triggered", False):
+                                    if t.get("direction") == "Bullish":
+                                        t["stop_loss"] = max(bybit_sl, t["entry_price"])
+                                    else:
+                                        t["stop_loss"] = min(bybit_sl, t["entry_price"])
                                 else:
                                     t["stop_loss"] = bybit_sl
+                            if bybit_tp > 0.0:
+                                t["take_profit"] = bybit_tp
+                            
+                            pos_val = float(pos.get("positionValue", 0.0))
+                            t["position_size_usd"] = pos_val / t["leverage"] if t["leverage"] > 0 else pos_val
+                            t["qty"] = abs(float(pos.get("size", 0.0)))
+                            
+                            # Proportional Unrealized PnL calculation
+                            try:
+                                same_symbol_trades = []
+                                for tf_check in ACTIVE_TRADE_TF_KEYS:
+                                    for t_item in bot_state.get(f"active_trade_{tf_check}", []):
+                                        if t_item.get("symbol") == symbol:
+                                            same_symbol_trades.append(t_item)
+                                total_lev_size = sum(float(t_item.get("position_size_usd", 0.0)) * float(t_item.get("leverage", 1.0)) for t_item in same_symbol_trades)
+                                position_pnl = float(pos.get("unrealisedPnl", 0.0))
+                                if total_lev_size > 0:
+                                    this_lev_size = float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
+                                    t["bybit_unrealized_pnl"] = round(position_pnl * (this_lev_size / total_lev_size), 2)
+                                else:
+                                    t["bybit_unrealized_pnl"] = position_pnl
+                            except Exception:
+                                t["bybit_unrealized_pnl"] = float(pos.get("unrealisedPnl", 0.0))
+                            
+                            # Sanitize ATR, TP, and SL for active trades to prevent invalid/stuck parameters
+                            avg_price = t["entry_price"]
+                            mark_price = t["mark_price"]
+                            liq_price = t["liq_price"]
+                            direction = t.get("direction", "Bullish")
+                            
+                            # Fix ATR if it's unreasonably large or unset
+                            current_atr = t.get("atr_dollars", 0.0)
+                            if current_atr <= 0 or current_atr > 0.05 * avg_price:
+                                current_atr = 0.015 * avg_price
+                                t["atr_dollars"] = current_atr
+                                
+                            # Fix Take Profit if it is unset (0.0)
+                            if t.get("take_profit", 0.0) == 0.0:
+                                if direction == "Bullish":
+                                    t["take_profit"] = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
+                                else:
+                                    t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
+                                if TRADE_MODE != "simulation":
+                                    update_bybit_take_profit(symbol, t["take_profit"], t)
+                                    
+                            # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
+                            sl_val = t.get("stop_loss", 0.0)
+                            sl_updated = False
+                            if direction == "Bullish":
+                                if sl_val <= 0.0 or (liq_price > 0.0 and sl_val <= liq_price) or sl_val < avg_price - 3.0 * current_atr:
+                                    sl_val = avg_price - 0.75 * current_atr
+                                    if liq_price > 0.0 and sl_val <= liq_price:
+                                        sl_val = liq_price + 0.2 * current_atr
+                                    sl_updated = True
                             else:
-                                t["stop_loss"] = sl_val
-                        
-                        # Dynamically reconstruct original size for recovered trades
-                        if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
-                            orig_qty, filled_qty, entry_ord_id = get_bybit_entry_order_qty(symbol, pos_side)
-                            if orig_qty is not None and orig_qty > 0.0:
-                                t["original_size"] = (orig_qty * avg_price) / t["leverage"] if t["leverage"] > 0 else (orig_qty * avg_price)
-                                t["fill_pct"] = round((filled_qty / orig_qty) * 100.0, 2)
-                                t["original_size_reconstructed"] = True
-                                if entry_ord_id and not t.get("bybit_order_id"):
+                                if sl_val <= 0.0 or (liq_price > 0.0 and sl_val >= liq_price) or sl_val > avg_price + 3.0 * current_atr:
+                                    sl_val = avg_price + 0.75 * current_atr
+                                    if liq_price > 0.0 and sl_val >= liq_price:
+                                        sl_val = liq_price - 0.2 * current_atr
+                                    sl_updated = True
+                                    
+                            if sl_updated:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(symbol, sl_val, t)
+                                    if success:
+                                        t["stop_loss"] = sl_val
+                                    else:
+                                        t["stop_loss"] = bybit_sl
+                                else:
+                                    t["stop_loss"] = sl_val
+                            
+                            # Dynamically reconstruct original size for recovered trades
+                            if t.get("recovered", False) and t.get("original_size_reconstructed", False) is not True:
+                                orig_qty, filled_qty, entry_ord_id = get_bybit_entry_order_qty(symbol, pos_side)
+                                if orig_qty is not None and orig_qty > 0.0:
+                                    t["original_size"] = (orig_qty * avg_price) / t["leverage"] if t["leverage"] > 0 else (orig_qty * avg_price)
+                                    t["fill_pct"] = round((filled_qty / orig_qty) * 100.0, 2)
+                                    t["original_size_reconstructed"] = True
+                                    if entry_ord_id and not t.get("bybit_order_id"):
+                                        t["bybit_order_id"] = entry_ord_id
+                                    print(f"[Crash Recovery Sync] Reconstructed original size for {symbol}: target={t['original_size']:.2f}, filled={t['position_size_usd']:.2f} ({t['fill_pct']}%)")
+                                    save_history()
+
+                            # Recover missing/unset bybit_order_id
+                            if not t.get("bybit_order_id") or t.get("bybit_order_id") == "N/A":
+                                _, _, entry_ord_id = get_bybit_entry_order_qty(symbol, pos_side)
+                                if entry_ord_id:
                                     t["bybit_order_id"] = entry_ord_id
-                                print(f"[Crash Recovery Sync] Reconstructed original size for {symbol}: target={t['original_size']:.2f}, filled={t['position_size_usd']:.2f} ({t['fill_pct']}%)")
-                                save_history()
+                                    print(f"[Sync] Recovered missing bybit_order_id {entry_ord_id} for {symbol}")
 
-                        # Recover missing/unset bybit_order_id
-                        if not t.get("bybit_order_id") or t.get("bybit_order_id") == "N/A":
-                            _, _, entry_ord_id = get_bybit_entry_order_qty(symbol, pos_side)
-                            if entry_ord_id:
-                                t["bybit_order_id"] = entry_ord_id
-                                print(f"[Sync] Recovered missing bybit_order_id {entry_ord_id} for {symbol}")
-
-                        # Recover missing/unset bybit_scale_out_order_id
-                        if not t.get("bybit_scale_out_order_id") or t.get("bybit_scale_out_order_id") == "N/A":
-                            limit_side = "Sell" if pos_side == "Buy" else "Buy"
-                            limit_ord_id = get_bybit_active_limit_order_id(symbol, limit_side)
-                            if limit_ord_id:
-                                t["bybit_scale_out_order_id"] = limit_ord_id
-                                print(f"[Sync] Recovered missing bybit_scale_out_order_id {limit_ord_id} for {symbol}")
-                        
-                        updated_trades.append(t)
-                        matched_symbols.add(symbol)
-                    else:
-                        # Position is closed on Bybit: keep ONLY if exit has not yet been processed
-                        if not t.get("exit_processed", False):
-                            t["bybit_closed"] = True
+                            # Recover missing/unset bybit_scale_out_order_id
+                            if not t.get("bybit_scale_out_order_id") or t.get("bybit_scale_out_order_id") == "N/A":
+                                limit_side = "Sell" if pos_side == "Buy" else "Buy"
+                                limit_ord_id = get_bybit_active_limit_order_id(symbol, limit_side)
+                                if limit_ord_id:
+                                    t["bybit_scale_out_order_id"] = limit_ord_id
+                                    print(f"[Sync] Recovered missing bybit_scale_out_order_id {limit_ord_id} for {symbol}")
+                            
                             updated_trades.append(t)
+                            matched_symbols.add(symbol)
                         else:
-                            print(f"[Sync Cleanup] Removed already processed closed trade for {symbol} ({tf_key}).")
-                
-                bot_state[f"active_trade_{tf_key}"] = updated_trades
+                            # Position is closed on Bybit: keep ONLY if exit has not yet been processed
+                            if not t.get("exit_processed", False):
+                                t["bybit_closed"] = True
+                                updated_trades.append(t)
+                            else:
+                                print(f"[Sync Cleanup] Removed already processed closed trade for {symbol} ({tf_key}).")
+                    
+                    bot_state[f"active_trade_{tf_key}"] = updated_trades
     
             # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
             recovered = 0
@@ -4514,7 +4525,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         break
                     else:
                         print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s. Cancelling and recalculating price...")
-                        cancel_bybit_order(symbol, bybit_order_id)
+                        cancel_res = cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.3)
                         # Re-verify order status after cancel to catch fills that occurred in-flight
                         post_cancel_details = get_bybit_order_details(symbol, bybit_order_id)
@@ -4527,6 +4538,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                 entry_price = float(post_cancel_details.get("avgPrice", limit_entry_price))
                                 actual_qty = cum_qty
                                 break
+                            elif status in ["New", "PartiallyFilled"]:
+                                print(f"[{symbol} {iv}m API WARNING] Order {bybit_order_id} still {status} after cancel. Retrying cancellation...")
+                                cancel_bybit_order(symbol, bybit_order_id)
+                                time.sleep(0.3)
+                        elif cancel_res and isinstance(cancel_res, dict) and cancel_res.get("retCode") != 0 and "Order not exists" not in str(cancel_res.get("retMsg")):
+                            print(f"[{symbol} {iv}m API WARNING] Order {bybit_order_id} cancellation returned: {cancel_res.get('retMsg')}")
                 elif order_res.get("retCode") == 10006 or "PostOnly" in str(order_res.get("retMsg")):
                     print(f"[{symbol} {iv}m API] Maker PostOnly would cross spread. Retrying next chase tick...")
                 else:
@@ -4886,8 +4903,13 @@ def main():
                     tr_id = tr.get("trade_id")
                     if tr_id:
                         all_open_trades[tr_id] = tr
+            rebal_close_set = set()
+            rebal_scale_set = set()
             if all_open_trades:
                 portfolio_rebal = PortfolioUtilityOptimizer.optimize_portfolio_capital(all_open_trades)
+                if isinstance(portfolio_rebal, dict):
+                    rebal_close_set = set(portfolio_rebal.get("close_trades", []))
+                    rebal_scale_set = set(portfolio_rebal.get("scale_out_trades", []))
 
             for iv in ["15", "30", "60", "120", "240"]:
                 tf = tf_map[iv]
@@ -5073,7 +5095,10 @@ def main():
                     half_closed = active_trade.get("half_closed", False)
                     trigger_scale_out = False
                     if not half_closed:
-                        if TRADE_MODE != "simulation":
+                        if active_trade.get("trade_id") in rebal_scale_set:
+                            trigger_scale_out = True
+                            print(f"[{active_symbol} {iv}m Portfolio Rebalance] Scale-out triggered by Portfolio Utility Optimizer.")
+                        elif TRADE_MODE != "simulation":
                             trigger_scale_out = bybit_scaled_out
                         else:
                             if direction == "Bullish" and current_price >= entry_price + scale_out_mult * atr_dollars:
@@ -5324,6 +5349,10 @@ def main():
                             exit_reason = champ_exit_reason
                     except Exception as ex_champ:
                         log_event("WARNING", f"[{active_symbol} {iv}m] evaluate_exit notice: {ex_champ}")
+
+                    if active_trade.get("trade_id") in rebal_close_set and not exit_reason:
+                        exit_reason = "PORTFOLIO_UTILITY_REBALANCE_CLOSE"
+                        print(f"[{active_symbol} {iv}m Portfolio Rebalance] Low-utility trade marked for closure to harvest margin.")
 
                     
                     # 3. Simulation mode SL/TP price checks
@@ -5807,9 +5836,14 @@ def main():
                         key = f"{symbol}_{regime.lower()}"
                         if key in data:
                             return float(data[key])
+                        elif regime.lower() in data:
+                            return float(data[regime.lower()])
+                        elif "default" in data:
+                            return float(data["default"])
             except Exception:
                 pass
-            return 0.55
+            from config import DYNAMIC_CONFIDENCE_THRESHOLDS
+            return float(DYNAMIC_CONFIDENCE_THRESHOLDS.get(str(interval), 0.55))
 
         reloaded_intervals = check_and_hot_reload_models()
         
@@ -5916,7 +5950,7 @@ def main():
                 interval_ms_val = int(interval_val) * 60 * 1000
                 expected_start_ms_val = current_hour_ts - interval_ms_val
                 is_forced_val = interval_val in forced_intervals
-                is_up_to_date_val = (latest_completed_ts_val >= expected_start_ms_val) or is_startup or is_forced_val
+                is_up_to_date_val = (latest_completed_ts_val >= expected_start_ms_val) or is_forced_val
                 if not is_up_to_date_val:
                     return sym, interval_val, df_raw_val, None
                 
@@ -6032,7 +6066,7 @@ def main():
                 interval_ms = int(iv) * 60 * 1000
                 expected_start_ms = current_hour_ts - interval_ms
                 is_forced = iv in forced_intervals
-                is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_startup or is_forced
+                is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_forced
                 
                 if not is_up_to_date:
                     # Candle is stale, wait for exchange to finalize the new candle
@@ -6531,23 +6565,63 @@ def main():
                                     ml_trend_dir = "Neutral"
                                     ml_prob = 0.0
                                     model_age_days = 0
+                                    is_htf_stale = False
 
                                     if macro_pred and isinstance(macro_pred, dict):
                                         ml_trend_dir = macro_pred.get("direction", "Neutral")
                                         ml_prob = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.0)
-                                        model_age_days = int(macro_pred.get("model_age_days") or 0)
+                                        pred_dyn_thresh = macro_pred.get("dynamic_threshold")
+                                        if pred_dyn_thresh is not None:
+                                            learned_threshold = float(pred_dyn_thresh)
+                                        
+                                        # Check timestamp age of HTF prediction (> 2x HTF candle interval)
+                                        pred_ts = macro_pred.get("timestamp") or macro_pred.get("eval_time") or 0.0
+                                        macro_iv_sec = int(macro_iv) * 60 if str(macro_iv).isdigit() else 3600
+                                        if pred_ts > 0 and (time.time() - pred_ts) > (2.0 * macro_iv_sec):
+                                            is_htf_stale = True
+
+                                    # Compute model age dynamically from manifest metadata timestamp if available
+                                    manifest_paths = [
+                                        f"ensemble_{regime.lower()}_trend_{macro_iv}_manifest.json",
+                                        f"ensemble_trending_trend_{macro_iv}_manifest.json"
+                                    ]
+                                    for m_path in manifest_paths:
+                                        if os.path.exists(m_path):
+                                            try:
+                                                with open(m_path, "r") as mf:
+                                                    m_meta = json.load(mf)
+                                                    m_created = m_meta.get("created_at") or m_meta.get("timestamp")
+                                                    if m_created:
+                                                        if isinstance(m_created, (int, float)):
+                                                            model_age_days = max(0, int((time.time() - m_created) / 86400))
+                                                        else:
+                                                            dt = datetime.fromisoformat(str(m_created).replace("Z", "+00:00"))
+                                                            model_age_days = max(0, (datetime.now(timezone.utc) - dt).days)
+                                                    else:
+                                                        mtime = os.path.getmtime(m_path)
+                                                        model_age_days = max(0, int((time.time() - mtime) / 86400))
+                                                    break
+                                            except Exception:
+                                                pass
 
                                     htf_meta["ml_prediction"] = ml_trend_dir
                                     htf_meta["ml_probability"] = ml_prob
                                     htf_meta["model_age_days"] = model_age_days
 
                                     # STEP 1: Check ML Model Freshness & Learned Confidence
-                                    if ml_trend_dir in ["Bullish", "Bearish"] and ml_prob >= learned_threshold and model_age_days < 45:
+                                    if ml_trend_dir in ["Bullish", "Bearish"] and ml_prob >= learned_threshold and model_age_days < 45 and not is_htf_stale:
                                         htf_trend = ml_trend_dir
                                         htf_meta["trend_source"] = "ML_MODEL"
                                         htf_meta["fallback_reason"] = "NONE"
                                     else:
-                                        fallback_reason = "MODEL_NEUTRAL" if ml_trend_dir == "Neutral" else ("LOW_CONFIDENCE" if ml_prob < learned_threshold else "MODEL_STALE")
+                                        if is_htf_stale:
+                                            fallback_reason = "SIGNAL_STALE"
+                                        elif ml_trend_dir == "Neutral":
+                                            fallback_reason = "MODEL_NEUTRAL"
+                                        elif ml_prob < learned_threshold:
+                                            fallback_reason = "LOW_CONFIDENCE"
+                                        else:
+                                            fallback_reason = "MODEL_STALE"
                                         htf_meta["fallback_reason"] = fallback_reason
 
                                         # STEP 2: EMA9 vs EMA21 + EMA21 Slope > 0 Technical Fallback
@@ -6788,10 +6862,13 @@ def main():
                                 with news_sentiment_lock:
                                     news_sentiment = cached_news_sentiment
                                     latest_titles = cached_news_titles
+                                    df_1h_confluence = fetched_data.get((symbol, "60"), (None, None))[1]
+                                    if df_1h_confluence is None:
+                                        df_1h_confluence = df
                                     all_pass, confluence_results, confluence_score_pct = check_pre_trade_confluence(
-                                        latest_candle["close"], df, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
+                                        latest_candle["close"], df_1h_confluence, ml_trend, news_sentiment, expected_pct_change, iv, symbol=symbol, htf_cache=htf_cache,
                                         calibrated_confidence=calibrated_confidence, dynamic_conf_threshold=dynamic_conf_threshold, get_history_fn=get_history,
-                                        get_orderbook_fn=get_orderbook_imbalance, choppiness_fn=choppiness_index, bot_state_dict=bot_state
+                                        get_orderbook_fn=get_orderbook_imbalance, choppiness_fn=choppiness_index, bot_state_dict=bot_state, current_regime=regime
                                     )
 
                                     # Update global confluence status
@@ -7054,7 +7131,9 @@ def main():
                                             print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                         
                                         # Base margin estimate before final leverage clamp
-                                        position_size_usd = max(2.0, target_notional_usd / 10.0)
+                                        from risk_limits import HARD_TIMEFRAME_MAX_LEVERAGE_CAPS
+                                        tf_hard_cap = HARD_TIMEFRAME_MAX_LEVERAGE_CAPS.get(str(iv), 5.0)
+                                        position_size_usd = target_notional_usd / max(1.0, tf_hard_cap)
                                         original_kelly_size = float(position_size_usd) # Keep intended size pre-clamp
                                         print(f"[{iv}m Trade Size Boundary Check] Target notional (CVaR constrained): ${target_notional_usd:.2f}")
 
@@ -7130,6 +7209,9 @@ def main():
                                             else:
                                                 lev_cap = 5.0
 
+                                            # Governance Hard Timeframe Leverage Cap
+                                            lev_cap = min(lev_cap, tf_hard_cap)
+
                                             # F-1: MCC Leverage Qualification Threshold Clamp
                                             mcc_val = pred_entry_dict.get("manifest_mcc") if 'pred_entry_dict' in locals() else (locals().get("pred_info", {}).get("manifest_mcc"))
                                             mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
@@ -7190,16 +7272,24 @@ def main():
                                             import uuid
                                             trade_uuid = str(uuid.uuid4())
                                             
-                                            # Check free available margin
+                                            # Check free available margin and minimum exchange requirements
                                             available_margin = max(0.0, current_bal - total_active_size)
-                                            min_req_margin = min_order_value_check = getattr(config, "MIN_ORDER_VALUE_USDT", 5.1) / max(1.0, leverage_val)
+                                            min_exchange_notional = getattr(config, "MIN_ORDER_VALUE_USDT", 5.1)
+                                            min_req_margin = min_exchange_notional / max(1.0, leverage_val)
+                                            raw_target_margin = target_notional_usd / max(1.0, leverage_val)
+
+                                            if raw_target_margin < min_req_margin:
+                                                log_event("INFO", f"[{symbol} {iv}m] Risk budget allocation (${raw_target_margin:.2f}) below exchange minimum (${min_req_margin:.2f}). Cleanly skipping entry.")
+                                                status_msg = "Skipped (Below Risk Allocation Floor)"
+                                                continue
+
                                             if available_margin < min_req_margin:
                                                 log_event("WARNING", f"[{symbol} {iv}m] Insufficient free margin (${available_margin:.2f}) for required position margin (${min_req_margin:.2f}). Skipping entry.")
                                                 status_msg = "Skipped (Insufficient Free Margin)"
                                                 continue
 
-                                            # Calculate initial proposed position size
-                                            position_size_usd = max(2.0, min(available_margin, target_notional_usd / max(1.0, leverage_val)))
+                                            # Calculate initial proposed position size cleanly clamped to available margin
+                                            position_size_usd = min(available_margin, raw_target_margin)
 
                                             # Pre-Trade Signal Guard Check
                                             pred_info = bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
@@ -7328,12 +7418,13 @@ def main():
                                                 
                                                     # Priority 2: Hard Cap - Never exceed 110% of approved original risk
                                                     risk_cap_ratio = getattr(config, "MAX_SCALED_RISK_CAP_RATIO", 1.10)
-                                                    if scaled_risk_usd > original_risk_usd * risk_cap_ratio:
-                                                        print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed 110% of approved risk (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
-                                                        status_msg = "Skipped (Exceeds 110% Risk Cap)"
+                                                    if original_risk_usd <= 0.0 or scaled_risk_usd > original_risk_usd * risk_cap_ratio:
+                                                        print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed risk limits (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
+                                                        status_msg = "Skipped (Exceeds Risk Cap)"
                                                         wallet_exceeded = True
                                                     else:
                                                         stop_loss_price = new_sl_price
+                                                        position_size_usd = final_val
                                                         is_oversized_trade = True
                                                         print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Tightened SL from ${original_stop_dist:.2f} to ${new_stop_dist:.2f} to keep risk constant at ${scaled_risk_usd:.2f}.")
 

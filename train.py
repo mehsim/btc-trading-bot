@@ -1683,7 +1683,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     champion_t = load_ensemble_classifier(c_prefix_t, n_features=n_champ)
                     champion_p = load_ensemble_regressor(c_prefix_p, n_features=n_champ)
                 except Exception as _le:
-                    print(f"  [Champion-Challenger Warning] Failed to load champion: {_le}. Defaulting to save.")
+                    print(f"  [Champion-Challenger Warning] Failed to load champion: {_le}. Champion comparison unavailable; requiring challenger to strictly pass all predictive floors and holdout quality gates.")
                     champion_t = None
                     champion_p = None
                     should_save = True
@@ -1738,9 +1738,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 })
 
                 # Step 3: Evaluate Champion Health against Institutional Governance Floors (Population Guarded)
-                from config import MODEL_GOVERNANCE
-                _min_h_mcc = MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02)
-                _min_h_balacc = MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.35)
+                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+                _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+                _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
                 is_full_population = len(SUPPORTED_SYMBOLS) > 1 or list(SUPPORTED_SYMBOLS) == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
                 if champ_mcc < _min_h_mcc or champ_acc < _min_h_balacc:
@@ -1784,13 +1784,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
         chal_bal_acc_mean = float(stat_bal.get("mean", 0.0)) if ('stat_bal' in locals() and isinstance(stat_bal, dict) and stat_bal.get("mean") is not None) else 0.0
 
-        # Compute block-bootstrap 95% CI on holdout MCC using lookahead block length
+        # Compute block-bootstrap 95% CI on holdout metrics using lookahead block length
         _lookahead_bl = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {}).get("lookahead", 10)
         from statistical_validation import StatisticalValidation
         stat_validator = StatisticalValidation()
 
         _holdout_correct = (np.array(y_holdout_trend) == np.array(chal_pred_t)).astype(float)
-        _, holdout_ci_low, holdout_ci_high = stat_validator.compute_bootstrap_ci(_holdout_correct, num_samples=1000, block_len=_lookahead_bl)
+        _, holdout_acc_ci_low, holdout_acc_ci_high = stat_validator.compute_bootstrap_ci(_holdout_correct, num_samples=1000, block_len=_lookahead_bl)
+        _, holdout_mcc_ci_low, holdout_mcc_ci_high = stat_validator.compute_mcc_bootstrap_ci(y_holdout_trend, chal_pred_t, num_samples=1000, block_len=_lookahead_bl)
 
         if should_save:
             if chal_mcc_mean < min_mcc_floor:
@@ -1802,8 +1803,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif chal_bal_acc_mean < min_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")
                 should_save = False
-            elif holdout_mcc < 0.0 and holdout_ci_high < 0.0:
-                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) CI upper bound ({holdout_ci_high:.4f}) < 0 — clear negative correlation out of sample")
+            elif holdout_mcc < min_holdout_mcc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
+                should_save = False
+            elif holdout_mcc_ci_high < 0.0:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI upper bound ({holdout_mcc_ci_high:.4f}) < 0 — clear negative correlation out of sample")
                 should_save = False
             elif chal_acc < min_holdout_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout balanced accuracy ({chal_acc:.4f}) below out-of-sample floor ({min_holdout_bal_acc_floor}) — at or near chance")
@@ -1833,7 +1837,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
                 if is_distribution_shifted:
                     shift_reason = f"neutral shift ({champ_neutral_pct:.1f}% -> {chal_neutral_pct:.1f}%)" if is_label_schema_diff else f"regime sample population shift ({champ_n_train} -> {chal_n_train} samples, {sample_count_ratio:.2f}x)"
-                    print(f"  [Predictive Floor Gate] Regime/population shift detected ({shift_reason}). Champion direct comparison void; promoting on absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}).")
+                    print(f"  [Predictive Floor Gate] Regime/population shift detected ({shift_reason}). Enforcing absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}, Holdout MCC={holdout_mcc:.4f} >= {min_holdout_mcc_floor}, Holdout BalAcc={chal_acc:.4f} >= {min_holdout_bal_acc_floor}).")
+                    if chal_mcc_mean < min_mcc_floor or holdout_mcc < min_holdout_mcc_floor or chal_acc < min_holdout_bal_acc_floor:
+                        print(f"  [Predictive Floor Gate] REJECTED: Challenger fails absolute quality floor under distribution shift.")
+                        should_save = False
                 elif champ_mcc_val is not None and chal_mcc_mean < (champ_mcc_val - mcc_tol):
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f} - tol {mcc_tol:.4f})")
                     should_save = False
@@ -2024,11 +2031,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "matrix": cm.tolist()
             },
             "holdout_accuracy": round(holdout_raw_acc, 4),
+            "holdout_accuracy_ci95": [round(float(holdout_acc_ci_low), 4), round(float(holdout_acc_ci_high), 4)],
             "holdout_balanced_accuracy": round(chal_acc, 4),
             "holdout_mcc": round(holdout_mcc, 4),
             "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, cv.lookahead * 9)), 2),
             "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead * 9)))), 4),
-            "holdout_mcc_ci95": [round(float(holdout_ci_low), 4), round(float(holdout_ci_high), 4)],
+            "holdout_mcc_ci95": [round(float(holdout_mcc_ci_low), 4), round(float(holdout_mcc_ci_high), 4)],
             "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
             "champion_holdout_balanced_accuracy": round(champ_acc, 4) if ('champ_acc' in locals() and champ_acc is not None) else None,
             "holdout_brier": round(chal_brier, 4),
@@ -2189,13 +2197,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
         res_df["regime"] = reg_vals
         return res_df
 
-    if "symbol" in df.columns and df["symbol"].nunique() > 1:
-        split_dfs = []
-        for _, grp in df.groupby("symbol", sort=False):
-            split_dfs.append(_compute_symbol_regime_series(grp, _enter_thr, _exit_thr))
-        df = pd.concat(split_dfs, ignore_index=True)
-        if "timestamp" in df.columns:
-            df = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
+    if "symbol" in df.columns:
+        df["symbol"] = df["symbol"].fillna("BTCUSDT")
+        if df["symbol"].nunique() > 1:
+            split_dfs = []
+            for _, grp in df.groupby("symbol", sort=False, dropna=False):
+                split_dfs.append(_compute_symbol_regime_series(grp, _enter_thr, _exit_thr))
+            df = pd.concat(split_dfs, ignore_index=True)
+            if "timestamp" in df.columns:
+                df = df.sort_values("timestamp", kind="mergesort").reset_index(drop=True)
+        else:
+            df = _compute_symbol_regime_series(df, _enter_thr, _exit_thr).reset_index(drop=True)
     else:
         df = _compute_symbol_regime_series(df, _enter_thr, _exit_thr).reset_index(drop=True)
 
@@ -2372,9 +2384,9 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
         if not sample_dfs:
             return None
         result = pd.concat(sample_dfs, ignore_index=True)
-        # Align to selected features only (P1 fix), preserving system-critical regime indicators (ATR_norm, ADX)
+        # Align to selected features only (P1 fix), preserving system-critical regime indicators (ATR_norm, ADX, symbol)
         keep = [c for c in live_selected if c in result.columns]
-        keep += [c for c in ["target_trend", "target_price_change", "sample_weight", "ATR_norm", "ADX"] if c in result.columns]
+        keep += [c for c in ["symbol", "target_trend", "target_price_change", "sample_weight", "ATR_norm", "ADX"] if c in result.columns]
         
         # Deduplicate keep list to prevent duplicate columns in sliced DataFrame
         seen = set()
@@ -2384,6 +2396,8 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
                 deduped_keep.append(c)
                 seen.add(c)
         result = result[deduped_keep]
+        if "symbol" not in result.columns:
+            result["symbol"] = "BTCUSDT"
         print(f"[Live Feedback] Injecting {len(result)} feedback samples (real + simulated skipped) for interval {interval}m.")
         return result
     except Exception as e:

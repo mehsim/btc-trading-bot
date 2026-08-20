@@ -676,10 +676,15 @@ def get_bybit_oi_history(symbol="BTCUSDT", interval="15", start_ts_ms=None, end_
         
     return df_history.reset_index(drop=True)
 
-funding_cache_lock = threading.Lock()
+funding_locks = {}
+funding_locks_guard = threading.Lock()
 
 def get_bybit_funding_history(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
-    with funding_cache_lock:
+    with funding_locks_guard:
+        if symbol not in funding_locks:
+            funding_locks[symbol] = threading.Lock()
+        sym_lock = funding_locks[symbol]
+    with sym_lock:
         return _get_bybit_funding_history_impl(symbol, start_ts_ms, end_ts_ms)
 
 def _get_bybit_funding_history_impl(symbol="BTCUSDT", start_ts_ms=None, end_ts_ms=None):
@@ -792,6 +797,8 @@ fng_cache_time = 0.0
 
 def get_fear_and_greed_history():
     global fng_cache, fng_cache_time
+    if fng_cache is not None and (time.time() - fng_cache_time) < 14400:
+        return fng_cache
     with fng_lock:
         # Cache for 4 hours (14400 seconds) in memory
         if fng_cache is not None and (time.time() - fng_cache_time) < 14400:

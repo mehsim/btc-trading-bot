@@ -83,14 +83,23 @@ def test_live_order_partial_fill_reversal():
     import pandas as pd
 
     df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
-    mock_ioc = MagicMock(return_value={"retCode": 0})
+    mock_ioc = MagicMock(return_value={"retCode": 0, "result": {"orderId": "mock_ioc_123"}})
+
+    def mock_order_details(symbol, order_id=None):
+        if order_id == "mock_ioc_123":
+            return {"orderStatus": "Filled", "avgPrice": 50000.0, "cumExecQty": 0.008}
+        return {"orderStatus": "PartiallyFilled", "avgPrice": 50000.0, "cumExecQty": 0.008}
 
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
          patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_partial_123"}}), \
          patch("main.wait_for_order_fill", return_value=True), \
-         patch("main.get_bybit_order_details", return_value={"orderStatus": "PartiallyFilled", "avgPrice": 50000.0, "cumExecQty": 0.008}), \
+         patch("main.get_bybit_order_details", side_effect=mock_order_details), \
          patch("main.place_bybit_taker_ioc_order", mock_ioc), \
+         patch("trading_engine.place_bybit_taker_ioc_order", mock_ioc), \
+         patch("bybit_client.place_bybit_taker_ioc_order", mock_ioc), \
+         patch("main.TRADE_MODE", "live"), \
+         patch("trading_engine.TRADE_MODE", "live"), \
          patch("main.send_telegram_alert"), \
          patch("main.sync_active_positions_from_bybit"):
 

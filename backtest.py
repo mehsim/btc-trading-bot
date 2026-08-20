@@ -266,8 +266,10 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
         min_sl_pct = min_sl_cfg.get(str(interval), min_sl_cfg.get("default", 0.008))
         min_sl_dist = entry_price * min_sl_pct
+        target_rr = tp_m / max(1e-9, sl_multiplier)
         if sl_dist < min_sl_dist:
             sl_dist = min_sl_dist
+            tp_dist = sl_dist * target_rr
         _sl_frac = sl_dist / max(1e-9, entry_price)
 
         if ml_trend == "Bullish":

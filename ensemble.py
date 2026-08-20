@@ -439,11 +439,8 @@ class EnsembleClassifier:
         else:
             self.is_fallback = False
             
-        # Stack probabilities for prediction, weighting features if explicit weights provided
-        w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
-        w = np.array(w_to_use, dtype=float)
-        w = w / max(1e-9, float(np.sum(w)))
-        X_meta = np.column_stack([xgb_prob * (w[0] * 3.0), lgb_prob * (w[1] * 3.0), cat_prob * (w[2] * 3.0)])
+        # Stack probabilities for prediction, matching fit-time meta-feature distribution
+        X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])
         
         if getattr(self, "meta_clf", None) is not None:
             try:
@@ -626,11 +623,8 @@ class EnsembleRegressor:
                 return (xgb_pred * 0.5 + cat_pred * 0.5)
             return (xgb_pred * w[0] + lgb_pred * w[1] + cat_pred * w[2])
             
-        # Apply Ridge meta-model via linear matrix multiplication, weighting features if explicit weights provided
-        w_to_use = weights if weights is not None else getattr(self, "weights", [1.0/3.0, 1.0/3.0, 1.0/3.0])
-        w = np.array(w_to_use, dtype=float)
-        w = w / max(1e-9, float(np.sum(w)))
-        X_meta = np.column_stack([xgb_pred * (w[0] * 3.0), lgb_pred * (w[1] * 3.0), cat_pred * (w[2] * 3.0)])
+        # Apply Ridge meta-model via linear matrix multiplication, matching fit-time meta-feature distribution
+        X_meta = np.column_stack([xgb_pred, lgb_pred, cat_pred])
         coef = np.array(self.meta_coef_, dtype=float)
         intercept = float(self.meta_intercept_) if self.meta_intercept_ is not None else 0.0
         return np.dot(X_meta, coef) + intercept

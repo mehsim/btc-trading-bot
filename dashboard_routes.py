@@ -175,12 +175,13 @@ def require_ip_whitelist(f):
         # If no IP whitelist is configured, require API key for non-local requests
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip() or get_secure_env("DASHBOARD_ADMIN_KEY", "").strip()
         if expected_key:
-            client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
+            client_key = request.headers.get("X-API-KEY") or request.headers.get("X-ADMIN-KEY")
             if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
                 return f(*args, **kwargs)
-            return jsonify({"error": "Unauthorized", "message": "API key required for external access."}), 401
+            return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        return f(*args, **kwargs)
+        # Fail closed for external access if neither whitelist nor API key is configured
+        return jsonify({"error": "Unauthorized", "message": "External access forbidden: configure ALLOWED_DASHBOARD_IPS or DASHBOARD_API_KEY."}), 401
     return decorated_function
 
 

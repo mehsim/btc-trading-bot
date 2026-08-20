@@ -35,8 +35,10 @@ DB_FILE = get_db_path()
 db_lock = threading.RLock()
 
 
-def get_db_connection():
-    target_db = get_db_path()
+_in_quarantine_recovery = False
+
+def get_db_connection(target_db=DB_FILE):
+    global _in_quarantine_recovery
     for attempt in range(5):
         conn = None
         try:
@@ -59,7 +61,8 @@ def get_db_connection():
         except sqlite3.DatabaseError as e:
             err_msg = str(e).lower()
             # Only quarantine file if error indicates genuine file malformation/corruption
-            if "malformed" in err_msg or "file is not a database" in err_msg:
+            if ("malformed" in err_msg or "file is not a database" in err_msg) and not _in_quarantine_recovery:
+                _in_quarantine_recovery = True
                 print(f"[Database Auto-Recovery] Detected genuine database corruption ({e}). Quarantining DB file {target_db}...")
                 try:
                     if conn is not None:
@@ -67,17 +70,22 @@ def get_db_connection():
                 except Exception:
                     pass
                 timestamp = int(time.time())
+                renamed_main = False
                 for ext in ["", "-wal", "-shm"]:
                     target = f"{target_db}{ext}"
                     if os.path.exists(target):
                         try:
                             os.rename(target, f"{target}.corrupt.{timestamp}")
+                            if ext == "":
+                                renamed_main = True
                         except Exception as ren_err:
                             print(f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
-                try:
-                    init_db()
-                except Exception as init_err:
-                    print(f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
+                if renamed_main:
+                    try:
+                        init_db()
+                    except Exception as init_err:
+                        print(f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
+                _in_quarantine_recovery = False
                 time.sleep(0.5)
             else:
                 try:

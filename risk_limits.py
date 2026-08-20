@@ -40,7 +40,7 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
     # 1. Validate Timeframe Leverage Caps
     cfg_leverage = getattr(config_module, "TIMEFRAME_MAX_LEVERAGE_CAPS", {})
     for tf, hard_cap in HARD_TIMEFRAME_MAX_LEVERAGE_CAPS.items():
-        active_lev = cfg_leverage.get(tf, hard_cap)
+        active_lev = cfg_leverage.get(str(tf), cfg_leverage.get(int(tf), hard_cap))
         if active_lev > hard_cap:
             raise PermissionError(
                 f"[Governance Violation] Leverage cap for timeframe {tf}m ({active_lev}x) "

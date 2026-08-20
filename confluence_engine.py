@@ -354,7 +354,11 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         rsi_val = float(df_1h["RSI"].iloc[-1])
     
     from production_regime_engine import production_regime_engine
-    macro_blackout = (news_sentiment == "BLACKOUT" or (isinstance(news_sentiment, dict) and news_sentiment.get("blackout")))
+    macro_blackout = (
+        news_sentiment == "BLACKOUT" or
+        (isinstance(news_sentiment, dict) and bool(news_sentiment.get("blackout") or news_sentiment.get("is_blackout") or news_sentiment.get("macro_guard_active"))) or
+        (df_1h is not None and "hours_to_news" in df_1h.columns and len(df_1h) > 0 and float(df_1h["hours_to_news"].iloc[-1]) <= 0.5)
+    )
     regime_res = production_regime_engine.evaluate_confluence(ml_trend, current_regime, rsi_val, macro_guard_active=macro_blackout)
     
     regime_rsi_pass = regime_res["execute"]

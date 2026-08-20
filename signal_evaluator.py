@@ -187,9 +187,9 @@ class SignalEvaluator:
                 _regime_key = "trending" if is_trending else "ranging"
                 
                 # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
-                from config import MODEL_GOVERNANCE
-                min_mcc_floor = MODEL_GOVERNANCE.get("min_mcc", 0.05)
-                min_bal_acc_floor = MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)
+                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+                min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_mcc", 0.05))
+                min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
 
                 mcc_val = models.get("manifest_mcc")
                 mcc_min_val = models.get("manifest_mcc_min")

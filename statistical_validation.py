@@ -51,13 +51,69 @@ class StatisticalValidation:
                 starts = np.random.randint(0, n, size=n_blocks)
                 idx = ((starts[:, None] + np.arange(b_len)[None, :]) % n).ravel()[:n]
                 boot_means.append(float(np.mean(arr[idx])))
-            
+
         boot_means = np.sort(boot_means)
         alpha = (1.0 - ci_level) / 2.0
-        low_idx = int(alpha * num_samples)
-        high_idx = int((1.0 - alpha) * num_samples)
+        low_idx = int(alpha * len(boot_means))
+        high_idx = int((1.0 - alpha) * len(boot_means))
+        high_idx = min(high_idx, len(boot_means) - 1)
         
         return float(np.mean(arr)), float(boot_means[low_idx]), float(boot_means[high_idx])
+
+    def compute_mcc_bootstrap_ci(
+        self,
+        y_true: Any,
+        y_pred: Any,
+        num_samples: int = 1000,
+        ci_level: float = 0.95,
+        block_len: int = 10
+    ) -> Tuple[float, float, float]:
+        """
+        Computes 95% Bootstrap Confidence Interval for Matthews Correlation Coefficient (MCC)
+        using stationary/circular block bootstrap over paired ground-truth and prediction sequences.
+        Returns: (mean_mcc, lower_bound_95, upper_bound_95)
+        """
+        from sklearn.metrics import matthews_corrcoef
+        if y_true is None or y_pred is None or len(y_true) < 5 or len(y_pred) < 5:
+            return 0.0, 0.0, 0.0
+        
+        y_t = np.asarray(y_true)
+        y_p = np.asarray(y_pred)
+        n = min(len(y_t), len(y_p))
+        y_t = y_t[:n]
+        y_p = y_p[:n]
+
+        try:
+            base_mcc = float(matthews_corrcoef(y_t, y_p))
+        except Exception:
+            base_mcc = 0.0
+
+        b_len = max(1, min(n, int(block_len)))
+        n_blocks = int(np.ceil(n / float(b_len)))
+        boot_mccs = []
+        np.random.seed(42)
+
+        for _ in range(num_samples):
+            starts = np.random.randint(0, n, size=n_blocks)
+            idx = ((starts[:, None] + np.arange(b_len)[None, :]) % n).ravel()[:n]
+            yt_sample = y_t[idx]
+            yp_sample = y_p[idx]
+            if len(np.unique(yt_sample)) > 1 and len(np.unique(yp_sample)) > 1:
+                try:
+                    boot_mccs.append(float(matthews_corrcoef(yt_sample, yp_sample)))
+                except Exception:
+                    pass
+
+        if len(boot_mccs) < 10:
+            return base_mcc, base_mcc, base_mcc
+
+        boot_mccs = np.sort(boot_mccs)
+        alpha = (1.0 - ci_level) / 2.0
+        low_idx = int(alpha * len(boot_mccs))
+        high_idx = int((1.0 - alpha) * len(boot_mccs))
+        high_idx = min(high_idx, len(boot_mccs) - 1)
+
+        return float(np.mean(boot_mccs)), float(boot_mccs[low_idx]), float(boot_mccs[high_idx])
 
     def benjamini_hochberg(self, p_values: List[float], alpha: float = 0.05) -> List[float]:
         """
@@ -149,24 +205,60 @@ class StatisticalValidation:
     def compute_live_vs_replay_checksum(
         self,
         feature_dict: Dict[str, Any],
+        replay_feature_dict: Optional[Dict[str, Any]] = None,
         policy_version: str = "2026.08.01-4H-REACTIVE",
-        model_weights_str: str = ""
+        model_weights_str: str = "",
+        live_prediction: Optional[Any] = None,
+        replay_prediction: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
-        Computes SHA256 deterministic checksums for live vs replay verification.
+        Computes SHA256 deterministic checksums and verifies live vs replay feature vectors & predictions.
         """
         import hashlib, json
         
-        feat_str = json.dumps(feature_dict, sort_keys=True)
+        feat_str = json.dumps(feature_dict, sort_keys=True, default=str)
         feat_sha = hashlib.sha256(feat_str.encode("utf-8")).hexdigest()[:16]
-        policy_sha = hashlib.sha256(policy_version.encode("utf-8")).hexdigest()[:16]
-        model_sha = hashlib.sha256((model_weights_str or "default_ensemble_v4").encode("utf-8")).hexdigest()[:16]
+        policy_sha = hashlib.sha256(str(policy_version).encode("utf-8")).hexdigest()[:16]
+        model_sha = hashlib.sha256((str(model_weights_str) or "default_ensemble_v4").encode("utf-8")).hexdigest()[:16]
+
+        replay_feat_sha = None
+        feature_divergence_max = 0.0
+        deterministic_match = True
+
+        if replay_feature_dict is not None:
+            replay_feat_str = json.dumps(replay_feature_dict, sort_keys=True, default=str)
+            replay_feat_sha = hashlib.sha256(replay_feat_str.encode("utf-8")).hexdigest()[:16]
+            
+            # Compute max absolute numeric feature divergence
+            divergences = []
+            for k, v in feature_dict.items():
+                if k in replay_feature_dict:
+                    try:
+                        v_live = float(v)
+                        v_rep = float(replay_feature_dict[k])
+                        divergences.append(abs(v_live - v_rep))
+                    except (ValueError, TypeError):
+                        if str(v) != str(replay_feature_dict[k]):
+                            deterministic_match = False
+            if divergences:
+                feature_divergence_max = max(divergences)
+                if feature_divergence_max > 1e-5:
+                    deterministic_match = False
+
+        pred_match = True
+        if live_prediction is not None and replay_prediction is not None:
+            pred_match = (live_prediction == replay_prediction)
+            if not pred_match:
+                deterministic_match = False
 
         return {
             "feature_checksum": feat_sha,
+            "replay_feature_checksum": replay_feat_sha or feat_sha,
             "policy_checksum": policy_sha,
             "model_checksum": model_sha,
-            "deterministic_match": True
+            "feature_divergence_max": feature_divergence_max,
+            "prediction_match": pred_match,
+            "deterministic_match": deterministic_match
         }
 
     def compute_decision_stability(
