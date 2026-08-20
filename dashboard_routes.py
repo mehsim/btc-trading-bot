@@ -1192,6 +1192,11 @@ def api_institutional_summary():
     eqs_val = min(98, max(40, int(55 + rr_val * 15))) if total_trades_count >= 5 else 81
     holdout_val = round(float(state_manager.get("shadow_holdout_accuracy", state_manager.get("holdout_accuracy", win_rate if win_rate > 0 else 52.4))), 1)
 
+    try:
+        real_bybit_bal = float(get_real_bybit_balance_cached())
+    except Exception:
+        real_bybit_bal = float(state_manager.get("real_bybit_balance", 0.0))
+
     data = {
         "status": "ok",
         "timestamp_utc": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
@@ -1227,9 +1232,7 @@ def api_institutional_summary():
             "today_leveraged_volume_usd": float(round(today_leveraged_volume, 2)),
             "today_win_rate_pct": float(round(today_win_rate, 1)),
             "today_pf": today_pf,
-            "today_drawdown_pct": float(today_dd),
-            "real_bybit_balance": (lambda: (get_real_bybit_balance_cached() if True else 0.0))() if True else 0.0,
-            "simulated_balance": state_manager.get("simulated_balance", 80.0)
+            "real_bybit_balance": real_bybit_bal,
         },
         "shs_breakdown": {
             "total_score": shs_val,
