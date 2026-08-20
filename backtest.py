@@ -644,7 +644,7 @@ def run_backtest():
     try:
         from walk_forward_engine import run_walk_forward_backtest
         def _wf_sim_fn(sub_df):
-            return run_single_backtest(sub_df, models, features, interval=INTERVAL, pessimistic_mode=True)
+            return run_single_backtest(sub_df, models_trending, models_ranging, p95, max_conf, min_confidence=MIN_CONFIDENCE, interval=INTERVAL, rule_feature=RULE_FEATURE, pessimistic_mode=True)
         wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=_wf_sim_fn)
         if wf_summary.get("status") == "success":
             print("=" * 90)

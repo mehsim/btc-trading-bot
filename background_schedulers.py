@@ -16,6 +16,8 @@ except Exception:
     SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "SUIUSDT", "DOGEUSDT"]
 JOURNAL_PATH = "trade_journal.csv"
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
+FUNDING_ARB_THRESHOLD = 0.001
+FUNDING_ARB_SIZE_USD = 20.0
 
 
 def run_daily_journal_scheduler(send_daily_journal_digest_func=None):
