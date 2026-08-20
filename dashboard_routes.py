@@ -1612,15 +1612,15 @@ def api_exit_analytics():
         avg_r = round(reasons_r_sum.get(cat, 0.0) / max(1, cnt), 2)
         dynamic_exit_attribution[cat] = {"pct": pct, "avg_r": avg_r, "count": cnt}
 
-    tp_times = [(float(t.get("exit_time", 0)) - float(t.get("entry_time", t.get("exit_time", 0)))) / 3600.0 for t in valid_trades if "PROFIT" in str(t.get("reason", "")).upper()]
-    sl_times = [(float(t.get("exit_time", 0)) - float(t.get("entry_time", t.get("exit_time", 0)))) / 3600.0 for t in valid_trades if "STOP" in str(t.get("reason", "")).upper()]
-    so_times = [(float(t.get("exit_time", 0)) - float(t.get("entry_time", t.get("exit_time", 0)))) / 3600.0 for t in valid_trades if "TRAILING" in str(t.get("reason", "")).upper()]
+    tp_times = [(safe_float(t.get("exit_time"), 0.0) - safe_float(t.get("entry_time", t.get("exit_time", 0.0)), 0.0)) / 3600.0 for t in valid_trades if "PROFIT" in str(t.get("reason", "")).upper()]
+    sl_times = [(safe_float(t.get("exit_time"), 0.0) - safe_float(t.get("entry_time", t.get("exit_time", 0.0)), 0.0)) / 3600.0 for t in valid_trades if "STOP" in str(t.get("reason", "")).upper()]
+    so_times = [(safe_float(t.get("exit_time"), 0.0) - safe_float(t.get("entry_time", t.get("exit_time", 0.0)), 0.0)) / 3600.0 for t in valid_trades if "TRAILING" in str(t.get("reason", "")).upper()]
 
     avg_tp_hours = round(float(np.mean(tp_times)), 1) if tp_times and any(t > 0 for t in tp_times) else 3.4
     avg_sl_hours = round(float(np.mean(sl_times)), 1) if sl_times and any(t > 0 for t in sl_times) else 1.8
     avg_so_hours = round(float(np.mean(so_times)), 1) if so_times and any(t > 0 for t in so_times) else 1.2
 
-    planned_rr_vals = [abs(float(t.get("take_profit", 0)) - float(t.get("entry_price", 0))) / max(0.01, abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0)))) for t in valid_trades if float(t.get("entry_price", 0)) > 0 and float(t.get("take_profit", 0)) > 0 and float(t.get("stop_loss", 0)) > 0 and abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) > 0.001 * float(t.get("entry_price", 0))]
+    planned_rr_vals = [abs(safe_float(t.get("take_profit"), 0.0) - safe_float(t.get("entry_price"), 0.0)) / max(0.01, abs(safe_float(t.get("entry_price"), 0.0) - safe_float(t.get("stop_loss"), 0.0))) for t in valid_trades if safe_float(t.get("entry_price"), 0.0) > 0 and safe_float(t.get("take_profit"), 0.0) > 0 and safe_float(t.get("stop_loss"), 0.0) > 0 and abs(safe_float(t.get("entry_price"), 0.0) - safe_float(t.get("stop_loss"), 0.0)) > 0.001 * safe_float(t.get("entry_price"), 0.0)]
     planned_rr_val = round(float(np.mean(planned_rr_vals)), 2) if planned_rr_vals else 2.50
 
     return jsonify({
