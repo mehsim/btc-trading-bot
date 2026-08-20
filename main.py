@@ -5968,7 +5968,6 @@ def main():
                 database.set_setting("bot_running", "False")
                 database.set_setting("bot_stopped", "True")
                 log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered ({cb_reason}, Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
-                print(f"[TRADING_LOOP] Hard Circuit Breaker Triggered ({cb_reason}, Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
                 time.sleep(10)
                 return
         except Exception as ex_cb:
@@ -6616,7 +6615,7 @@ def main():
                                     adjustments_applied.append(("oi_momentum_guard", 0.05))
                                     print(f"[{symbol} {iv}m] OI Momentum Guard: Low Open Interest Delta ({oi_delta:+.2f}%) raised threshold to {dynamic_conf_threshold*100:.1f}%")
                             except Exception as e:
-                                print(f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
+                                log_event("WARNING", f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
 
                             # Bound final threshold relative to economic base
                             from config import MAX_THRESHOLD_UPLIFT
