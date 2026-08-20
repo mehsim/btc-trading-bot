@@ -7267,7 +7267,7 @@ def main():
                                                 qty_str = format_bybit_qty(symbol, raw_qty)
                                                 qty_val = float(qty_str) if qty_str else 0.0
 
-                                                original_notional = qty_val * entry_price
+                                                original_notional = leveraged_size
                                                 original_stop_dist = abs(entry_price - stop_loss_price)
                                                 original_risk_usd = (original_notional / max(1e-8, entry_price)) * original_stop_dist
                                                 is_oversized_trade = False
@@ -7308,7 +7308,8 @@ def main():
                                                     scaled_risk_usd = (scaled_notional / max(1e-8, entry_price)) * new_stop_dist
                                                 
                                                     # Priority 2: Hard Cap - Never exceed 110% of approved original risk
-                                                    if original_risk_usd > 0 and scaled_risk_usd > original_risk_usd * 1.10:
+                                                    risk_cap_ratio = getattr(config, "MAX_SCALED_RISK_CAP_RATIO", 1.10)
+                                                    if scaled_risk_usd > original_risk_usd * risk_cap_ratio:
                                                         print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed 110% of approved risk (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
                                                         status_msg = "Skipped (Exceeds 110% Risk Cap)"
                                                         wallet_exceeded = True

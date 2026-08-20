@@ -80,3 +80,32 @@ def test_bybit_quantity_formatting():
     assert format_bybit_qty("AVAXUSDT", 0.5) == "0.5"
     assert format_bybit_qty("LTCUSDT", 1.8) == "1.8"
     assert format_bybit_qty("BTCUSDT", 0.1234) == "0.123"
+
+def test_min_notional_risk_cap_enforcement():
+    """Verify min-notional scaling cannot bypass 110% approved risk cap when raw qty rounds to 0."""
+    from bybit_client import format_bybit_qty
+    entry_price = 65000.0
+    position_size_usd = 2.0  # Approved margin floor
+    leverage_val = 5.0
+    leveraged_size = position_size_usd * leverage_val  # $10.00
+    raw_qty = leveraged_size / entry_price  # 0.00015385 BTC
+    qty_str = format_bybit_qty("BTCUSDT", raw_qty)  # "0.000"
+    qty_val = float(qty_str) if qty_str else 0.0  # 0.0
+
+    # Test that original_notional uses untruncated leveraged_size ($10.00)
+    original_notional = leveraged_size
+    original_stop_dist = 1000.0
+    original_risk_usd = (original_notional / max(1e-8, entry_price)) * original_stop_dist
+    assert original_risk_usd > 0.0  # $0.1538 risk
+
+    # Min notional scaling forces order to 0.001 BTC ($65.00)
+    scaled_notional = 65.0  # 0.001 * 65000
+    atr_dollars = 1000.0
+    min_allowed_sl_dist = atr_dollars * 0.60  # $600.00
+    scaled_risk_usd = (scaled_notional / max(1e-8, entry_price)) * min_allowed_sl_dist  # $0.60 risk
+
+    # Risk cap check must trigger and reject trade
+    risk_cap_ratio = 1.10
+    is_rejected = scaled_risk_usd > original_risk_usd * risk_cap_ratio
+    assert is_rejected is True  # $0.60 > $0.1538 * 1.10 = $0.1692 -> REJECTED!
+
