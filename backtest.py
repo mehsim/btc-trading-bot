@@ -33,6 +33,8 @@ parser.add_argument("--sl-mult", type=float, default=None, help="Override SL mul
 parser.add_argument("--tp-mult", type=float, default=None, help="Override TP multiplier for simulation")
 parser.add_argument("--lookahead", type=int, default=None, help="Override lookahead bars for simulation")
 parser.add_argument("--rule-feature", type=str, default=None, help="Direct decile rule mode on a single feature")
+parser.add_argument("--challenger", action="store_true", default=False, help="Evaluate newly trained challenger candidate models")
+parser.add_argument("--bypass-denylist", action="store_true", default=False, help="Bypass governance denylist check for historical backtesting")
 
 args, _ = parser.parse_known_args()
 INTERVAL = args.interval
@@ -45,6 +47,8 @@ OVERRIDE_SL_MULT = args.sl_mult
 OVERRIDE_TP_MULT = args.tp_mult
 OVERRIDE_LOOKAHEAD = args.lookahead
 RULE_FEATURE = args.rule_feature
+USE_CHALLENGER = args.challenger
+BYPASS_DENYLIST = args.bypass_denylist
 
 INTERVAL_SLIPPAGE = {
     "5": 0.0005,   # 0.05% base slippage for 5m
@@ -79,7 +83,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     ranging_file = f"selected_features_{interval}_ranging.json"
     selected_features_filename = f"selected_features_{interval}.json"
 
-    if os.path.exists(trending_file):
+    if models_trending is not None and models_trending.get("feature_names"):
+        feat_trending = models_trending["feature_names"]
+    elif getattr(models_trending.get("trend") if models_trending else None, "feature_names", None):
+        feat_trending = models_trending["trend"].feature_names
+    elif os.path.exists(trending_file):
         with open(trending_file, "r") as f:
             feat_trending = json.load(f)
     elif os.path.exists(selected_features_filename):
@@ -87,7 +95,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             feat_dict = json.load(f)
             feat_trending = feat_dict.get("trending") if isinstance(feat_dict, dict) else feat_dict
 
-    if os.path.exists(ranging_file):
+    if models_ranging is not None and models_ranging.get("feature_names"):
+        feat_ranging = models_ranging["feature_names"]
+    elif getattr(models_ranging.get("trend") if models_ranging else None, "feature_names", None):
+        feat_ranging = models_ranging["trend"].feature_names
+    elif os.path.exists(ranging_file):
         with open(ranging_file, "r") as f:
             feat_ranging = json.load(f)
     elif os.path.exists(selected_features_filename):
@@ -100,8 +112,8 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     if feat_ranging is None:
         feat_ranging = features
 
-    X_matrix_trending = df[feat_trending].values
-    X_matrix_ranging = df[feat_ranging].values
+    X_matrix_trending = df[feat_trending].values if all(c in df.columns for c in feat_trending) else df[[c for c in feat_trending if c in df.columns]].values
+    X_matrix_ranging = df[feat_ranging].values if all(c in df.columns for c in feat_ranging) else df[[c for c in feat_ranging if c in df.columns]].values
 
     probs_tr_all = None
     pred_pct_tr_all = None
@@ -399,13 +411,19 @@ def run_backtest():
     try:
         from ensemble import load_ensemble_classifier, load_ensemble_regressor
         import json
+        sfx = "_challenger" if USE_CHALLENGER else ""
+        trending_manifest_file = f"ensemble_trending_trend_{INTERVAL}{sfx}_manifest.json"
+        ranging_manifest_file = f"ensemble_ranging_trend_{INTERVAL}{sfx}_manifest.json"
         trending_file = f"selected_features_{INTERVAL}_trending.json"
         ranging_file = f"selected_features_{INTERVAL}_ranging.json"
         selected_features_filename = f"selected_features_{INTERVAL}.json"
 
         feat_tr = None
         feat_rn = None
-        if os.path.exists(trending_file):
+        if os.path.exists(trending_manifest_file):
+            with open(trending_manifest_file, "r") as f:
+                feat_tr = json.load(f).get("feature_names")
+        elif os.path.exists(trending_file):
             with open(trending_file, "r") as f:
                 feat_tr = json.load(f)
         elif os.path.exists(selected_features_filename):
@@ -413,7 +431,10 @@ def run_backtest():
                 d_f = json.load(f)
                 feat_tr = d_f.get("trending") if isinstance(d_f, dict) else d_f
 
-        if os.path.exists(ranging_file):
+        if os.path.exists(ranging_manifest_file):
+            with open(ranging_manifest_file, "r") as f:
+                feat_rn = json.load(f).get("feature_names")
+        elif os.path.exists(ranging_file):
             with open(ranging_file, "r") as f:
                 feat_rn = json.load(f)
         elif os.path.exists(selected_features_filename):
@@ -426,10 +447,19 @@ def run_backtest():
         if feat_rn is None:
             feat_rn = features
 
+        weights_tr_file = f"ensemble_trending_trend_{INTERVAL}{sfx}_weights.json"
+        weights_rn_file = f"ensemble_ranging_trend_{INTERVAL}{sfx}_weights.json"
         weights_tr = [0.10, 0.45, 0.45] if str(INTERVAL) == "15" else ([0.15, 0.42, 0.43] if str(INTERVAL) == "30" else [0.30, 0.20, 0.50])
         weights_rn = [0.10, 0.45, 0.45] if str(INTERVAL) == "15" else ([0.15, 0.42, 0.43] if str(INTERVAL) == "30" else [0.30, 0.50, 0.20])
-        trending_cal_file = f"calibrator_trending_{INTERVAL}.json"
-        ranging_cal_file = f"calibrator_ranging_{INTERVAL}.json"
+        if os.path.exists(weights_tr_file):
+            with open(weights_tr_file, "r") as f:
+                weights_tr = json.load(f).get("classifier_weights", weights_tr)
+        if os.path.exists(weights_rn_file):
+            with open(weights_rn_file, "r") as f:
+                weights_rn = json.load(f).get("classifier_weights", weights_rn)
+
+        trending_cal_file = f"calibrator_trending_{INTERVAL}{sfx}.json"
+        ranging_cal_file = f"calibrator_ranging_{INTERVAL}{sfx}.json"
         cal_tr = None
         cal_rn = None
         if os.path.exists(trending_cal_file):
@@ -440,25 +470,27 @@ def run_backtest():
                 cal_rn = json.load(f)
 
         models_trending = None
-        if f"trending_{INTERVAL}" not in getattr(config, "MODEL_SLOT_DENYLIST", set()):
+        if USE_CHALLENGER or BYPASS_DENYLIST or f"trending_{INTERVAL}" not in getattr(config, "MODEL_SLOT_DENYLIST", set()):
             try:
                 models_trending = {
-                    "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
-                    "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}", len(feat_tr), feature_names=feat_tr),
+                    "trend": load_ensemble_classifier(f"ensemble_trending_trend_{INTERVAL}{sfx}", len(feat_tr), feature_names=feat_tr),
+                    "price": load_ensemble_regressor(f"ensemble_trending_price_{INTERVAL}{sfx}", len(feat_tr), feature_names=feat_tr),
                     "weights": weights_tr,
-                    "calibrator": cal_tr
+                    "calibrator": cal_tr,
+                    "feature_names": feat_tr
                 }
             except Exception as e:
                 print(f"[Warning] Could not load trending models: {e}")
 
         models_ranging = None
-        if f"ranging_{INTERVAL}" not in getattr(config, "MODEL_SLOT_DENYLIST", set()):
+        if USE_CHALLENGER or BYPASS_DENYLIST or f"ranging_{INTERVAL}" not in getattr(config, "MODEL_SLOT_DENYLIST", set()):
             try:
                 models_ranging = {
-                    "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
-                    "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}", len(feat_rn), feature_names=feat_rn),
+                    "trend": load_ensemble_classifier(f"ensemble_ranging_trend_{INTERVAL}{sfx}", len(feat_rn), feature_names=feat_rn),
+                    "price": load_ensemble_regressor(f"ensemble_ranging_price_{INTERVAL}{sfx}", len(feat_rn), feature_names=feat_rn),
                     "weights": weights_rn,
-                    "calibrator": cal_rn
+                    "calibrator": cal_rn,
+                    "feature_names": feat_rn
                 }
             except Exception as e:
                 print(f"[Warning] Could not load ranging models: {e}")

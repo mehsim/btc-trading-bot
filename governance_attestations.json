@@ -1,11 +1,11 @@
 {
   "trending_15": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "ranging_15": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "trending_30": {
     "research_notebook_approved": false,

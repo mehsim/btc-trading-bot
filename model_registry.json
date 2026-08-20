@@ -1,13 +1,13 @@
 {
   "Production": {
-    "run_id": "train_240m_ranging_1787223684",
-    "model_name": "ensemble_ranging_240",
+    "run_id": "train_15m_ranging_1787235456",
+    "model_name": "ensemble_ranging_15",
     "metrics": {
-      "val_accuracy": 0.3289102559771175,
-      "val_mae": 0.055703289987421224
+      "val_accuracy": 0.337,
+      "val_mae": 0.00856185032052923
     },
     "stage": "Production",
-    "registered_at_utc": "2026-08-20T11:01:24.204118+00:00"
+    "registered_at_utc": "2026-08-20T14:17:36.146541+00:00"
   },
   "Staging": {
     "run_id": "train_240m_trending_1787071122",
@@ -1621,6 +1621,56 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-08-20T11:00:28.830659+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1787223684",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3289102559771175,
+        "val_mae": 0.055703289987421224
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-20T11:01:24.204118+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1787233300",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.33165059075509457,
+        "val_mae": 0.007731372290377227
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-20T13:41:40.054390+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1787234346",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3255247870186658,
+        "val_mae": 0.007353915842602473
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-20T13:59:06.632160+00:00"
+    },
+    {
+      "run_id": "train_15m_ranging_1787234497",
+      "model_name": "ensemble_ranging_15",
+      "metrics": {
+        "val_accuracy": 0.3595,
+        "val_mae": 0.010941672060004825
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-20T14:01:37.182004+00:00"
+    },
+    {
+      "run_id": "train_15m_trending_1787235244",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3569,
+        "val_mae": 0.007013360349341486
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-20T14:14:04.509158+00:00"
     }
   ]
 }

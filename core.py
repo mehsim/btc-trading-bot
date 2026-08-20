@@ -78,7 +78,13 @@ def calculate_historical_thresholds(model_trend, interval):
                         from logger import log_event
                         log_event("WARNING", f"Selected features file load notice: {ex_feat_file}")
                 
-                feat_cols = [col for col in selected_features_list if col in df.columns] if selected_features_list else [c for c in features if c in df.columns]
+                model_feats = getattr(model_trend, "feature_names", None)
+                if model_feats:
+                    feat_cols = [col for col in model_feats if col in df.columns]
+                elif selected_features_list:
+                    feat_cols = [col for col in selected_features_list if col in df.columns]
+                else:
+                    feat_cols = [c for c in features if c in df.columns]
                             
                 from ensemble import _slice_model_input
                 X_hist = _slice_model_input(model_trend, df[feat_cols])

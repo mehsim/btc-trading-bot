@@ -66,7 +66,7 @@ if os.path.exists("governance_denylist.json"):
         pass
 
 MODEL_SLOT_DENYLIST = {
-    "ranging_15",     # legacy barrier mismatch (trained 2.5/2.2 vs serving 1.4/1.25)
+    # 15m trending & ranging lifted 2026-08-20: retrained with verified barrier contract (23 feats, Delta PF +0.15)
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     # trending_240 lifted 2026-08-18: retrained with RFECV (CV MCC +0.0582, Holdout MCC +0.0331)
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
