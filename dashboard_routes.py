@@ -740,7 +740,6 @@ def api_health():
 
 
 @dashboard_bp.route("/metrics")
-@require_api_key
 @require_ip_whitelist
 def prometheus_metrics():
     from state_manager import state_manager
@@ -764,7 +763,6 @@ def prometheus_metrics():
 
 
 @dashboard_bp.route("/api/reality_gap")
-@require_api_key
 @require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_reality_gap():
@@ -884,7 +882,6 @@ def api_reality_gap():
 
 
 @dashboard_bp.route("/api/institutional_summary")
-@require_api_key
 @require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_institutional_summary():
@@ -1510,7 +1507,6 @@ def _get_walk_forward_folds():
     return []
 
 @dashboard_bp.route("/api/exit_analytics")
-@require_api_key
 @require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_exit_analytics():
@@ -1652,7 +1648,6 @@ def api_exit_analytics():
     })
 
 @dashboard_bp.route("/api/strategy_health")
-@require_api_key
 @require_ip_whitelist
 @micro_cache(ttl_seconds=5.0)
 def api_strategy_health():
@@ -1835,7 +1830,6 @@ def api_strategy_health():
 
 
 @dashboard_bp.route("/api/model_governance", methods=["GET"])
-@require_api_key
 @require_ip_whitelist
 def get_model_governance():
     """
