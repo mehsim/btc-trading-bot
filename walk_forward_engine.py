@@ -120,8 +120,7 @@ def run_walk_forward_backtest(
                         float(t.get("net_return", t.get("pnl_pct", 0.0))) * (100.0 if abs(float(t.get("net_return", 0.0))) <= 2.0 else 1.0)
                         for t in trades_extracted if isinstance(t, dict)
                     ]
-            except Exception as sim_ex:
-                print(f"[Walk-Forward Simulator Notice] Trade extraction notice: {sim_ex}")
+            except Exception:
                 trade_returns = []
                 
         if trade_returns:

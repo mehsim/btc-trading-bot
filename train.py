@@ -1773,6 +1773,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             chal_ece = float(locals().get("ece_score", 0.03))
 
         # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
+        import config
         from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
         min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_mcc", 0.05))
         min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))

@@ -213,7 +213,8 @@ def run_statistical_governance_scheduler():
     If a slot produces statistically confirmed negative expectancy (REJECT), it persists the slot
     to governance_denylist.json to automatically offline the model on next execution cycle.
     """
-    print("[Scheduler] Automated statistical governance monitoring scheduler started.")
+    from logger import log_event
+    log_event("INFO", "[Scheduler] Automated statistical governance monitoring scheduler started.")
     intervals_to_monitor = ["15", "30", "60", "120", "240", "360"]
     while True:
         try:
@@ -240,9 +241,9 @@ def run_statistical_governance_scheduler():
                         decision = matrix_res.get("governance", {}).get("decision")
                         if decision == "REJECT":
                             reasons_str = "; ".join(matrix_res.get("governance", {}).get("reasons", ["Statistical rejection"]))
-                            print(f"[Statistical Governance Live Gate] Denylisting trending_{iv} due to statistical rejection: {reasons_str}")
+                            log_event("WARNING", f"[Statistical Governance Live Gate] Denylisting trending_{iv} due to statistical rejection: {reasons_str}")
                             _record_to_governance_denylist(f"trending_{iv}", reason=f"Live statistical rejection: {reasons_str}")
         except Exception as e:
-            print(f"[Statistical Governance Scheduler Error] {e}")
+            log_event("ERROR", f"[Statistical Governance Scheduler Error] {e}")
 
         time.sleep(3600)  # Check hourly
