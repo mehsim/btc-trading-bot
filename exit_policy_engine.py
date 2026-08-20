@@ -351,6 +351,10 @@ class ExitPolicyEngine:
             except Exception as shadow_err:
                 pass
 
+    def get_shadow_evaluations(self) -> Dict[str, Any]:
+        """Returns the most recent shadow policy simulation states."""
+        return getattr(self, "_shadow_evaluations", {})
+
     def select_and_lock_meta_policy(
         self,
         regime: str = "Trending",

@@ -227,7 +227,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             if i + 1 >= total_candles:
                 break
             raw_entry = df.loc[i + 1, "open"]
-            half_spread = (FEE_RATE / 4.0) * raw_entry
+            half_spread = (fee_rate / 4.0) * raw_entry
             entry_price = raw_entry + half_spread if ml_trend == "Bullish" else raw_entry - half_spread
         else:
             entry_price = close_price
@@ -238,7 +238,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         # ATR-based Stop Loss and Take Profit with production TP resolution
         regime_detected = "trending" if is_trending_state else "ranging"
         sl_multiplier = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 0.8)
-        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else (cfg.get("tp_mult_trending", 1.85) if (regime_detected == "trending") else cfg.get("tp_mult_ranging", 1.25))
+        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else cfg.get("tp_mult_trending", 1.85)
 
         from trade_calculators import UnifiedTargetGenerator
         tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
@@ -313,11 +313,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             
         if pessimistic_mode:
             # Full round-trip taker fee (entry + exit) + half spread
-            total_trading_cost = (2.0 * FEE_RATE) + (FEE_RATE / 4.0)
+            total_trading_cost = (2.0 * fee_rate) + (fee_rate / 4.0)
             net_return = gross_return - total_trading_cost
         else:
             vol_slippage = (atr_norm * 0.05) if atr_norm is not None else 0.0005
-            net_return = gross_return - FEE_RATE - vol_slippage
+            net_return = gross_return - fee_rate - vol_slippage
         
         # Deduct 8h perpetual funding rate for holds >= 8 hours
         try:
@@ -643,7 +643,9 @@ def run_backtest():
     }
     try:
         from walk_forward_engine import run_walk_forward_backtest
-        wf_summary = run_walk_forward_backtest(df)
+        def _wf_sim_fn(sub_df):
+            return run_single_backtest(sub_df, models, features, interval=INTERVAL, pessimistic_mode=True)
+        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=_wf_sim_fn)
         if wf_summary.get("status") == "success":
             print("=" * 90)
             print("WALK-FORWARD SLIDING WINDOW VALIDATION SUMMARY")

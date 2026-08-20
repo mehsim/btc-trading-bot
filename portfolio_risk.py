@@ -52,7 +52,13 @@ class PortfolioRiskEngine:
         for p in open_positions:
             if isinstance(p, dict):
                 sym = p.get("symbol") or "CANDIDATE"
-                symbol_sizes[sym] = symbol_sizes.get(sym, 0.0) + safe_float(p.get("position_size_usd", 0.0))
+                notional = safe_float(p.get("notional", 0.0))
+                if notional <= 0:
+                    base_usd = safe_float(p.get("position_size_usd", 0.0))
+                    # If leverage is explicitly provided in position dict, account for leveraged exposure
+                    lev = safe_float(p.get("leverage", 1.0))
+                    notional = base_usd * (lev if lev > 1.0 else 1.0)
+                symbol_sizes[sym] = symbol_sizes.get(sym, 0.0) + notional
 
         if not symbol_sizes:
             return 0.0, 0.0, True

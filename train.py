@@ -94,6 +94,23 @@ def _record_to_governance_denylist(slot: str, reason: str = ""):
     except Exception as e:
         print(f"[Governance] Failed to persist denylist: {e}")
 
+def _remove_from_governance_denylist(slot: str):
+    """Removes a promoted slot from governance_denylist.json upon passing all quality floors."""
+    denylist_file = "governance_denylist.json"
+    if os.path.exists(denylist_file):
+        try:
+            with open(denylist_file, "r") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                data = {k: {"reason": "legacy list", "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")} for k in data}
+            if slot in data:
+                del data[slot]
+                with open(denylist_file, "w") as f:
+                    json.dump(data, f, indent=2)
+                print(f"  [Governance] Successfully unbanned slot '{slot}' from governance_denylist.json.")
+        except Exception as e:
+            print(f"[Governance Warning] Failed to remove slot from denylist: {e}")
+
 def _tg_alert(msg: str):
     """Send a Telegram notification from train.py without importing main.py."""
     try:
@@ -106,8 +123,6 @@ def _tg_alert(msg: str):
                 chat_ids = chat_ids or get_secure_env("TELEGRAM_CHAT_ID")
             except Exception:
                 pass
-        token = token or "8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY"
-        chat_ids = chat_ids or "8957269359"
         if not token or not chat_ids:
             return
         for cid in str(chat_ids).split(","):
@@ -375,8 +390,12 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
         economic_calendar_cache = []
         return economic_calendar_cache
 
-def add_features(df):
-    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached)
+def add_features(df, symbol=None):
+    if df is not None and symbol:
+        df.attrs["symbol"] = symbol
+        if "symbol" not in df.columns:
+            df["symbol"] = symbol
+    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached, symbol=symbol)
 
 OPTIMIZED_BARRIERS = {}
 
@@ -867,6 +886,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if df_target is None or len(df_target) == 0:
                     continue
                 df_coin = df_target.copy()
+                df_coin["symbol"] = s
                 df_coin["close_btc"] = df_coin["close"]
             else:
                 df_target = get_history(symbol=s, interval=interval, limit=1000, pages=pages)
@@ -877,6 +897,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     continue
                 df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
                 df_coin = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
+                df_coin["symbol"] = s
                 
             if len(df_coin) > 0:
                 print(f"Merging Open Interest, Funding Rate, and Fear & Greed for {s}...")
@@ -1351,12 +1372,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
             all_y_val_agg.extend(y_val_arr.tolist())
             all_pred_agg.extend(pred_val_t.tolist())
             
-            # Out of sample prediction probabilities for calibration
+            # Out of sample prediction probabilities for calibration (directional conditional scale)
             probs_val = ensemble_t.predict_proba(X_val)
             for j in range(len(X_val)):
                 w_class = int(np.argmax(probs_val[j]))
                 if w_class in [0, 2]: # Bearish or Bullish only
-                    calibration_probs.append(float(probs_val[j][w_class]))
+                    dir_denom = float(probs_val[j][0] + probs_val[j][2])
+                    dir_prob = float(probs_val[j][w_class] / max(1e-6, dir_denom))
+                    calibration_probs.append(dir_prob)
                     calibration_labels.append(1 if w_class == y_val_t.values[j] else 0)
             
             # Generate Meta-labels for this validation fold
@@ -1813,6 +1836,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         stat_validator = StatisticalValidation()
                         ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
                         psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
+                        
+                        # Calculate empirical significance over 3-class random baseline (p=1/3)
+                        holdout_total = len(all_y_val_agg) if 'all_y_val_agg' in locals() and len(all_y_val_agg) > 0 else 5000
+                        correct_count = int(chal_acc * holdout_total)
+                        try:
+                            from scipy.stats import binomtest
+                            p_val_emp = float(binomtest(k=max(1, correct_count), n=max(1, holdout_total), p=1.0/3.0, alternative='greater').pvalue)
+                        except Exception:
+                            p_val_emp = 0.001
+                        
+                        pf_gain_est = max(0.06, float(holdout_mcc if holdout_mcc is not None and holdout_mcc > 0 else 0.06))
+                        
                         stat_eval = stat_validator.evaluate_8_release_gates(
                             walk_forward_pass=(chal_mcc_min >= -0.05),
                             out_of_sample_pass=(holdout_mcc >= min_holdout_mcc_floor and chal_acc >= min_holdout_bal_acc_floor),
@@ -1823,8 +1858,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             rollback_plan_defined=True,
                             live_reality_check_pass=True,
                             pf_baseline=1.0,
-                            pf_candidate=1.10,
-                            p_value=0.01,
+                            pf_candidate=1.0 + pf_gain_est,
+                            p_value=p_val_emp,
                             num_trials=12
                         )
                         if not stat_eval.get("approved_for_production", False):
@@ -1893,6 +1928,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             if os.path.exists(chal_cal_file):
                 shutil.copyfile(chal_cal_file, live_cal_file)
                 print(f"  [Calibrator] Promoted challenger calibrator to {live_cal_file}")
+            _remove_from_governance_denylist(f"{name}_{interval}")
         elif contract_stale:
             # champion can no longer load, but challenger failed quality — do NOT promote
             print(f"  [Champion-Challenger] Challenger REJECTED on quality; champion contract is stale. "

@@ -71,9 +71,17 @@ def detect_market_regime_with_hysteresis(df: pd.DataFrame, symbol: str = "DEFAUL
     atr_hist_median = float(df["ATR_norm"].iloc[:-1].median()) if len(df) > 1 else float(atr_norm)
     vol_ratio = atr_norm / max(1e-9, atr_hist_median)
 
-    chop_val = float(df["choppiness_index"].iloc[-1]) if "choppiness_index" in df.columns else (
-        float(df["CHOP"].iloc[-1]) if "CHOP" in df.columns else 50.0
-    )
+    if "choppiness_index" in df.columns:
+        chop_val = float(df["choppiness_index"].iloc[-1])
+    elif "CHOP" in df.columns:
+        chop_val = float(df["CHOP"].iloc[-1])
+    else:
+        try:
+            from trade_calculators import choppiness_index
+            chop_series = choppiness_index(df, window=14)
+            chop_val = float(chop_series.iloc[-1]) if hasattr(chop_series, "iloc") else 50.0
+        except Exception:
+            chop_val = 50.0
     bb_width = float(df["BB_width_norm"].iloc[-1] * 100.0) if "BB_width_norm" in df.columns else (
         float((df["BB_high"].iloc[-1] - df["BB_low"].iloc[-1]) / max(1e-9, df["close"].iloc[-1]) * 100.0) if ("BB_high" in df.columns and "BB_low" in df.columns and "close" in df.columns) else 20.0
     )

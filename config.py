@@ -52,7 +52,7 @@ TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.335, "30": 0.338, "default": 0.340}
 # When False (Default): Routes to validated universal/trending models across all market regimes.
 # When True: Routes strictly to regime-specific models (trending vs ranging) and abstains fail-closed if unservable.
 ENABLE_DYNAMIC_REGIME_ROUTING = False
-DYNAMIC_REGIME_ROUTING_INTERVALS = {"120", "30"}  # 120m & 30m ranging champions verified out-of-sample
+DYNAMIC_REGIME_ROUTING_INTERVALS = {"30"}  # 30m ranging champion verified out-of-sample (120m denied by governance)
 _persisted_denylist = set()
 if os.path.exists("governance_denylist.json"):
     try:

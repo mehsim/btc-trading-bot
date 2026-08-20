@@ -208,6 +208,15 @@ def add_features(df, fetch_calendar_callback=None, symbol=None):
     
     df["MFI"] = MFIIndicator(df["high"], df["low"], df["close"], df["volume"], window=14).money_flow_index()
     
+    # Choppiness Index (0-100) for regime detection (fully vectorized across time)
+    tr_chop = np.maximum(df["high"] - df["low"], np.maximum(abs(df["high"] - df["close"].shift(1)), abs(df["low"] - df["close"].shift(1))))
+    atr_chop_sum = tr_chop.rolling(14).sum()
+    high_chop_max = df["high"].rolling(14).max()
+    low_chop_min = df["low"].rolling(14).min()
+    denom_chop = (high_chop_max - low_chop_min).replace(0, np.nan)
+    df["choppiness_index"] = (100.0 * np.log10(atr_chop_sum / denom_chop) / np.log10(14)).fillna(50.0)
+    df["CHOP"] = df["choppiness_index"]
+    
     # ATR Volatility normalized
     atr_ind = AverageTrueRange(df["high"], df["low"], df["close"], window=14)
     df["ATR_norm"] = atr_ind.average_true_range() / (df["close"] + 1e-8)
@@ -287,8 +296,8 @@ def add_features(df, fetch_calendar_callback=None, symbol=None):
     # Rolling z-score normalization for RSI and ADX (200-candle window)
     for col in ["RSI", "ADX"]:
         rolling_mean = df[col].rolling(200, min_periods=200).mean()
-        rolling_std = df[col].rolling(200, min_periods=200).std().replace(0, 1)
-        df[f"{col}_z"] = (df[col] - rolling_mean) / rolling_std
+        rolling_std = df[col].rolling(200, min_periods=200).std().replace(0, np.nan).fillna(1.0)
+        df[f"{col}_z"] = ((df[col] - rolling_mean) / rolling_std).fillna(0.0)
 
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     rolling_pv = (typical_price * df["volume"]).rolling(window=168, min_periods=1).sum()

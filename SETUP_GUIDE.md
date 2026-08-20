@@ -52,15 +52,15 @@ Create a `.env` file in the root project directory:
 ```bash
 cat << 'EOF' > .env
 # Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY
-TELEGRAM_CHAT_ID=8957269359,8827929671
+TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
+TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID_HERE
 
 # Bybit API Credentials (Live Trading & Wallet Equity Sync)
-BYBIT_API_KEY=r02Fp8h4mmaREFT93l
-BYBIT_API_SECRET=tphjX8d4vwmDi1mxHJScEIBFJjn7wWf6K8ot
+BYBIT_API_KEY=YOUR_BYBIT_API_KEY_HERE
+BYBIT_API_SECRET=YOUR_BYBIT_API_SECRET_HERE
 
 # Bot Mode: 'simulation' (Paper Trading) or 'live' (Real Trading)
-TRADE_MODE=live
+TRADE_MODE=simulation
 
 # News & Sentiment API Key (Optional)
 FINNHUB_TOKEN=free
@@ -121,7 +121,7 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/btc-trading-bot
 EnvironmentFile=/home/ubuntu/btc-trading-bot/.env
 ExecStart=/home/ubuntu/btc-trading-bot/.venv/bin/python3 main.py
-ExecStartPost=/bin/sh -c 'curl -s -X POST https://api.telegram.org/bot8817449481:AAGKzzloVb36ClP4hr4FhgXSzJHIcIlYTfY/sendMessage -d chat_id=8957269359 -d text="✅ BTC Bot started successfully."'
+ExecStartPost=/bin/sh -c '. /home/ubuntu/btc-trading-bot/.env && curl -s -X POST https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage -d chat_id=$TELEGRAM_CHAT_ID -d text="✅ BTC Bot started successfully."'
 Restart=always
 RestartSec=10
 

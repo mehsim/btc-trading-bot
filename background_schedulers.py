@@ -9,9 +9,11 @@ import time
 from datetime import datetime, timezone
 import database
 
-FUNDING_ARB_THRESHOLD = 0.001  # 0.1% — above this, shorts earn funding income
-FUNDING_ARB_SIZE_USD = 20.0    # Fixed notional size per arbitrage position
-SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
+try:
+    import config
+    SUPPORTED_SYMBOLS = getattr(config, "SUPPORTED_SYMBOLS", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "SUIUSDT", "DOGEUSDT"])
+except Exception:
+    SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT", "LINKUSDT", "NEARUSDT", "APTUSDT", "SUIUSDT", "DOGEUSDT"]
 JOURNAL_PATH = "trade_journal.csv"
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
 

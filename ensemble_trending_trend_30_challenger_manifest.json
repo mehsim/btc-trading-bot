@@ -2,11 +2,11 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_trend_30",
-  "timestamp": "2026-08-18T11:34:23.728186+00:00",
+  "timestamp": "2026-08-20T10:49:46.556076+00:00",
   "model_version": "v7.2.0-93893d3b-202608181134",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "93893d3b",
+  "git_sha": "b98b11ee",
   "feature_count": 15,
   "feature_names": [
     "ADX",
@@ -84,48 +84,48 @@
     "balanced_accuracy": 0.3962
   },
   "metrics": {
-    "uniqueness_ratio": 0.0769,
-    "effective_sample_size": 2251.77,
-    "raw_sample_size": 29267,
-    "mcc": 0.0638,
-    "balanced_accuracy": 0.3751
+    "uniqueness_ratio": 0.0092,
+    "effective_sample_size": 100.61,
+    "raw_sample_size": 10912,
+    "mcc": 0.0587,
+    "balanced_accuracy": 0.3843
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3751,
-      "median": 0.3747,
-      "std": 0.01,
-      "min": 0.3613,
-      "max": 0.3915
+      "mean": 0.3843,
+      "median": 0.3703,
+      "std": 0.0326,
+      "min": 0.3399,
+      "max": 0.4334
     },
     "macro_f1": {
-      "mean": 0.3346,
-      "median": 0.3239,
-      "std": 0.0318,
-      "min": 0.289,
-      "max": 0.3786
+      "mean": 0.3573,
+      "median": 0.3575,
+      "std": 0.0427,
+      "min": 0.3032,
+      "max": 0.4293
     },
     "mcc": {
-      "mean": 0.0638,
-      "median": 0.055,
-      "std": 0.0245,
-      "min": 0.0309,
-      "max": 0.1002
+      "mean": 0.0587,
+      "median": 0.0539,
+      "std": 0.0343,
+      "min": 0.0148,
+      "max": 0.1178
     },
-    "mean_kappa": 0.05715584450174414,
-    "mean_pr_auc_bear": 0.22759366013925791,
-    "mean_pr_auc_bull": 0.15816663105328452,
-    "mean_raw_accuracy": 0.3948,
-    "mean_mae": 0.011124,
-    "label_dist_bearish_pct": 18.62,
-    "label_dist_neutral_pct": 66.44,
-    "label_dist_bullish_pct": 14.95,
-    "n_training_samples": 29267,
+    "mean_kappa": 0.0551177530287561,
+    "mean_pr_auc_bear": 0.21858663737494308,
+    "mean_pr_auc_bull": 0.1842648307103496,
+    "mean_raw_accuracy": 0.4483,
+    "mean_mae": 0.012232,
+    "label_dist_bearish_pct": 16.59,
+    "label_dist_neutral_pct": 68.73,
+    "label_dist_bullish_pct": 14.68,
+    "n_training_samples": 10912,
     "n_holdout_samples": 8640,
-    "effective_sample_size": 2251.77,
-    "raw_sample_size": 29267,
-    "uniqueness_ratio": 0.0769,
+    "effective_sample_size": 100.61,
+    "raw_sample_size": 10912,
+    "uniqueness_ratio": 0.0092,
     "confusion_matrix": {
       "labels": [
         "Bearish",
@@ -139,29 +139,29 @@
       ],
       "matrix": [
         [
-          1707,
-          1530,
-          1434
+          625,
+          800,
+          317
         ],
         [
-          4130,
-          6711,
-          5221
+          1807,
+          3082,
+          1188
         ],
         [
-          1272,
-          1172,
-          1208
+          421,
+          482,
+          368
         ]
       ]
     },
-    "holdout_accuracy": 0.681,
-    "holdout_balanced_accuracy": 0.3333,
-    "holdout_mcc": 0.0,
-    "champion_holdout_mcc": null,
-    "champion_holdout_balanced_accuracy": null,
-    "holdout_brier": 0.4802,
-    "holdout_ece": 0.0657,
+    "holdout_accuracy": 0.2794,
+    "holdout_balanced_accuracy": 0.3619,
+    "holdout_mcc": 0.0344,
+    "champion_holdout_mcc": 0.0,
+    "champion_holdout_balanced_accuracy": 0.3333,
+    "holdout_brier": 0.7558,
+    "holdout_ece": 0.2364,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -170,7 +170,7 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "93893d3b"
+    "git_sha": "b98b11ee"
   },
   "barrier_config": {
     "tp_mult_trending": 2.8909683078238504,
@@ -180,15 +180,15 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0638,
-  "manifest_mcc_min": 0.0309,
-  "manifest_bal_acc": 0.3751,
+  "manifest_mcc": 0.0587,
+  "manifest_mcc_min": 0.0148,
+  "manifest_bal_acc": 0.3843,
   "label_distribution": [
-    7148,
-    25510,
-    5740
+    3295,
+    13648,
+    2915
   ],
-  "promoted": true,
-  "evaluation_timestamp": "2026-08-18T11:34:23.728186+00:00",
-  "hmac_signature": "78ebb8ac94d4ca6dbe15c139614a47416dc28a7bc90e34c9969b15742a5e1bf5"
+  "promoted": false,
+  "evaluation_timestamp": "2026-08-20T10:49:46.556076+00:00",
+  "hmac_signature": "5d5c8106768e54eaaa8dd1762868231a49b48df1312e5b437fe7f5616b3b2ae6"
 }

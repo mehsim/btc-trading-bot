@@ -5,6 +5,15 @@ import config
 import database
 from circuit_breaker import circuit_breaker
 
+@pytest.fixture(autouse=True)
+def reset_circuit_breaker_state():
+    """Ensure global circuit breaker singleton state is clean before and after each test."""
+    circuit_breaker.is_circuit_active = False
+    circuit_breaker.active_reason = "HEALTHY"
+    yield
+    circuit_breaker.is_circuit_active = False
+    circuit_breaker.active_reason = "HEALTHY"
+
 def test_circuit_breaker_halts_on_max_trades_cap():
     """Verify that exceeding MAX_LIVE_TRADES_CAP activates circuit breaker."""
     mock_trades = [

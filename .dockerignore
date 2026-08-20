@@ -10,3 +10,13 @@ catboost_info/
 kline_cache/
 *.log
 *.pkl
+.env
+.manifest_hmac_secret
+trading_bot.db*
+dashboard_history.json
+*.pem
+backups/
+mlruns/
+mlflow.db*
+trade_journal.csv
+active_trades.json

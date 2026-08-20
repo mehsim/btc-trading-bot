@@ -77,13 +77,13 @@ MAX_RR_RATIO = {
 }
 
 MIN_RR_RATIO = {
-    "5m": 1.8,
-    "15": 2.0, "15m": 2.0,
-    "30": 2.5, "30m": 2.5,
-    "60": 3.0, "1h": 3.0,
-    "120": 4.0, "2h": 4.0,
-    "240": 4.0, "4h": 4.0,
-    "360": 4.0, "6h": 4.0
+    "5m": 1.5,
+    "15": 1.8, "15m": 1.8,
+    "30": 2.0, "30m": 2.0,
+    "60": 2.0, "1h": 2.0,
+    "120": 2.0, "2h": 2.0,
+    "240": 2.0, "4h": 2.0,
+    "360": 2.0, "6h": 2.0
 }
 
 
@@ -118,30 +118,36 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
     
     profit_factor = gross_gains / max(1e-9, gross_losses) if gross_losses > 0 else (10.0 if gross_gains > 0 else 0.0)
 
-    # Convert trade returns to R-multiples (R = pnl / (initial_equity * risk_per_trade_pct))
-    risk_usd = max(0.01, initial_equity * risk_per_trade_pct)
-    r_multiples = returns / risk_usd
+    # Check if returns are fractional (e.g. 0.012 for 1.2%) vs absolute dollar PnL
+    is_fractional = bool(len(returns) > 0 and np.max(np.abs(returns)) <= 2.0)
+    
+    if is_fractional:
+        pct_returns = returns
+        returns_dollar = returns * initial_equity
+        r_multiples = returns / max(1e-4, risk_per_trade_pct)
+        # Compounded equity curve for fractional returns
+        full_equity = initial_equity * np.cumprod(np.insert(1.0 + returns, 0, 1.0))
+    else:
+        returns_dollar = returns
+        pct_returns = returns / initial_equity
+        risk_usd = max(0.01, initial_equity * risk_per_trade_pct)
+        r_multiples = returns / risk_usd
+        # Additive equity curve for dollar PnL
+        equity_curve = initial_equity + np.cumsum(returns_dollar)
+        full_equity = np.insert(equity_curve, 0, initial_equity)
+
     expectancy_r = float(np.mean(r_multiples))
 
     # Sharpe & Sortino Ratios (Trade-level annualized)
-    mean_ret = float(np.mean(returns))
-    std_ret = float(np.std(returns)) if len(returns) > 1 else 0.0
-    
-    downside_returns = returns[returns < 0]
-    std_downside = float(np.std(downside_returns)) if len(downside_returns) > 1 else (std_ret if len(returns) > 1 else 0.0)
-
-    # Convert absolute dollar returns to % returns for Sharpe/Sortino if returns are raw PnL
-    pct_returns = returns / initial_equity
     pct_mean = float(np.mean(pct_returns))
     pct_std = float(np.std(pct_returns)) if len(pct_returns) > 1 else 0.0
-    pct_downside_std = float(np.std(pct_returns[pct_returns < 0])) if len(pct_returns[pct_returns < 0]) > 1 else (pct_std if len(pct_returns) > 1 else 0.0)
+    downside_pct = pct_returns[pct_returns < 0]
+    pct_downside_std = float(np.std(downside_pct)) if len(downside_pct) > 1 else (pct_std if len(pct_returns) > 1 else 0.0)
 
     sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * np.sqrt(min(total_trades, 252)) if pct_std > 0 else 0.0
     sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * np.sqrt(min(total_trades, 252)) if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
 
-    # Equity Curve & Drawdown (additive cumsum for raw PnL dollar returns)
-    equity_curve = initial_equity + np.cumsum(returns)
-    full_equity = np.insert(equity_curve, 0, initial_equity)
+    # Equity Curve & Drawdown
     peak = np.maximum.accumulate(full_equity)
     dd_curve = (peak - full_equity) / np.maximum(1e-8, peak) * 100.0
     max_drawdown = float(np.max(dd_curve)) if len(dd_curve) > 0 else 0.0
@@ -378,41 +384,29 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
         adjusted["stop_dist"] = required_stop
 
     # 2. Universal R:R Ratio Capping by timeframe (Max Cap)
+    if adjusted["stop_dist"] <= 0:
+        logs.append(f"[REJECT_ZERO_STOP] {symbol} {interval} Stop distance is zero or negative (${adjusted['stop_dist']:.4f})")
+        return False, adjusted, "; ".join(logs)
+
     iv_str = str(interval).replace("m", "")
     max_rr = MAX_RR_RATIO.get(str(interval), MAX_RR_RATIO.get(iv_str, 4.0))
-    current_rr = adjusted["tp_dist"] / adjusted["stop_dist"] if adjusted["stop_dist"] > 0 else 0.0
+    max_allowed_tp_dist = adjusted["stop_dist"] * max_rr
+    current_rr = adjusted["tp_dist"] / adjusted["stop_dist"]
     
     if current_rr > max_rr:
-        max_allowed_tp_dist = adjusted["stop_dist"] * max_rr
         if direction == "Bearish":
             adjusted["tp_price"] = entry_price - max_allowed_tp_dist
         else:
             adjusted["tp_price"] = entry_price + max_allowed_tp_dist
         adjusted["tp_dist"] = max_allowed_tp_dist
         current_rr = max_rr
-        orig_rr_str = f"{tp_dist/adjusted['stop_dist']:.1f}:1" if adjusted['stop_dist'] > 0 else "N/A"
+        orig_rr_str = f"{tp_dist/adjusted['stop_dist']:.1f}:1"
         logs.append(f"[TP_CAPPED_UNIVERSAL] {symbol} {interval} R:R capped from {orig_rr_str} to {max_rr:.1f}:1 (TP dist reduced from ${tp_dist:.4f} to ${max_allowed_tp_dist:.4f})")
         
-    # 3. Minimum R:R Ratio Floor Gate (Dynamic TP optimization if below min_rr)
-    min_rr = MIN_RR_RATIO.get(str(interval), MIN_RR_RATIO.get(iv_str, 2.0))
+    # 3. Minimum R:R Ratio Floor Gate (Strict rejection of sub-floor geometry)
+    min_rr = MIN_RR_RATIO.get(str(interval), MIN_RR_RATIO.get(iv_str, 1.8))
     if current_rr < min_rr:
-        try:
-            from trade_frequency_optimizer import trade_frequency_optimizer
-            opt_tp, new_rr, adjusted_flag = trade_frequency_optimizer.optimize_tp_target_for_rr(
-                entry_price=entry_price, stop_price=adjusted["stop_price"], atr_dollars=atr_dollars, direction=direction, min_rr_required=min_rr, max_allowed_tp_dist=max_allowed_tp_dist
-            )
-            if adjusted_flag:
-                adjusted["tp_price"] = opt_tp
-                adjusted["tp_dist"] = abs(opt_tp - entry_price)
-                current_rr = new_rr
-                logs.append(f"[TP_OPTIMIZED_RR] {symbol} {interval} TP target adjusted to ${opt_tp:.4f} to satisfy {min_rr:.1f}:1 R:R floor")
-            else:
-                current_rr = new_rr
-        except Exception as e:
-            logs.append(f"[TP_OPTIMIZE_WARNING] {symbol} {interval}: {e}")
-
-    if current_rr < min_rr:
-        logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.1f}:1 is below minimum floor {min_rr:.1f}:1 (Unreachable target)")
+        logs.append(f"[REJECT_MIN_RR] {symbol} {interval} R:R {current_rr:.2f}:1 is below minimum floor {min_rr:.2f}:1")
         return False, adjusted, "; ".join(logs)
 
     return True, adjusted, "; ".join(logs) if logs else "OK"
@@ -1196,11 +1190,12 @@ class UnifiedTargetGenerator:
         import numpy as np
         cfg = TIMEFRAME_CONFIG.get(str(interval), {})
         min_tp_d = max(0.75 * atr_dollars, entry_price * 0.0020)
-        actual_tp_m = max(min_tp_d / max(1e-6, atr_dollars), base_tp_m)
+        min_tp_m = min_tp_d / max(1e-6, atr_dollars)
+        actual_tp_m = max(min_tp_m, base_tp_m)
         lookahead = cfg.get("lookahead", 10)
         reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
         max_reach_m = float(np.sqrt(lookahead)) * reach_factor
-        return float(min(actual_tp_m, max_reach_m))
+        return float(max(min_tp_m, min(actual_tp_m, max_reach_m)))
 
     @staticmethod
     def compute_targets(
@@ -1229,7 +1224,7 @@ class UnifiedTargetGenerator:
         lookahead = TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10)
         reach_factor = getattr(config, "HORIZON_REACHABILITY_FACTOR", 1.5)
         max_reach_dist = atr_dollars * float(np.sqrt(lookahead)) * reach_factor
-        calc_dist = min(calc_dist, max_reach_dist)
+        calc_dist = max(min_tp_dist, min(calc_dist, max_reach_dist))
 
         raw_tp = entry_price + (dir_sign * calc_dist)
 

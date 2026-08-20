@@ -104,8 +104,17 @@ def run_walk_forward_backtest(
         if callable(trade_simulator_fn):
             try:
                 sim_res = trade_simulator_fn(test_df)
+                trades_extracted = []
                 if isinstance(sim_res, dict) and "trades" in sim_res:
-                    trade_returns = [float(t.get("pnl_pct", 0.0)) for t in sim_res["trades"]]
+                    trades_extracted = sim_res["trades"]
+                elif isinstance(sim_res, (list, tuple)) and len(sim_res) > 0:
+                    trades_extracted = sim_res[0] if isinstance(sim_res[0], list) else []
+                
+                if trades_extracted:
+                    trade_returns = [
+                        float(t.get("net_return", t.get("pnl_pct", 0.0))) * (100.0 if abs(float(t.get("net_return", 0.0))) <= 2.0 else 1.0)
+                        for t in trades_extracted if isinstance(t, dict)
+                    ]
             except Exception:
                 trade_returns = []
                 

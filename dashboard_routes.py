@@ -155,15 +155,31 @@ def require_ip_whitelist(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         allowed_ips = get_secure_env("ALLOWED_DASHBOARD_IPS", "").strip()
+        trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
+        if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
+            client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
+        else:
+            client_ip = request.remote_addr
+
+        # Local loopback is always allowed
+        if client_ip in ["127.0.0.1", "::1", "localhost"]:
+            return f(*args, **kwargs)
+
+        # If IP whitelist is configured, enforce it
         if allowed_ips:
             ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-            trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
-            if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
-                client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
-            else:
-                client_ip = request.remote_addr
-            if client_ip not in ip_list and client_ip not in ["127.0.0.1", "::1"]:
+            if client_ip not in ip_list:
                 return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
+            return f(*args, **kwargs)
+
+        # If no IP whitelist is configured, require API key for non-local requests
+        expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip() or get_secure_env("DASHBOARD_ADMIN_KEY", "").strip()
+        if expected_key:
+            client_key = request.headers.get("X-API-KEY") or request.args.get("api_key")
+            if client_key and hmac.compare_digest(client_key.strip().encode("utf-8"), expected_key.encode("utf-8")):
+                return f(*args, **kwargs)
+            return jsonify({"error": "Unauthorized", "message": "API key required for external access."}), 401
+
         return f(*args, **kwargs)
     return decorated_function
 

@@ -40,7 +40,7 @@ class TradeFrequencyOptimizer:
         """
         stop_dist = abs(entry_price - stop_price)
         if stop_dist <= 0:
-            return entry_price * (1.02 if direction == "Bullish" else 0.98), 2.0, False
+            return entry_price, 0.0, False
 
         required_tp_dist = stop_dist * min_rr_required
 
