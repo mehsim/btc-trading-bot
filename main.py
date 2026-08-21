@@ -763,59 +763,49 @@ def load_history():
         except Exception as hf_err:
             print(f"[Sync] Could not restore history from HF Dataset (normal if first run): {hf_err}")
 
-    # 2. Sync from AWS Server API if running locally
+    # 2. Sync from AWS Server API if explicitly configured with remote target (not localhost)
     elif not space_id:
-        try:
-            server_ip_default = os.environ.get("SERVER_IP", "127.0.0.1")
-            aws_host = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL") or server_ip_default
-
-            if not aws_host.startswith("http://") and not aws_host.startswith("https://"):
-                aws_host = f"http://{aws_host}"
-            if ":" not in aws_host.replace("http://", "").replace("https://", ""):
-                sync_port = os.environ.get("PORT", "5001")
-                aws_host = f"{aws_host}:{sync_port}"
-            sync_url = f"{aws_host.rstrip('/')}/api/status"
-            print(f"Syncing: Attempting to pull latest history from AWS Server API ({sync_url})...")
-            headers = {}
-            api_k = get_secure_env("DASHBOARD_API_KEY", "").strip()
-            if api_k:
-                headers["X-API-KEY"] = api_k
-            resp = requests.get(sync_url, headers=headers, timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                remote_trades = data.get("trade_history", [])
-                remote_predictions = data.get("prediction_history", [])
-                remote_balance = data.get("simulated_balance", 80.0)
-                
-                # Filter out old 5m intervals
-                remote_trades = [t for t in remote_trades if str(t.get("interval", "60")) != "5"]
-                remote_predictions = [p for p in remote_predictions if str(p.get("interval", "60")) != "5"]
-                
-                if len(remote_trades) > 0 or len(remote_predictions) > 0:
-                    bot_state["simulated_balance"] = remote_balance
-                    bot_state["trade_history"] = remote_trades
-                    bot_state["prediction_history"] = remote_predictions
-                    # NOTE: Do NOT overwrite active_trade_* keys from the API response.
-                    # StateManager already loads active trades from SQLite on startup.
-                    # The API response may lag behind (Redis caching) and overwriting
-                    # would wipe valid trades recovered from the DB.
+        target_server = os.environ.get("TARGET_AWS_SERVER") or os.environ.get("SYNC_SERVER_URL")
+        if target_server and not any(h in target_server for h in ["127.0.0.1", "localhost", "0.0.0.0", "::1"]):
+            try:
+                aws_host = target_server
+                if not aws_host.startswith("http://") and not aws_host.startswith("https://"):
+                    aws_host = f"http://{aws_host}"
+                if ":" not in aws_host.replace("http://", "").replace("https://", ""):
+                    sync_port = os.environ.get("PORT", "5001")
+                    aws_host = f"{aws_host}:{sync_port}"
+                sync_url = f"{aws_host.rstrip('/')}/api/status"
+                print(f"Syncing: Attempting to pull latest history from Remote Server API ({sync_url})...")
+                headers = {}
+                api_k = get_secure_env("DASHBOARD_API_KEY", "").strip()
+                if api_k:
+                    headers["X-API-KEY"] = api_k
+                resp = requests.get(sync_url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    remote_trades = data.get("trade_history", [])
+                    remote_predictions = data.get("prediction_history", [])
+                    remote_balance = data.get("simulated_balance", 80.0)
                     
-                    # Migrate legacy active trades from DB-loaded state
-                    for tf_key in ACTIVE_TRADE_TF_KEYS:
-                        migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
+                    remote_trades = [t for t in remote_trades if str(t.get("interval", "60")) != "5"]
+                    remote_predictions = [p for p in remote_predictions if str(p.get("interval", "60")) != "5"]
+                    
+                    if len(remote_trades) > 0 or len(remote_predictions) > 0:
+                        bot_state["simulated_balance"] = remote_balance
+                        bot_state["trade_history"] = remote_trades
+                        bot_state["prediction_history"] = remote_predictions
                         
-                    bot_state["bot_running"] = data.get("bot_running", True)
-                    bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
-                    print(f"Sync Success: Loaded {len(remote_trades)} trades and {len(remote_predictions)} predictions from AWS Server ({sync_url}).")
-                    
-                    # Startup Balance Audit
-                    active_margin = sum(t.get("position_size_usd", 0.0) for tf_key in ACTIVE_TRADE_TF_KEYS for t in bot_state.get(f"active_trade_{tf_key}", []))
-                    print(f"[Startup Sync Balance Audit] Cash Balance: ${bot_state['simulated_balance']:.2f} | Active Position Margin: ${active_margin:.2f} | Total Account Value: ${bot_state['simulated_balance'] + active_margin:.2f}")
-                    
-                    save_history()
-                    return
-        except Exception as e:
-            print(f"[AWS Sync] Could not fetch state from AWS Server ({sync_url}): {e}")
+                        for tf_key in ACTIVE_TRADE_TF_KEYS:
+                            migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
+                            
+                        bot_state["bot_running"] = data.get("bot_running", True)
+                        bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
+                        print(f"Sync Success: Loaded {len(remote_trades)} trades and {len(remote_predictions)} predictions from Remote Server ({sync_url}).")
+                        
+                        save_history()
+                        return
+            except Exception as e:
+                print(f"[Remote Sync] Could not fetch state from Remote Server ({sync_url}): {e}")
 
 
     # 2. Local/Persistent history fallback load
@@ -1450,6 +1440,19 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
     if live_price is None:
         live_price = get_fallback_price(symbol)
         
+    if active_trade:
+        current_sl = float(active_trade.get("stop_loss", 0.0))
+        direction_val = active_trade.get("direction", "Bullish")
+        is_long = direction_val in ("Bullish", "Buy", "Long")
+        # Monotonic Stop Loss Invariant: Locked risk cannot increase
+        if current_sl > 0:
+            if is_long and sl_price < (current_sl - 1e-4):
+                print(f"[Bybit API Monotonic Guard] Rejected Long SL widening: proposed ${sl_price:.4f} < current ${current_sl:.4f}.")
+                return False
+            elif not is_long and sl_price > (current_sl + 1e-4):
+                print(f"[Bybit API Monotonic Guard] Rejected Short SL widening: proposed ${sl_price:.4f} > current ${current_sl:.4f}.")
+                return False
+
     if live_price is not None:
         if side == "Buy" or side == "Long":  # Long position: Stop Loss must be < current price
             if sl_price >= live_price:
@@ -4280,26 +4283,27 @@ def sync_active_positions_from_bybit():
                     }
                     
                     tf_key = matched_tf
-                    # Cross-timeframe duplicate guard: skip if symbol already active in ANY timeframe
-                    already_in_any_tf = any(
-                        any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
-                        for k in ACTIVE_TRADE_TF_KEYS
-                    )
-                    if already_in_any_tf:
-                        print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe.")
-                        continue
-                    active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
-                    if not isinstance(active_trades_list, list):
-                        active_trades_list = []
-                    active_trades_list.append(recovered_trade)
-                    bot_state[f"active_trade_{tf_key}"] = active_trades_list
-                    try:
-                        import database
-                        database.save_active_trades(tf_key, [recovered_trade])
-                    except Exception as ex_db_save:
-                        print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
-                    recovered += 1
-                    print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
+                    with active_trades_lock:
+                        # Cross-timeframe duplicate guard: skip if symbol already active in ANY timeframe
+                        already_in_any_tf = any(
+                            any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
+                            for k in ACTIVE_TRADE_TF_KEYS
+                        )
+                        if already_in_any_tf:
+                            print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe.")
+                            continue
+                        active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
+                        if not isinstance(active_trades_list, list):
+                            active_trades_list = []
+                        active_trades_list.append(recovered_trade)
+                        bot_state[f"active_trade_{tf_key}"] = active_trades_list
+                        try:
+                            import database
+                            database.save_active_trades(tf_key, [recovered_trade])
+                        except Exception as ex_db_save:
+                            print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
+                        recovered += 1
+                        print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
                     
             if recovered > 0:
                 save_history()

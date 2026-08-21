@@ -135,15 +135,15 @@ def add_news_proximity_feature(df, fetch_calendar_callback=None):
 MIN_FEATURE_HISTORY = 200 + 14 + 1
 _FEATURES_CACHE = {}
 
-def add_features(df, fetch_calendar_callback=None, symbol=None):
+def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
     if df is not None and len(df) < MIN_FEATURE_HISTORY:
         raise ValueError(f"add_features requires >= {MIN_FEATURE_HISTORY} bars, got {len(df)}")
         
     cache_key = None
     if df is not None and len(df) > 0 and "timestamp" in df.columns and "close" in df.columns:
         try:
-            sym_val = str(df["symbol"].iloc[-1]) if "symbol" in df.columns else "BTCUSDT"
-            iv_val = str(df["interval"].iloc[-1]) if "interval" in df.columns else "15"
+            sym_val = str(symbol) if symbol is not None else (str(df["symbol"].iloc[-1]) if "symbol" in df.columns else str(getattr(df, "attrs", {}).get("symbol", "BTCUSDT")))
+            iv_val = str(interval) if interval is not None else (str(df["interval"].iloc[-1]) if "interval" in df.columns else str(getattr(df, "attrs", {}).get("interval", "15")))
             last_ts = float(df["timestamp"].iloc[-1])
             last_close = float(df["close"].iloc[-1])
             cache_key = (sym_val, iv_val, len(df), last_ts, last_close)

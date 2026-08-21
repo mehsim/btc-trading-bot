@@ -63,28 +63,47 @@ def get_db_connection(target_db=DB_FILE):
             # Only quarantine file if error indicates genuine file malformation/corruption
             if ("malformed" in err_msg or "file is not a database" in err_msg) and not _in_quarantine_recovery:
                 _in_quarantine_recovery = True
-                print(f"[Database Auto-Recovery] Detected genuine database corruption ({e}). Quarantining DB file {target_db}...")
+                is_corrupted = False
                 try:
                     if conn is not None:
                         conn.close()
                 except Exception:
                     pass
-                timestamp = int(time.time())
-                renamed_main = False
-                for ext in ["", "-wal", "-shm"]:
-                    target = f"{target_db}{ext}"
-                    if os.path.exists(target):
+
+                # Corroborate corruption with a read-only integrity check
+                try:
+                    if os.path.exists(target_db):
+                        with sqlite3.connect(f"file:{target_db}?mode=ro", uri=True, timeout=5.0) as chk_conn:
+                            res = chk_conn.execute("PRAGMA integrity_check;").fetchone()
+                            if res and "ok" not in str(res[0]).lower():
+                                is_corrupted = True
+                            else:
+                                is_corrupted = False
+                    else:
+                        is_corrupted = False
+                except Exception:
+                    is_corrupted = True
+
+                if is_corrupted:
+                    print(f"[Database Auto-Recovery] Verified genuine database corruption ({e}). Quarantining DB file {target_db}...")
+                    timestamp = int(time.time())
+                    renamed_main = False
+                    for ext in ["", "-wal", "-shm"]:
+                        target = f"{target_db}{ext}"
+                        if os.path.exists(target):
+                            try:
+                                os.rename(target, f"{target}.corrupt.{timestamp}")
+                                if ext == "":
+                                    renamed_main = True
+                            except Exception as ren_err:
+                                print(f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
+                    if renamed_main:
                         try:
-                            os.rename(target, f"{target}.corrupt.{timestamp}")
-                            if ext == "":
-                                renamed_main = True
-                        except Exception as ren_err:
-                            print(f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
-                if renamed_main:
-                    try:
-                        init_db()
-                    except Exception as init_err:
-                        print(f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
+                            init_db()
+                        except Exception as init_err:
+                            print(f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
+                else:
+                    print(f"[Database Transient Warning] Integrity check passed or non-corrupt; avoiding premature quarantine.")
                 _in_quarantine_recovery = False
                 time.sleep(0.5)
             else:
