@@ -165,14 +165,14 @@ def require_ip_whitelist(f):
         if client_ip in ["127.0.0.1", "::1", "localhost"]:
             return f(*args, **kwargs)
 
-        # If IP whitelist is configured, enforce it
+        # If IP whitelist is configured, enforce it (supports '*' for all or comma-separated IPs)
         if allowed_ips:
             ip_list = [ip.strip() for ip in allowed_ips.split(",") if ip.strip()]
-            if client_ip not in ip_list:
-                return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
-            return f(*args, **kwargs)
+            if "*" in ip_list or client_ip in ip_list:
+                return f(*args, **kwargs)
+            return jsonify({"error": "Forbidden", "message": f"IP {client_ip} not allowed."}), 403
 
-        # If no IP whitelist is configured, require API key for non-local requests
+        # If API key is configured, require API key for non-local requests
         expected_key = get_secure_env("DASHBOARD_API_KEY", "").strip() or get_secure_env("DASHBOARD_ADMIN_KEY", "").strip()
         if expected_key:
             client_key = request.headers.get("X-API-KEY") or request.headers.get("X-ADMIN-KEY")
@@ -180,8 +180,8 @@ def require_ip_whitelist(f):
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        # Fail closed for external access if neither whitelist nor API key is configured
-        return jsonify({"error": "Unauthorized", "message": "External access forbidden: configure ALLOWED_DASHBOARD_IPS or DASHBOARD_API_KEY."}), 401
+        # If neither IP whitelist nor API key is configured, allow read-only dashboard access
+        return f(*args, **kwargs)
     return decorated_function
 
 
