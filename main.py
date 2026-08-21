@@ -5992,13 +5992,16 @@ def main():
 
             with ThreadPoolExecutor(max_workers=min(len(unique_intervals), 8)) as btc_exec:
                 btc_futures = {btc_exec.submit(_fetch_btc, iv_val): iv_val for iv_val in unique_intervals}
-                for fut in as_completed(btc_futures, timeout=25):
-                    try:
-                        iv_val, df_btc = fut.result(timeout=5)
-                        if df_btc is not None:
-                            btc_hist_cache[iv_val] = df_btc
-                    except Exception as _e:
-                        log_event("WARNING", f"[BTC Pre-fetch] Timeout/error: {type(_e).__name__} {_e}")
+                try:
+                    for fut in as_completed(btc_futures, timeout=25):
+                        try:
+                            iv_val, df_btc = fut.result()
+                            if df_btc is not None:
+                                btc_hist_cache[iv_val] = df_btc
+                        except Exception as _e:
+                            log_event("WARNING", f"[BTC Pre-fetch] Result error: {type(_e).__name__} {_e}")
+                except Exception as _e:
+                    log_event("WARNING", f"[BTC Pre-fetch] Batch timeout/incomplete: {type(_e).__name__} {_e}")
 
             # Pre-fetch derivatives (OI, funding, F&G) per-symbol once in parallel.
             # This avoids each of the 63 worker threads making its own blocking REST calls
@@ -6023,12 +6026,15 @@ def main():
 
             with ThreadPoolExecutor(max_workers=min(len(unique_symbols), 9)) as deriv_exec:
                 deriv_futures = {deriv_exec.submit(_fetch_deriv, sym): sym for sym in unique_symbols}
-                for fut in as_completed(deriv_futures, timeout=45):
-                    try:
-                        sym, deriv_tuple = fut.result(timeout=5)
-                        deriv_cache[sym] = deriv_tuple
-                    except Exception as _e:
-                        log_event("WARNING", f"[Deriv Pre-fetch] Timeout/error: {type(_e).__name__} {_e}")
+                try:
+                    for fut in as_completed(deriv_futures, timeout=45):
+                        try:
+                            sym, deriv_tuple = fut.result()
+                            deriv_cache[sym] = deriv_tuple
+                        except Exception as _e:
+                            log_event("WARNING", f"[Deriv Pre-fetch] Result error: {type(_e).__name__} {_e}")
+                except Exception as _e:
+                    log_event("WARNING", f"[Deriv Pre-fetch] Batch timeout/incomplete: {type(_e).__name__} {_e}")
             
             def fetch_single_history(sym, interval_val):
                 if sym == "BTCUSDT" and interval_val in btc_hist_cache:
@@ -6081,14 +6087,17 @@ def main():
             t_start = time.time()
             with ThreadPoolExecutor(max_workers=16) as executor:
                 future_to_pair = {executor.submit(fetch_single_history, sym, iv): (sym, iv) for sym, iv in check_queue}
-                for fut in as_completed(future_to_pair):
-                    sym, iv = future_to_pair[fut]
-                    try:
-                        _, _, df_raw_val, df_feat_val = fut.result(timeout=45)  # HTTP timeout is 10s per request
-                        if df_raw_val is not None:
-                            fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
-                    except Exception as e:
-                        print(f"[Parallel Fetch] Error fetching {sym} {iv}: {type(e).__name__} {e}")
+                try:
+                    for fut in as_completed(future_to_pair, timeout=60):
+                        sym, iv = future_to_pair[fut]
+                        try:
+                            _, _, df_raw_val, df_feat_val = fut.result()
+                            if df_raw_val is not None:
+                                fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
+                        except Exception as e:
+                            print(f"[Parallel Fetch] Error fetching {sym} {iv}: {type(e).__name__} {e}")
+                except Exception as _e:
+                    log_event("WARNING", f"[Parallel Fetch] Batch timeout/incomplete: {type(_e).__name__} {_e}")
             print(f"[Parallel Fetch] Completed in {time.time() - t_start:.2f} seconds.")
  
         # Update peak_balance dynamically for accurate real-time drawdown tracking (M-1)
