@@ -1390,9 +1390,11 @@ def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms):
         exit_quantities = []
         entry_values = []
         
+        matched_count = 0
         for item in pnl_list:
             updated_time = int(item.get("updatedTime", 0))
             if updated_time >= entry_time_ms:
+                matched_count += 1
                 pnl_val = float(item.get("closedPnl", 0.0))
                 total_pnl += pnl_val
                 
@@ -1405,6 +1407,9 @@ def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms):
                 if ev > 0:
                     entry_values.append(ev)
                     
+        if matched_count == 0:
+            return None
+
         avg_exit_price = None
         if exit_prices and exit_quantities:
             total_qty = sum(exit_quantities)
@@ -4059,14 +4064,19 @@ def sync_active_positions_from_bybit():
                                 current_atr = 0.015 * avg_price
                                 t["atr_dollars"] = current_atr
                                 
-                            # Fix Take Profit if it is unset (0.0)
-                            if t.get("take_profit", 0.0) == 0.0:
+                            # Fix Take Profit if it is unset (0.0) or missing on venue
+                            venue_tp = float(pos.get("takeProfit", 0.0) or 0.0)
+                            local_tp = float(t.get("take_profit", 0.0))
+                            if local_tp == 0.0:
                                 if direction == "Bullish":
-                                    t["take_profit"] = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
+                                    local_tp = max(mark_price + 1.25 * current_atr, avg_price + 1.25 * current_atr)
                                 else:
-                                    t["take_profit"] = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
-                                if TRADE_MODE != "simulation":
-                                    update_bybit_take_profit(symbol, t["take_profit"], t)
+                                    local_tp = min(mark_price - 1.25 * current_atr, avg_price - 1.25 * current_atr)
+                                t["take_profit"] = local_tp
+                            
+                            # If venue has no TP set or venue differs materially from local target TP, re-push
+                            if TRADE_MODE != "simulation" and (venue_tp == 0.0 or abs(venue_tp - local_tp) > 1e-4):
+                                update_bybit_take_profit(symbol, t["take_profit"], t)
                                     
                             # Fix Stop Loss if it is unset, below liquidation (for long), or above liquidation (for short)
                             sl_val = t.get("stop_loss", 0.0)
@@ -4728,6 +4738,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "intended_size_usd": float(intended_size_usd if intended_size_usd is not None else position_size_usd),
             "position_size_usd": actual_size_usd,
             "sl_failed": not bool(sl_ok),
+            "tp_failed": not bool(tp_ok),
             "scaled_out_pnl": 0.0,
             "kelly_fraction": float(kelly_fraction),
             "leverage": float(leverage_val),
@@ -4972,6 +4983,17 @@ def main():
                                     flatten_ok = emergency_flatten_position(active_symbol, flatten_side, format_bybit_qty(active_symbol, raw_qty))
                                     if flatten_ok:
                                         exit_reason = "CRITICAL FAIL-SAFE: UNSTOPPED POSITION CLOSED VIA EMERGENCY FLATTEN"
+
+                        # Active recovery for tp_failed / unanchored take profit
+                        if active_trade.get("tp_failed", False):
+                            retry_tp_ok = update_bybit_take_profit(active_symbol, take_profit, active_trade=active_trade)
+                            if retry_tp_ok:
+                                active_trade["tp_failed"] = False
+                                active_trade["tp_failed_retries"] = 0
+                                active_trades_updated = True
+                                log_event("INFO", f"[{active_symbol}] Recovered missing Bybit Take Profit at ${take_profit:.2f}.")
+                            else:
+                                active_trade["tp_failed_retries"] = active_trade.get("tp_failed_retries", 0) + 1
 
                         if active_trade.get("bybit_closed", False):
                             bybit_closed = True
@@ -5365,15 +5387,15 @@ def main():
                         print(f"[{active_symbol} {iv}m Portfolio Rebalance] Low-utility trade marked for closure to harvest margin.")
 
                     
-                    # 3. Simulation mode SL/TP price checks
-                    if TRADE_MODE == "simulation" and not exit_reason:
+                    # 3. SL/TP price checks (fallback for missing venue orders or simulation)
+                    if not exit_reason:
                         if direction == "Bullish":
-                            if current_price <= stop_loss:
+                            if current_price <= stop_loss and (TRADE_MODE == "simulation" or active_trade.get("sl_failed")):
                                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
                             elif current_price >= take_profit:
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
                         else:
-                            if current_price >= stop_loss:
+                            if current_price >= stop_loss and (TRADE_MODE == "simulation" or active_trade.get("sl_failed")):
                                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
                             elif current_price <= take_profit:
                                 exit_reason = "TAKE PROFIT HIT [SUCCESS]"
@@ -5407,7 +5429,13 @@ def main():
                             if not entry_time_ms:
                                 entry_time_ms = int((end_time - (int(iv) * 60)) * 1000)
                             
-                            bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms)
+                            bybit_pnl_data = None
+                            for pnl_attempt in range(3):
+                                bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms)
+                                if bybit_pnl_data is not None:
+                                    break
+                                time.sleep(0.4)
+
                             if bybit_pnl_data:
                                 bybit_realized_pnl = bybit_pnl_data["total_pnl"]
                                 if bybit_pnl_data["avg_exit_price"] is not None:
