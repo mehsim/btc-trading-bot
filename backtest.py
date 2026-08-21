@@ -167,20 +167,19 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
 
         pred_change = pred_pct * close_price
 
-        winning_class = int(np.argmax(probs))
         from ensemble import resolve_direction
         ml_trend, ml_confidence = resolve_direction(probs)
-        raw_class_prob = float(probs[winning_class]) if winning_class < len(probs) else ml_confidence
         prob_neutral = float(probs[1]) if len(probs) >= 2 else 0.0
         neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
+        raw_confidence = ml_confidence
         if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
-            raw_class_prob = min(0.95, raw_class_prob * (1.0 - prob_neutral * neutral_coeff))
+            raw_confidence = min(0.95, raw_confidence * (1.0 - prob_neutral * neutral_coeff))
 
-        # B-3: Live Calibration alignment using Beta / Isotonic engine (matches main.py:6130)
-        calibrated_confidence = raw_class_prob
+        # Live Calibration alignment using Beta / Isotonic engine (matches main.py:6242-6250)
+        calibrated_confidence = raw_confidence
         if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
             from tools.beta_calibrator import calibrate_probability
-            calibrated_confidence = calibrate_probability(raw_class_prob, calibrator)
+            calibrated_confidence = calibrate_probability(raw_confidence, calibrator)
         calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
         if feat_ranks is not None:
@@ -201,10 +200,16 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
 
         expected_pct_change = (abs(pred_change) / max(1e-9, close_price)) * 100
 
-        # 1. Confidence threshold (enforce production floor and timeframe base threshold)
+        # Resolve target multipliers for economic break-even calculation
+        cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+        sl_multiplier = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 0.8)
+        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else cfg.get("tp_mult_trending" if is_trending_state else "tp_mult_ranging", 1.85)
+
+        # 1. Economic Break-Even Threshold (p*) + Production Confidence Gate
+        p_star = (sl_multiplier + (fee_rate * 2.0)) / max(1e-6, (sl_multiplier + tp_multiplier * 0.80))
         tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {})
-        base_conf_floor = float(tf_cfg.get("base_confidence_threshold", 0.40))
-        effective_min_conf = min_confidence if min_confidence is not None else base_conf_floor
+        base_conf_floor = float(tf_cfg.get("base_confidence_threshold", p_star))
+        effective_min_conf = min_confidence if min_confidence is not None else max(p_star, base_conf_floor)
 
         if calibrated_confidence < effective_min_conf:
             i += 1
@@ -247,12 +252,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             entry_price = close_price
 
         atr_dollars = atr_norm * entry_price
-        cfg = TIMEFRAME_CONFIG.get(str(interval), {})
 
         # ATR-based Stop Loss and Take Profit with production TP resolution
         regime_detected = "trending" if is_trending_state else "ranging"
-        sl_multiplier = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 0.8)
-        tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else cfg.get("tp_mult_trending", 1.85)
 
         from trade_calculators import UnifiedTargetGenerator
         tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(

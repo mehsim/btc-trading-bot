@@ -180,8 +180,15 @@ def require_ip_whitelist(f):
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        # If neither IP whitelist nor API key is configured, allow read-only dashboard access
-        return f(*args, **kwargs)
+        # If neither IP whitelist nor API key is configured, deny external non-loopback access by default
+        allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1")
+        if allow_public:
+            return f(*args, **kwargs)
+
+        return jsonify({
+            "error": "Forbidden",
+            "message": "External dashboard access is restricted. Configure ALLOWED_DASHBOARD_IPS, DASHBOARD_API_KEY, or set DASHBOARD_ALLOW_PUBLIC=true in .env."
+        }), 403
     return decorated_function
 
 
