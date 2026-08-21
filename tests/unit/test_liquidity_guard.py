@@ -33,21 +33,21 @@ def test_get_liquidity_score_dynamic_turnover_benchmark():
 
 def test_get_liquidity_score_dynamic_symbol_tier_benchmarks():
     """Verify per-symbol tier benchmark resolution."""
-    # BTCUSDT benchmark $5M. $2.5M depth -> 0.50 score
-    with patch("data.get_orderbook_imbalance", return_value={"total_depth": 2_500_000.0, "spread": 0.0005}):
+    # BTCUSDT benchmark $400k. $200k depth -> 0.50 score
+    with patch("data.get_orderbook_imbalance", return_value={"total_depth": 200_000.0, "spread": 0.0005}):
         btc_score = get_liquidity_score("BTCUSDT")
         assert btc_score == pytest.approx(0.50)
 
-    # DOTUSDT benchmark $500k. $2.5M depth -> 1.0 max score
-    with patch("data.get_orderbook_imbalance", return_value={"total_depth": 2_500_000.0, "spread": 0.0005}):
+    # DOTUSDT benchmark $50k. $100k depth -> 1.0 max score
+    with patch("data.get_orderbook_imbalance", return_value={"total_depth": 100_000.0, "spread": 0.0005}):
         dot_score = get_liquidity_score("DOTUSDT")
         assert dot_score == pytest.approx(1.0)
 
 
 def test_get_liquidity_score_dynamic_spread_penalty():
     """Verify spread penalty degrades liquidity score when spread is wide."""
-    # Good depth ($5M BTC benchmark), but wide spread (0.325% spread) -> 50% spread multiplier penalty
-    with patch("data.get_orderbook_imbalance", return_value={"total_depth": 5_000_000.0, "spread": 0.00325}):
+    # Good depth ($400k BTC benchmark), but wide spread (0.325% spread) -> 50% spread multiplier penalty
+    with patch("data.get_orderbook_imbalance", return_value={"total_depth": 400_000.0, "spread": 0.00325}):
         score = get_liquidity_score("BTCUSDT")
         assert score == pytest.approx(0.50)
 
