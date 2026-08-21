@@ -516,6 +516,13 @@ app = Flask(__name__, template_folder="templates")
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.register_blueprint(dashboard_bp)
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-KEY, X-ADMIN-KEY, Authorization"
+    return response
+
 bot_logs = []
 logs_lock = threading.Lock()
 retraining_lock = threading.Lock()

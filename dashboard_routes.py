@@ -180,8 +180,8 @@ def require_ip_whitelist(f):
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        # If neither IP whitelist nor API key is configured, deny external non-loopback access by default
-        allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1")
+        # If neither IP whitelist nor API key is configured, allow public read-only access by default unless explicitly disabled
+        allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "true").lower() in ("true", "1")
         if allow_public:
             return f(*args, **kwargs)
 
