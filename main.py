@@ -6027,12 +6027,13 @@ def main():
  
             print(f"[Parallel Fetch] Querying {len(check_queue)} candle combinations in parallel...")
             t_start = time.time()
-            with ThreadPoolExecutor(max_workers=6) as executor:
+            from concurrent.futures import as_completed
+            with ThreadPoolExecutor(max_workers=16) as executor:
                 future_to_pair = {executor.submit(fetch_single_history, sym, iv): (sym, iv) for sym, iv in check_queue}
-                for fut in future_to_pair:
+                for fut in as_completed(future_to_pair):
                     sym, iv = future_to_pair[fut]
                     try:
-                        _, _, df_raw_val, df_feat_val = fut.result(timeout=60)  # HTTP timeout is 10s per request
+                        _, _, df_raw_val, df_feat_val = fut.result(timeout=45)  # HTTP timeout is 10s per request
                         if df_raw_val is not None:
                             fetched_data[(sym, iv)] = (df_raw_val, df_feat_val)
                     except Exception as e:
