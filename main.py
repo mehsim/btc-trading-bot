@@ -3380,9 +3380,9 @@ def get_news_sentiment():
             if processed > 0:
                 avg_score = total_score / processed
                 sentiment = "Neutral"
-                if avg_score > 0.15:
+                if avg_score > 0.05:
                     sentiment = "Bullish"
-                elif avg_score < -0.15:
+                elif avg_score < -0.05:
                     sentiment = "Bearish"
                 print(f"[News/Sentiment Serverless] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
                 return sentiment, cleaned_titles, "FINBERT_SERVERLESS"
@@ -3396,30 +3396,32 @@ def get_news_sentiment():
                 # Comprehensive expanded financial & crypto lexicon
                 bullish_keywords = {
                     # Market Price Action
-                    "bullish", "surge", "surges", "surging", "rally", "rallies", "rallying", "breakout", "skyrocket", "skyrockets",
+                    "bullish", "surge", "surges", "surging", "rally", "rallies", "rallying", "breakout", "skyrocket", "skyrockets", "skyrocketing",
                     "gain", "gains", "gaining", "all-time high", "ath", "soar", "soars", "soaring", "pump", "pumping", "pumps",
                     "rebound", "rebounds", "rebounding", "recovery", "recovers", "recovering", "uptrend", "outperform", "outperforms",
                     "bounce", "bouncing", "climb", "climbs", "climbing", "record high", "milestone", "moon", "soaring",
+                    "bull run", "historic rally", "breaks above", "tops", "new high", "break above",
                     # Flows & Institutional
                     "inflow", "inflows", "accumulation", "accumulating", "accumulate", "adoption", "approval", "approved", "approves",
                     "institutional", "profit", "profits", "profitable", "upward", "bull", "bulls", "optimistic", "growth", "expanding",
                     "buy", "buying", "bought", "reserve", "treasury", "sec approval", "etf approval", "partnership", "mainnet", "upgrade",
-                    "stimulus", "rate cut", "rate cuts", "dovish", "easing", "support level", "holder", "holders"
+                    "stimulus", "rate cut", "rate cuts", "dovish", "easing", "support level", "holder", "holders", "record inflow"
                 }
                 bearish_keywords = {
                     # Market Price Action & Losses
                     "bearish", "crash", "crashes", "crashing", "dump", "dumps", "dumping", "plunge", "plunges", "plunging",
                     "drop", "drops", "dropping", "fall", "falls", "falling", "slide", "slides", "sliding", "tumble", "tumbles", "tumbling",
                     "collapse", "collapses", "collapsing", "selloff", "sell-off", "selloffs", "downtrend", "slump", "slumps", "retreat",
-                    "retreats", "bleeding", "capitulation", "correction", "wilt", "wilts", "wilted",
+                    "retreats", "bleeding", "capitulation", "correction", "wilt", "wilts", "wilted", "slips", "drops back", "stalled",
                     # Risk, Hacks & Failures
-                    "hack", "hacked", "hacks", "exploit", "exploited", "exploits", "stolen", "drain", "drained", "scam", "rugpull",
+                    "hack", "hacked", "hacks", "exploit", "exploited", "exploits", "stolen", "theft", "drain", "drained", "scam", "rugpull",
                     "fraud", "bankruptcy", "bankrupt", "bankruptcies", "insolvent", "insolvency", "liquidation", "liquidations", "liquidated",
                     "outflow", "outflows", "loss", "losses", "bear", "bears", "pessimistic", "panic", "sell", "selling", "sold",
-                    "cut headcount", "layoff", "layoffs", "cuts 1", "cuts 2", "job cuts",
+                    "cut headcount", "layoff", "layoffs", "cuts 1", "cuts 2", "job cuts", "halt", "halts",
                     # Regulatory & Macro Hardship
                     "ban", "banned", "banning", "bans", "lawsuit", "lawsuits", "sued", "suing", "sec", "crackdown", "probe", "investigation",
-                    "subpoena", "fine", "fined", "penalty", "rate hike", "rate hikes", "hawkish", "inflation", "recession", "war", "restriction"
+                    "subpoena", "fine", "fined", "penalty", "rate hike", "rate hikes", "hawkish", "inflation", "recession", "war", "restriction",
+                    "anti-crypto"
                 }
                 
                 total_score = 0.0
@@ -3435,9 +3437,9 @@ def get_news_sentiment():
                     
                 avg_score = total_score / len(cleaned_titles)
                 sentiment = "Neutral"
-                if avg_score > 0.10:
+                if avg_score > 0.05:
                     sentiment = "Bullish"
-                elif avg_score < -0.10:
+                elif avg_score < -0.05:
                     sentiment = "Bearish"
                 print(f"[News/Sentiment Lexicon Local] Analyzed {len(cleaned_titles)} titles via local financial lexicon. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
                 return sentiment, cleaned_titles, "KEYWORD"
@@ -3457,9 +3459,9 @@ def get_news_sentiment():
         avg_score = total_score / len(cleaned_titles)
         
         sentiment = "Neutral"
-        if avg_score > 0.15:
+        if avg_score > 0.05:
             sentiment = "Bullish"
-        elif avg_score < -0.15:
+        elif avg_score < -0.05:
             sentiment = "Bearish"
             
         print(f"[News/Sentiment Local] Analysis complete. Avg Score: {avg_score:.4f} | Aggregated: {sentiment}")
