@@ -96,13 +96,13 @@ MAX_RR_RATIO = {
 }
 
 MIN_RR_RATIO = {
-    "5m": 1.8,
-    "15": 2.0, "15m": 2.0,
-    "30": 2.5, "30m": 2.5,
-    "60": 3.0, "1h": 3.0,
-    "120": 4.0, "2h": 4.0,
-    "240": 4.0, "4h": 4.0,
-    "360": 4.0, "6h": 4.0
+    "5m": 1.2,
+    "15": 1.3, "15m": 1.3,
+    "30": 1.4, "30m": 1.4,
+    "60": 1.5, "1h": 1.5,
+    "120": 1.5, "2h": 1.5,
+    "240": 1.5, "4h": 1.5,
+    "360": 1.5, "6h": 1.5
 }
 
 
@@ -6802,9 +6802,6 @@ def main():
                             elif is_cooling:
                                 status_msg = "Skipped (Cool-Off)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
-                            elif confluence_blocked:
-                                status_msg = "Skipped (HTF Trend Block)"
-                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Counter-trend relative to macro timeframe ({macro_tf} trend: {htf_trend}).")
                             elif funding_blocked:
                                 status_msg = "Skipped (Funding Block)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
@@ -6831,7 +6828,13 @@ def main():
                                     mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
                                     current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
                                     u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
-                                    exp_r_val = (abs(float(expected_pct_change)) / 100.0) / max(1e-6, atr_norm_val)
+                                    
+                                    # Expected R:R of the target setup relative to minimum floor
+                                    _15m_cfg = bot_state.get("optimized_timeframe_config", {}).get("15", {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
+                                    _15m_base = TIMEFRAME_CONFIG.get("15", {"sl_mult": 0.9, "tp_mult_ranging": 1.4, "tp_mult_trending": 1.8})
+                                    _15m_sl = float(_15m_cfg.get("sl_mult", _15m_base.get("sl_mult", 0.9)))
+                                    _15m_tp = float(_15m_cfg.get("tp_mult_trending" if latest_candle.get("ADX", 0.0) >= 20.0 else "tp_mult_ranging", 1.4))
+                                    exp_r_val = float(_15m_tp / max(1e-6, _15m_sl))
 
                                     # C-2: estimate per-symbol 24h ADV from candle volume * price
                                     _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
