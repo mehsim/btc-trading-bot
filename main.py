@@ -4518,6 +4518,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     filled = wait_for_order_fill(symbol, bybit_order_id, timeout_sec=2.0)
                     if filled:
                         bybit_success = True
+                        # Cancel any remaining working residual on partial fill to avoid oversized position
+                        cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.3)
                         order_details = get_bybit_order_details(symbol, bybit_order_id)
                         if order_details:
@@ -5118,9 +5120,10 @@ def main():
                             half_closed = True
                             active_trade["half_closed"] = True
                             
-                            # Close configured portion of the position
-                            closed_size = round(position_size_usd * scale_out_portion, 2)
-                            remaining_size = round(position_size_usd - closed_size, 2)
+                            # Close configured portion of the position (derived from original entry margin)
+                            orig_margin = float(active_trade.get("original_size", active_trade.get("position_size_usd", position_size_usd)))
+                            closed_size = round(orig_margin * scale_out_portion, 2)
+                            remaining_size = round(orig_margin - closed_size, 2)
                             
                             # Calculate profit on closed portion (correct taker fee on leveraged size)
                             raw_return_pct = ((current_price - entry_price) / entry_price) * 100.0
@@ -5175,9 +5178,10 @@ def main():
                             half_closed = True
                             active_trade["half_closed"] = True
                             
-                            # Close configured portion of position
-                            closed_size = round(position_size_usd * scale_out_portion, 2)
-                            remaining_size = round(position_size_usd - closed_size, 2)
+                            # Close configured portion of position (derived from original entry margin)
+                            orig_margin = float(active_trade.get("original_size", active_trade.get("position_size_usd", position_size_usd)))
+                            closed_size = round(orig_margin * scale_out_portion, 2)
+                            remaining_size = round(orig_margin - closed_size, 2)
                             
                             # Calculate profit on closed portion (correct taker fee on leveraged size)
                             raw_return_pct = ((entry_price - current_price) / entry_price) * 100.0
@@ -7288,6 +7292,12 @@ def main():
                                             take_profit_price = adjusted_struct["tp_price"]
                                             leverage_val = adjusted_struct["leverage"]
 
+                                            # Re-derive position size & notional from the widened stop loss to preserve exact risk budget
+                                            stop_loss_frac = max(0.002, abs(entry_price - stop_loss_price) / max(1e-9, entry_price))
+                                            target_notional_usd = (current_bal * f_clamped) / stop_loss_frac
+                                            if target_notional_usd > (current_bal * MAX_CAP_LEVERAGE):
+                                                target_notional_usd = current_bal * MAX_CAP_LEVERAGE
+
                                             cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
                                             lookahead = cfg.get("lookahead", 10)
                                             duration_seconds = int(iv) * 60.0 * lookahead
@@ -7425,11 +7435,11 @@ def main():
                                                     scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
                                                     new_stop_dist = original_stop_dist * scale_ratio
                                                 
-                                                    # Enforce absolute floor: Never compress SL tighter than 0.60x ATR to prevent spread noise stop-outs
-                                                    min_allowed_sl_dist = atr_dollars * 0.60
+                                                    # Enforce absolute floor: Never compress SL tighter than 0.75x ATR to protect against spread noise
+                                                    min_allowed_sl_dist = atr_dollars * 0.75
                                                     if new_stop_dist < min_allowed_sl_dist:
                                                         new_stop_dist = min_allowed_sl_dist
-                                                        print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to 0.60x ATR (${min_allowed_sl_dist:.4f}) to protect against spread noise.")
+                                                        print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to 0.75x ATR (${min_allowed_sl_dist:.4f}) to protect against spread noise.")
                                                 
                                                     if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
                                                         new_sl_price = entry_price - new_stop_dist
