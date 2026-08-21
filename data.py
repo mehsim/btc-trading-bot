@@ -517,7 +517,19 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     final_df = df_history.iloc[-target_count:].reset_index(drop=True)
     if len(final_df) > 1:
         try:
-            expected_step_ms = int(interval) * 60 * 1000 if str(interval).isdigit() else 3600 * 1000
+            str_iv = str(interval).strip().upper()
+            if str_iv.isdigit():
+                expected_step_ms = int(str_iv) * 60 * 1000
+            elif str_iv in ("D", "1D", "DAY", "DAILY"):
+                expected_step_ms = 86400 * 1000
+            elif str_iv in ("W", "1W", "WEEK", "WEEKLY"):
+                expected_step_ms = 7 * 86400 * 1000
+            elif str_iv.endswith("M") and str_iv[:-1].isdigit():
+                expected_step_ms = int(str_iv[:-1]) * 60 * 1000
+            elif str_iv.endswith("H") and str_iv[:-1].isdigit():
+                expected_step_ms = int(str_iv[:-1]) * 3600 * 1000
+            else:
+                expected_step_ms = 3600 * 1000
             diffs = final_df["timestamp"].diff().dropna()
             gaps = diffs[diffs > expected_step_ms * 1.5]
             if len(gaps) > 0:
