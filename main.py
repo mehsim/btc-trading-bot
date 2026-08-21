@@ -7323,8 +7323,8 @@ def main():
                                             # Re-derive position size & notional from the widened stop loss to preserve exact risk budget
                                             stop_loss_frac = max(0.002, abs(entry_price - stop_loss_price) / max(1e-9, entry_price))
                                             target_notional_usd = (current_bal * f_clamped) / stop_loss_frac
-                                            if target_notional_usd > (current_bal * MAX_CAP_LEVERAGE):
-                                                target_notional_usd = current_bal * MAX_CAP_LEVERAGE
+                                            if target_notional_usd > (current_bal * lev_cap):
+                                                target_notional_usd = current_bal * lev_cap
 
                                             cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
                                             lookahead = cfg.get("lookahead", 10)
