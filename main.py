@@ -505,7 +505,9 @@ from ta.volatility import BollingerBands, AverageTrueRange
 from ta.volume import MFIIndicator
 print("[System Debug] ta imported.")
 print("[System Debug] Importing data.py...")
-from data import get_history, merge_derivatives_sentiment_features, classify_market_regime
+from data import (get_history, merge_derivatives_sentiment_features, classify_market_regime,
+                  _merge_cached_derivatives, get_bybit_oi_history, get_bybit_funding_history,
+                  get_fear_and_greed_history)
 print("[System Debug] Importing Flask...")
 from flask import Flask, jsonify, render_template, request, make_response
 
@@ -5997,6 +5999,36 @@ def main():
                             btc_hist_cache[iv_val] = df_btc
                     except Exception as _e:
                         log_event("WARNING", f"[BTC Pre-fetch] Timeout/error: {type(_e).__name__} {_e}")
+
+            # Pre-fetch derivatives (OI, funding, F&G) per-symbol once in parallel.
+            # This avoids each of the 63 worker threads making its own blocking REST calls
+            # to get_bybit_oi_history / get_bybit_funding_history (up to 50 paginated pages each).
+            unique_symbols = list(set(sym for sym, iv in check_queue))
+            deriv_cache = {}  # key: sym -> (df_oi, df_funding, df_fng)
+
+            def _fetch_deriv(sym):
+                try:
+                    df_oi = get_bybit_oi_history(symbol=sym, interval="15")
+                except Exception:
+                    df_oi = pd.DataFrame(columns=["timestamp", "open_interest"])
+                try:
+                    df_funding = get_bybit_funding_history(symbol=sym)
+                except Exception:
+                    df_funding = pd.DataFrame(columns=["timestamp", "funding_rate"])
+                try:
+                    df_fng = get_fear_and_greed_history()
+                except Exception:
+                    df_fng = pd.DataFrame(columns=["timestamp", "fear_greed"])
+                return sym, (df_oi, df_funding, df_fng)
+
+            with ThreadPoolExecutor(max_workers=min(len(unique_symbols), 9)) as deriv_exec:
+                deriv_futures = {deriv_exec.submit(_fetch_deriv, sym): sym for sym in unique_symbols}
+                for fut in as_completed(deriv_futures, timeout=45):
+                    try:
+                        sym, deriv_tuple = fut.result(timeout=5)
+                        deriv_cache[sym] = deriv_tuple
+                    except Exception as _e:
+                        log_event("WARNING", f"[Deriv Pre-fetch] Timeout/error: {type(_e).__name__} {_e}")
             
             def fetch_single_history(sym, interval_val):
                 if sym == "BTCUSDT" and interval_val in btc_hist_cache:
@@ -6034,7 +6066,12 @@ def main():
                 else:
                     df_target_val["close_btc"] = df_target_val["close"]
                 
-                df_target_val = merge_derivatives_sentiment_features(df_target_val, symbol=sym, interval=interval_val)
+                # Use pre-fetched derivatives if available, otherwise fall back to live fetch
+                if sym in deriv_cache:
+                    df_oi_c, df_funding_c, df_fng_c = deriv_cache[sym]
+                    df_target_val = _merge_cached_derivatives(df_target_val, df_oi_c, df_funding_c, df_fng_c)
+                else:
+                    df_target_val = merge_derivatives_sentiment_features(df_target_val, symbol=sym, interval=interval_val)
                 df_feat_val = add_features(df_target_val, symbol=sym)
                 
                 return sym, interval_val, df_raw_val, df_feat_val
