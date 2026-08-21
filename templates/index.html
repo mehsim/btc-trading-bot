@@ -2977,9 +2977,17 @@
                     if (data.recent_alerts && Array.isArray(data.recent_alerts)) {
                         const alertsStream = document.getElementById("recent-alerts-stream");
                         if (alertsStream && data.recent_alerts.length > 0) {
-                            alertsStream.innerHTML = data.recent_alerts.map(item => `
-                                <div style="border-left: 2px solid var(--accent-green); padding-left: 6px; margin-bottom: 4px;">${item}</div>
-                            `).join('');
+                            alertsStream.innerHTML = data.recent_alerts.map(item => {
+                                let borderColor = "var(--accent-green)";
+                                if (item.includes("WARNING") || item.includes("Contradiction") || item.includes("Block") || item.includes("Skipped") || item.includes("Abstain")) {
+                                    borderColor = "var(--accent-orange)";
+                                } else if (item.includes("ERROR") || item.includes("Fail") || item.includes("Halt") || item.includes("Exception")) {
+                                    borderColor = "var(--accent-red)";
+                                } else if (item.includes("INFO") || item.includes("WS") || item.includes("Sync") || item.includes("Loaded") || item.includes("News")) {
+                                    borderColor = "var(--accent-blue)";
+                                }
+                                return `<div style="border-left: 2px solid ${borderColor}; padding-left: 8px; margin-bottom: 6px; word-break: break-word; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.35; color: var(--text-secondary);">${item}</div>`;
+                            }).join('');
                         }
                     }
 
