@@ -4932,12 +4932,12 @@ def main():
                         continue
                     current_price = symbol_price
                     
-                    stop_loss = active_trade["stop_loss"]
-                    take_profit = active_trade["take_profit"]
-                    direction = active_trade["direction"]
-                    end_time = active_trade["end_time"]
-                    entry_price = active_trade["entry_price"]
-                    predicted_price = active_trade["predicted_price"]
+                    stop_loss = float(active_trade.get("stop_loss", 0.0))
+                    take_profit = float(active_trade.get("take_profit", 0.0))
+                    direction = str(active_trade.get("direction", "Bullish"))
+                    end_time = float(active_trade.get("end_time", time.time() + 3600))
+                    entry_price = float(active_trade.get("entry_price", current_price))
+                    predicted_price = float(active_trade.get("predicted_price", entry_price))
     
                     # Bybit Live position query and state tracking
                     bybit_closed = False

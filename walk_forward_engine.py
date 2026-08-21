@@ -163,6 +163,8 @@ def run_walk_forward_backtest(
         window_results.append({
             "window_start": _get_ts(test_df.iloc[0]),
             "window_end": _get_ts(test_df.iloc[-1]),
+            "trades": len(trade_returns),
+            "status": "completed" if len(trade_returns) > 0 else "no_trades",
             "win_rate": win_rate,
             "cum_return": cum_ret,
             "max_drawdown": max_dd,
@@ -176,19 +178,35 @@ def run_walk_forward_backtest(
         
         start_idx += step_bars
         
-    win_rates = [w["win_rate"] for w in window_results]
-    returns = [w["cum_return"] for w in window_results]
+    active_windows = [w for w in window_results if w.get("trades", 0) > 0]
+    total_trades = sum(w.get("trades", 0) for w in window_results)
+
+    if total_trades == 0:
+        return {
+            "status": "no_trades",
+            "window_count": len(window_results),
+            "total_trades": 0,
+            "mean_win_rate": 0.0,
+            "mean_return": 0.0,
+            "max_drawdown": 0.0,
+            "mean_profit_factor": 0.0,
+            "windows": window_results
+        }
+
+    win_rates = [w["win_rate"] for w in active_windows]
+    returns = [w["cum_return"] for w in active_windows]
     drawdowns = [w["max_drawdown"] for w in window_results]
-    pfs = [w["profit_factor"] for w in window_results]
-    expectancies = [w["expectancy_r"] for w in window_results]
-    sharpes = [w["sharpe_ratio"] for w in window_results]
-    sortinos = [w["sortino_ratio"] for w in window_results]
-    calmars = [w["calmar_ratio"] for w in window_results]
-    recoveries = [w["recovery_factor"] for w in window_results]
+    pfs = [w["profit_factor"] for w in active_windows]
+    expectancies = [w["expectancy_r"] for w in active_windows]
+    sharpes = [w["sharpe_ratio"] for w in active_windows]
+    sortinos = [w["sortino_ratio"] for w in active_windows]
+    calmars = [w["calmar_ratio"] for w in active_windows]
+    recoveries = [w["recovery_factor"] for w in active_windows]
     
     summary = {
         "status": "success",
         "window_count": len(window_results),
+        "total_trades": total_trades,
         "mean_win_rate": float(np.mean(win_rates)) if win_rates else 0.0,
         "mean_return": float(np.mean(returns)) if returns else 0.0,
         "max_drawdown": float(np.max(drawdowns)) if drawdowns else 0.0,
