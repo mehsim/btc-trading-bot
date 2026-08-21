@@ -2924,11 +2924,40 @@
                         const aiRegime = document.getElementById("ai-decision-regime");
                         const shadowVal = document.getElementById("shadow-note-val");
                         const aiRationale = document.getElementById("ai-decision-rationale");
+                        const aiBadge = document.getElementById("ai-decision-badge");
+                        const aiCard = document.getElementById("card-ai-decision");
 
-                        if (aiAct) aiAct.innerText = champ.action || "ABSTAIN / HOLD (Capital Preserved)";
+                        if (aiAct) {
+                            aiAct.innerText = champ.action || "ABSTAIN / HOLD (Capital Preserved)";
+                            if (champ.action_color) {
+                                aiAct.style.color = champ.action_color;
+                            }
+                        }
+                        if (aiBadge) {
+                            aiBadge.innerText = champ.badge_text || (champ.action && champ.action.includes("LIVE") ? "LIVE ACTIVE" : "GOVERNED");
+                            if (champ.action && champ.action.includes("LIVE")) {
+                                aiBadge.style.background = "rgba(16, 185, 129, 0.2)";
+                                aiBadge.style.color = "var(--accent-green)";
+                                if (aiCard) aiCard.style.borderColor = "rgba(16, 185, 129, 0.6)";
+                            } else if (champ.action && champ.action.includes("Contradiction")) {
+                                aiBadge.style.background = "rgba(245, 158, 11, 0.2)";
+                                aiBadge.style.color = "var(--accent-orange)";
+                                if (aiCard) aiCard.style.borderColor = "rgba(245, 158, 11, 0.4)";
+                            } else {
+                                aiBadge.style.background = "rgba(59, 130, 246, 0.15)";
+                                aiBadge.style.color = "var(--accent-blue)";
+                                if (aiCard) aiCard.style.borderColor = "rgba(59, 130, 246, 0.3)";
+                            }
+                        }
                         if (aiConf) aiConf.innerText = `${champ.confidence_pct || 0.0}%`;
                         if (aiRegime) aiRegime.innerText = champ.regime || '—';
-                        if (shadowVal) shadowVal.innerText = shadow.direction ? `${shadow.direction} (${shadow.confidence_pct}% Conf - 0% Real Capital)` : '—';
+                        if (shadowVal) {
+                            if (shadow.direction && shadow.direction !== 'NEUTRAL') {
+                                shadowVal.innerText = `${shadow.direction} (${shadow.confidence_pct || 0}% Conf - 0% Real Capital)`;
+                            } else {
+                                shadowVal.innerText = 'Challenger Tracking (0% Real Capital)';
+                            }
+                        }
                         if (aiRationale) aiRationale.innerText = champ.rationale || "Net Expected Utility E[U] <= 0 -> Real Capital Preserved";
                     }
 

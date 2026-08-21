@@ -521,45 +521,94 @@ def api_status():
             real_bal = None
 
         # AI Decision & Rationale dynamic structure (reflects exact execution reality)
-        top_prediction = status_data.get("latest_prediction_60m") or status_data.get("latest_prediction_15m") or {}
-        direction = top_prediction.get("direction", "NEUTRAL")
-        conf = top_prediction.get("calibrated_confidence") or top_prediction.get("confidence", 0.0)
+        pred_history = status_data.get("prediction_history", [])
+        latest_pred = pred_history[-1] if pred_history else (status_data.get("latest_prediction_60m") or status_data.get("latest_prediction_15m") or {})
+        
+        pred_symbol = latest_pred.get("symbol", status_data.get("active_symbol", "BTCUSDT"))
+        pred_tf = str(latest_pred.get("interval", "15"))
+        pred_dir = str(latest_pred.get("direction", "NEUTRAL"))
+        pred_status = str(latest_pred.get("status", "Abstain"))
+        pred_conf = float(latest_pred.get("calibrated_confidence") or latest_pred.get("confidence") or latest_pred.get("raw_confidence") or 0.0)
+        pred_thresh = float(latest_pred.get("dynamic_threshold") or 0.52)
+        pred_change = float(latest_pred.get("predicted_change") or 0.0)
         
         active_positions = state_manager.get("positions", [])
-        has_active_trade = any(float(p.get("size", 0) or 0) > 0 for p in active_positions) if isinstance(active_positions, list) else False
+        active_pos_list = [p for p in active_positions if float(p.get("size", 0) or 0) > 0] if isinstance(active_positions, list) else []
+        has_active_trade = len(active_pos_list) > 0
         trade_mode = os.environ.get("TRADE_MODE", "simulation").upper()
 
-        # 1. Champion Production Model Decision (100% Capital Allocation)
+        # Dynamic Regime & ADX Resolution
+        adx_val = status_data.get(f"adx_{pred_tf}m") or status_data.get("adx_15m") or status_data.get("adx_1h") or 25.0
+        regime_raw = status_data.get(f"regime_{pred_tf}m") or status_data.get("regime_15m") or ("Trending" if float(adx_val) >= 24.0 else "Ranging")
+        dynamic_regime_str = f"{str(regime_raw).capitalize()} (ADX {float(adx_val):.1f})"
+
+        # 1. Champion Production Model Decision
         if has_active_trade:
-            champ_action = f"LIVE POSITION OPEN: {direction.upper()} (BTCUSDT)"
-            champ_rationale = f"Live Order Active on Bybit | Allocation: 100% Capital | Conf: {conf*100 if conf <= 1.0 else conf:.1f}% | Net Utility E[U] > 0"
+            pos = active_pos_list[0]
+            pos_sym = pos.get("symbol", pred_symbol)
+            pos_side = str(pos.get("side", pred_dir)).upper()
+            pos_entry = float(pos.get("entry_price", 0) or 0)
+            pos_pnl = float(pos.get("unrealized_pnl", 0) or 0)
+            champ_action = f"LIVE POSITION OPEN: {pos_side} ({pos_sym})"
+            champ_rationale = f"Live Order Active on Bybit | Entry: ${pos_entry:,.2f} | PnL: {pos_pnl:+.2f} USD | Conf: {pred_conf*100 if pred_conf <= 1.0 else pred_conf:.1f}% | Governed Execution"
+            action_color = "var(--accent-green)" if pos_side in ["BUY", "LONG", "BULLISH"] else "var(--accent-red)"
+            badge_text = "LIVE ACTIVE"
         else:
-            champ_action = "ABSTAIN / HOLD (Capital Preserved)"
-            champ_rationale = f"Champion Model Hold | Mode: {trade_mode} | Net Expected Utility E[U] <= 0 or Spread/Heat limit active -> No live order"
+            if "Contradiction" in pred_status:
+                champ_action = f"ABSTAIN: Contradiction ({pred_symbol} {pred_tf}M)"
+                champ_rationale = f"Safety Gate: {pred_dir} signal contradicted by negative expected price move ({pred_change:+.3f}) -> Entry blocked to protect capital."
+                action_color = "var(--accent-orange)"
+                badge_text = "CONTRADICTION"
+            elif "HTF" in pred_status:
+                champ_action = f"ABSTAIN: HTF Trend Block ({pred_symbol} {pred_tf}M)"
+                champ_rationale = f"Macro Filter: {pred_tf}M {pred_dir} signal blocked by opposing higher timeframe trend -> Capital preserved."
+                action_color = "var(--accent-orange)"
+                badge_text = "HTF BLOCKED"
+            elif "Low Confidence" in pred_status or (pred_conf > 0 and pred_conf < pred_thresh):
+                conf_fmt = f"{pred_conf*100 if pred_conf <= 1.0 else pred_conf:.1f}%"
+                thresh_fmt = f"{pred_thresh*100 if pred_thresh <= 1.0 else pred_thresh:.1f}%"
+                champ_action = f"ABSTAIN: Low Conviction ({pred_symbol} {pred_tf}M)"
+                champ_rationale = f"Hurdle Filter: Calibrated confidence {conf_fmt} < required {thresh_fmt} break-even hurdle -> Capital preserved."
+                action_color = "var(--accent-blue)"
+                badge_text = "LOW CONFIDENCE"
+            elif "Low Liquidity" in pred_status:
+                champ_action = f"ABSTAIN: Microstructure Guard ({pred_symbol})"
+                champ_rationale = f"Liquidity Gate: Book depth or spread below institutional execution threshold -> Entry skipped."
+                action_color = "var(--accent-purple)"
+                badge_text = "LOW LIQUIDITY"
+            else:
+                champ_action = "ABSTAIN / HOLD (Capital Preserved)"
+                champ_rationale = f"Champion Model Hold | Mode: {trade_mode} | Net Expected Utility E[U] <= 0 -> Real Capital Preserved"
+                action_color = "var(--accent-green)"
+                badge_text = "ABSTAINING"
 
         status_data["champion_decision"] = {
             "model_version": "v7.2.0 (Production Champion)",
-            "capital_allocation_pct": 100.0 if trade_mode == "LIVE" else 0.0,
+            "capital_allocation_pct": 100.0 if (trade_mode == "LIVE" and has_active_trade) else 0.0,
             "action": champ_action,
-            "direction": direction if has_active_trade else "NEUTRAL",
-            "confidence_pct": round(conf * 100.0 if conf <= 1.0 else conf, 1),
-            "target_symbol": "BTCUSDT",
-            "regime": status_data.get("regime_60m", "Trending (ADX 32.4)"),
+            "action_color": action_color,
+            "badge_text": badge_text,
+            "direction": pred_dir if (has_active_trade or pred_dir != "NEUTRAL") else "NEUTRAL",
+            "confidence_pct": round(pred_conf * 100.0 if pred_conf <= 1.0 else pred_conf, 1),
+            "target_symbol": pred_symbol,
+            "timeframe": f"{pred_tf}M",
+            "regime": dynamic_regime_str,
             "rationale": champ_rationale
         }
 
-        # 2. Shadow Candidate Model Decision (0% Capital Allocation)
-        shadow_direction = direction if conf > 0.60 else "BEARISH"
-        shadow_conf = round(max(83.1, conf * 100.0 if conf <= 1.0 else conf), 1)
+        # 2. Shadow / Challenger Candidate Model Decision (0% Real Capital)
+        shadow_direction = pred_dir if pred_dir != "NEUTRAL" else "NEUTRAL"
+        shadow_conf = round(pred_conf * 100.0 if pred_conf <= 1.0 else pred_conf, 1)
         status_data["shadow_decision"] = {
-            "model_version": "v7.3.0 (Shadow Candidate)",
-            "capital_allocation_pct": 0.0, # 0% Real Capital
-            "action": f"SHADOW SIGNAL ({shadow_direction.upper()}) — NO REAL TRADE",
+            "model_version": "v7.3.0 (Shadow Challenger)",
+            "capital_allocation_pct": 0.0,
+            "action": f"SHADOW TRACKING ({shadow_direction.upper()}) — 0% CAPITAL",
             "direction": shadow_direction,
             "confidence_pct": shadow_conf,
-            "target_symbol": "BTCUSDT",
-            "regime": status_data.get("regime_60m", "Trending (ADX 32.4)"),
-            "rationale": f"Candidate Model Evaluation | Shadow Stage (0% Real Capital) | Conf: {shadow_conf}% | Real Exchange Balance Preserved"
+            "target_symbol": pred_symbol,
+            "timeframe": f"{pred_tf}M",
+            "regime": dynamic_regime_str,
+            "rationale": f"Candidate Model Evaluation | Shadow Stage (0% Real Capital) | Direction: {shadow_direction} ({shadow_conf}% Conf) | Real Balance Preserved"
         }
 
         status_data["ai_decision"] = status_data["champion_decision"]
