@@ -5842,8 +5842,13 @@ def main():
                             return float(data["default"])
             except Exception:
                 pass
-            from config import DYNAMIC_CONFIDENCE_THRESHOLDS
-            return float(DYNAMIC_CONFIDENCE_THRESHOLDS.get(str(interval), 0.55))
+            try:
+                from config import TIMEFRAME_CONFIG, DYNAMIC_CONFIDENCE_THRESHOLDS
+                if str(interval) in TIMEFRAME_CONFIG and "base_confidence_threshold" in TIMEFRAME_CONFIG[str(interval)]:
+                    return float(TIMEFRAME_CONFIG[str(interval)]["base_confidence_threshold"])
+                return float(DYNAMIC_CONFIDENCE_THRESHOLDS.get(str(interval), 0.55))
+            except Exception:
+                return 0.55
 
         reloaded_intervals = check_and_hot_reload_models()
         

@@ -365,6 +365,11 @@ for _tf in list(TIMEFRAME_CONFIG.keys()):
         except Exception:
             pass
 
+DYNAMIC_CONFIDENCE_THRESHOLDS = {
+    _tf: float(_cfg.get("base_confidence_threshold", 0.55))
+    for _tf, _cfg in TIMEFRAME_CONFIG.items()
+}
+
 # Learnable EQS Weights Dictionary (Bayesian Optimization Ready)
 EQS_WEIGHTS = {
     "structure": 20.0,
