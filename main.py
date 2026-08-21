@@ -5951,6 +5951,8 @@ def main():
                         check_queue = missing_pairs
 
         forced_intervals = set()
+        if is_startup:
+            forced_intervals.update(["15", "30", "60", "120", "240"])
         # 3. Handle hot-reload queue inject
         if reloaded_intervals:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Hot-reloaded intervals detected: {reloaded_intervals}. Resetting processed timestamps and forcing check...")
