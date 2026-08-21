@@ -90,6 +90,13 @@ def run_walk_forward_backtest(
     actual model trade execution and trade returns instead of buy-and-hold price bars.
     Returns statistical summary of metrics across out-of-sample test windows.
     """
+    if not callable(trade_simulator_fn):
+        return {
+            "status": "missing_trade_simulator",
+            "error": "No valid trade_simulator_fn provided. Walk-forward validation requires model simulation.",
+            "window_count": 0
+        }
+
     if df is None or len(df) < (train_window_bars + test_window_bars):
         return {"status": "insufficient_data", "window_count": 0}
         
@@ -133,14 +140,11 @@ def run_walk_forward_backtest(
             max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
             ret_list = (arr_ret / 100.0).tolist()
         else:
-            test_returns = test_df["close"].pct_change().fillna(0.0).dropna() * 100.0
-            win_rate = float((test_returns > 0).mean() * 100.0) if len(test_returns) > 0 else 0.0
-            cum_ret = float(((1.0 + test_returns / 100.0).prod() - 1.0) * 100.0) if len(test_returns) > 0 else 0.0
-            eq = np.cumprod(1.0 + test_returns / 100.0)
-            peak = np.maximum.accumulate(eq)
-            dd = (peak - eq) / peak * 100.0
-            max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
-            ret_list = (test_returns / 100.0).tolist()
+            # 0 trades generated in this window by strategy
+            win_rate = 0.0
+            cum_ret = 0.0
+            max_dd = 0.0
+            ret_list = []
         
         def _get_ts(row_val):
             try:

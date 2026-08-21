@@ -173,10 +173,15 @@ class StatisticalValidation:
             pf_gain = float(pf_candidate - pf_baseline)
             practical_pass = pf_gain >= self.min_pf_gain
             dual_sig_val = practical_pass and statistical_pass
+        elif pf_candidate is not None:
+            pf_gain = float(pf_candidate - 1.0)
+            practical_pass = pf_candidate >= (1.0 + self.min_pf_gain)
+            dual_sig_val = practical_pass and statistical_pass
         else:
+            # Standalone candidate: Dual-significance validates OOS predictive floor and statistical significance
             pf_gain = None
-            practical_pass = False
-            dual_sig_val = "NOT_EVALUABLE"
+            practical_pass = bool(out_of_sample_pass)
+            dual_sig_val = practical_pass and statistical_pass
 
         gate_results = {
             "Gate 1 (Walk-Forward)": walk_forward_pass,

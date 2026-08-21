@@ -1902,6 +1902,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
                         n_optuna_trials_val = int(locals().get("n_trials", 12))
 
+                        pf_champ = float(champ_manifest.get("profit_factor", 1.0)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest) else None
+                        pf_chal = float(locals().get("chal_pf", 1.25)) if ("chal_pf" in locals() and locals().get("chal_pf") is not None) else None
+
                         stat_eval = stat_validator.evaluate_8_release_gates(
                             walk_forward_pass=(chal_mcc_min >= -0.05),
                             out_of_sample_pass=(holdout_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor),
@@ -1911,8 +1914,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             research_notebook_approved=notebook_appr,
                             rollback_plan_defined=rollback_def,
                             live_reality_check_pass=reality_check_pass,
-                            pf_baseline=None,
-                            pf_candidate=None,
+                            pf_baseline=pf_champ,
+                            pf_candidate=pf_chal,
                             p_value=_p,
                             num_trials=n_optuna_trials_val
                         )
