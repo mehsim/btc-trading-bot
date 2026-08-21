@@ -55,3 +55,4 @@ kelly_trade_history.json
 trade_journal.csv
 governance_audit_trail.json*
 data/
+models_backup_*/

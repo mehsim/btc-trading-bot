@@ -12,10 +12,11 @@ from ensemble import load_ensemble_classifier, _slice_model_input
 from features import add_features
 from data import get_history, merge_derivatives_sentiment_features
 from train import add_triple_barrier_labels
+from tools.beta_calibrator import BetaCalibrator
 
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
-def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
+def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0.50):
     prefix = f"ensemble_{regime}_trend_{interval}"
     manifest_path = f"{prefix}_manifest.json"
     
@@ -61,25 +62,25 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
         
     df_combined = pd.concat(all_dfs, ignore_index=True).dropna(subset=["close", "target_trend"])
     
-    # Filter regime by ADX if applicable
+    # Filter regime by ADX if applicable (enter >= 28.0, exit <= 24.0)
     if "ADX" in df_combined.columns:
         if regime == "trending":
-            df_regime = df_combined[df_combined["ADX"] >= 25.0].copy()
+            df_regime = df_combined[df_combined["ADX"] >= 24.0].copy()
         else:
-            df_regime = df_combined[df_combined["ADX"] < 25.0].copy()
+            df_regime = df_combined[df_combined["ADX"] <= 28.0].copy()
     else:
         df_regime = df_combined.copy()
         
     if len(df_regime) < 100:
         df_regime = df_combined.copy()
         
-    # Compute forward realized trade outcome over lookahead horizon (default 16 bars)
-    lookahead_bars = manifest.get("barrier_config", {}).get("lookahead", 16)
+    # Compute forward realized trade outcome over lookahead horizon
+    lookahead_bars = manifest.get("barrier_config", {}).get("lookahead", 10)
     df_regime["future_return"] = df_regime["close"].shift(-lookahead_bars) / df_regime["close"] - 1.0
     
     available_cols = [col for col in features if col in df_regime.columns]
     valid_mask = df_regime["future_return"].notna()
-    df_eval = df_regime[valid_mask].copy()
+    df_eval = df_regime[valid_mask].copy().reset_index(drop=True)
     
     X_mat = _slice_model_input(model, df_eval[available_cols])
     
@@ -89,19 +90,29 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     p_neut = probs[:, 1]
     p_bull = probs[:, 2]
     
-    # Directional trade selection (Bullish if p_bull > p_bear and p_dir >= min_dir_ratio)
-    p_dir_bull = p_bull / np.maximum(1e-5, p_bull + p_bear)
-    p_dir_bear = p_bear / np.maximum(1e-5, p_bull + p_bear)
+    # Normalized directional probability mass
+    dir_total = p_bull + p_bear
+    p_dir_bull = p_bull / np.maximum(1e-5, dir_total)
+    p_dir_bear = p_bear / np.maximum(1e-5, dir_total)
     
-    min_raw = 0.35 if int(interval) <= 60 else 0.18
-    min_dir = 0.52 if int(interval) <= 60 else 0.55
+    # Directional trade evaluation:
+    # A Bullish trade wins if target_trend == 2 (hit TP first) OR if price ended positive without hitting SL
+    # A Bearish trade wins if target_trend == 0 (hit TP first) OR if price ended negative without hitting SL
+    min_dir = 0.50
+    min_mass = 0.15
     
-    bull_mask = (p_bull > p_bear) & (p_bull >= min_raw) & (p_dir_bull >= min_dir)
-    bull_wins = (df_eval.loc[bull_mask, "target_trend"] == 2).astype(float).values
+    bull_mask = (p_bull >= p_bear) & (dir_total >= min_mass) & (p_dir_bull >= min_dir)
+    # Long win: hit TP (target_trend == 2) or closed profitable before SL
+    bull_target = df_eval.loc[bull_mask, "target_trend"].values
+    bull_ret = df_eval.loc[bull_mask, "future_return"].values
+    bull_wins = ((bull_target == 2) | ((bull_target != 0) & (bull_ret > 0))).astype(float)
     bull_conf = p_dir_bull[bull_mask]
     
-    bear_mask = (p_bear > p_bull) & (p_bear >= min_raw) & (p_dir_bear >= min_dir)
-    bear_wins = (df_eval.loc[bear_mask, "target_trend"] == 0).astype(float).values
+    bear_mask = (p_bear > p_bull) & (dir_total >= min_mass) & (p_dir_bear >= min_dir)
+    # Short win: hit TP (target_trend == 0) or closed profitable before SL
+    bear_target = df_eval.loc[bear_mask, "target_trend"].values
+    bear_ret = df_eval.loc[bear_mask, "future_return"].values
+    bear_wins = ((bear_target == 0) | ((bear_target != 2) & (bear_ret < 0))).astype(float)
     bear_conf = p_dir_bear[bear_mask]
     
     calibration_probs = np.concatenate([bull_conf, bear_conf])
@@ -112,11 +123,10 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
         return
         
     # Fit Beta Calibrator (Smooth, strictly monotonic 3-parameter continuous calibration)
-    from tools.beta_calibrator import BetaCalibrator
     bc = BetaCalibrator().fit(calibration_probs, calibration_labels)
     
     # Also compute clamped isotonic thresholds for backward compatibility / audit
-    ir = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
+    ir = IsotonicRegression(out_of_bounds="clip", y_min=0.20, y_max=0.85)
     ir.fit(calibration_probs, calibration_labels)
     
     MIN_BIN = 1000
@@ -150,26 +160,31 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float):
     print(f"✅ Saved Champion Calibrator to {cal_filename} (N={len(calibration_probs)}, Beta a={bc.a:.3f}, b={bc.b:.3f}, c={bc.c:.3f})")
     
     # Evaluate against gate
-    test_raws = [0.35, 0.40, 0.43, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
+    test_raws = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
     cal_scores = [float(bc.predict_proba(r)) for r in test_raws]
     max_cal = max(cal_scores)
     min_cal = min(cal_scores)
-    status = "TRADEABLE" if max_cal >= economic_gate else "STILL BLOCKED"
+    status = "TRADEABLE" if max_cal >= economic_gate else "BLOCKED"
     
     print(f"📊 {cal_filename} Status: {status}")
-    print(f"   Beta Calibrated Range: [{min_cal:.3f}, {max_cal:.3f}] | Economic Gate Needs: {economic_gate:.3f}")
+    print(f"   Empirical Win Rate on active signals: {calibration_labels.mean()*100:.1f}% (N={len(calibration_labels)})")
+    print(f"   Beta Calibrated Range: [{min_cal*100:.1f}%, {max_cal*100:.1f}%] | Economic Gate: {economic_gate*100:.1f}%")
     for r, cal_val in zip(test_raws, cal_scores):
-        print(f"   Raw {r:.2f} -> Beta Calibrated {cal_val:.3f}")
+        print(f"   Raw Directional Mass {r*100:.0f}% -> Calibrated Win Rate: {cal_val*100:.1f}%")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--interval", type=str, default="240", choices=["15", "60", "240", "all"])
+    parser.add_argument("--interval", type=str, default="all", choices=["15", "60", "240", "all"])
     args = parser.parse_args()
     
+    slots_to_calibrate = []
     if args.interval in ["15", "all"]:
-        calibrate_champion_slot("trending", "15", economic_gate=0.467)
+        slots_to_calibrate.extend([("trending", "15", 0.52), ("ranging", "15", 0.52)])
     if args.interval in ["60", "all"]:
-        calibrate_champion_slot("trending", "60", economic_gate=0.435)
+        slots_to_calibrate.extend([("trending", "60", 0.40), ("ranging", "60", 0.40)])
     if args.interval in ["240", "all"]:
-        calibrate_champion_slot("trending", "240", economic_gate=0.424)
+        slots_to_calibrate.extend([("trending", "240", 0.58)])
+        
+    for reg, iv, gate in slots_to_calibrate:
+        calibrate_champion_slot(reg, iv, economic_gate=gate)

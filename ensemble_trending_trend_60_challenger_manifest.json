@@ -2,65 +2,53 @@
   "manifest_schema_version": 3,
   "governance_version": 2,
   "prefix": "ensemble_trending_trend_60",
-  "timestamp": "2026-08-20T10:53:53.877825+00:00",
+  "timestamp": "2026-08-21T11:09:01.754867+00:00",
   "model_version": "v7.2.0-beb40481-202608142257",
   "feature_version": "v3.1.0",
   "ensemble_version": "v3.0_stacking",
-  "git_sha": "b98b11ee",
-  "feature_count": 23,
+  "git_sha": "7cd0cf91",
+  "feature_count": 17,
   "feature_names": [
-    "close_to_Kalman",
-    "hour_sin",
-    "btc_return_5m_lag3",
-    "ADX_neg",
-    "fear_greed_lag1",
-    "btc_rsi",
-    "day_of_week_cos",
-    "ADX_z",
-    "BB_width",
-    "btc_rsi_lag2",
-    "close_to_EMA200",
-    "close_to_VWAP",
-    "ADX",
+    "RSI_24",
+    "RSI_lag2",
     "hour_cos",
-    "volatility_gk_lag2",
-    "day_of_week_sin",
-    "BB_pct",
-    "volatility_gk_lag1",
-    "close_to_EMA50",
+    "roll_spread_lag1",
+    "btc_rsi",
     "fear_greed_lag2",
-    "roll_spread",
+    "close_to_EMA200",
+    "RSI",
+    "EMA9_to_EMA21",
+    "fear_greed_lag1",
     "fear_greed",
+    "day_of_week_cos",
+    "close_to_EMA50",
+    "day_of_week_sin",
+    "close_to_Kalman",
+    "ADX",
     "ATR_norm"
   ],
   "surviving_features": [
-    "close_to_Kalman",
-    "hour_sin",
-    "btc_return_5m_lag3",
-    "ADX_neg",
-    "fear_greed_lag1",
-    "btc_rsi",
-    "day_of_week_cos",
-    "ADX_z",
-    "BB_width",
-    "btc_rsi_lag2",
-    "close_to_EMA200",
-    "close_to_VWAP",
-    "ADX",
+    "RSI_24",
+    "RSI_lag2",
     "hour_cos",
-    "volatility_gk_lag2",
-    "day_of_week_sin",
-    "BB_pct",
-    "volatility_gk_lag1",
-    "close_to_EMA50",
+    "roll_spread_lag1",
+    "btc_rsi",
     "fear_greed_lag2",
-    "roll_spread",
+    "close_to_EMA200",
+    "RSI",
+    "EMA9_to_EMA21",
+    "fear_greed_lag1",
     "fear_greed",
+    "day_of_week_cos",
+    "close_to_EMA50",
+    "day_of_week_sin",
+    "close_to_Kalman",
+    "ADX",
     "ATR_norm"
   ],
   "vif_values": {},
-  "feature_contract_hash": "0c27130a922d",
-  "feature_pipeline_hash": "ba3c161c0af6",
+  "feature_contract_hash": "8d331847099d",
+  "feature_pipeline_hash": "e1a5540db7e9",
   "training_data_hash": "58b4ea69e201f8b136bc55ade42ac07ef035654fc80e70741a22f17dc071c442",
   "preprocessing_hash": "91a7d4858ec9e25e04e9606f702aba034974c9c6413b292d6b525eebe2a34bca",
   "parent_model_hash": "7a10d8d2249135e26e524ff22499a9aa60ee91d12964aa6d6b15f8ea76897a6e",
@@ -99,46 +87,46 @@
   },
   "metrics": {
     "uniqueness_ratio": 0.011,
-    "effective_sample_size": 130.84,
-    "raw_sample_size": 11861,
-    "mcc": 0.0197,
-    "balanced_accuracy": 0.3486
+    "effective_sample_size": 262.91,
+    "raw_sample_size": 23880,
+    "mcc": 0.0099,
+    "balanced_accuracy": 0.3408
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
     "balanced_accuracy": {
-      "mean": 0.3486,
-      "median": 0.3611,
-      "std": 0.0244,
-      "min": 0.3091,
-      "max": 0.3707
+      "mean": 0.3408,
+      "median": 0.3449,
+      "std": 0.0175,
+      "min": 0.3108,
+      "max": 0.3635
     },
     "macro_f1": {
-      "mean": 0.3268,
-      "median": 0.3395,
-      "std": 0.0305,
-      "min": 0.2728,
-      "max": 0.3585
+      "mean": 0.3301,
+      "median": 0.3323,
+      "std": 0.0173,
+      "min": 0.2981,
+      "max": 0.3504
     },
     "mcc": {
-      "mean": 0.0197,
-      "median": 0.0436,
-      "std": 0.0396,
-      "min": -0.0417,
-      "max": 0.0607
+      "mean": 0.0099,
+      "median": 0.0097,
+      "std": 0.0276,
+      "min": -0.0362,
+      "max": 0.0498
     },
-    "mean_kappa": 0.018623181319579584,
-    "mean_pr_auc_bear": 0.32090308587368616,
-    "mean_pr_auc_bull": 0.2795535273828379,
-    "mean_raw_accuracy": 0.3694,
-    "mean_mae": 0.014448,
-    "label_dist_bearish_pct": 30.23,
-    "label_dist_neutral_pct": 45.09,
-    "label_dist_bullish_pct": 24.68,
-    "n_training_samples": 11861,
+    "mean_kappa": 0.009517827475681995,
+    "mean_pr_auc_bear": 0.2876844411110967,
+    "mean_pr_auc_bull": 0.24639119629148243,
+    "mean_raw_accuracy": 0.3648,
+    "mean_mae": 0.016576,
+    "label_dist_bearish_pct": 29.08,
+    "label_dist_neutral_pct": 46.68,
+    "label_dist_bullish_pct": 24.24,
+    "n_training_samples": 23880,
     "n_holdout_samples": 7200,
-    "effective_sample_size": 130.84,
-    "raw_sample_size": 11861,
+    "effective_sample_size": 262.91,
+    "raw_sample_size": 23880,
     "uniqueness_ratio": 0.011,
     "confusion_matrix": {
       "labels": [
@@ -153,29 +141,39 @@
       ],
       "matrix": [
         [
-          1222,
-          1196,
-          437
+          1565,
+          2593,
+          1593
         ],
         [
-          1841,
-          1963,
-          715
+          2721,
+          4313,
+          2422
         ],
         [
-          909,
-          1132,
-          465
+          1218,
+          2094,
+          1381
         ]
       ]
     },
-    "holdout_accuracy": 0.2707,
-    "holdout_balanced_accuracy": 0.2917,
-    "holdout_mcc": -0.0606,
-    "champion_holdout_mcc": 0.1777,
-    "champion_holdout_balanced_accuracy": 0.4525,
-    "holdout_brier": 0.7039,
-    "holdout_ece": 0.1556,
+    "holdout_accuracy": 0.3172,
+    "holdout_accuracy_ci95": [
+      0.2997,
+      0.3364
+    ],
+    "holdout_balanced_accuracy": 0.3408,
+    "holdout_mcc": 0.013,
+    "holdout_effective_n": 8.89,
+    "holdout_mcc_mde_80pct": 0.9397,
+    "holdout_mcc_ci95": [
+      -0.0129,
+      0.0402
+    ],
+    "champion_holdout_mcc": null,
+    "champion_holdout_balanced_accuracy": null,
+    "holdout_brier": 0.6725,
+    "holdout_ece": 0.073,
     "optuna_objective": {
       "mean": null,
       "median": null,
@@ -184,7 +182,7 @@
       "max": null
     },
     "training_pipeline_version": "v7.2.0",
-    "git_sha": "b98b11ee"
+    "git_sha": "7cd0cf91"
   },
   "barrier_config": {
     "tp_mult_trending": 1.4746788008303522,
@@ -194,15 +192,15 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0197,
-  "manifest_mcc_min": -0.0417,
-  "manifest_bal_acc": 0.3486,
+  "manifest_mcc": 0.0099,
+  "manifest_mcc_min": -0.0362,
+  "manifest_bal_acc": 0.3408,
   "label_distribution": [
-    5847,
-    8722,
-    4775
+    9154,
+    14698,
+    7632
   ],
   "promoted": false,
-  "evaluation_timestamp": "2026-08-20T10:53:53.877825+00:00",
-  "hmac_signature": "0b27833d54394c98ecff622709c501f8933c87dc307eeb064ed169dc07d64356"
+  "evaluation_timestamp": "2026-08-21T11:09:01.754867+00:00",
+  "hmac_signature": "1179f5fac01a7314a894627872f7f173d626ca9db8a33f8490f866733d469dc2"
 }

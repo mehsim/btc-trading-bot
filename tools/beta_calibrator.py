@@ -42,7 +42,8 @@ class BetaCalibrator:
         x2 = -np.log(1.0 - s)
         X = np.column_stack([x1, x2])
 
-        lr = LogisticRegression(C=1e5, solver='lbfgs', max_iter=1000)
+        # Regularized logistic regression (C=1.0 provides robust L2 shrinkage against sample noise)
+        lr = LogisticRegression(C=1.0, solver='lbfgs', max_iter=1000)
         try:
             lr.fit(X, y)
             coefs = lr.coef_[0]
@@ -57,7 +58,7 @@ class BetaCalibrator:
             if a_val < 0 or b_val < 0:
                 # Fit 1D Platt log-odds calibration: ln(s / (1-s))
                 log_odds = (x1 + x2).reshape(-1, 1)
-                lr_platt = LogisticRegression(C=1e5, solver='lbfgs', max_iter=1000)
+                lr_platt = LogisticRegression(C=1.0, solver='lbfgs', max_iter=1000)
                 lr_platt.fit(log_odds, y)
                 platt_coef = max(0.01, float(lr_platt.coef_[0][0]))
                 self.a = platt_coef
@@ -86,6 +87,8 @@ class BetaCalibrator:
         # logit = a * ln(s) - b * ln(1-s) + c
         logit = self.a * np.log(s) - self.b * np.log(1.0 - s) + self.c
         prob = 1.0 / (1.0 + np.exp(-np.clip(logit, -20.0, 20.0)))
+        # Bounded empirical probability ceiling/floor to protect Kelly sizing from saturation
+        prob = np.clip(prob, 0.20, 0.85)
         
         if is_scalar:
             return float(prob.item() if hasattr(prob, 'item') else prob)

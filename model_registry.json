@@ -1,13 +1,13 @@
 {
   "Production": {
-    "run_id": "train_15m_ranging_1787235456",
-    "model_name": "ensemble_ranging_15",
+    "run_id": "train_60m_ranging_1787313707",
+    "model_name": "ensemble_ranging_60",
     "metrics": {
-      "val_accuracy": 0.337,
-      "val_mae": 0.00856185032052923
+      "val_accuracy": 0.3254,
+      "val_mae": 0.01826498738984335
     },
     "stage": "Production",
-    "registered_at_utc": "2026-08-20T14:17:36.146541+00:00"
+    "registered_at_utc": "2026-08-21T12:01:47.484256+00:00"
   },
   "Staging": {
     "run_id": "train_240m_trending_1787071122",
@@ -1671,6 +1671,46 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-08-20T14:14:04.509158+00:00"
+    },
+    {
+      "run_id": "train_15m_ranging_1787235456",
+      "model_name": "ensemble_ranging_15",
+      "metrics": {
+        "val_accuracy": 0.337,
+        "val_mae": 0.00856185032052923
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-20T14:17:36.146541+00:00"
+    },
+    {
+      "run_id": "train_60m_trending_1787310541",
+      "model_name": "ensemble_trending_60",
+      "metrics": {
+        "val_accuracy": 0.3408,
+        "val_mae": 0.021778747945580205
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-21T11:09:01.760250+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1787310877",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.323,
+        "val_mae": 0.016689845462880985
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-21T11:14:37.511190+00:00"
+    },
+    {
+      "run_id": "train_60m_ranging_1787312910",
+      "model_name": "ensemble_ranging_60",
+      "metrics": {
+        "val_accuracy": 0.3308,
+        "val_mae": 0.01668989254825176
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-21T11:48:30.572399+00:00"
     }
   ]
 }
