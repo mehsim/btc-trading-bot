@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import json
 from datetime import datetime
+from logger import log_event
 
 def run_monte_carlo_bootstrap(returns: list, num_simulations: int = 10000) -> dict:
     if not returns:
@@ -82,18 +83,19 @@ def run_walk_forward_backtest(
     train_window_bars: int = 4000,
     test_window_bars: int = 500,
     step_bars: int = 500,
-    trade_simulator_fn = None
+    trade_simulator_fn = None,
+    train_fn = None
 ) -> dict:
     """
     Executes expanding/sliding window Walk-Forward simulation.
-    If trade_simulator_fn is provided (e.g. backtest.run_single_backtest), evaluates
-    actual model trade execution and trade returns instead of buy-and-hold price bars.
-    Returns statistical summary of metrics across out-of-sample test windows.
+    If train_fn is provided (e.g. train_fn(train_df) -> models), refits models on each training window
+    before running simulator on test_df for true out-of-sample evaluation.
+    If only trade_simulator_fn is provided with pre-fit models, runs rolling-window replay evaluation.
     """
-    if not callable(trade_simulator_fn):
+    if not callable(trade_simulator_fn) and not callable(train_fn):
         return {
             "status": "missing_trade_simulator",
-            "error": "No valid trade_simulator_fn provided. Walk-forward validation requires model simulation.",
+            "error": "No valid trade_simulator_fn or train_fn provided. Walk-forward validation requires simulation logic.",
             "window_count": 0
         }
 
@@ -102,15 +104,27 @@ def run_walk_forward_backtest(
         
     n = len(df)
     window_results = []
+    is_refitted = callable(train_fn)
     
     start_idx = 0
     while start_idx + train_window_bars + test_window_bars <= n:
+        train_df = df.iloc[start_idx : start_idx + train_window_bars].copy()
         test_df = df.iloc[start_idx + train_window_bars : start_idx + train_window_bars + test_window_bars].copy()
         
-        trade_returns = []
-        if callable(trade_simulator_fn):
+        sim_fn_to_use = trade_simulator_fn
+        if is_refitted:
             try:
-                sim_res = trade_simulator_fn(test_df)
+                fitted_models = train_fn(train_df)
+                if callable(fitted_models):
+                    sim_fn_to_use = fitted_models
+            except Exception as tr_err:
+                sim_fn_to_use = trade_simulator_fn
+
+        trade_returns = []
+        sl_fracs = []
+        if callable(sim_fn_to_use):
+            try:
+                sim_res = sim_fn_to_use(test_df)
                 trades_extracted = []
                 if isinstance(sim_res, dict) and "trades" in sim_res:
                     trades_extracted = sim_res["trades"]
@@ -127,8 +141,10 @@ def run_walk_forward_backtest(
                         float(t.get("net_return", t.get("pnl_pct", 0.0))) * (100.0 if abs(float(t.get("net_return", 0.0))) <= 2.0 else 1.0)
                         for t in trades_extracted if isinstance(t, dict)
                     ]
+                    sl_fracs = [float(t.get("sl_frac", 0.01)) for t in trades_extracted if isinstance(t, dict)]
             except Exception:
                 trade_returns = []
+                sl_fracs = []
                 
         if trade_returns:
             arr_ret = np.array(trade_returns)
@@ -156,15 +172,31 @@ def run_walk_forward_backtest(
             except Exception:
                 return 0
 
-        # Calculate statistical quality metrics for test window
+        # Calculate statistical quality metrics for test window with per-trade risk denominators
+        win_duration_days = None
+        try:
+            if "timestamp" in test_df.columns and len(test_df) > 1:
+                t0 = float(test_df["timestamp"].iloc[0])
+                t1 = float(test_df["timestamp"].iloc[-1])
+                win_duration_days = max(0.1, (t1 - t0) / (86400.0 * (1000.0 if t1 > 1e11 else 1.0)))
+        except Exception as ex_ts:
+            log_event("WARNING", f"Window duration calculation notice: {ex_ts}")
+
         from trade_calculators import calculate_replay_statistics
-        stats = calculate_replay_statistics(ret_list, initial_equity=100.0)
+        stats = calculate_replay_statistics(
+            ret_list,
+            initial_equity=100.0,
+            risk_per_trade_pct=sl_fracs if sl_fracs else 0.01,
+            duration_days=win_duration_days
+        )
 
         window_results.append({
             "window_start": _get_ts(test_df.iloc[0]),
             "window_end": _get_ts(test_df.iloc[-1]),
             "trades": len(trade_returns),
             "status": "completed" if len(trade_returns) > 0 else "no_trades",
+            "evaluation_type": "refitted_walk_forward" if is_refitted else "rolling_window_replay",
+            "is_refitted": is_refitted,
             "win_rate": win_rate,
             "cum_return": cum_ret,
             "max_drawdown": max_dd,

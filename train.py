@@ -1647,7 +1647,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     f"              : {champ_names}\n"
                     f"    Challenger: {chal_count} features | hash={chal_hash}\n"
                     f"              : {challenger_feature_names}\n"
-                    f"    Champion comparison skipped. New model automatically promoted."
+                    f"    Evaluating challenger against champion manifest baseline."
                 )
                 _emit_governance_event({
                     "event":                  "MODEL_CONTRACT_CHANGED",
@@ -1673,10 +1673,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     "old_preprocessing_hash": champ_manifest.get("preprocessing_hash"),
                     "new_preprocessing_hash": None,
                     # Decision
-                    "action":                 "ChampionSkipped",
+                    "action":                 "ChampionManifestScored",
                     "reason":                 reason,
                 })
-                should_save = True
+                champ_mcc_val = champ_manifest.get("holdout_mcc", champ_manifest.get("cv_metrics", {}).get("mcc", {}).get("mean"))
+                champion_t = None
+                champion_p = None
             else:
                 try:
                     n_champ = champ_manifest.get("feature_count", X_holdout.shape[1])
@@ -1686,7 +1688,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     print(f"  [Champion-Challenger Warning] Failed to load champion: {_le}. Champion comparison unavailable; requiring challenger to strictly pass all predictive floors and holdout quality gates.")
                     champion_t = None
                     champion_p = None
-                    should_save = True
         else:
             print(f"  [Champion-Challenger] No existing champion for {name.upper()}. Saving challenger.")
 
@@ -1766,11 +1767,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_brier = 0.99
                 chal_ece = 0.99
         else:
-            print(f"  [Champion-Challenger] No existing champion (or contract updated) for {name.upper()}. Promoting challenger.")
-            chal_acc = float(locals().get("holdout_bal_acc") if locals().get("holdout_bal_acc") is not None else (stat_bal.get("mean") or 0.0))
-            chal_mae = float(chal_mae if ('chal_mae' in locals() and chal_mae is not None) else (locals().get("stat_mae", {}).get("mean") or 0.0))
-            chal_brier = float(chal_brier if ('chal_brier' in locals() and chal_brier is not None) else (safe_stat(locals().get("brier_scores", [])).get("mean") or 0.20))
-            chal_ece = float(chal_ece if ('chal_ece' in locals() and chal_ece is not None) else (locals().get("ece_score") or 0.03))
+            print(f"  [Champion-Challenger] No live champion model for {name.upper()} (contract updated or new model). Evaluating against recorded manifest baseline.")
+            champ_manifest_mcc = champ_manifest.get("holdout_mcc", champ_manifest.get("cv_metrics", {}).get("mcc", {}).get("mean")) if isinstance(champ_manifest, dict) else None
+            if champ_manifest_mcc is not None:
+                champ_mcc_baseline = float(champ_manifest_mcc)
+                if holdout_mcc < (champ_mcc_baseline - 0.010):
+                    print(f"  [Champion-Challenger] REJECTED: Challenger holdout MCC ({holdout_mcc:.4f}) regressed against champion manifest baseline ({champ_mcc_baseline:.4f} - 0.010 tolerance).")
+                    should_save = False
+                else:
+                    print(f"  [Champion-Challenger] PASSED: Challenger holdout MCC ({holdout_mcc:.4f}) meets or exceeds champion manifest baseline ({champ_mcc_baseline:.4f}).")
+                    should_save = True
+            else:
+                should_save = True
 
         # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
         import config
@@ -1784,8 +1792,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
         chal_bal_acc_mean = float(stat_bal.get("mean", 0.0)) if ('stat_bal' in locals() and isinstance(stat_bal, dict) and stat_bal.get("mean") is not None) else 0.0
 
-        # Compute block-bootstrap 95% CI on holdout metrics using lookahead block length
-        _lookahead_bl = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {}).get("lookahead", 10)
+        # Compute block-bootstrap 95% CI on holdout metrics using multi-symbol lookahead block length
+        _lookahead_bl = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {}).get("lookahead", 10) * len(SUPPORTED_SYMBOLS)
         from statistical_validation import StatisticalValidation
         stat_validator = StatisticalValidation()
 
@@ -1967,9 +1975,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "sharpe_oos": locals().get("chal_sharpe", 1.0),
                 "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
             }
-            champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and compatible and not is_distribution_shifted) else None
+            champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and not is_distribution_shifted) else None
             promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
-            if compatible and not is_distribution_shifted and not promoted and not force_save:
+            if not is_distribution_shifted and not promoted and not force_save:
                 print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
                 should_save = False
             # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
@@ -2043,8 +2051,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_accuracy_ci95": [round(float(holdout_acc_ci_low), 4), round(float(holdout_acc_ci_high), 4)],
             "holdout_balanced_accuracy": round(chal_acc, 4),
             "holdout_mcc": round(holdout_mcc, 4),
-            "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, cv.lookahead * 9)), 2),
-            "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead * 9)))), 4),
+            "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, cv.lookahead)), 2),
+            "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead)))), 4),
             "holdout_mcc_ci95": [round(float(holdout_mcc_ci_low), 4), round(float(holdout_mcc_ci_high), 4)],
             "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
             "champion_holdout_balanced_accuracy": round(champ_acc, 4) if ('champ_acc' in locals() and champ_acc is not None) else None,

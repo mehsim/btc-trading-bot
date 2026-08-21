@@ -88,10 +88,17 @@ MIN_RR_RATIO = {
 
 
 # Statistical Quality Engine: Profit Factor, Expectancy (R), Sharpe, and Sortino Ratios
-def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.0, risk_per_trade_pct: float = 0.01) -> dict:
+def calculate_replay_statistics(
+    returns_list: list,
+    initial_equity: float = 100.0,
+    risk_per_trade_pct: Union[float, list, np.ndarray] = 0.01,
+    duration_days: Optional[float] = None,
+    interval: Optional[str] = None
+) -> dict:
     """
     Unified Statistical Replay & Backtest Quality Engine.
-    Computes Profit Factor, Expectancy in R-multiples, Sharpe Ratio, Sortino Ratio, Win Rate, and Drawdown.
+    Computes Profit Factor, Expectancy in R-multiples (with elementwise SL denominators),
+    Sharpe Ratio, Sortino Ratio, Win Rate, and Drawdown.
     """
     if not returns_list:
         return {
@@ -121,42 +128,58 @@ def calculate_replay_statistics(returns_list: list, initial_equity: float = 100.
     # Check if returns are fractional (e.g. 0.012 for 1.2%) vs absolute dollar PnL
     is_fractional = bool(len(returns) > 0 and np.max(np.abs(returns)) <= 2.0)
     
+    # Vectorized / elementwise risk fraction support
+    risk_arr = np.asarray(risk_per_trade_pct, dtype=float)
+    if risk_arr.ndim > 0 and len(risk_arr) == total_trades:
+        safe_risk_arr = np.maximum(1e-4, risk_arr)
+    else:
+        scalar_risk = float(risk_arr.item() if risk_arr.ndim == 0 else risk_arr[0]) if risk_arr.size > 0 else 0.01
+        safe_risk_arr = np.full(total_trades, max(1e-4, scalar_risk))
+
     if is_fractional:
         pct_returns = returns
         returns_dollar = returns * initial_equity
-        r_multiples = returns / max(1e-4, risk_per_trade_pct)
+        r_multiples = pct_returns / safe_risk_arr
         # Compounded equity curve for fractional returns
         full_equity = initial_equity * np.cumprod(np.insert(1.0 + returns, 0, 1.0))
     else:
         returns_dollar = returns
         pct_returns = returns / initial_equity
-        risk_usd = max(0.01, initial_equity * risk_per_trade_pct)
-        r_multiples = returns / risk_usd
+        risk_usd_arr = np.maximum(0.01, initial_equity * safe_risk_arr)
+        r_multiples = returns_dollar / risk_usd_arr
         # Additive equity curve for dollar PnL
         equity_curve = initial_equity + np.cumsum(returns_dollar)
         full_equity = np.insert(equity_curve, 0, initial_equity)
 
     expectancy_r = float(np.mean(r_multiples))
 
-    # Sharpe & Sortino Ratios (Trade-level annualized)
+    # Sharpe & Sortino Ratios (Annualized by elapsed time if provided, or trade frequency)
     pct_mean = float(np.mean(pct_returns))
     pct_std = float(np.std(pct_returns)) if len(pct_returns) > 1 else 0.0
     downside_pct = pct_returns[pct_returns < 0]
     pct_downside_std = float(np.std(downside_pct)) if len(downside_pct) > 1 else (pct_std if len(pct_returns) > 1 else 0.0)
-
-    sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * np.sqrt(min(total_trades, 252)) if pct_std > 0 else 0.0
-    sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * np.sqrt(min(total_trades, 252)) if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
 
     # Equity Curve & Drawdown
     peak = np.maximum.accumulate(full_equity)
     dd_curve = (peak - full_equity) / np.maximum(1e-8, peak) * 100.0
     max_drawdown = float(np.max(dd_curve)) if len(dd_curve) > 0 else 0.0
     ending_return = float(((full_equity[-1] - initial_equity) / initial_equity) * 100.0) if len(full_equity) > 0 else 0.0
+    safe_dd = max(0.01, max_drawdown)
+
+    if duration_days is not None and duration_days > 0:
+        years = max(duration_days / 365.25, 1.0 / 365.25)
+        annual_trades = float(total_trades) / years
+        ann_factor = float(np.sqrt(max(1.0, annual_trades)))
+        annualized_return = float(((1.0 + max(-0.99, ending_return / 100.0)) ** (1.0 / years) - 1.0) * 100.0)
+    else:
+        ann_factor = float(np.sqrt(min(float(total_trades), 252.0)))
+        annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
+
+    sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * ann_factor if pct_std > 0 else 0.0
+    sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * ann_factor if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
 
     # Institutional Metrics: Calmar Ratio & Recovery Factor
-    safe_dd = max(0.01, max_drawdown)
     recovery_factor = ending_return / safe_dd
-    annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
     calmar_ratio = annualized_return / safe_dd
 
     # Calculate SQN, Ulcer Index, MAR Ratio, and Gain-to-Pain

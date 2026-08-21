@@ -11,6 +11,7 @@ from ta.momentum import RSIIndicator
 
 # Add workspace path to python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from logger import log_event
 from data import get_history, merge_derivatives_sentiment_features
 from core import (
     add_features,
@@ -374,8 +375,17 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             print(f"  {_r:<15} {_mix[_r]:>5}  {100*_mix[_r]/_n:5.1f}%   mean {_meanR:+.3f}R")
 
     returns = [t["net_return"] for t in trades]
+    sl_fracs = [t.get("sl_frac", 0.01) for t in trades]
+    duration_days = None
+    try:
+        if "timestamp" in df.columns and len(df) > 1:
+            ts_start = float(df["timestamp"].iloc[0])
+            ts_end = float(df["timestamp"].iloc[-1])
+            duration_days = max(0.1, (ts_end - ts_start) / (86400.0 * (1000.0 if ts_end > 1e11 else 1.0)))
+    except Exception as ex_ts:
+        log_event("WARNING", f"Timestamp duration calculation notice: {ex_ts}")
     from trade_calculators import calculate_replay_statistics
-    stats = calculate_replay_statistics(returns, initial_equity=100.0)
+    stats = calculate_replay_statistics(returns, initial_equity=100.0, risk_per_trade_pct=sl_fracs, duration_days=duration_days, interval=str(INTERVAL))
     
     stat_tuple = (
         stats.get("total_trades", 0),
@@ -701,12 +711,12 @@ def run_backtest():
         wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn)
         if wf_summary.get("status") == "success":
             print("=" * 90)
-            print("WALK-FORWARD SLIDING WINDOW VALIDATION SUMMARY")
+            print("ROLLING WINDOW WALK-FORWARD VALIDATION SUMMARY")
             print("=" * 90)
-            print(f"Total Sliding Windows Evaluated: {wf_summary.get('window_count')}")
-            print(f"Mean Out-of-Sample Win Rate    : {wf_summary.get('mean_win_rate'):.2f}%")
-            print(f"Mean Out-of-Sample Return      : {wf_summary.get('mean_return'):+.2f}%")
-            print(f"Worst Out-of-Sample Drawdown   : {wf_summary.get('max_drawdown'):.2f}%")
+            print(f"Total Windows Evaluated        : {wf_summary.get('window_count')}")
+            print(f"Mean Window Win Rate           : {wf_summary.get('mean_win_rate'):.2f}%")
+            print(f"Mean Window Return             : {wf_summary.get('mean_return'):+.2f}%")
+            print(f"Worst Window Drawdown          : {wf_summary.get('max_drawdown'):.2f}%")
             print("=" * 90 + "\n")
             export_data["walk_forward_validation"] = wf_summary
     except Exception as wf_err:
