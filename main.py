@@ -6172,11 +6172,51 @@ def main():
                         # Ensure models for interval iv are loaded into memory on-demand
                         _tf = models_by_interval.get(iv, {})
                         if _tf.get("_fully_denied"):
+                            pred_entry_dict = {
+                                "symbol": symbol,
+                                "interval": str(iv),
+                                "predicted_change": 0.0,
+                                "predicted_price": float(latest_candle.get("close", 0.0)),
+                                "direction": "Offline (Denied)",
+                                "raw_confidence": 0.0,
+                                "calibrated_confidence": 0.0,
+                                "manifest_mcc": 0.0,
+                                "signal_source": "GOVERNANCE_DENIED",
+                                "is_fallback": False,
+                                "status": "Offline (Governance Denied)"
+                            }
+                            for k_suffix in [str(tf), str(iv)]:
+                                bot_state[f"regime_{symbol}_{k_suffix}"] = regime
+                                bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
+                                bot_state[f"regime_{k_suffix}"] = regime
+                                bot_state[f"adx_{k_suffix}"] = adx_regime
+                                bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
+                                bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                             continue
                         if not any(_tf.get(_r, {}).get("trend") for _r in ("trending", "ranging")):
                             load_model_weights(iv)
                             _tf = models_by_interval.get(iv, {})
                             if _tf.get("_fully_denied"):
+                                pred_entry_dict = {
+                                    "symbol": symbol,
+                                    "interval": str(iv),
+                                    "predicted_change": 0.0,
+                                    "predicted_price": float(latest_candle.get("close", 0.0)),
+                                    "direction": "Offline (Denied)",
+                                    "raw_confidence": 0.0,
+                                    "calibrated_confidence": 0.0,
+                                    "manifest_mcc": 0.0,
+                                    "signal_source": "GOVERNANCE_DENIED",
+                                    "is_fallback": False,
+                                    "status": "Offline (Governance Denied)"
+                                }
+                                for k_suffix in [str(tf), str(iv)]:
+                                    bot_state[f"regime_{symbol}_{k_suffix}"] = regime
+                                    bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
+                                    bot_state[f"regime_{k_suffix}"] = regime
+                                    bot_state[f"adx_{k_suffix}"] = adx_regime
+                                    bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
+                                    bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                                 continue
 
                         if iv in models_by_interval:
@@ -6195,10 +6235,6 @@ def main():
                             m_cal = models_tf.get(regime_key, {}).get("calibrator")
                             m_meta = models_tf.get(regime_key, {}).get("meta")
                             feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
-
-                            if m_price is None or m_trend is None or not feat_list:
-                                log_event("INFO", f"[{symbol} {iv}m] {served_regime} model unavailable / abstaining — skipping interval (Fail-Closed)")
-                                continue
 
                             active_model_price = m_price
                             active_model_trend = m_trend
@@ -6227,16 +6263,38 @@ def main():
                                     except Exception as mf_err:
                                         log_event("WARNING", f"Failed to load manifest {man_path}: {mf_err}")
 
-                            if mcc_val is not None and mcc_val < min_mcc_floor:
-                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] MCC ({mcc_val:.4f}) below predictive floor ({min_mcc_floor}). Abstaining.")
-                                continue
+                            abstain_reason = None
+                            if m_price is None or m_trend is None or not feat_list:
+                                abstain_reason = f"{served_regime} model offline"
+                            elif mcc_val is not None and mcc_val < min_mcc_floor:
+                                abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
+                            elif mcc_min_val is not None and mcc_min_val < -0.05:
+                                abstain_reason = f"min CV MCC {mcc_min_val:.4f} < -0.05"
+                            elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
+                                abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
 
-                            if mcc_min_val is not None and mcc_min_val < 0.0:
-                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < 0.0). Abstaining.")
-                                continue
-
-                            if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
-                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] BalAcc ({bal_acc_val:.4f}) below floor ({min_bal_acc_floor}). Abstaining.")
+                            if abstain_reason:
+                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] {abstain_reason}. Abstaining.")
+                                pred_entry_dict = {
+                                    "symbol": symbol,
+                                    "interval": str(iv),
+                                    "predicted_change": 0.0,
+                                    "predicted_price": float(latest_candle.get("close", 0.0)),
+                                    "direction": "Abstain",
+                                    "raw_confidence": 0.0,
+                                    "calibrated_confidence": 0.0,
+                                    "manifest_mcc": mcc_val,
+                                    "signal_source": "GOVERNANCE_ABSTAIN",
+                                    "is_fallback": False,
+                                    "status": f"Abstain ({abstain_reason})"
+                                }
+                                for k_suffix in [str(tf), str(iv)]:
+                                    bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
+                                    bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
+                                    bot_state[f"regime_{k_suffix}"] = regime_name
+                                    bot_state[f"adx_{k_suffix}"] = adx_regime
+                                    bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
+                                    bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                                 continue
                             
                             # C-1: Preserve strict train/serve feature distribution consistency

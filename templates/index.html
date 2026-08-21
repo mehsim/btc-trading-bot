@@ -3088,15 +3088,24 @@
                         const subtitleElem = document.getElementById(`model-details-subtitle-${tf}`);
 
                         if (pred && predElem && barElem && subtitleElem) {
-                            predElem.innerText = pred.direction;
-                            if (pred.direction === "Bullish") {
+                            const dir = pred.direction || "No Signal";
+                            predElem.innerText = dir;
+                            if (dir === "Bullish") {
                                 predElem.style.color = "var(--accent-green)";
                                 predElem.style.textShadow = "var(--neon-green-glow)";
                                 barElem.style.backgroundColor = "var(--accent-green)";
-                            } else if (pred.direction === "Bearish") {
+                            } else if (dir === "Bearish") {
                                 predElem.style.color = "var(--accent-red)";
                                 predElem.style.textShadow = "var(--neon-red-glow)";
                                 barElem.style.backgroundColor = "var(--accent-red)";
+                            } else if (dir.includes("Offline") || dir.includes("Denied")) {
+                                predElem.style.color = "var(--text-muted)";
+                                predElem.style.textShadow = "none";
+                                barElem.style.backgroundColor = "rgba(255,255,255,0.1)";
+                            } else if (dir.includes("Abstain") || dir === "Neutral") {
+                                predElem.style.color = "var(--accent-blue)";
+                                predElem.style.textShadow = "none";
+                                barElem.style.backgroundColor = "var(--accent-blue)";
                             } else {
                                 predElem.style.color = "var(--text-secondary)";
                                 predElem.style.textShadow = "none";
@@ -3105,8 +3114,9 @@
 
                             const confPct = ((pred.calibrated_confidence !== undefined ? pred.calibrated_confidence : (pred.confidence || 0.0)) * 100);
                             const changeVal = (typeof pred.predicted_change === 'number' && !isNaN(pred.predicted_change)) ? pred.predicted_change : 0.0;
-                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(3)}`;
-                            barElem.style.width = `${confPct}%`;
+                            const statusSuffix = pred.status ? ` • ${pred.status}` : '';
+                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(3)}${statusSuffix}`;
+                            barElem.style.width = `${Math.max(2, confPct)}%`;
                         } else if (predElem && barElem && subtitleElem) {
                             predElem.innerText = "No Signal";
                             predElem.style.color = "var(--text-secondary)";
@@ -3115,8 +3125,7 @@
                             subtitleElem.innerText = `Calibrated Conf: 0%`;
                         }
 
-                        const rawActiveList = data[`active_trade_${tf}`] || [];
-                        const activeTradesList = rawActiveList.filter(t => !t.bybit_closed && !t.closed);
+                        const activeTradesList = data[`active_trade_${tf}`] || [];
                         const positionContainer = document.getElementById(`position-container-${tf}`);
                         const levBadge = document.getElementById(`leverage-badge-${tf}`);
                         
@@ -3215,22 +3224,23 @@
                     const logs = data.logs || [];
                     const logContainer = document.getElementById("terminal-console-logs");
                     if (logContainer && logs.length > 0) {
-                        const logsSignature = logs.slice(-10).join("|");
-                        if (logContainer._lastSignature !== logsSignature || logContainer.children.length === 0) {
-                            logContainer._lastSignature = logsSignature;
-                            logContainer.innerHTML = "";
-                            logs.forEach(lineText => {
-                                if (!lineText || !lineText.trim()) return;
+                        if (logs.length > loggedLinesCount || logContainer.children.length <= 2) {
+                            const startIdx = (logs.length > loggedLinesCount && loggedLinesCount > 0) ? loggedLinesCount : Math.max(0, logs.length - 30);
+                            if (logContainer.children.length <= 2) {
+                                logContainer.innerHTML = "";
+                            }
+                            for (let k = startIdx; k < logs.length; k++) {
+                                const lineText = logs[k];
                                 const lineDiv = document.createElement("div");
                                 lineDiv.className = "terminal-line";
 
-                                if (lineText.includes("APPROVED") || lineText.includes("[PASS]") || lineText.includes("SUCCESS")) {
+                                if (lineText.includes("APPROVED") || lineText.includes("[PASS]")) {
                                     lineDiv.style.color = "var(--accent-green)";
-                                } else if (lineText.includes("REJECTED") || lineText.includes("[FAIL]") || lineText.includes("Error") || lineText.includes("WARNING") || lineText.includes("Denied")) {
+                                } else if (lineText.includes("REJECTED") || lineText.includes("[FAIL]") || lineText.includes("Error") || lineText.includes("WARNING")) {
                                     lineDiv.style.color = "var(--accent-red)";
-                                } else if (lineText.includes("New completed") || lineText.includes("Trade Opened") || lineText.includes("Signal")) {
+                                } else if (lineText.includes("New completed") || lineText.includes("Trade Opened")) {
                                     lineDiv.style.color = "var(--accent-orange)";
-                                } else if (lineText.includes("TRADE EXITED") || lineText.includes("Exit")) {
+                                } else if (lineText.includes("TRADE EXITED")) {
                                     lineDiv.style.color = "var(--accent-purple)";
                                 }
 
@@ -3243,7 +3253,11 @@
                                     lineDiv.innerText = lineText;
                                 }
                                 logContainer.appendChild(lineDiv);
-                            });
+                            }
+                            loggedLinesCount = logs.length;
+                            while (logContainer.children.length > 40) {
+                                logContainer.removeChild(logContainer.firstChild);
+                            }
                             logContainer.scrollTop = logContainer.scrollHeight;
                         }
                     }
@@ -3760,11 +3774,11 @@
                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; margin-top: 4px;">
                         <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                             <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Mean</div>
-                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-green);">${(tModel.mcc_mean !== undefined && tModel.mcc_mean !== null) ? Number(tModel.mcc_mean).toFixed(4) : '0.1250'}</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-green);">${tModel.mcc_mean !== undefined ? tModel.mcc_mean.toFixed(4) : '—'}</div>
                         </div>
                         <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                             <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Min</div>
-                            <div style="font-size: 15px; font-weight: 800; color: var(--text-primary);">${(tModel.mcc_min !== undefined && tModel.mcc_min !== null) ? Number(tModel.mcc_min).toFixed(4) : '0.0800'}</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--text-primary);">${tModel.mcc_min !== undefined ? tModel.mcc_min.toFixed(4) : '—'}</div>
                         </div>
                         <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                             <div style="font-size: 10px; color: var(--text-secondary);">Feature Count</div>
@@ -3803,11 +3817,11 @@
                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; margin-top: 4px;">
                         <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                             <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Mean</div>
-                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-green);">${(rModel.mcc_mean !== undefined && rModel.mcc_mean !== null) ? Number(rModel.mcc_mean).toFixed(4) : '0.0657'}</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--accent-green);">${rModel.mcc_mean !== undefined ? rModel.mcc_mean.toFixed(4) : '—'}</div>
                         </div>
                         <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                             <div style="font-size: 10px; color: var(--text-secondary);">CV MCC Min</div>
-                            <div style="font-size: 15px; font-weight: 800; color: var(--text-primary);">${(rModel.mcc_min !== undefined && rModel.mcc_min !== null) ? Number(rModel.mcc_min).toFixed(4) : '0.0438'}</div>
+                            <div style="font-size: 15px; font-weight: 800; color: var(--text-primary);">${rModel.mcc_min !== undefined ? rModel.mcc_min.toFixed(4) : '—'}</div>
                         </div>
                         <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                             <div style="font-size: 10px; color: var(--text-secondary);">Feature Count</div>

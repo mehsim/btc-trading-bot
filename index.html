@@ -3088,15 +3088,24 @@
                         const subtitleElem = document.getElementById(`model-details-subtitle-${tf}`);
 
                         if (pred && predElem && barElem && subtitleElem) {
-                            predElem.innerText = pred.direction;
-                            if (pred.direction === "Bullish") {
+                            const dir = pred.direction || "No Signal";
+                            predElem.innerText = dir;
+                            if (dir === "Bullish") {
                                 predElem.style.color = "var(--accent-green)";
                                 predElem.style.textShadow = "var(--neon-green-glow)";
                                 barElem.style.backgroundColor = "var(--accent-green)";
-                            } else if (pred.direction === "Bearish") {
+                            } else if (dir === "Bearish") {
                                 predElem.style.color = "var(--accent-red)";
                                 predElem.style.textShadow = "var(--neon-red-glow)";
                                 barElem.style.backgroundColor = "var(--accent-red)";
+                            } else if (dir.includes("Offline") || dir.includes("Denied")) {
+                                predElem.style.color = "var(--text-muted)";
+                                predElem.style.textShadow = "none";
+                                barElem.style.backgroundColor = "rgba(255,255,255,0.1)";
+                            } else if (dir.includes("Abstain") || dir === "Neutral") {
+                                predElem.style.color = "var(--accent-blue)";
+                                predElem.style.textShadow = "none";
+                                barElem.style.backgroundColor = "var(--accent-blue)";
                             } else {
                                 predElem.style.color = "var(--text-secondary)";
                                 predElem.style.textShadow = "none";
@@ -3105,8 +3114,9 @@
 
                             const confPct = ((pred.calibrated_confidence !== undefined ? pred.calibrated_confidence : (pred.confidence || 0.0)) * 100);
                             const changeVal = (typeof pred.predicted_change === 'number' && !isNaN(pred.predicted_change)) ? pred.predicted_change : 0.0;
-                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(3)}`;
-                            barElem.style.width = `${confPct}%`;
+                            const statusSuffix = pred.status ? ` • ${pred.status}` : '';
+                            subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(3)}${statusSuffix}`;
+                            barElem.style.width = `${Math.max(2, confPct)}%`;
                         } else if (predElem && barElem && subtitleElem) {
                             predElem.innerText = "No Signal";
                             predElem.style.color = "var(--text-secondary)";

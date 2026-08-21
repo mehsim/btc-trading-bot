@@ -488,17 +488,45 @@ def api_status():
         active_sym = request.args.get("symbol") or status_data.get("active_symbol", "BTCUSDT")
         status_data["active_symbol"] = active_sym
         state_manager["active_symbol"] = active_sym
+        tf_to_iv = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"}
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
-            sym_pred = status_data.get(f"latest_prediction_{active_sym}_{tf}") or status_data.get(f"latest_prediction_BTCUSDT_{tf}")
+            iv_key = tf_to_iv.get(tf, tf)
+            sym_pred = (
+                status_data.get(f"latest_prediction_{active_sym}_{tf}") or 
+                status_data.get(f"latest_prediction_{active_sym}_{iv_key}") or 
+                status_data.get(f"latest_prediction_{tf}") or 
+                status_data.get(f"latest_prediction_{iv_key}") or 
+                status_data.get(f"latest_prediction_BTCUSDT_{tf}") or
+                status_data.get(f"latest_prediction_BTCUSDT_{iv_key}")
+            )
             if sym_pred:
                 status_data[f"latest_prediction_{tf}"] = sym_pred
-            sym_regime = status_data.get(f"regime_{active_sym}_{tf}") or status_data.get(f"regime_BTCUSDT_{tf}")
+            sym_regime = (
+                status_data.get(f"regime_{active_sym}_{tf}") or 
+                status_data.get(f"regime_{active_sym}_{iv_key}") or 
+                status_data.get(f"regime_{tf}") or 
+                status_data.get(f"regime_{iv_key}") or 
+                status_data.get(f"regime_BTCUSDT_{tf}") or
+                status_data.get(f"regime_BTCUSDT_{iv_key}")
+            )
             if sym_regime:
                 status_data[f"regime_{tf}"] = sym_regime
-            sym_adx = status_data.get(f"adx_{active_sym}_{tf}") if status_data.get(f"adx_{active_sym}_{tf}") is not None else status_data.get(f"adx_BTCUSDT_{tf}")
+            sym_adx = (
+                status_data.get(f"adx_{active_sym}_{tf}") if status_data.get(f"adx_{active_sym}_{tf}") is not None else
+                status_data.get(f"adx_{active_sym}_{iv_key}") if status_data.get(f"adx_{active_sym}_{iv_key}") is not None else
+                status_data.get(f"adx_{tf}") if status_data.get(f"adx_{tf}") is not None else
+                status_data.get(f"adx_{iv_key}") if status_data.get(f"adx_{iv_key}") is not None else
+                status_data.get(f"adx_BTCUSDT_{tf}")
+            )
             if sym_adx is not None:
                 status_data[f"adx_{tf}"] = sym_adx
-            sym_conf = status_data.get(f"confluence_results_{active_sym}_{tf}") or status_data.get(f"confluence_results_BTCUSDT_{tf}")
+            sym_conf = (
+                status_data.get(f"confluence_results_{active_sym}_{tf}") or 
+                status_data.get(f"confluence_results_{active_sym}_{iv_key}") or 
+                status_data.get(f"confluence_results_{tf}") or 
+                status_data.get(f"confluence_results_{iv_key}") or 
+                status_data.get(f"confluence_results_BTCUSDT_{tf}")
+            )
             if sym_conf:
                 status_data[f"confluence_results_{tf}"] = sym_conf
 
@@ -508,10 +536,11 @@ def api_status():
                 status_data[f"regime_{tf}"] = "Ranging (GMM)"
             if not status_data.get(f"latest_prediction_{tf}"):
                 status_data[f"latest_prediction_{tf}"] = {
-                    "direction": "No Signal",
+                    "direction": "Abstain",
                     "confidence": 0.0,
                     "calibrated_confidence": 0.0,
-                    "predicted_change": 0.0
+                    "predicted_change": 0.0,
+                    "status": "Initializing"
                 }
             if not status_data.get(f"confluence_results_{tf}"):
                 status_data[f"confluence_results_{tf}"] = get_default_confluence_checks()
