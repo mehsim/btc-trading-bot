@@ -247,13 +247,18 @@ def extract_or_build_returns_df(df_dict: dict) -> pd.DataFrame:
         if sym == "returns_df":
             continue
         if isinstance(obj, pd.DataFrame) and "close" in obj.columns and len(obj) >= 10:
-            close_series[sym] = obj["close"].pct_change()
+            s = obj["close"].pct_change()
+            if "timestamp" in obj.columns:
+                s.index = obj["timestamp"]
+            close_series[sym] = s
         elif isinstance(obj, pd.Series):
             close_series[sym] = obj.pct_change()
 
     if not close_series:
         return None
     returns_df = pd.DataFrame(close_series).dropna()
+    if len(returns_df) < 10:
+        return None
     return returns_df if not returns_df.empty else None
 
 def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: Optional[pd.DataFrame] = None) -> tuple:
@@ -269,7 +274,7 @@ def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candid
     heat_pct = (new_heat_usd / max(1e-9, total_equity)) * 100.0
 
     # Always execute Parametric VaR check for active positions + candidate
-    eval_positions = list(open_positions) + [{"symbol": "CANDIDATE", "position_size_usd": candidate_size_usd}]
+    eval_positions = list(open_positions) + [{"symbol": "CANDIDATE", "position_size_usd": candidate_size_usd, "leverage": candidate_lev}]
     var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, total_equity)
     if not var_ok:
         return False, var_pct * 100.0
@@ -352,7 +357,7 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         
         # 2. Portfolio heat & Parametric VaR check
         returns_df = extract_or_build_returns_df(df_dict)
-        eval_positions = list(active_trades) + [{"symbol": symbol, "position_size_usd": capped_size}]
+        eval_positions = list(active_trades) + [{"symbol": symbol, "position_size_usd": capped_size, "leverage": leverage_val}]
         var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, equity)
         if journal:
             journal.gate("var", (var_pct * 100.0) if var_pct is not None else None, var_ok)

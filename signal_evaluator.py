@@ -292,29 +292,11 @@ class SignalEvaluator:
 
                     from ensemble import resolve_direction
                     _top_trend, _top_conf = resolve_direction(probs)
-                    dir_total = prob_bearish + prob_bullish
-                    if str(interval) in ["15", "30"] and dir_total >= 0.15:
-                        norm_bear = prob_bearish / max(1e-9, dir_total)
-                        norm_bull = prob_bullish / max(1e-9, dir_total)
-                        if norm_bull >= eval_threshold:
-                            direction = "Bullish"
-                            raw_conf = norm_bull
-                        elif norm_bear >= eval_threshold:
-                            direction = "Bearish"
-                            raw_conf = norm_bear
-                        else:
-                            direction = "Neutral"
-                            raw_conf = _top_conf
+                    raw_conf = _top_conf
+                    if _top_trend in ["Bullish", "Bearish"] and _top_conf >= eval_threshold:
+                        direction = _top_trend
                     else:
-                        if prob_bullish > max(prob_bearish, prob_neutral) and prob_bullish >= eval_threshold:
-                            direction = "Bullish"
-                            raw_conf = prob_bullish
-                        elif prob_bearish > max(prob_bullish, prob_neutral) and prob_bearish >= eval_threshold:
-                            direction = "Bearish"
-                            raw_conf = prob_bearish
-                        else:
-                            direction = "Neutral"
-                            raw_conf = _top_conf
+                        direction = "Neutral"
 
                     if direction in ["Bullish", "Bearish"]:
                         from meta_labeler import evaluate_meta_filter

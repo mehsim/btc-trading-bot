@@ -1959,6 +1959,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
             force_save = os.environ.get("FORCE_SAVE_MODELS", "0") == "1"
             cand_eval = {
                 "mcc": chal_mcc_mean,
+                "mcc_min": chal_mcc_min if "chal_mcc_min" in locals() else None,
+                "ece": chal_ece,
+                "brier_score": chal_brier,
+                "val_accuracy": chal_acc,
+                "val_mae": chal_mae if "chal_mae" in locals() else 0.0,
+                "sharpe_oos": chal_sharpe if "chal_sharpe" in locals() else 1.0,
                 "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
             }
             champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and compatible and not is_distribution_shifted) else None
