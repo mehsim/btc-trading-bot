@@ -5975,14 +5975,28 @@ def main():
         htf_cache = {}
         fetched_data = {}
         if check_queue:
-            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             
-            # Fetch BTCUSDT history once per interval to cache and share among workers (avoids rate limits and duplicate REST calls)
+            # Parallelise the BTC pre-fetch across all unique intervals to avoid blocking the main thread
             btc_hist_cache = {}
             unique_intervals = set(iv for sym, iv in check_queue)
-            for iv_val in unique_intervals:
-                df_btc = get_history(symbol="BTCUSDT", interval=iv_val, limit=300)
-                btc_hist_cache[iv_val] = df_btc
+
+            def _fetch_btc(iv_val):
+                try:
+                    return iv_val, get_history(symbol="BTCUSDT", interval=iv_val, limit=300)
+                except Exception as _e:
+                    log_event("WARNING", f"[BTC Pre-fetch] Error for {iv_val}: {type(_e).__name__} {_e}")
+                    return iv_val, None
+
+            with ThreadPoolExecutor(max_workers=min(len(unique_intervals), 8)) as btc_exec:
+                btc_futures = {btc_exec.submit(_fetch_btc, iv_val): iv_val for iv_val in unique_intervals}
+                for fut in as_completed(btc_futures, timeout=25):
+                    try:
+                        iv_val, df_btc = fut.result(timeout=5)
+                        if df_btc is not None:
+                            btc_hist_cache[iv_val] = df_btc
+                    except Exception as _e:
+                        log_event("WARNING", f"[BTC Pre-fetch] Timeout/error: {type(_e).__name__} {_e}")
             
             def fetch_single_history(sym, interval_val):
                 if sym == "BTCUSDT" and interval_val in btc_hist_cache:
@@ -6027,7 +6041,6 @@ def main():
  
             print(f"[Parallel Fetch] Querying {len(check_queue)} candle combinations in parallel...")
             t_start = time.time()
-            from concurrent.futures import as_completed
             with ThreadPoolExecutor(max_workers=16) as executor:
                 future_to_pair = {executor.submit(fetch_single_history, sym, iv): (sym, iv) for sym, iv in check_queue}
                 for fut in as_completed(future_to_pair):
