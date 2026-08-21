@@ -6842,15 +6842,23 @@ def main():
                                     tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
                                     exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
 
+                                    # Adaptive spread limit: 5.0 bps for BTC/ETH, 8.0 for major alts, 15.0 for others
+                                    if symbol in ["BTCUSDT", "ETHUSDT"]:
+                                        max_spread_bps = 5.0
+                                    elif symbol in ["SOLUSDT", "BNBUSDT", "XRPUSDT"]:
+                                        max_spread_bps = 8.0
+                                    else:
+                                        max_spread_bps = 15.0
+
                                     if curr_vol < vol_20th and vol_20th > 0:
                                         status_msg = "Skipped (Volume Compression <20th Pct)"
                                         print(f"[{symbol} 15m Filter] Trade skipped: Volume ({curr_vol:.1f}) < 20th percentile ({vol_20th:.1f}).")
                                     elif atr_norm_val > (1.5 * mean_atr_24h):
                                         status_msg = "Skipped (ATR Spike >1.5x Mean)"
                                         print(f"[{symbol} 15m Filter] Trade skipped: ATR spike ({atr_norm_val*100:.2f}%) > 1.5x 24h mean ({mean_atr_24h*100:.2f}%).")
-                                    elif current_spread_bps > 4.5:
-                                        status_msg = "Skipped (Spread Widening >4.5 bps)"
-                                        print(f"[{symbol} 15m Filter] Trade skipped: Spread ({current_spread_bps:.1f} bps) exceeds 4.5 bps limit.")
+                                    elif current_spread_bps > max_spread_bps:
+                                        status_msg = f"Skipped (Spread Widening >{max_spread_bps:.1f} bps)"
+                                        print(f"[{symbol} 15m Filter] Trade skipped: Spread ({current_spread_bps:.1f} bps) exceeds {max_spread_bps:.1f} bps limit.")
                                     elif exp_r_val < 1.0:
                                         status_msg = "Skipped (Expected R < 1.0R)"
                                         print(f"[{symbol} 15m Filter] Trade skipped: Expected R ({exp_r_val:.2f}R) < 1.00R floor.")

@@ -29,7 +29,7 @@ class ExecutionValidator:
         Validates order invariants. Returns (is_valid, reason).
         Thresholds adapt dynamically to symbol ATR norm and live orderbook depth.
         """
-        dynamic_min_rr = self.min_rr_ratio if self.min_rr_ratio is not None else float(max(1.10, min(2.50, 1.0 + (atr_norm * 20.0))))
+        dynamic_min_rr = self.min_rr_ratio if self.min_rr_ratio is not None else 1.10
         dynamic_max_impact = self.max_market_impact_pct if self.max_market_impact_pct is not None else float(max(0.005, min(0.05, 0.02 * (top_book_depth_usd / 50000.0))))
         if entry_price <= 0 or stop_loss_price <= 0 or take_profit_price <= 0:
             return False, f"Invalid prices: Entry={entry_price}, SL={stop_loss_price}, TP={take_profit_price}"

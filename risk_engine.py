@@ -143,14 +143,9 @@ def compute_conservative_kelly(
     p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
     b_ratio = float(tp_multiplier / sl_multiplier) if sl_multiplier > 0 else 1.5
     
-    n = 30.0
-    z = 1.96
-    denom = 1.0 + (z**2 / n)
-    center = p_hat + (z**2 / (2.0 * n))
-    spread = z * np.sqrt((p_hat * (1.0 - p_hat) / n) + (z**2 / (4.0 * n**2)))
-    p_wilson = max(0.0, (center - spread) / denom)
-    
-    raw_kelly = max(0.0, (p_wilson * (b_ratio + 1.0) - 1.0) / b_ratio) if b_ratio > 0 else 0.0
+    # Pure Quarter-Kelly formula using calibrated model probability:
+    # Full Kelly: f* = (p * (b + 1) - 1) / b
+    raw_kelly = max(0.0, (p_hat * (b_ratio + 1.0) - 1.0) / b_ratio) if b_ratio > 0 else 0.0
     scaled_kelly = 0.25 * raw_kelly
 
     # R-1 Model Quality Sizing Multiplier

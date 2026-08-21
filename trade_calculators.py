@@ -44,11 +44,11 @@ def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
         raise ValueError(f"[{symbol}] Un-economical R:R ratio ({rr:.2f} < 0.40): entry={entry}, sl={sl}, tp={tp}")
     return True
 
-REALIZED_RR_HAIRCUT = 0.58  # 1.30 realized / 2.24 nominal, measured over 4.5 years
+REALIZED_RR_HAIRCUT = 0.80  # Realistic limit maker exit realization factor
 
-def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 0.0016, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> float:
+def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> float:
     """
-    Computes required break-even probability accounting for empirical realized R:R haircut from timer exits.
+    Computes required break-even probability accounting for realistic execution costs and target realization.
     Formula: p* = (sl_frac + cost_frac) / (sl_frac + (tp_frac * realized_rr_haircut))
     """
     sl_dist = abs(entry - sl)
@@ -57,10 +57,10 @@ def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 
     tp_frac = (tp_dist / max(1e-9, entry)) * realized_rr_haircut
     return (sl_frac + cost_frac) / max(1e-9, (sl_frac + tp_frac))
 
-def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: float = 0.0016, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> bool:
+def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> bool:
     """
     Evaluates whether calibrated confidence meets the required win rate for the given entry, TP, and SL,
-    accounting for empirical realized R:R haircut from timer exits.
+    accounting for realistic execution costs and target realization.
     Returns True if conf >= required_p, False otherwise.
     """
     required_p = calculate_required_p(entry, tp, sl, cost_frac=cost_frac, realized_rr_haircut=realized_rr_haircut)

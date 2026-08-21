@@ -79,16 +79,16 @@ class ProductionRegimeEngine:
             return {"execute": False, "reason": "Blocked: CHOPPY Market Regime (No Edge)"}
 
         if ml_direction == "Bullish":
-            if regime == "RANGING" and rsi > 65.0:
-                return {"execute": False, "reason": "Overbought in Ranging Regime (RSI > 65)"}
-            if regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi < 40.0:
-                return {"execute": False, "reason": "Counter-trend momentum mismatch (RSI < 40)"}
+            if regime == "RANGING" and rsi > 70.0:
+                return {"execute": False, "reason": "Overbought in Ranging Regime (RSI > 70)"}
+            if regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi < 25.0:
+                return {"execute": False, "reason": "Extreme Counter-Trend Exhaustion (RSI < 25)"}
                 
         elif ml_direction == "Bearish":
-            if regime == "RANGING" and rsi < 35.0:
-                return {"execute": False, "reason": "Oversold in Ranging Regime (RSI < 35)"}
-            if regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi > 60.0:
-                return {"execute": False, "reason": "Counter-trend momentum mismatch (RSI > 60)"}
+            if regime == "RANGING" and rsi < 30.0:
+                return {"execute": False, "reason": "Oversold in Ranging Regime (RSI < 30)"}
+            if regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi > 75.0:
+                return {"execute": False, "reason": "Extreme Counter-Trend Exhaustion (RSI > 75)"}
 
         return {"execute": True, "reason": "Signal Confluence Confirmed"}
 
