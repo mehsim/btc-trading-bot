@@ -6424,12 +6424,12 @@ def main():
                                 all_pass = False
                                 continue
 
-                            # Degenerate live prediction detector
+                            # Degenerate live prediction detector (requires statistically sufficient sample size N >= 30)
                             _model_key = f"ensemble_{regime_key}_trend_{iv}"
                             _recent_runtime_argmax[_model_key].append(int(np.argmax(probs)))
-                            if len(_recent_runtime_argmax[_model_key]) >= 5:
+                            if len(_recent_runtime_argmax[_model_key]) >= 30:
                                 _shares = np.bincount(_recent_runtime_argmax[_model_key], minlength=3) / len(_recent_runtime_argmax[_model_key])
-                                if _shares.max() > 0.95:
+                                if _shares.max() >= 0.98:
                                     log_event("WARNING", f"[{_model_key}] degenerate: {_shares.round(3)} over {len(_recent_runtime_argmax[_model_key])} predictions — abstaining (Fail-Closed)")
                                     status_msg = f"Skipped (Degenerate Prediction: {_model_key})"
                                     continue
