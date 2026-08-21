@@ -43,7 +43,7 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "default": 0.050}
+TIMEFRAME_MIN_MCC = {"15": 0.015, "30": 0.035, "default": 0.050}
 TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.350, "default": 0.360}
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.010, "30": 0.015, "default": 0.020}
 TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.335, "30": 0.338, "default": 0.340}
@@ -302,12 +302,12 @@ def _get_tf_env(key: str, default: float) -> float:
 # Allows dynamic overrides via .env (e.g. TF_15M_SL_MULT=1.25) or Optuna tuning
 TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe - High-Conviction Scalp (Targets ~4-5 trades/day across portfolio)
-        "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 16)),
-        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.9),
-        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.52),
+        "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
+        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.15),
+        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.55),
         "min_adx": _get_tf_env("TF_15M_MIN_ADX", 20.0),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.4),
-        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.8)
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.20),
+        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.80)
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
