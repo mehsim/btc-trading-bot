@@ -6005,6 +6005,10 @@ def main():
             # to get_bybit_oi_history / get_bybit_funding_history (up to 50 paginated pages each).
             unique_symbols = list(set(sym for sym, iv in check_queue))
             deriv_cache = {}  # key: sym -> (df_oi, df_funding, df_fng)
+            try:
+                df_fng_global = get_fear_and_greed_history()
+            except Exception:
+                df_fng_global = pd.DataFrame(columns=["timestamp", "fear_greed"])
 
             def _fetch_deriv(sym):
                 try:
@@ -6015,11 +6019,7 @@ def main():
                     df_funding = get_bybit_funding_history(symbol=sym)
                 except Exception:
                     df_funding = pd.DataFrame(columns=["timestamp", "funding_rate"])
-                try:
-                    df_fng = get_fear_and_greed_history()
-                except Exception:
-                    df_fng = pd.DataFrame(columns=["timestamp", "fear_greed"])
-                return sym, (df_oi, df_funding, df_fng)
+                return sym, (df_oi, df_funding, df_fng_global)
 
             with ThreadPoolExecutor(max_workers=min(len(unique_symbols), 9)) as deriv_exec:
                 deriv_futures = {deriv_exec.submit(_fetch_deriv, sym): sym for sym in unique_symbols}
@@ -6069,7 +6069,8 @@ def main():
                 # Use pre-fetched derivatives if available, otherwise fall back to live fetch
                 if sym in deriv_cache:
                     df_oi_c, df_funding_c, df_fng_c = deriv_cache[sym]
-                    df_target_val = _merge_cached_derivatives(df_target_val, df_oi_c, df_funding_c, df_fng_c)
+                    df_btc_ref = btc_hist_cache.get(interval_val)
+                    df_target_val = _merge_cached_derivatives(df_target_val, df_oi_c, df_funding_c, df_fng_c, df_btc=df_btc_ref, symbol=sym)
                 else:
                     df_target_val = merge_derivatives_sentiment_features(df_target_val, symbol=sym, interval=interval_val)
                 df_feat_val = add_features(df_target_val, symbol=sym)

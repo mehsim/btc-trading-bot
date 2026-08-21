@@ -885,39 +885,43 @@ def get_fear_and_greed_history():
 
     return pd.DataFrame(columns=["timestamp", "fear_greed"])
 
-def _merge_cached_derivatives(df, df_oi, df_funding, df_fng):
-    """Merge pre-fetched OI, funding, and F&G DataFrames into df without making live REST calls.
-    Mirrors the merge logic of merge_derivatives_sentiment_features for use in the parallel fetch pipeline."""
+def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol="BTCUSDT"):
+    """Merge pre-fetched OI, funding, F&G, and BTC DataFrames into df without making live REST calls.
+    Mirrors the complete merge logic of merge_derivatives_sentiment_features for use in the parallel fetch pipeline."""
     if df.empty:
         df["open_interest"] = 0.0
         df["funding_rate"] = 0.0
         df["fear_greed"] = 50.0
+        df["btc_close"] = 0.0
+        df["btc_volume"] = 0.0
+        df["btc_rsi"] = 50.0
+        return df
+
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype("int64")
+
+    if df_oi is not None and not df_oi.empty:
+        df_oi = df_oi.copy()
+        df_oi["timestamp"] = pd.to_numeric(df_oi["timestamp"], errors="coerce").fillna(0).astype("int64")
+        df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
+        df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
     else:
-        df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype("int64")
+        df["open_interest"] = 0.0
 
-        if df_oi is not None and not df_oi.empty:
-            df_oi = df_oi.copy()
-            df_oi["timestamp"] = pd.to_numeric(df_oi["timestamp"], errors="coerce").fillna(0).astype("int64")
-            df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
-            df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
-        else:
-            df["open_interest"] = 0.0
+    if df_funding is not None and not df_funding.empty:
+        df_funding = df_funding.copy()
+        df_funding["timestamp"] = pd.to_numeric(df_funding["timestamp"], errors="coerce").fillna(0).astype("int64")
+        df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
+        df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
+    else:
+        df["funding_rate"] = 0.0
 
-        if df_funding is not None and not df_funding.empty:
-            df_funding = df_funding.copy()
-            df_funding["timestamp"] = pd.to_numeric(df_funding["timestamp"], errors="coerce").fillna(0).astype("int64")
-            df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
-            df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
-        else:
-            df["funding_rate"] = 0.0
-
-        if df_fng is not None and not df_fng.empty:
-            df_fng = df_fng.copy()
-            df_fng["timestamp"] = pd.to_numeric(df_fng["timestamp"], errors="coerce").fillna(0).astype("int64")
-            df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
-            df = pd.merge_asof(df, df_fng, on="timestamp", direction="backward")
-        else:
-            df["fear_greed"] = 50.0
+    if df_fng is not None and not df_fng.empty:
+        df_fng = df_fng.copy()
+        df_fng["timestamp"] = pd.to_numeric(df_fng["timestamp"], errors="coerce").fillna(0).astype("int64")
+        df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
+        df = pd.merge_asof(df, df_fng, on="timestamp", direction="backward")
+    else:
+        df["fear_greed"] = 50.0
 
     # Calculate OI momentum and sanitize inf values (mirrors merge_derivatives_sentiment_features)
     df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
@@ -926,6 +930,52 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng):
     df["oi_price_divergence"] = np.sign(df["close"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)) * np.sign(df["oi_change_pct"])
     df["funding_pctile"] = df["funding_rate"].rolling(720, min_periods=24).rank(pct=True).fillna(0.5)
     df["funding_roc"] = df["funding_rate"].diff().fillna(0.0)
+
+    # Merge BTCUSDT Correlation Features
+    if symbol != "BTCUSDT":
+        if df_btc is not None and not df_btc.empty:
+            df_btc_sub = df_btc.copy()
+            df_btc_sub["timestamp"] = pd.to_numeric(df_btc_sub["timestamp"], errors="coerce").fillna(0).astype("int64")
+            df_btc_sub = df_btc_sub.sort_values("timestamp").reset_index(drop=True)
+            delta = df_btc_sub["close"].diff()
+            gain = (delta.where(delta > 0, 0.0)).rolling(window=14, min_periods=1).mean()
+            loss = (-delta.where(delta < 0, 0.0)).rolling(window=14, min_periods=1).mean()
+            rs = gain / (loss + 1e-9)
+            df_btc_sub["btc_rsi"] = 100.0 - (100.0 / (1.0 + rs))
+            df_btc_sub["btc_rsi"] = df_btc_sub["btc_rsi"].fillna(50.0)
+            
+            df_btc_features = df_btc_sub[["timestamp", "close", "volume", "btc_rsi"]].rename(
+                columns={"close": "btc_close", "volume": "btc_volume"}
+            )
+            df = pd.merge_asof(df, df_btc_features, on="timestamp", direction="backward")
+        else:
+            df["btc_close"] = df["close"]
+            df["btc_volume"] = df["volume"]
+            df["btc_rsi"] = 50.0
+    else:
+        df["btc_close"] = df["close"]
+        df["btc_volume"] = df["volume"]
+        delta = df["close"].diff()
+        gain = (delta.where(delta > 0, 0.0)).rolling(window=14, min_periods=1).mean()
+        loss = (-delta.where(delta < 0, 0.0)).rolling(window=14, min_periods=1).mean()
+        rs = gain / (loss + 1e-9)
+        df["btc_rsi"] = 100.0 - (100.0 / (1.0 + rs))
+        df["btc_rsi"] = df["btc_rsi"].fillna(50.0)
+
+    # Clean up NaNs using forward-fill ONLY to eliminate look-ahead leakage
+    df["open_interest"] = df["open_interest"].ffill().fillna(0.0)
+    df["funding_rate"] = df["funding_rate"].ffill().fillna(0.0)
+    df["fear_greed"] = df["fear_greed"].ffill().fillna(50.0)
+    df["oi_change_1h"] = df["oi_change_1h"].ffill().fillna(0.0)
+    df["oi_change_4h"] = df["oi_change_4h"].ffill().fillna(0.0)
+    df["oi_change_pct"] = df["oi_change_pct"].ffill().fillna(0.0)
+    df["oi_price_divergence"] = df["oi_price_divergence"].ffill().fillna(0.0)
+    df["funding_pctile"] = df["funding_pctile"].ffill().fillna(0.5)
+    df["funding_roc"] = df["funding_roc"].ffill().fillna(0.0)
+    df["btc_close"] = df["btc_close"].ffill().fillna(df["close"])
+    df["btc_volume"] = df["btc_volume"].ffill().fillna(df["volume"])
+    df["btc_rsi"] = df["btc_rsi"].ffill().fillna(50.0)
+    
     return df
 
 
