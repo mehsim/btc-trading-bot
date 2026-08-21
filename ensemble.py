@@ -655,7 +655,31 @@ def save_ensemble_classifier(model, prefix, feature_names=None, write_manifest=T
     if write_manifest:
         write_model_manifest(prefix, feature_names=feature_names)
 
+def is_model_slot_denied(prefix: str) -> bool:
+    try:
+        from config import MODEL_SLOT_DENYLIST
+        for slot in MODEL_SLOT_DENYLIST:
+            parts = slot.split("_")
+            if len(parts) == 2:
+                regime, iv = parts[0], parts[1]
+                if (f"{regime}_trend_{iv}" in prefix or
+                    f"{regime}_price_{iv}" in prefix or
+                    f"{regime}_{iv}" in prefix or
+                    f"{iv}m_{regime}" in prefix or
+                    prefix.endswith(f"_{slot}") or
+                    prefix == slot):
+                    return True
+            elif slot in prefix:
+                return True
+    except Exception as ex_deny:
+        log_event("WARNING", f"[Model Slot Denylist Check Error] {ex_deny}")
+    return False
+
 def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
+    if is_model_slot_denied(str(prefix)):
+        log_event("WARNING", f"[Model Slot Denylist] Blocked loading for denied model slot (prefix='{prefix}')")
+        return None
+
     if n_features is None:
         try:
             from core import features as core_features
@@ -1071,6 +1095,10 @@ def save_ensemble_regressor(model, prefix, feature_names=None, write_manifest=Tr
         write_model_manifest(prefix, feature_names=feature_names)
 
 def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
+    if is_model_slot_denied(str(prefix)):
+        log_event("WARNING", f"[Model Slot Denylist] Blocked loading for denied model slot (prefix='{prefix}')")
+        return None
+
     if n_features is None:
         try:
             from core import features as core_features

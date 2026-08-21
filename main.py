@@ -81,7 +81,9 @@ from decision_journal import DecisionRecord, write_decision
 assert_risk_governance_invariants()
 assert_shared_constants_aligned()
 
+import collections
 ACTIVE_TRADE_TF_KEYS = ["5m", "15m", "30m", "1h", "2h", "4h", "6h"]
+_recent_runtime_argmax = collections.defaultdict(lambda: collections.deque(maxlen=100))
 
 
 # === FIX 1, 2, 3: TRADE STRUCTURE & RISK SANITIZATION GATE ===
@@ -6196,6 +6198,39 @@ def main():
                             active_calibrator = m_cal
                             active_meta_model = m_meta
                             regime_name = f"{served_regime} (GMM)" if ENABLE_DYNAMIC_REGIME_ROUTING else served_regime
+
+                            # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
+                            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_mcc", 0.05))
+                            min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
+
+                            mcc_val = getattr(active_model_trend, "manifest_mcc", None) or models_tf.get(regime_key, {}).get("manifest_mcc") or models_tf.get("manifest_mcc")
+                            mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
+                            bal_acc_val = getattr(active_model_trend, "manifest_bal_acc", None) or models_tf.get(regime_key, {}).get("manifest_bal_acc") or models_tf.get("manifest_bal_acc")
+
+                            if mcc_val is None:
+                                man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
+                                if os.path.exists(man_path):
+                                    try:
+                                        with open(man_path, "r") as mf:
+                                            _mdata = json.load(mf)
+                                            mcc_val = _mdata.get("manifest_mcc")
+                                            mcc_min_val = _mdata.get("manifest_mcc_min")
+                                            bal_acc_val = _mdata.get("manifest_bal_acc")
+                                    except Exception as mf_err:
+                                        log_event("WARNING", f"Failed to load manifest {man_path}: {mf_err}")
+
+                            if mcc_val is not None and mcc_val < min_mcc_floor:
+                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] MCC ({mcc_val:.4f}) below predictive floor ({min_mcc_floor}). Abstaining.")
+                                continue
+
+                            if mcc_min_val is not None and mcc_min_val < 0.0:
+                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < 0.0). Abstaining.")
+                                continue
+
+                            if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
+                                log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] BalAcc ({bal_acc_val:.4f}) below floor ({min_bal_acc_floor}). Abstaining.")
+                                continue
                             
                             # C-1: Preserve strict train/serve feature distribution consistency
                             # Remove ad-hoc inference-time feature multiplier scaling
@@ -6260,6 +6295,16 @@ def main():
                                 rec.reject_reason = status_msg
                                 all_pass = False
                                 continue
+
+                            # Degenerate live prediction detector
+                            _model_key = f"ensemble_{regime_key}_trend_{iv}"
+                            _recent_runtime_argmax[_model_key].append(int(np.argmax(probs)))
+                            if len(_recent_runtime_argmax[_model_key]) >= 5:
+                                _shares = np.bincount(_recent_runtime_argmax[_model_key], minlength=3) / len(_recent_runtime_argmax[_model_key])
+                                if _shares.max() > 0.95:
+                                    log_event("WARNING", f"[{_model_key}] degenerate: {_shares.round(3)} over {len(_recent_runtime_argmax[_model_key])} predictions — abstaining (Fail-Closed)")
+                                    status_msg = f"Skipped (Degenerate Prediction: {_model_key})"
+                                    continue
                         
                             if len(probs) >= 3:
                                 prob_bearish = float(probs[0])

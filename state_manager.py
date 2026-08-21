@@ -6,6 +6,7 @@ except ImportError:
     redis = None
 import numpy as np
 import database
+from logger import log_event
 
 class ObservedList(list):
     def __init__(self, items, on_mutate_callback):
@@ -178,25 +179,23 @@ class StateManager:
                 raw_list = list(self._cache.get("prediction_history", []))
                 self._redis.set("bot_state:prediction_history", json.dumps(raw_list))
             except Exception as e:
-                print(f"[StateManager Redis Error] Failed to sync prediction_history mutation: {e}")
+                log_event("WARNING", f"[StateManager Redis Error] Failed to sync prediction_history mutation: {e}")
 
 
     def __getitem__(self, key):
         with self._lock:
-            if key in self._cache and isinstance(self._cache[key], ObservedList):
-                return self._cache[key]
-                
-            val = None
-            if self._redis:
-                try:
-                    val_str = self._redis.get(f"bot_state:{key}")
-                    if val_str is not None:
-                        val = json.loads(val_str)
-                except Exception:
-                    pass
-            
-            if val is None:
-                val = self._cache.get(key)
+            if key in self._cache:
+                val = self._cache[key]
+            else:
+                val = None
+                if self._redis:
+                    try:
+                        val_str = self._redis.get(f"bot_state:{key}")
+                        if val_str is not None:
+                            val = json.loads(val_str)
+                            self._cache[key] = val
+                    except Exception as e:
+                        log_event("WARNING", f"[StateManager Redis Error] Failed to get key {key}: {e}")
                 
             if key == "trade_history" and isinstance(val, list) and not isinstance(val, ObservedList):
                 val = ObservedList(val, lambda lst, item: self._on_mutate_trade(item))
@@ -222,7 +221,7 @@ class StateManager:
                 try:
                     self._redis.set(f"bot_state:{key}", json.dumps(raw_value, default=default_json_serializer))
                 except Exception as e:
-                    print(f"[StateManager Redis Error] Failed to set {key}: {e}")
+                    log_event("WARNING", f"[StateManager Redis Error] Failed to set {key}: {e}")
                     
             self._cache[key] = value
             
@@ -235,19 +234,18 @@ class StateManager:
 
     def get(self, key, default=None):
         with self._lock:
-            if key in self._cache and isinstance(self._cache[key], ObservedList):
-                return self._cache[key]
-                
-            val = None
-            if self._redis:
-                try:
-                    val_str = self._redis.get(f"bot_state:{key}")
-                    if val_str is not None:
-                        val = json.loads(val_str)
-                except Exception as e:
-                    pass
-            if val is None:
-                val = self._cache.get(key)
+            if key in self._cache:
+                val = self._cache[key]
+            else:
+                val = None
+                if self._redis:
+                    try:
+                        val_str = self._redis.get(f"bot_state:{key}")
+                        if val_str is not None:
+                            val = json.loads(val_str)
+                            self._cache[key] = val
+                    except Exception as e:
+                        log_event("WARNING", f"[StateManager Redis Error] Failed to get key {key}: {e}")
                 if val is None:
                     return default
             
@@ -261,12 +259,14 @@ class StateManager:
 
     def __contains__(self, key):
         with self._lock:
+            if key in self._cache:
+                return True
             if self._redis:
                 try:
-                    return self._redis.exists(f"bot_state:{key}")
+                    return bool(self._redis.exists(f"bot_state:{key}"))
                 except Exception as e:
-                    pass
-            return key in self._cache
+                    log_event("WARNING", f"[StateManager Redis Error] Failed to check exists for {key}: {e}")
+            return False
 
     def copy(self):
         with self._lock:

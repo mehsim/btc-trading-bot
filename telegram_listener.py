@@ -778,9 +778,15 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🔴 *Trading Bot Paused.* Automatic trade execution suspended.", "parse_mode": "Markdown"})
 
                     elif cmd in ["kill"]:
-                        with bot_state_lock:
-                            bot_state["bot_running"] = False
-                        execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🚨 *EMERGENCY KILL SWITCH ENGAGED.* Automatic trading suspended.", "parse_mode": "Markdown"})
+                        try:
+                            from dashboard_routes import trigger_emergency_kill_switch
+                            from telegram_bot import send_telegram_alert
+                            trigger_emergency_kill_switch(bot_state, send_telegram_alert, f"Telegram /kill command from chat_id={chat_id}")
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted, working orders cancelled, and all open positions closing at market.", "parse_mode": "Markdown"})
+                        except Exception as kill_err:
+                            with bot_state_lock:
+                                bot_state["bot_running"] = False
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": f"🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted (close error: {kill_err}).", "parse_mode": "Markdown"})
 
                     elif cmd in ["help"]:
                         help_text = (
