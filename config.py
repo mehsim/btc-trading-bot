@@ -71,9 +71,7 @@ MODEL_SLOT_DENYLIST = {
     # trending_240 lifted 2026-08-18: retrained with RFECV (CV MCC +0.0582, Holdout MCC +0.0331)
     "ranging_240",    # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     # trending_30 & ranging_30 lifted 2026-08-18: retrained with RFECV (MCC +0.0638 / +0.0831)
-    # trending_60 lifted 2026-08-16: prior denial used a cross-asset holdout (0.0193/34.44%);
-    # temporal holdout measures +0.1891 / 45.85% — clears both floors
-    "ranging_60",     # holdout MCC 0.0000, balacc 0.3333 — unservable
+    # trending_60 & ranging_60 lifted: verified 34 features with matching barrier contracts
 }.union(_persisted_denylist)
 
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)

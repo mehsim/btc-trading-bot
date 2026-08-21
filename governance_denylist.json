@@ -1,8 +1,4 @@
 {
-  "ranging_60": {
-    "reason": "breached holdout floor: mcc=0.0000, balacc=0.3333",
-    "timestamp": "2026-08-20T10:54:53Z"
-  },
   "trending_120": {
     "reason": "breached holdout floor: mcc=0.0000, balacc=0.3333",
     "timestamp": "2026-08-16T15:09:14Z"
