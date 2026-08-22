@@ -205,12 +205,12 @@ def run_walk_forward_backtest(
             "win_rate": win_rate,
             "cum_return": cum_ret,
             "max_drawdown": max_dd,
-            "profit_factor": stats["profit_factor"],
-            "expectancy_r": stats["expectancy_r"],
-            "sharpe_ratio": stats["sharpe_ratio"],
-            "sortino_ratio": stats["sortino_ratio"],
-            "calmar_ratio": stats["calmar_ratio"],
-            "recovery_factor": stats["recovery_factor"]
+            "profit_factor": stats.get("profit_factor", 0.0),
+            "expectancy_r": stats.get("expectancy_r", 0.0),
+            "sharpe_ratio": stats.get("sharpe_ratio", 0.0),
+            "sortino_ratio": stats.get("sortino_ratio", 0.0),
+            "calmar_ratio": stats.get("calmar_ratio", 0.0),
+            "recovery_factor": stats.get("recovery_factor", 0.0)
         })
         
         start_idx += step_bars

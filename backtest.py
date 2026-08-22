@@ -65,6 +65,13 @@ def calculate_backtest_slippage(interval: str, atr_norm: float = 0.0) -> float:
     return base + volatility_premium
 
 
+PARTITION_FEATURES = [
+    "ADX", "ATR_norm", "CHOP", "BB_width", "RSI_z", "volatility_vts",
+    "htf_4h_trend_dir", "hour_sin", "hour_cos", "volume_ratio",
+    "funding_rate", "oi_change_1h", "CVD_norm"
+]
+
+
 def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.40, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True, rule_feature=None, return_trades=False):
     df = df.reset_index(drop=True)
     trades = []
@@ -415,16 +422,44 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         
         equity_compounded = equity_compounded * (1.0 + net_return)
         equity_simple += net_return
-        
+
         peak_equity = max(peak_equity, equity_compounded)
         current_drawdown = (peak_equity - equity_compounded) / max(1e-9, peak_equity)
         max_drawdown = max(max_drawdown, current_drawdown)
 
+        feat_snap = {}
+        for c in PARTITION_FEATURES:
+            if c in df.columns:
+                try:
+                    val = float(df.loc[i, c])
+                    feat_snap[c] = val if not np.isnan(val) else None
+                except Exception:
+                    feat_snap[c] = None
+
+        sym_name = str(getattr(df, "symbol", "BTCUSDT") if hasattr(df, "symbol") else df["symbol"].iloc[0] if "symbol" in df.columns else "BTCUSDT")
+
         trades.append({
-            "exit_reason": exit_reason,
-            "gross_return": gross_return,
-            "net_return": net_return,
-            "sl_frac": _sl_frac
+            "entry_index": int(i),
+            "timestamp": int(df.loc[i, "timestamp"]) if "timestamp" in df.columns else 0,
+            "calibrated_confidence": float(calibrated_confidence),
+            "ml_trend": str(ml_trend),
+            "adx_val": float(adx_val),
+            "atr_norm": float(atr_norm),
+            "is_trending_state": bool(is_trending_state),
+            "expected_pct_change": float(expected_pct_change),
+            "entry_price": float(entry_price),
+            "stop_loss": float(stop_loss),
+            "take_profit": float(take_profit),
+            "tp_m": float(tp_m),
+            "candles_elapsed": int(candles_elapsed),
+            "exit_reason": str(exit_reason),
+            "exit_price": float(exit_price),
+            "gross_return": float(gross_return),
+            "net_return": float(net_return),
+            "sl_frac": float(_sl_frac),
+            "symbol": sym_name,
+            "interval": str(interval),
+            "feat": feat_snap
         })
         active_until_idx = i + max(1, candles_elapsed)
         i = active_until_idx
@@ -668,6 +703,7 @@ def run_backtest():
     }
 
     results = []
+    all_scenario_trades = []
     for name, cfg in scenarios.items():
         # Execute pessimistic (realistic) run
         res_p = run_single_backtest(
@@ -678,9 +714,23 @@ def run_backtest():
             fee_rate=0.002,
             interval=INTERVAL,
             pessimistic_mode=True,
-            rule_feature=RULE_FEATURE
+            rule_feature=RULE_FEATURE,
+            return_trades=True
         )
-        t_count_p, win_rate_p, pf_p, mdd_p, ret_p, exp_r_p = res_p[:6]
+        if isinstance(res_p, dict):
+            stat_t = res_p["metrics"]
+            trades_p = res_p.get("trades", [])
+        else:
+            stat_t = res_p
+            trades_p = []
+        t_count_p, win_rate_p, pf_p, mdd_p, ret_p, exp_r_p = stat_t[:6]
+        for tr in trades_p:
+            all_scenario_trades.append({
+                "scenario": name,
+                "symbol": tr.get("symbol", "BTCUSDT"),
+                "interval": str(INTERVAL),
+                **tr
+            })
 
         # Execute optimistic (signal close) run for comparison
         res_o = run_single_backtest(
@@ -706,6 +756,17 @@ def run_backtest():
             "Pessimistic MDD": f"{mdd_p:.2f}%" if t_count_p > 0 else "N/A",
             "Pessimistic WinRate": f"{win_rate_p:.2f}%" if t_count_p > 0 else "N/A"
         })
+
+    # Export per-trade granular backtest context to JSONL
+    try:
+        import jsonlines
+        with jsonlines.open("backtest_trades.jsonl", mode="w") as writer:
+            writer.write_all(all_scenario_trades)
+    except Exception:
+        with open("backtest_trades.jsonl", "w") as f_trades:
+            for tr in all_scenario_trades:
+                f_trades.write(json.dumps(tr) + "\n")
+    print(f"[Backtest] Emitted {len(all_scenario_trades)} rich per-trade context records to backtest_trades.jsonl.")
 
     # Print Comparison Table
     results_df = pd.DataFrame(results)
