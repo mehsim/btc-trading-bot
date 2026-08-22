@@ -1606,6 +1606,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         save_ensemble_regressor(final_ensemble_p, f"{c_prefix_p}_challenger", feature_names=features, write_manifest=False)
 
         champion_exists = os.path.exists(f"{c_prefix_t}_xgb.json")
+        champ_manifest = {}
         should_save = True
         champion_t = None
         champion_p = None
@@ -1855,6 +1856,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif holdout_mcc < min_holdout_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
                 should_save = False
+            elif holdout_mcc_ci_low < min_holdout_mcc_floor:
+                _mde_val = stat_validator.compute_mde(eff_n=len(y_holdout_trend) / max(1, _lookahead_bl))
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) < minimum floor ({min_holdout_mcc_floor:.4f}). MDE(80%) was {_mde_val:.4f}.")
+                should_save = False
             elif holdout_mcc_ci_high < 0.0:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI upper bound ({holdout_mcc_ci_high:.4f}) < 0 — clear negative correlation out of sample")
                 should_save = False
@@ -1900,19 +1905,30 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
                         psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
                         
-                        # (a) Real p-value from CV fold MCCs
-                        import numpy as _np
-                        _m = _np.array(primary_mccs, dtype=float)
-                        _t = float(_m.mean() / max(1e-9, _m.std(ddof=1) / _np.sqrt(max(1, len(_m)))))
-                        from scipy import stats as _st
-                        _p = float(2.0 * _st.t.sf(abs(_t), df=max(1, len(_m) - 1)))
+                        # (a) Real p-value from pooled out-of-fold bootstrap CI
+                        if len(all_y_val_agg) > 0 and len(all_pred_agg) > 0:
+                            _pooled_y_true = np.array(all_y_val_agg)
+                            _pooled_y_pred = np.array(all_pred_agg)
+                            _oof_mcc_mean, _oof_ci_low, _oof_ci_high = stat_validator.compute_mcc_bootstrap_ci(
+                                _pooled_y_true, _pooled_y_pred, num_samples=1000, block_len=_lookahead_bl
+                            )
+                            _oof_se = max(1e-6, (_oof_ci_high - _oof_ci_low) / 3.92)
+                            _oof_z = _oof_mcc_mean / _oof_se
+                            from scipy import stats as _st
+                            _p = float(2.0 * _st.norm.sf(abs(_oof_z)))
+                        else:
+                            import numpy as _np
+                            _m = _np.array(primary_mccs, dtype=float)
+                            _t = float(_m.mean() / max(1e-9, _m.std(ddof=1) / _np.sqrt(max(1, len(_m)))))
+                            from scipy import stats as _st
+                            _p = float(2.0 * _st.t.sf(abs(_t), df=max(1, len(_m) - 1)))
                         
                         # (b) Real shadow trades count from database
                         import sqlite3
                         import database
                         shadow_cnt = 0
                         try:
-                            with sqlite3.connect(database.DB_FILE) as _sdb:
+                            with sqlite3.connect(database.get_db_path()) as _sdb:
                                 _cur = _sdb.cursor()
                                 _cur.execute("SELECT COUNT(*) FROM completed_trades WHERE interval = ?", (str(interval),))
                                 _row = _cur.fetchone()
@@ -1924,7 +1940,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         # (c) Real live reality check on last 50 completed trades
                         reality_check_pass = True
                         try:
-                            with sqlite3.connect(database.DB_FILE) as _sdb:
+                            with sqlite3.connect(database.get_db_path()) as _sdb:
                                 _cur = _sdb.cursor()
                                 _cur.execute("SELECT venue_closed_pnl, pnl_usd FROM completed_trades WHERE interval = ? ORDER BY id DESC LIMIT 50", (str(interval),))
                                 _t_rows = _cur.fetchall()
@@ -1949,41 +1965,50 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         notebook_appr = bool(attestation_data.get("research_notebook_approved", False))
                         rollback_def = bool(attestation_data.get("rollback_plan_defined", False))
 
-                        # Compute empirical holdout profit factor for challenger
+                        # Compute empirical holdout profit factor & Sharpe ratio using true barrier trade simulation
                         chal_trade_rets = []
+                        _sl_fracs = []
                         for p_dir, p_ret in zip(chal_pred_t, y_holdout_price):
                             if p_dir == 1:
                                 chal_trade_rets.append(float(p_ret))
+                                _sl_fracs.append(0.01)
                             elif p_dir == 2:
                                 chal_trade_rets.append(-float(p_ret))
-                        chal_gains = sum(r for r in chal_trade_rets if r > 0)
-                        chal_losses = abs(sum(r for r in chal_trade_rets if r < 0))
-                        pf_chal = float(chal_gains / max(1e-6, chal_losses)) if chal_losses > 0 else (1.5 if chal_gains > 0 else 1.0)
-
-                        # Empirical out-of-sample trade Sharpe ratio
-                        chal_sharpe = 0.0
-                        if chal_trade_rets and len(chal_trade_rets) >= 5:
-                            _rets_arr = np.array(chal_trade_rets, dtype=float)
-                            _ret_std = float(np.std(_rets_arr))
-                            if _ret_std > 1e-9:
-                                chal_sharpe = float((np.mean(_rets_arr) / _ret_std) * np.sqrt(max(1, len(_rets_arr))))
+                                _sl_fracs.append(0.01)
+                        
+                        from trade_calculators import calculate_replay_statistics
+                        chal_stats = calculate_replay_statistics(
+                            chal_trade_rets,
+                            initial_equity=100.0,
+                            risk_per_trade_pct=_sl_fracs if _sl_fracs else 0.01,
+                            interval=str(interval)
+                        )
+                        chal_pf = float(chal_stats.get("profit_factor", 1.0))
+                        chal_sharpe = float(chal_stats.get("sharpe_ratio", 0.0))
 
                         # Compute empirical holdout profit factor for champion (or baseline)
                         pf_champ = 1.0
                         if champion_t is not None and "champ_pred_t" in locals():
                             champ_trade_rets = []
+                            _c_sl_fracs = []
                             for p_dir, p_ret in zip(champ_pred_t, y_holdout_price):
                                 if p_dir == 1:
                                     champ_trade_rets.append(float(p_ret))
+                                    _c_sl_fracs.append(0.01)
                                 elif p_dir == 2:
                                     champ_trade_rets.append(-float(p_ret))
-                            champ_gains = sum(r for r in champ_trade_rets if r > 0)
-                            champ_losses = abs(sum(r for r in champ_trade_rets if r < 0))
-                            pf_champ = float(champ_gains / max(1e-6, champ_losses)) if champ_losses > 0 else (1.0 if champ_gains > 0 else 1.0)
+                                    _c_sl_fracs.append(0.01)
+                            champ_stats = calculate_replay_statistics(
+                                champ_trade_rets,
+                                initial_equity=100.0,
+                                risk_per_trade_pct=_c_sl_fracs if _c_sl_fracs else 0.01,
+                                interval=str(interval)
+                            )
+                            pf_champ = float(champ_stats.get("profit_factor", 1.0))
                         elif "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
                             pf_champ = float(champ_manifest.get("profit_factor", 1.0))
 
-                        n_optuna_trials_val = int(locals().get("n_trials", 12))
+                        n_optuna_trials_val = int(_trials) if ('_trials' in locals() and _trials is not None) else int(globals().get("OPTUNA_TRIALS", 30))
 
                         stat_eval = stat_validator.evaluate_8_release_gates(
                             walk_forward_pass=(chal_mcc_min >= -0.05),
@@ -1995,7 +2020,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             rollback_plan_defined=rollback_def,
                             live_reality_check_pass=reality_check_pass,
                             pf_baseline=pf_champ,
-                            pf_candidate=pf_chal,
+                            pf_candidate=chal_pf,
                             p_value=_p,
                             num_trials=n_optuna_trials_val
                         )
@@ -2044,7 +2069,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "brier_score": chal_brier,
                 "val_accuracy": chal_acc,
                 "val_mae": locals().get("chal_mae", 0.0),
-                "sharpe_oos": locals().get("chal_sharpe", 0.0),
+                "sharpe_oos": float(chal_sharpe),
                 "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
             }
             champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and not is_distribution_shifted) else None
@@ -2169,10 +2194,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["manifest_mcc"] = round(float(chal_mcc_mean), 4)
                 manifest_data["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
                 manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
+                manifest_data["profit_factor"] = round(float(chal_pf), 4)
+                manifest_data["holdout_mcc"] = round(float(holdout_mcc), 4)
+                manifest_data["holdout_sharpe"] = round(float(chal_sharpe), 4)
                 if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
                     manifest_data["metrics"] = {}
                 manifest_data["metrics"]["mcc"] = manifest_data["manifest_mcc"]
                 manifest_data["metrics"]["balanced_accuracy"] = manifest_data["manifest_bal_acc"]
+                manifest_data["metrics"]["profit_factor"] = manifest_data["profit_factor"]
+                manifest_data["metrics"]["holdout_mcc"] = manifest_data["holdout_mcc"]
+                manifest_data["metrics"]["holdout_sharpe"] = manifest_data["holdout_sharpe"]
                 manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
                 manifest_data["metrics"]["effective_sample_size"] = eff_n_val
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
@@ -2203,10 +2234,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_manifest["manifest_mcc"] = round(float(chal_mcc_mean), 4)
                 chal_manifest["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
                 chal_manifest["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
+                chal_manifest["profit_factor"] = round(float(chal_pf), 4)
+                chal_manifest["holdout_mcc"] = round(float(holdout_mcc), 4)
+                chal_manifest["holdout_sharpe"] = round(float(chal_sharpe), 4)
                 if "metrics" not in chal_manifest or not isinstance(chal_manifest["metrics"], dict):
                     chal_manifest["metrics"] = {}
                 chal_manifest["metrics"]["mcc"] = chal_manifest["manifest_mcc"]
                 chal_manifest["metrics"]["balanced_accuracy"] = chal_manifest["manifest_bal_acc"]
+                chal_manifest["metrics"]["profit_factor"] = chal_manifest["profit_factor"]
+                chal_manifest["metrics"]["holdout_mcc"] = chal_manifest["holdout_mcc"]
+                chal_manifest["metrics"]["holdout_sharpe"] = chal_manifest["holdout_sharpe"]
                 chal_manifest.pop("hmac_signature", None)
                 chal_canonical = json.dumps(chal_manifest, sort_keys=True, default=_json_safe).encode("utf-8")
                 chal_manifest["hmac_signature"] = hmac.new(hmac_key, chal_canonical, hashlib.sha256).hexdigest()
