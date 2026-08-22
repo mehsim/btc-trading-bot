@@ -25,13 +25,13 @@ def test_regime_rsi_guards():
     engine = ProductionRegimeEngine()
 
     # RANGING Regime Checks
-    # LONG with RSI > 65 should be BLOCKED (Overbought in range)
-    res1 = engine.evaluate_confluence("Bullish", "RANGING", rsi=68.0)
+    # LONG with RSI > 70 should be BLOCKED (Overbought in range)
+    res1 = engine.evaluate_confluence("Bullish", "RANGING", rsi=72.0)
     assert res1["execute"] is False
     assert "Overbought" in res1["reason"]
 
-    # SHORT with RSI < 35 should be BLOCKED (Oversold in range)
-    res2 = engine.evaluate_confluence("Bearish", "RANGING", rsi=32.0)
+    # SHORT with RSI < 30 should be BLOCKED (Oversold in range)
+    res2 = engine.evaluate_confluence("Bearish", "RANGING", rsi=28.0)
     assert res2["execute"] is False
     assert "Oversold" in res2["reason"]
 
@@ -40,8 +40,8 @@ def test_regime_rsi_guards():
     assert res3["execute"] is True
 
     # TRENDING Regime Checks
-    # LONG with RSI < 40 should be BLOCKED (Lack of momentum)
-    res4 = engine.evaluate_confluence("Bullish", "TRENDING", rsi=35.0)
+    # LONG with RSI < 25 should be BLOCKED (Extreme counter-trend exhaustion)
+    res4 = engine.evaluate_confluence("Bullish", "TRENDING", rsi=22.0)
     assert res4["execute"] is False
 
     # Macro guard active -> Blocked

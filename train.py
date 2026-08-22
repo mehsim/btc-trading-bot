@@ -1908,10 +1908,33 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         notebook_appr = bool(attestation_data.get("research_notebook_approved", False))
                         rollback_def = bool(attestation_data.get("rollback_plan_defined", False))
 
-                        n_optuna_trials_val = int(locals().get("n_trials", 12))
+                        # Compute empirical holdout profit factor for challenger
+                        chal_trade_rets = []
+                        for p_dir, p_ret in zip(chal_pred_t, y_holdout_price):
+                            if p_dir == 1:
+                                chal_trade_rets.append(float(p_ret))
+                            elif p_dir == 2:
+                                chal_trade_rets.append(-float(p_ret))
+                        chal_gains = sum(r for r in chal_trade_rets if r > 0)
+                        chal_losses = abs(sum(r for r in chal_trade_rets if r < 0))
+                        pf_chal = float(chal_gains / max(1e-6, chal_losses)) if chal_losses > 0 else (1.5 if chal_gains > 0 else 1.0)
 
-                        pf_champ = float(champ_manifest.get("profit_factor", 1.0)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest) else None
-                        pf_chal = float(locals().get("chal_pf", 1.25)) if ("chal_pf" in locals() and locals().get("chal_pf") is not None) else None
+                        # Compute empirical holdout profit factor for champion (or baseline)
+                        pf_champ = 1.0
+                        if champion_t is not None and "champ_pred_t" in locals():
+                            champ_trade_rets = []
+                            for p_dir, p_ret in zip(champ_pred_t, y_holdout_price):
+                                if p_dir == 1:
+                                    champ_trade_rets.append(float(p_ret))
+                                elif p_dir == 2:
+                                    champ_trade_rets.append(-float(p_ret))
+                            champ_gains = sum(r for r in champ_trade_rets if r > 0)
+                            champ_losses = abs(sum(r for r in champ_trade_rets if r < 0))
+                            pf_champ = float(champ_gains / max(1e-6, champ_losses)) if champ_losses > 0 else (1.0 if champ_gains > 0 else 1.0)
+                        elif "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
+                            pf_champ = float(champ_manifest.get("profit_factor", 1.0))
+
+                        n_optuna_trials_val = int(locals().get("n_trials", 12))
 
                         stat_eval = stat_validator.evaluate_8_release_gates(
                             walk_forward_pass=(chal_mcc_min >= -0.05),

@@ -178,10 +178,9 @@ class StatisticalValidation:
             practical_pass = pf_candidate >= (1.0 + self.min_pf_gain)
             dual_sig_val = practical_pass and statistical_pass
         else:
-            # Standalone candidate: Dual-significance validates OOS predictive floor and statistical significance
             pf_gain = None
-            practical_pass = bool(out_of_sample_pass)
-            dual_sig_val = practical_pass and statistical_pass
+            practical_pass = False
+            dual_sig_val = "NOT_EVALUABLE"
 
         gate_results = {
             "Gate 1 (Walk-Forward)": walk_forward_pass,
