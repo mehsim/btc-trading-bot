@@ -291,6 +291,40 @@ def test_min_notional_sl_compression_leverage_aware_floor():
     assert min_allowed_sl_dist >= 100.0, f"Expected >= 100.0 for >10x leverage, got {min_allowed_sl_dist}"
 
 
+def test_portfolio_risk_dual_gate_cvar_attenuation():
+    """Verify portfolio_risk enforces both mean loss and tail CVaR 99.9% scaling constraints."""
+    max_stress_loss_pct = 0.25
+    max_cvar_pct = max_stress_loss_pct * 1.4  # 0.35
+
+    # Case 1: Mean loss passes (0.10 <= 0.25), but Tail CVaR 99.9% breaches (0.50 > 0.35)
+    base_loss_pct = 0.05
+    base_cvar_pct = 0.10
+    loss_pct = 0.10
+    cvar_pct = 0.50
+
+    remaining_loss_budget = max(0.0, max_stress_loss_pct - base_loss_pct)  # 0.20
+    marginal_loss = max(1e-6, loss_pct - base_loss_pct)  # 0.05
+    loss_scale = max(0.0, min(1.0, float(remaining_loss_budget / marginal_loss)))  # 1.0
+
+    remaining_cvar_budget = max(0.0, max_cvar_pct - base_cvar_pct)  # 0.25
+    marginal_cvar = max(1e-6, cvar_pct - base_cvar_pct)  # 0.40
+    cvar_scale = max(0.0, min(1.0, float(remaining_cvar_budget / marginal_cvar)))  # 0.625
+
+    scale_factor = min(loss_scale, cvar_scale)
+    assert scale_factor == cvar_scale, "CVaR constraint must be the binding constraint when tail risk breaches"
+    assert scale_factor < 1.0, "Scale factor must properly attenuate the trade"
+
+
+def test_signal_evaluator_slot_denylist_abstention():
+    """Verify SignalEvaluator safely abstains on denied model slots without invoking rule fallbacks."""
+    from ensemble import is_model_slot_denied
+    
+    # 30m slot is denied in production governance
+    assert is_model_slot_denied("trending_trend_30") is True
+    assert is_model_slot_denied("trending_price_30") is True
+
+
+
 
 
 

@@ -580,17 +580,17 @@ def get_funding_adjustment(symbol: str, direction: str, funding_rate: float) -> 
 
 
 SYMBOL_LIQUIDITY_BENCHMARKS = {
-    "BTCUSDT": 400_000.0,
-    "ETHUSDT": 250_000.0,
-    "SOLUSDT": 150_000.0,
-    "BNBUSDT": 100_000.0,
-    "XRPUSDT": 100_000.0,
-    "DOGEUSDT": 100_000.0,
-    "ADAUSDT": 75_000.0,
-    "AVAXUSDT": 50_000.0,
-    "DOTUSDT": 50_000.0,
-    "LTCUSDT": 50_000.0,
-    "LINKUSDT": 50_000.0,
+    "BTCUSDT": 5_000_000.0,
+    "ETHUSDT": 3_500_000.0,
+    "SOLUSDT": 1_500_000.0,
+    "BNBUSDT": 1_000_000.0,
+    "XRPUSDT": 1_000_000.0,
+    "DOGEUSDT": 1_000_000.0,
+    "ADAUSDT": 750_000.0,
+    "AVAXUSDT": 500_000.0,
+    "DOTUSDT": 500_000.0,
+    "LTCUSDT": 500_000.0,
+    "LINKUSDT": 500_000.0,
 }
 
 
@@ -601,7 +601,7 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: Op
 
     Dynamic Value Resolution:
     - If 24h turnover is provided/available, benchmark = max(50k, min(10M, 0.05% of 24h turnover)).
-    - Otherwise, resolves per-symbol tier benchmark from SYMBOL_LIQUIDITY_BENCHMARKS (default $50k for altcoins).
+    - Otherwise, resolves per-symbol tier benchmark from SYMBOL_LIQUIDITY_BENCHMARKS (default $350k for altcoins).
     - Incorporates spread penalty: spreads wider than 0.15% dynamically degrade the score.
     """
     try:
@@ -623,7 +623,7 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: Op
         elif symbol_upper in SYMBOL_LIQUIDITY_BENCHMARKS:
             dynamic_benchmark = SYMBOL_LIQUIDITY_BENCHMARKS[symbol_upper]
         else:
-            dynamic_benchmark = 50_000.0  # Dynamic default for altcoins
+            dynamic_benchmark = 350_000.0  # Dynamic default for altcoins
 
         # 2. Depth Score calculation relative to dynamic benchmark
         depth_score = min(depth_est / dynamic_benchmark, 1.0)

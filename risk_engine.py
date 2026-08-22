@@ -87,18 +87,18 @@ from config import INTERVAL_MAX_POSITION_PCT
 
 MAX_SYMBOL_EXPOSURE_PCT = 0.20   # Max 20% total balance in one symbol across all intervals
 
-def check_interval_position_limit(interval: str, proposed_size: float, balance: float) -> float:
+def check_interval_position_limit(interval: str, proposed_size: float, balance: float, max_lev: float = 1.0) -> float:
     max_pct = INTERVAL_MAX_POSITION_PCT.get(str(interval), 0.15)
-    max_size = balance * max_pct
+    max_size = balance * max_pct * max_lev
     return min(proposed_size, max_size)
 
-def check_symbol_total_exposure(symbol: str, active_trades: list, proposed_size: float, balance: float) -> float:
+def check_symbol_total_exposure(symbol: str, active_trades: list, proposed_size: float, balance: float, max_lev: float = 1.0) -> float:
     current_exposure = sum(
-        float(t.get("position_size_usd", 0.0))
+        float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
         for t in active_trades
         if isinstance(t, dict) and t.get("symbol") == symbol
     )
-    max_exposure = balance * MAX_SYMBOL_EXPOSURE_PCT
+    max_exposure = balance * MAX_SYMBOL_EXPOSURE_PCT * max_lev
     available = max(0.0, max_exposure - current_exposure)
     return min(proposed_size, available)
 
@@ -343,10 +343,12 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
 
         peak_equity = float(bot_state.get("peak_balance", equity))
         
-        # 0. Check interval position cap & total symbol exposure cap
-        capped_size = check_interval_position_limit(interval, position_size_usd, equity)
-        capped_size = check_symbol_total_exposure(symbol, active_trades, capped_size, equity)
-        leveraged_notional = capped_size * max(1.0, leverage_val)
+        # 0. Check interval position cap & total symbol exposure cap on true economic notional
+        raw_notional = position_size_usd * max(1.0, leverage_val)
+        capped_notional = check_interval_position_limit(interval, raw_notional, equity, max_lev=max(1.0, leverage_val))
+        capped_notional = check_symbol_total_exposure(symbol, active_trades, capped_notional, equity, max_lev=max(1.0, leverage_val))
+        capped_size = capped_notional / max(1.0, leverage_val)
+        leveraged_notional = capped_notional
         if capped_size < min_pos or leveraged_notional < min_notional: # Below minimum viable trade margin/notional
             return False, f"REJECTED: Position size (${position_size_usd:.2f}) exceeds interval/symbol exposure cap for {symbol} ({interval}m)", 0.0, 0.0
 

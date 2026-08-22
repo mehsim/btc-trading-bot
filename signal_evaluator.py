@@ -180,11 +180,27 @@ class SignalEvaluator:
                     self.bot_state[f"regime_{tf_key}"] = regime_str
                     self.bot_state[f"adx_{tf_key}"] = adx_val
 
+            # Check governance slot denylist before model evaluation or rule fallback
+            from ensemble import is_model_slot_denied
+            _regime_key = "trending" if is_trending else "ranging"
+            if is_model_slot_denied(f"{_regime_key}_trend_{interval}") or is_model_slot_denied(f"{_regime_key}_price_{interval}"):
+                log_event("INFO", f"[SignalEvaluator Denylist] {symbol} {interval}m ({_regime_key}) is denied by governance policy — skipping safely.")
+                with self.state_lock:
+                    self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = {
+                        "symbol": str(symbol),
+                        "direction": "Neutral",
+                        "confidence": 0.0,
+                        "calibrated_confidence": 0.0,
+                        "predicted_change": 0.0,
+                        "signal_source": "GOVERNANCE_DENIED",
+                        "timestamp": time.time()
+                    }
+                return
+
             # Lazy model evaluation
             model_eval_success = False
             models = self.get_models(interval, is_trending)
             if models is not None:
-                _regime_key = "trending" if is_trending else "ranging"
                 
                 # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
                 from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC

@@ -6498,35 +6498,32 @@ def main():
                             # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
                             calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
-
-                            
-                            # Item D: Exponential Time-Decayed Cross-Interval Penalty applied to THRESHOLD GATE (Fix Recommendation #8)
-                            htf_decay_threshold_penalty = 0.0
-                            if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
-                                pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get("latest_prediction_30m") or {}
-                                pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get("latest_prediction_1h") or {}
-                            
-                                now_time_sec = time.time()
-                                for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
-                                    p_dir = pred_dict.get("direction")
-                                    p_ts = pred_dict.get("timestamp", now_time_sec)
-                                    if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
-                                        age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
-                                        decay = 0.5 ** (age_mins / 30.0)
-                                        htf_decay_threshold_penalty += 0.03 * decay
-                                    
-                                if htf_decay_threshold_penalty > 0:
-                                    htf_decay_threshold_penalty = min(0.04, htf_decay_threshold_penalty)
-                                    print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction gate penalty (+{htf_decay_threshold_penalty*100:.1f}% required threshold). Calibrated conf preserved -> {calibrated_confidence*100:.2f}%")
-
-                            expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
-
-                            # Update global state prediction metrics for this timeframe
+                            # Governance MCC / Predictive Floor Check
+                            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_mcc", 0.05))
                             _manifest_mcc_val = getattr(m_trend, "manifest_mcc", None)
                             if _manifest_mcc_val is None:
-                                _m_info = locals().get("manifest_info")
-                                if isinstance(_m_info, dict):
-                                    _manifest_mcc_val = _m_info.get("manifest_mcc")
+                                _manifest_mcc_val = locals().get("manifest_info", {}).get("manifest_mcc")
+
+                            if _manifest_mcc_val is not None and _manifest_mcc_val < min_mcc_floor:
+                                log_event("WARNING", f"[{symbol} {iv}m] Model MCC ({_manifest_mcc_val:.4f}) below governance floor ({min_mcc_floor}). ABSTAIN.")
+                                continue
+
+                            # Live Degenerate Prediction Detector
+                            if not hasattr(main, "_recent_live_argmax"):
+                                from collections import deque
+                                main._recent_live_argmax = {}
+                            _model_key = f"ensemble_{regime_name.lower()}_trend_{iv}"
+                            if _model_key not in main._recent_live_argmax:
+                                main._recent_live_argmax[_model_key] = deque(maxlen=20)
+                            main._recent_live_argmax[_model_key].append(int(np.argmax(probs)))
+                            if len(main._recent_live_argmax[_model_key]) >= 5:
+                                _shares = np.bincount(main._recent_live_argmax[_model_key], minlength=3) / len(main._recent_live_argmax[_model_key])
+                                if _shares.max() > 0.95:
+                                    log_event("WARNING", f"[{_model_key}] Degenerate prediction distribution ({_shares.round(3)}) — ABSTAIN.")
+                                    continue
+
+                            expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
                             pred_entry_dict = {
                                 "timestamp": float(time.time()),
@@ -6624,9 +6621,25 @@ def main():
                                 dynamic_conf_threshold += vol_delta
                                 adjustments_applied.append(("high_volatility", vol_delta))
                                 
-                            if htf_decay_threshold_penalty > 0:
-                                dynamic_conf_threshold += htf_decay_threshold_penalty
-                                adjustments_applied.append(("htf_decay_penalty", htf_decay_threshold_penalty))
+                            htf_decay_threshold_penalty = 0.0
+                            if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
+                                pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get("latest_prediction_30m") or {}
+                                pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get("latest_prediction_1h") or {}
+
+                                now_time_sec = time.time()
+                                for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
+                                    p_dir = pred_dict.get("direction")
+                                    p_ts = pred_dict.get("timestamp", now_time_sec)
+                                    if p_dir in ["Bullish", "Bearish"] and p_dir != ml_trend:
+                                        age_mins = max(0.0, (now_time_sec - p_ts) / 60.0)
+                                        decay = 0.5 ** (age_mins / 30.0)
+                                        htf_decay_threshold_penalty += 0.03 * decay
+
+                                if htf_decay_threshold_penalty > 0:
+                                    htf_decay_threshold_penalty = min(0.04, htf_decay_threshold_penalty)
+                                    dynamic_conf_threshold += htf_decay_threshold_penalty
+                                    adjustments_applied.append(("htf_decay_penalty", htf_decay_threshold_penalty))
+                                    print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction gate penalty (+{htf_decay_threshold_penalty*100:.1f}% required threshold).")
                             
                             # Recent 50-Trade Performance Decay Filter
                             recent_trades = bot_state.get("trade_history", [])[-50:]
@@ -8095,7 +8108,12 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_summary_scheduler, name="daily-summary-scheduler", daemon=True).start()
     # Start pain feedback verifier background thread
     threading.Thread(target=run_pain_feedback_verifier, name="pain-feedback-verifier", daemon=True).start()
-    # Note: Primary evaluation is driven authoritatively by the main candle processing loop to prevent state-key race conditions.
+    # Start signal evaluator background thread
+    try:
+        from signal_evaluator import run_signal_evaluator_loop
+        threading.Thread(target=run_signal_evaluator_loop, args=(bot_state,), name="signal-evaluator", daemon=True).start()
+    except Exception as ex_se:
+        log_event("WARNING", f"[SignalEvaluator Launch Warning] {ex_se}")
 
     # Keep main thread alive
     while True:

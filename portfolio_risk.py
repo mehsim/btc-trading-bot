@@ -437,7 +437,7 @@ class PortfolioRiskEngine:
             log_event("WARNING", f"portfolio_risk notice: {ex_portfolio_risk}")
             return False, 0.0, 1.0, {"error": str(ex_portfolio_risk)}
 
-        # Exceeds stress budget! Calculate recommended scaling factor
+        # Exceeds stress budget! Calculate recommended scaling factor using dual-gate constraints
         base_res = self.run_monte_carlo_stress_test(
             open_positions=open_positions,
             returns_df=returns_df,
@@ -447,11 +447,20 @@ class PortfolioRiskEngine:
             seed=seed
         )
         base_loss_pct = base_res.get("projected_stress_loss_pct", 0.0)
+        base_cvar_pct = base_res.get("stress_cvar_999_pct", 0.0)
 
-        remaining_budget = max(0.0, max_stress_loss_pct - base_loss_pct)
+        # 1. Mean loss budget constraint
+        remaining_loss_budget = max(0.0, max_stress_loss_pct - base_loss_pct)
         marginal_loss = max(1e-6, loss_pct - base_loss_pct)
+        loss_scale = max(0.0, min(1.0, float(remaining_loss_budget / marginal_loss)))
 
-        scale_factor = max(0.0, min(1.0, float(remaining_budget / marginal_loss)))
+        # 2. Stress CVaR 99.9% tail budget constraint
+        remaining_cvar_budget = max(0.0, max_cvar_pct - base_cvar_pct)
+        marginal_cvar = max(1e-6, cvar_pct - base_cvar_pct)
+        cvar_scale = max(0.0, min(1.0, float(remaining_cvar_budget / marginal_cvar)))
+
+        # Dual-gate scale factor is the strictest constraint between mean loss and tail CVaR
+        scale_factor = min(loss_scale, cvar_scale)
         is_approved = scale_factor >= 0.25
 
         return is_approved, round(scale_factor, 2), loss_pct, res
