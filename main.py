@@ -809,7 +809,11 @@ def load_history():
                         for tf_key in ACTIVE_TRADE_TF_KEYS:
                             migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
                             
-                        bot_state["bot_running"] = data.get("bot_running", True)
+                        local_halt_setting = database.get_setting("bot_running", "True")
+                        if local_halt_setting == "False":
+                            bot_state["bot_running"] = False
+                        else:
+                            bot_state["bot_running"] = data.get("bot_running", True)
                         bot_state["fresh_reset_v3"] = data.get("fresh_reset_v3", False)
                         print(f"Sync Success: Loaded {len(remote_trades)} trades and {len(remote_predictions)} predictions from Remote Server ({sync_url}).")
                         

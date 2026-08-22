@@ -195,12 +195,20 @@ def require_ip_whitelist(f):
 def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: str = "Manual Trigger"):
     print(f"[EMERGENCY KILL SWITCH] Triggered! Reason: {reason}")
     bot_state["bot_running"] = False
-    if send_telegram_alert_func:
-        send_telegram_alert_func(f"🚨 *EMERGENCY KILL SWITCH ACTIVATED* 🚨\n• Reason: `{reason}`\n• Action: Halting bot & closing open positions at market.")
+    database.set_setting("bot_running", "False")
+    
+    cancel_success = True
+    close_success = True
+    errors = []
+
     try:
         from bybit_client import bybit_post_request, get_all_bybit_positions, TRADE_MODE
         if TRADE_MODE != "simulation":
-            bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
+            res_cancel = bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
+            if isinstance(res_cancel, dict) and res_cancel.get("retCode") != 0:
+                cancel_success = False
+                errors.append(f"Cancel failed: {res_cancel.get('retMsg', 'Unknown error')}")
+            
             positions = get_all_bybit_positions()
             for p in (positions or []):
                 sym = p.get("symbol")
@@ -208,7 +216,7 @@ def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: s
                 side = p.get("side")
                 if sz > 0 and sym:
                     close_side = "Sell" if side == "Buy" else "Buy"
-                    bybit_post_request("/v5/order/create", {
+                    res_close = bybit_post_request("/v5/order/create", {
                         "category": "linear",
                         "symbol": sym,
                         "side": close_side,
@@ -217,8 +225,25 @@ def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: s
                         "timeInForce": "IOC",
                         "reduceOnly": True
                     })
+                    if isinstance(res_close, dict) and res_close.get("retCode") != 0:
+                        close_success = False
+                        errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
     except Exception as err:
+        errors.append(str(err))
+        cancel_success = False
+        close_success = False
         print(f"[Kill Switch Error] Failed executing emergency close: {err}")
+
+    status_msg = f"🚨 *EMERGENCY KILL SWITCH ACTIVATED* 🚨\n• Reason: `{reason}`\n• Action: Bot halted."
+    if errors:
+        status_msg += f"\n• Errors encountered: {'; '.join(errors)}"
+    else:
+        status_msg += "\n• Working orders cancelled and open positions closed at market."
+
+    if send_telegram_alert_func:
+        send_telegram_alert_func(status_msg)
+        
+    return cancel_success and close_success, errors
 
 
 @dashboard_bp.route("/killswitch", methods=["POST"])
@@ -1048,7 +1073,8 @@ def api_institutional_summary():
     today_pf = round(today_gross_gains / today_gross_losses, 2) if today_gross_losses > 0 else (1.00 if today_gross_gains > 0 else 0.00)
 
     today_returns = [safe_float(t.get("pnl_usd", 0.0)) for t in today_trades]
-    today_stats = calculate_replay_statistics(today_returns, initial_equity=100.0) if today_returns else {}
+    today_sl_fracs = [abs(safe_float(t.get("entry_price", 0)) - safe_float(t.get("stop_loss", 0))) / max(1e-4, safe_float(t.get("entry_price", 0))) if safe_float(t.get("entry_price", 0)) > 0 else 0.01 for t in today_trades]
+    today_stats = calculate_replay_statistics(today_returns, initial_equity=100.0, risk_per_trade_pct=today_sl_fracs, duration_days=1.0) if today_returns else {}
     today_dd = round(today_stats.get("max_drawdown_pct", 0.0), 1)
 
     now_ts = time.time()
@@ -1073,7 +1099,10 @@ def api_institutional_summary():
     rr_val = round(avg_win_val / avg_loss_val, 2) if avg_loss_val > 0 else 0.00
     
     returns_list = [safe_float(t.get("pnl_usd", 0.0)) for t in valid_trades]
-    stats = calculate_replay_statistics(returns_list, initial_equity=100.0) if returns_list else {}
+    sl_fracs_list = [abs(safe_float(t.get("entry_price", 0)) - safe_float(t.get("stop_loss", 0))) / max(1e-4, safe_float(t.get("entry_price", 0))) if safe_float(t.get("entry_price", 0)) > 0 else 0.01 for t in valid_trades]
+    trade_ts_list = [safe_float(t.get("exit_time", t.get("entry_time", 0))) for t in valid_trades if safe_float(t.get("exit_time", t.get("entry_time", 0))) > 0]
+    total_duration_days = max(1.0, (max(trade_ts_list) - min(trade_ts_list)) / 86400.0) if len(trade_ts_list) > 1 else None
+    stats = calculate_replay_statistics(returns_list, initial_equity=100.0, risk_per_trade_pct=sl_fracs_list, duration_days=total_duration_days) if returns_list else {}
     
     dynamic_sharpe = round(stats.get("sharpe_ratio", 0.0), 2)
     dynamic_sortino = round(stats.get("sortino_ratio", 0.0), 2)
@@ -1777,7 +1806,10 @@ def api_strategy_health():
             log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
     pnls = [float(t.get("pnl_usd", 0.0)) for t in history] if history else [1.5, 2.1, -0.8, 1.8, 2.4, -0.5, 3.2]
-    stats = calculate_replay_statistics(pnls, initial_equity=100.0)
+    hist_sl_fracs = [abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) / max(1e-4, float(t.get("entry_price", 0))) if float(t.get("entry_price", 0)) > 0 else 0.01 for t in history] if history else 0.01
+    hist_ts = [float(t.get("exit_time", t.get("entry_time", 0))) for t in history if float(t.get("exit_time", t.get("entry_time", 0))) > 0] if history else []
+    hist_duration_days = max(1.0, (max(hist_ts) - min(hist_ts)) / 86400.0) if len(hist_ts) > 1 else None
+    stats = calculate_replay_statistics(pnls, initial_equity=100.0, risk_per_trade_pct=hist_sl_fracs, duration_days=hist_duration_days)
 
     # 2. Dynamic Git Commit Hash
     try:
@@ -1842,7 +1874,8 @@ def api_strategy_health():
     avg_mae = float(np.mean(mae_vals))
 
     r30_pnls = [float(t.get("pnl_usd", 0.0)) for t in history[:30] if isinstance(t, dict)] if history else []
-    r30_stats = calculate_replay_statistics(r30_pnls, initial_equity=100.0) if r30_pnls else stats
+    r30_sl = [abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) / max(1e-4, float(t.get("entry_price", 0))) if float(t.get("entry_price", 0)) > 0 else 0.01 for t in history[:30] if isinstance(t, dict)] if history else 0.01
+    r30_stats = calculate_replay_statistics(r30_pnls, initial_equity=100.0, risk_per_trade_pct=r30_sl) if r30_pnls else stats
     r30_pf = round(float(r30_stats.get("profit_factor", 1.84)), 2)
     r30_exp = r30_stats.get("expectancy_r", 0.36)
     r30_exp_str = f"{r30_exp:+.2f}R" if r30_exp >= 0 else f"{r30_exp:.2f}R"

@@ -781,12 +781,22 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                         try:
                             from dashboard_routes import trigger_emergency_kill_switch
                             from telegram_bot import send_telegram_alert
-                            trigger_emergency_kill_switch(bot_state, send_telegram_alert, f"Telegram /kill command from chat_id={chat_id}")
-                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": "🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted, working orders cancelled, and all open positions closing at market.", "parse_mode": "Markdown"})
+                            success, errors = trigger_emergency_kill_switch(bot_state, None, f"Telegram /kill command from chat_id={chat_id}")
+                            if success and not errors:
+                                resp_text = "🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted, working orders cancelled, and all open positions closed at market."
+                            else:
+                                err_str = "; ".join(errors) if errors else "partial error"
+                                resp_text = f"🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted (close/cancel warnings: {err_str})."
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": resp_text, "parse_mode": "Markdown"})
                         except Exception as kill_err:
                             with bot_state_lock:
                                 bot_state["bot_running"] = False
-                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": f"🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted (close error: {kill_err}).", "parse_mode": "Markdown"})
+                            try:
+                                import database
+                                database.set_setting("bot_running", "False")
+                            except Exception as ex_db:
+                                log_event("WARNING", f"[Telegram Kill Database Error] {ex_db}")
+                            execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": f"🚨 *EMERGENCY KILL SWITCH ENGAGED.* Bot halted (error: {kill_err}).", "parse_mode": "Markdown"})
 
                     elif cmd in ["help"]:
                         help_text = (

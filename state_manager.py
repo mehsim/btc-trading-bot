@@ -184,18 +184,17 @@ class StateManager:
 
     def __getitem__(self, key):
         with self._lock:
+            val = None
             if key in self._cache:
                 val = self._cache[key]
-            else:
-                val = None
-                if self._redis:
-                    try:
-                        val_str = self._redis.get(f"bot_state:{key}")
-                        if val_str is not None:
-                            val = json.loads(val_str)
-                            self._cache[key] = val
-                    except Exception as e:
-                        log_event("WARNING", f"[StateManager Redis Error] Failed to get key {key}: {e}")
+            elif self._redis and key not in getattr(self, "_dirty_redis_keys", set()):
+                try:
+                    val_str = self._redis.get(f"bot_state:{key}")
+                    if val_str is not None:
+                        val = json.loads(val_str)
+                        self._cache[key] = val
+                except Exception as e:
+                    log_event("WARNING", f"[StateManager Redis Error] Failed to get key {key}: {e}")
                 
             if key == "trade_history" and isinstance(val, list) and not isinstance(val, ObservedList):
                 val = ObservedList(val, lambda lst, item: self._on_mutate_trade(item))
@@ -217,11 +216,16 @@ class StateManager:
                 value = ObservedList(value, lambda lst, item: self._on_mutate_prediction(item))
                 raw_value = list(value)
                 
+            if not hasattr(self, "_dirty_redis_keys"):
+                self._dirty_redis_keys = set()
+
             if self._redis:
                 try:
                     self._redis.set(f"bot_state:{key}", json.dumps(raw_value, default=default_json_serializer))
+                    self._dirty_redis_keys.discard(key)
                 except Exception as e:
                     log_event("WARNING", f"[StateManager Redis Error] Failed to set {key}: {e}")
+                    self._dirty_redis_keys.add(key)
                     
             self._cache[key] = value
             
@@ -234,20 +238,20 @@ class StateManager:
 
     def get(self, key, default=None):
         with self._lock:
+            val = None
             if key in self._cache:
                 val = self._cache[key]
-            else:
-                val = None
-                if self._redis:
-                    try:
-                        val_str = self._redis.get(f"bot_state:{key}")
-                        if val_str is not None:
-                            val = json.loads(val_str)
-                            self._cache[key] = val
-                    except Exception as e:
-                        log_event("WARNING", f"[StateManager Redis Error] Failed to get key {key}: {e}")
-                if val is None:
-                    return default
+            elif self._redis and key not in getattr(self, "_dirty_redis_keys", set()):
+                try:
+                    val_str = self._redis.get(f"bot_state:{key}")
+                    if val_str is not None:
+                        val = json.loads(val_str)
+                        self._cache[key] = val
+                except Exception as e:
+                    log_event("WARNING", f"[StateManager Redis Error] Failed to get key {key}: {e}")
+            
+            if val is None:
+                return default
             
             if key == "trade_history" and isinstance(val, list) and not isinstance(val, ObservedList):
                 val = ObservedList(val, lambda lst, item: self._on_mutate_trade(item))

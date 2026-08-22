@@ -324,6 +324,30 @@ def test_signal_evaluator_slot_denylist_abstention():
     assert is_model_slot_denied("trending_price_30") is True
 
 
+def test_state_manager_none_default_fallback():
+    """Verify StateManager.get(key, default) returns default when cached value is None."""
+    from state_manager import StateManager
+    sm = StateManager()
+    sm._cache["test_none_key"] = None
+    
+    assert sm.get("test_none_key", 42) == 42, "Must return default when cached value is None"
+    assert sm.get("test_nonexistent_key", "default_val") == "default_val"
+
+
+def test_calculate_replay_statistics_interval_scaling():
+    """Verify calculate_replay_statistics uses interval for statistical annualization."""
+    from trade_calculators import calculate_replay_statistics
+    
+    returns = [0.01, 0.02, -0.01, 0.015, -0.005, 0.02, 0.01]
+    stats_15m = calculate_replay_statistics(returns, initial_equity=100.0, risk_per_trade_pct=0.01, interval="15")
+    stats_60m = calculate_replay_statistics(returns, initial_equity=100.0, risk_per_trade_pct=0.01, interval="60")
+    
+    assert stats_15m["sharpe_ratio"] > 0
+    assert stats_60m["sharpe_ratio"] > 0
+    assert stats_15m["expectancy_r"] > 0
+
+
+
 
 
 

@@ -171,6 +171,15 @@ def calculate_replay_statistics(
         annual_trades = float(total_trades) / years
         ann_factor = float(np.sqrt(max(1.0, annual_trades)))
         annualized_return = float(((1.0 + max(-0.99, ending_return / 100.0)) ** (1.0 / years) - 1.0) * 100.0)
+    elif interval is not None:
+        try:
+            mins = float(str(interval).lower().replace("m", "").replace("h", "")) * (60.0 if "h" in str(interval).lower() else 1.0)
+            candles_per_year = (365.25 * 24.0 * 60.0) / max(1.0, mins)
+            ann_factor = float(np.sqrt(min(candles_per_year, max(1.0, float(total_trades) * (candles_per_year / 1000.0)))))
+            annualized_return = ending_return * min(52.0, (candles_per_year / max(1.0, float(total_trades))))
+        except Exception:
+            ann_factor = float(np.sqrt(min(float(total_trades), 252.0)))
+            annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
     else:
         ann_factor = float(np.sqrt(min(float(total_trades), 252.0)))
         annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
