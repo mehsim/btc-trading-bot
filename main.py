@@ -7498,15 +7498,16 @@ def main():
                                             if struct_log != "OK":
                                                 print(f"[{symbol} {iv}m Pre-Flight Audit] {struct_log}")
 
-                                            stop_loss_price = adjusted_struct["stop_price"]
+                                            new_stop_price = adjusted_struct["stop_price"]
                                             take_profit_price = adjusted_struct["tp_price"]
                                             leverage_val = adjusted_struct["leverage"]
 
-                                            # Re-derive position size & notional from the widened stop loss to preserve exact risk budget
-                                            stop_loss_frac = max(0.002, abs(entry_price - stop_loss_price) / max(1e-9, entry_price))
-                                            target_notional_usd = (current_bal * f_clamped) / stop_loss_frac
-                                            if target_notional_usd > (current_bal * lev_cap):
-                                                target_notional_usd = current_bal * lev_cap
+                                            # Proportional stop-adjustment to preserve all upstream risk budgets (Joint Allocator, Covariance, Vol Regime, Learning Engine, CVaR)
+                                            new_stop_loss_frac = max(0.002, abs(entry_price - new_stop_price) / max(1e-9, entry_price))
+                                            if abs(new_stop_loss_frac - stop_loss_frac) > 1e-9:
+                                                target_notional_usd = target_notional_usd * (stop_loss_frac / new_stop_loss_frac)
+                                            stop_loss_price = new_stop_price
+                                            target_notional_usd = min(target_notional_usd, current_bal * lev_cap)
 
                                             cfg = TIMEFRAME_CONFIG.get(str(iv), {"lookahead": 10})
                                             lookahead = cfg.get("lookahead", 10)

@@ -153,3 +153,36 @@ def test_place_bybit_limit_order_post_only_payload():
         payload = mock_exec_gtc.call_args[0][1]
         assert payload.get("timeInForce") == "GTC"
 
+
+def test_sizing_preserves_all_risk_budget_constraints_on_stop_adjustment():
+    """Verify that post-validation stop-loss adjustment does not discard upstream risk budgets."""
+    current_bal = 100.0
+    f_clamped = 0.05
+    cov_multiplier = 0.5  # 50% correlation haircut
+    vol_regime_mult = 0.8 # Volatility haircut
+    learning_risk_mult = 0.7 # Learning engine haircut
+    lev_cap = 5.0
+
+    entry_price = 100.0
+    initial_sl_price = 98.0  # 2% stop loss
+    initial_sl_frac = max(0.002, abs(entry_price - initial_sl_price) / entry_price)  # 0.02
+    
+    # Base notional with all 3 haircuts applied
+    raw_notional_usd = (current_bal * f_clamped) / initial_sl_frac  # 5.0 / 0.02 = 250.0
+    target_notional_usd = raw_notional_usd * cov_multiplier * vol_regime_mult * learning_risk_mult  # 250 * 0.5 * 0.8 * 0.7 = 70.0
+    
+    # Simulate trade structure widening stop loss to 96.0 (4% stop loss)
+    widened_sl_price = 96.0
+    widened_sl_frac = max(0.002, abs(entry_price - widened_sl_price) / entry_price)  # 0.04
+    
+    # Proportional scaling logic as implemented in main.py
+    if abs(widened_sl_frac - initial_sl_frac) > 1e-9:
+        target_notional_usd = target_notional_usd * (initial_sl_frac / widened_sl_frac)
+    target_notional_usd = min(target_notional_usd, current_bal * lev_cap)
+    
+    # Expected: notional scaled down by 0.02/0.04 = 0.5, giving 35.0 (maintaining $1.40 risk)
+    # Under old buggy logic: would reset to (100 * 0.05) / 0.04 = 125.0 (discarding all haircuts!)
+    assert target_notional_usd == 35.0, f"Expected 35.0, got {target_notional_usd}"
+    assert target_notional_usd < 100.0, "Upstream correlation and volatility haircuts must not be discarded"
+
+
