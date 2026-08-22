@@ -1805,9 +1805,9 @@ def api_strategy_health():
         except Exception as ex_dashboard_routes:
             log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
-    pnls = [float(t.get("pnl_usd", 0.0)) for t in history] if history else [1.5, 2.1, -0.8, 1.8, 2.4, -0.5, 3.2]
-    hist_sl_fracs = [abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) / max(1e-4, float(t.get("entry_price", 0))) if float(t.get("entry_price", 0)) > 0 else 0.01 for t in history] if history else 0.01
-    hist_ts = [float(t.get("exit_time", t.get("entry_time", 0))) for t in history if float(t.get("exit_time", t.get("entry_time", 0))) > 0] if history else []
+    pnls = [float(t.get("pnl_usd") or 0.0) for t in history] if history else [1.5, 2.1, -0.8, 1.8, 2.4, -0.5, 3.2]
+    hist_sl_fracs = [abs(float(t.get("entry_price") or 0.0) - float(t.get("stop_loss") or 0.0)) / max(1e-4, float(t.get("entry_price") or 0.0)) if float(t.get("entry_price") or 0.0) > 0 else 0.01 for t in history] if history else 0.01
+    hist_ts = [float(t.get("exit_time") or t.get("entry_time") or 0.0) for t in history if float(t.get("exit_time") or t.get("entry_time") or 0.0) > 0] if history else []
     hist_duration_days = max(1.0, (max(hist_ts) - min(hist_ts)) / 86400.0) if len(hist_ts) > 1 else None
     stats = calculate_replay_statistics(pnls, initial_equity=100.0, risk_per_trade_pct=hist_sl_fracs, duration_days=hist_duration_days)
 
