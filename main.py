@@ -6047,8 +6047,9 @@ def main():
                 df_completed_val = df_raw_val.iloc[:-1].copy()
                 latest_completed_ts_val = int(df_completed_val.iloc[-1]["timestamp"])
                 
+                is_forced_val = interval_val in forced_intervals
                 last_ts_key_val = f"last_processed_{sym}_{interval_val}_ts"
-                if last_processed_timestamps.get(last_ts_key_val) is not None:
+                if not is_forced_val and last_processed_timestamps.get(last_ts_key_val) is not None:
                     if latest_completed_ts_val == last_processed_timestamps[last_ts_key_val]:
                         return sym, interval_val, df_raw_val, None
                 
@@ -6189,8 +6190,9 @@ def main():
                     
                 completed_this_hour.add((symbol, iv))
                 
-                if latest_completed_ts != last_processed_timestamps[last_ts_key]:
-                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] New completed {symbol} {iv}-minute candle detected (TS: {latest_completed_ts})")
+                if (latest_completed_ts != last_processed_timestamps[last_ts_key]) or is_forced:
+                    last_processed_timestamps[last_ts_key] = latest_completed_ts
+                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Completed {symbol} {iv}-minute candle evaluation triggered (TS: {latest_completed_ts})")
                     log_event("INFO", f"[{symbol} {iv}m] Evaluation start — candle {latest_completed_ts}")
                     rec = DecisionRecord(symbol=symbol, interval=str(iv))
                     rec.candle_timestamp = latest_completed_ts
