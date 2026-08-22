@@ -42,6 +42,7 @@ decision_outcome_db.json
 security_audit.log
 audit_trail.jsonl
 mlflow.db
+trades.db
 db_snapshots/
 junit/
 .manifest_hmac_secret
