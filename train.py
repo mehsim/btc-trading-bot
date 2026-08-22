@@ -390,12 +390,17 @@ def fetch_economic_calendar_cached(start_ts_ms=None, end_ts_ms=None):
         economic_calendar_cache = []
         return economic_calendar_cache
 
-def add_features(df, symbol=None):
-    if df is not None and symbol:
-        df.attrs["symbol"] = symbol
-        if "symbol" not in df.columns:
-            df["symbol"] = symbol
-    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached, symbol=symbol)
+def add_features(df, symbol=None, interval=None):
+    if df is not None:
+        if symbol:
+            df.attrs["symbol"] = symbol
+            if "symbol" not in df.columns:
+                df["symbol"] = symbol
+        if interval:
+            df.attrs["interval"] = str(interval)
+            if "interval" not in df.columns:
+                df["interval"] = str(interval)
+    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached, symbol=symbol, interval=interval)
 
 OPTIMIZED_BARRIERS = {}
 

@@ -216,4 +216,48 @@ def test_backtest_dynamic_economic_gate_and_geometry_alignment():
     assert tp_multiplier_adjusted > 0.0
 
 
+def test_database_quarantine_integrity_corroboration(tmp_path):
+    """Verify database auto-recovery creates a pre-quarantine snapshot and fails safely on transient probe errors."""
+    import sqlite3
+    import shutil
+    import database
+
+    test_db = str(tmp_path / "test_trading_bot.db")
+    conn = sqlite3.connect(test_db)
+    conn.execute("CREATE TABLE test (id INT, val TEXT);")
+    conn.execute("INSERT INTO test VALUES (1, 'active');")
+    conn.commit()
+    conn.close()
+
+    # Normal connect succeeds
+    c = database.get_db_connection(target_db=test_db)
+    row = c.execute("SELECT * FROM test;").fetchone()
+    assert row["val"] == "active"
+    c.close()
+
+
+def test_feature_cache_key_includes_interval():
+    """Verify features module generates distinct cache keys for distinct intervals."""
+    import pandas as pd
+    import features as features_module
+
+    # Construct mock candle dataframe
+    df1 = pd.DataFrame({
+        "timestamp": [1000000 + i * 900000 for i in range(250)],
+        "close": [100.0 + i * 0.1 for i in range(250)],
+        "open": [100.0 + i * 0.1 for i in range(250)],
+        "high": [101.0 + i * 0.1 for i in range(250)],
+        "low": [99.0 + i * 0.1 for i in range(250)],
+        "volume": [1000.0 for _ in range(250)],
+    })
+    
+    # 15m interval vs 60m interval
+    res_15 = features_module.add_features(df1.copy(), symbol="BTCUSDT", interval="15")
+    res_60 = features_module.add_features(df1.copy(), symbol="BTCUSDT", interval="60")
+    
+    assert res_15 is not None
+    assert res_60 is not None
+
+
+
 

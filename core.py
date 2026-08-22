@@ -29,8 +29,8 @@ for lag in [1, 2]:
     features.append(f"MACD_diff_lag{lag}")
     features.append(f"BB_pct_lag{lag}")
 
-def add_features(df, fetch_calendar_callback=None):
-    return features_module.add_features(df, fetch_calendar_callback=fetch_calendar_callback)
+def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
+    return features_module.add_features(df, fetch_calendar_callback=fetch_calendar_callback, symbol=symbol, interval=interval)
 
 def calibrate_confidence(raw_conf, eps=1e-3):
     """
@@ -55,7 +55,7 @@ def calculate_historical_thresholds(model_trend, interval):
 
             if len(df) > 0:
                 df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
-                df = add_features(df)
+                df = add_features(df, symbol=SYMBOL, interval=interval)
                 
                 selected_features_list = None
                 manifest_filename = f"ensemble_trending_trend_{interval}_manifest.json"

@@ -2,6 +2,7 @@ from logger import log_event
 import math
 import sqlite3
 import os
+import shutil
 import json
 import uuid
 import threading
@@ -70,23 +71,46 @@ def get_db_connection(target_db=DB_FILE):
                 except Exception:
                     pass
 
-                # Corroborate corruption with a read-only integrity check
+                # Corroborate corruption with a read-only integrity check and proper resource cleanup
+                chk_conn = None
                 try:
                     if os.path.exists(target_db):
-                        with sqlite3.connect(f"file:{target_db}?mode=ro", uri=True, timeout=5.0) as chk_conn:
-                            res = chk_conn.execute("PRAGMA integrity_check;").fetchone()
-                            if res and "ok" not in str(res[0]).lower():
-                                is_corrupted = True
-                            else:
-                                is_corrupted = False
+                        chk_conn = sqlite3.connect(f"file:{target_db}?mode=ro", uri=True, timeout=60.0)
+                        chk_conn.execute("PRAGMA busy_timeout = 60000;")
+                        res = chk_conn.execute("PRAGMA integrity_check;").fetchone()
+                        if res and "ok" not in str(res[0]).lower():
+                            is_corrupted = True
+                        else:
+                            is_corrupted = False
                     else:
                         is_corrupted = False
-                except Exception:
-                    is_corrupted = True
+                except Exception as chk_err:
+                    # Fail-safe: Transient lock/access error in read-only probe does NOT prove corruption
+                    log_event("WARNING", f"[Database Auto-Recovery] Integrity probe error ({chk_err}); skipping premature quarantine.")
+                    is_corrupted = False
+                finally:
+                    if chk_conn is not None:
+                        try:
+                            chk_conn.close()
+                        except Exception:
+                            pass
 
                 if is_corrupted:
-                    print(f"[Database Auto-Recovery] Verified genuine database corruption ({e}). Quarantining DB file {target_db}...")
+                    log_event("CRITICAL", f"[Database Auto-Recovery] Verified genuine database corruption ({e}). Creating backup snapshot & quarantining DB file {target_db}...")
                     timestamp = int(time.time())
+                    
+                    # Pre-quarantine snapshot for disaster recovery
+                    snapshot_dir = os.path.join(os.path.dirname(os.path.abspath(target_db)) or ".", "db_snapshots", f"pre_quarantine_{timestamp}")
+                    try:
+                        os.makedirs(snapshot_dir, exist_ok=True)
+                        for ext in ["", "-wal", "-shm"]:
+                            src = f"{target_db}{ext}"
+                            if os.path.exists(src):
+                                shutil.copy2(src, os.path.join(snapshot_dir, f"{os.path.basename(target_db)}{ext}"))
+                        log_event("INFO", f"[Database Auto-Recovery] Pre-quarantine snapshot saved to {snapshot_dir}")
+                    except Exception as snap_err:
+                        log_event("WARNING", f"[Database Auto-Recovery] Warning: Pre-quarantine snapshot failed: {snap_err}")
+
                     renamed_main = False
                     for ext in ["", "-wal", "-shm"]:
                         target = f"{target_db}{ext}"
@@ -96,14 +120,14 @@ def get_db_connection(target_db=DB_FILE):
                                 if ext == "":
                                     renamed_main = True
                             except Exception as ren_err:
-                                print(f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
+                                log_event("WARNING", f"[Database Auto-Recovery] Could not rename {target}: {ren_err}")
                     if renamed_main:
                         try:
                             init_db()
                         except Exception as init_err:
-                            print(f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
+                            log_event("WARNING", f"[Database Auto-Recovery] init_db after quarantine notice: {init_err}")
                 else:
-                    print(f"[Database Transient Warning] Integrity check passed or non-corrupt; avoiding premature quarantine.")
+                    log_event("INFO", f"[Database Transient Warning] Integrity check passed or non-corrupt; avoiding premature quarantine.")
                 _in_quarantine_recovery = False
                 time.sleep(0.5)
             else:

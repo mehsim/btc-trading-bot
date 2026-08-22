@@ -143,7 +143,18 @@ def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
     if df is not None and len(df) > 0 and "timestamp" in df.columns and "close" in df.columns:
         try:
             sym_val = str(symbol) if symbol is not None else (str(df["symbol"].iloc[-1]) if "symbol" in df.columns else str(getattr(df, "attrs", {}).get("symbol", "BTCUSDT")))
-            iv_val = str(interval) if interval is not None else (str(df["interval"].iloc[-1]) if "interval" in df.columns else str(getattr(df, "attrs", {}).get("interval", "15")))
+            if interval is not None:
+                iv_val = str(interval)
+            elif "interval" in df.columns:
+                iv_val = str(df["interval"].iloc[-1])
+            elif getattr(df, "attrs", {}).get("interval"):
+                iv_val = str(df.attrs["interval"])
+            elif len(df) >= 2:
+                dt_mins = round(abs(float(df["timestamp"].iloc[-1]) - float(df["timestamp"].iloc[-2])) / 60000.0)
+                iv_val = str(dt_mins) if dt_mins > 0 else "15"
+            else:
+                iv_val = "15"
+
             last_ts = float(df["timestamp"].iloc[-1])
             last_close = float(df["close"].iloc[-1])
             cache_key = (sym_val, iv_val, len(df), last_ts, last_close)

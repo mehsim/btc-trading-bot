@@ -3102,12 +3102,17 @@ for lag in [1, 2]:
 # Initial model loading is deferred to main() to ensure Flask starts immediately on HF Spaces.
 
 
-def add_features(df, symbol=None):
-    if df is not None and symbol:
-        df.attrs["symbol"] = symbol
-        if "symbol" not in df.columns:
-            df["symbol"] = symbol
-    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached, symbol=symbol)
+def add_features(df, symbol=None, interval=None):
+    if df is not None:
+        if symbol:
+            df.attrs["symbol"] = symbol
+            if "symbol" not in df.columns:
+                df["symbol"] = symbol
+        if interval:
+            df.attrs["interval"] = str(interval)
+            if "interval" not in df.columns:
+                df["interval"] = str(interval)
+    return features_module.add_features(df, fetch_calendar_callback=fetch_economic_calendar_cached, symbol=symbol, interval=interval)
 
 def build_df(current_price):
     try:
@@ -3131,7 +3136,7 @@ def build_df(current_price):
             
             if len(df) > 0:
                 df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=INTERVAL)
-                df = add_features(df)
+                df = add_features(df, symbol=SYMBOL, interval=INTERVAL)
                 return df
     except Exception as e:
         print(f"Error fetching candle data: {e}")
@@ -3662,7 +3667,7 @@ def calculate_historical_thresholds(model_trend, interval):
             df = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
             if len(df) > 0:
                 df = merge_derivatives_sentiment_features(df, symbol=SYMBOL, interval=interval)
-                df = add_features(df)
+                df = add_features(df, symbol=SYMBOL, interval=interval)
                 
                 selected_features_list = None
                 if interval in models_by_interval:
@@ -6080,7 +6085,7 @@ def main():
                     df_target_val = _merge_cached_derivatives(df_target_val, df_oi_c, df_funding_c, df_fng_c, df_btc=df_btc_ref, symbol=sym)
                 else:
                     df_target_val = merge_derivatives_sentiment_features(df_target_val, symbol=sym, interval=interval_val)
-                df_feat_val = add_features(df_target_val, symbol=sym)
+                df_feat_val = add_features(df_target_val, symbol=sym, interval=interval_val)
                 
                 return sym, interval_val, df_raw_val, df_feat_val
  
