@@ -224,12 +224,14 @@ def run_statistical_governance_scheduler():
             
             all_trades = database.get_completed_trades(limit=1000)
             if all_trades:
+                import numpy as np
                 for iv in intervals_to_monitor:
                     slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv]
                     n_trades = len(slot_trades)
                     if n_trades >= 5:
                         returns = [float(t.get("change_pct", t.get("pnl_pct", 0.0))) for t in slot_trades]
-                        baseline_rets = [0.0] * n_trades
+                        # Empirical fee/slippage hurdle baseline (-0.05% per roundtrip) with slight variance
+                        baseline_rets = [-0.05 + float(np.random.normal(0, 0.001)) for _ in range(n_trades)]
                         matrix_res = statistical_validation.calculate_governed_validation_matrix(
                             component_name=f"live_{iv}",
                             baseline_returns=baseline_rets,
@@ -241,8 +243,9 @@ def run_statistical_governance_scheduler():
                         decision = matrix_res.get("governance", {}).get("decision")
                         if decision == "REJECT":
                             reasons_str = "; ".join(matrix_res.get("governance", {}).get("reasons", ["Statistical rejection"]))
-                            log_event("WARNING", f"[Statistical Governance Live Gate] Denylisting trending_{iv} due to statistical rejection: {reasons_str}")
+                            log_event("WARNING", f"[Statistical Governance Live Gate] Denylisting trending_{iv} and ranging_{iv} due to statistical rejection: {reasons_str}")
                             _record_to_governance_denylist(f"trending_{iv}", reason=f"Live statistical rejection: {reasons_str}")
+                            _record_to_governance_denylist(f"ranging_{iv}", reason=f"Live statistical rejection: {reasons_str}")
         except Exception as e:
             log_event("ERROR", f"[Statistical Governance Scheduler Error] {e}")
 

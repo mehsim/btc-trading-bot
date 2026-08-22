@@ -661,15 +661,19 @@ class StatisticalValidation:
         else:
             promotion_triggers.append(f"10k Bootstrap 95% CI [{ci_low}, {ci_high}] excludes zero")
 
-        if abs(cohen_d) >= 0.20:
-            promotion_triggers.append(f"Cohen d ({cohen_d:.3f}) >= 0.20 (meaningful effect)")
-
-        if sprt_res["sprt_decision"] == "ACCEPT_H1_PROMOTE":
+        if sprt_res.get("sprt_decision") == "ACCEPT_H1_PROMOTE":
             promotion_triggers.append("Wald SPRT accepted H1")
+        elif sprt_res.get("sprt_decision") in ["REJECT_H1_ABORT", "REJECT"]:
+            reasons.append("Wald SPRT rejected H1 (abort/negative evidence)")
 
-        if power_val < 0.80:
-            decision = "NEED_MORE_DATA"
-        elif p_val < 0.05 and not ci_crosses_zero:
+        if sprt_res.get("sprt_decision") in ["REJECT_H1_ABORT", "REJECT"] or (cohen_d < -0.10 and p_val < 0.05):
+            decision = "REJECT"
+        elif power_val < 0.80:
+            if cohen_d < 0.0 or p_val > 0.20:
+                decision = "REJECT"
+            else:
+                decision = "NEED_MORE_DATA"
+        elif p_val < 0.05 and not ci_crosses_zero and cohen_d > 0:
             decision = "KEEP"
         elif (0.05 <= p_val < 0.20 or ci_crosses_zero) and abs(cohen_d) >= 0.20:
             decision = "SHADOW_ONLY"

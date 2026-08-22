@@ -8057,6 +8057,12 @@ if __name__ == "__main__":
     threading.Thread(target=run_daily_backup_scheduler, name="daily-backup-scheduler", daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread
     threading.Thread(target=run_daily_summary_scheduler, name="daily-summary-scheduler", daemon=True).start()
+    # Start statistical governance scheduler background thread
+    try:
+        from background_schedulers import run_statistical_governance_scheduler
+        threading.Thread(target=run_statistical_governance_scheduler, name="stat-governance-scheduler", daemon=True).start()
+    except Exception as ex_sgs:
+        log_event("WARNING", f"[StatGovernance Launch Warning] {ex_sgs}")
     # Start pain feedback verifier background thread
     threading.Thread(target=run_pain_feedback_verifier, name="pain-feedback-verifier", daemon=True).start()
     # Start signal evaluator background thread

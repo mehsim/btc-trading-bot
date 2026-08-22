@@ -2010,8 +2010,51 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
                         n_optuna_trials_val = int(_trials) if ('_trials' in locals() and _trials is not None) else int(globals().get("OPTUNA_TRIALS", 30))
 
+                        # Gate 1: Walk-Forward Validation using true rolling refit callback
+                        wf_pass = False
+                        try:
+                            from walk_forward_engine import run_walk_forward_backtest
+                            from ensemble import train_single_xgb_classifier
+                            
+                            def _wf_train_fn(_w_train_df):
+                                _wf_feats = [c for c in challenger_feature_names if c in _w_train_df.columns]
+                                if not _wf_feats or len(_w_train_df) < 100:
+                                    return None
+                                _w_X = _w_train_df[_wf_feats].fillna(0.0)
+                                _w_y = _w_train_df["target_trend"].astype(int) if "target_trend" in _w_train_df.columns else np.zeros(len(_w_train_df), dtype=int)
+                                _w_m = train_single_xgb_classifier(_w_X, _w_y, n_estimators=30, max_depth=3)
+                                
+                                def _wf_sim_fn(_w_test_df):
+                                    _t_X = _w_test_df[_wf_feats].fillna(0.0)
+                                    _t_preds = _w_m.predict(_t_X)
+                                    _t_prices = _w_test_df["target_price"].fillna(0.0).values if "target_price" in _w_test_df.columns else np.zeros(len(_w_test_df))
+                                    _w_trades = []
+                                    for _p_d, _p_r in zip(_t_preds, _t_prices):
+                                        if _p_d == 1:
+                                            _w_trades.append({"net_return": float(_p_r), "sl_frac": 0.01})
+                                        elif _p_d == 2:
+                                            _w_trades.append({"net_return": -float(_p_r), "sl_frac": 0.01})
+                                    return {"trades": _w_trades}
+                                return _wf_sim_fn
+
+                            _df_for_wf = locals().get("df_clean") if locals().get("df_clean") is not None else locals().get("df")
+                            if _df_for_wf is not None and len(_df_for_wf) >= 500:
+                                _w_res = run_walk_forward_backtest(
+                                    df=_df_for_wf,
+                                    train_window_bars=min(2000, max(300, int(len(_df_for_wf) * 0.5))),
+                                    test_window_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
+                                    step_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
+                                    train_fn=_wf_train_fn
+                                )
+                                wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= 0.0 and _w_res.get("mean_profit_factor", 0.0) >= 1.0)
+                            else:
+                                wf_pass = (chal_mcc_min >= -0.05 and holdout_mcc >= 0.0)
+                        except Exception as _wf_ex:
+                            log_event("WARNING", f"[Walk-Forward Validation Gate Error] {_wf_ex}")
+                            wf_pass = (chal_mcc_min >= -0.05 and holdout_mcc >= 0.0)
+
                         stat_eval = stat_validator.evaluate_8_release_gates(
-                            walk_forward_pass=(chal_mcc_min >= -0.05),
+                            walk_forward_pass=wf_pass,
                             out_of_sample_pass=(holdout_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor),
                             ece_calibration_pct=ece_pct,
                             psi_drift_score=psi_score,
