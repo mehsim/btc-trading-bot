@@ -26,7 +26,7 @@ parser = argparse.ArgumentParser(description="BTC Trading Bot Backtester")
 parser.add_argument("--interval", default="60", choices=["15", "30", "60", "120", "240", "360"], help="Trading interval in minutes")
 parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol")
 parser.add_argument("--fee-rate", type=float, default=0.002, help="Trading fee rate")
-parser.add_argument("--min-confidence", type=float, default=0.40, help="Minimum confidence threshold")
+parser.add_argument("--min-confidence", type=float, default=None, help="Minimum confidence threshold (default: None for production dynamic economic p*)")
 parser.add_argument("--pages", type=int, default=40, help="History pages count")
 parser.add_argument("--pessimistic", action="store_true", default=True, help="Use pessimistic fill model (next-bar open + spread/slippage)")
 parser.add_argument("--optimistic", action="store_true", default=False, help="Use optimistic fill model (signal close price)")
@@ -206,18 +206,47 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         sl_multiplier = OVERRIDE_SL_MULT if OVERRIDE_SL_MULT is not None else cfg.get("sl_mult", 0.8)
         tp_multiplier = OVERRIDE_TP_MULT if OVERRIDE_TP_MULT is not None else cfg.get("tp_mult_trending" if is_trending_state else "tp_mult_ranging", 1.85)
 
-        # 1. Economic Break-Even Threshold (p*) + Production Confidence Gate
-        p_star = (sl_multiplier + (fee_rate * 2.0)) / max(1e-6, (sl_multiplier + tp_multiplier * 0.80))
-        tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {})
-        base_conf_floor = float(tf_cfg.get("base_confidence_threshold", p_star))
-        effective_min_conf = min_confidence if min_confidence is not None else max(p_star, base_conf_floor)
+        # 1. Economic Break-Even Threshold (p*) + Production Dynamic Confidence Gate (mirrors main.py:6571-6625)
+        atr_norm = float(df.loc[i, "ATR_norm"]) if "ATR_norm" in df.columns else 0.01
+        cost_bps = (fee_rate * 2.0) * 10000.0  # round-trip in bps
+        effective_tp_m = tp_multiplier * 0.80  # REALIZED_RR_HAIRCUT
+        p_star = sl_multiplier / max(1e-6, (effective_tp_m + sl_multiplier))
+        cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + sl_multiplier) * max(1e-4, atr_norm))
+        economic_base_threshold = float(round(p_star + cost_adj, 4))
+        
+        base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
+        dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
+
+        # Production additive adjustments (Ranging, High Volatility, Session)
+        if not is_trending_state:
+            regime_delta = 0.03 if str(interval) in ["15", "30"] else 0.05
+            dynamic_conf_threshold += regime_delta
+        
+        if atr_norm > 0.015:
+            dynamic_conf_threshold += 0.05
+            
+        candle_hour = 0
+        if "timestamp" in df.columns:
+            try:
+                candle_hour = datetime.utcfromtimestamp(df.loc[i, "timestamp"] / 1000.0).hour
+            except Exception:
+                candle_hour = 0
+        if 0 <= candle_hour < 8:
+            dynamic_conf_threshold += 0.02
+
+        if min_confidence == "dynamic_plus_3":
+            effective_min_conf = dynamic_conf_threshold + 0.03
+        elif isinstance(min_confidence, (int, float)):
+            effective_min_conf = float(min_confidence)
+        else:
+            effective_min_conf = dynamic_conf_threshold
 
         if calibrated_confidence < effective_min_conf:
             i += 1
             continue
 
         # 2. ADX Regime Floor Filter (mirrors live production main.py)
-        min_adx_thresh = float(tf_cfg.get("min_adx", 20.0))
+        min_adx_thresh = float(cfg.get("min_adx", 20.0))
         adx_val = float(df.loc[i, "ADX"]) if "ADX" in df.columns else 25.0
         if adx_val < min_adx_thresh:
             i += 1
@@ -231,7 +260,6 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                 continue
 
         # 4. Volatility & Fee check
-        atr_norm = df.loc[i, "ATR_norm"]
         if use_regressor_fee_check:
             if expected_pct_change < 0.25:
                 i += 1
@@ -254,22 +282,60 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
 
         atr_dollars = atr_norm * entry_price
 
-        # ATR-based Stop Loss and Take Profit with production TP resolution
+        # ATR-based Stop Loss and Take Profit with production 4-layer geometry (mirrors main.py:7147-7205)
         regime_detected = "trending" if is_trending_state else "ranging"
 
+        vol_factor = 1.0
+        if atr_norm > 0:
+            vol_factor = 1.5 - ((atr_norm - 0.003) / 0.005) * 0.75
+            vol_factor = max(0.75, min(1.5, vol_factor))
+
+        min_target = max(getattr(config, "MIN_TARGET_ATR_MULT", {}).get(str(interval), 1.5), 1.20 * sl_multiplier)
+        base_tp_target = max(tp_multiplier, min_target)
+        tp_multiplier_adjusted = round(base_tp_target * vol_factor, 3)
+
+        # (a) Volatility (ATR Percentile) Adjustment (±5%)
+        vol_adj = 1.00
+        if "ATR" in df.columns and i >= 10:
+            hist_atr = df["ATR"].iloc[max(0, i-100):i].dropna()
+            if len(hist_atr) > 0:
+                atr_percentile = float((hist_atr < df.loc[i, "ATR"]).mean() * 100.0)
+                if atr_percentile > 90.0:
+                    vol_adj = 0.95
+                elif atr_percentile < 20.0:
+                    vol_adj = 1.05
+        tp_multiplier_adjusted *= vol_adj
+
+        # (b) Session Liquidity Adjustment
+        if 6 <= candle_hour < 8:
+            session_factor = 0.95
+        elif 12 <= candle_hour < 16:
+            session_factor = 1.00
+        else:
+            session_factor = 0.98
+        tp_multiplier_adjusted *= session_factor
+
+        # (c) Walk-Forward Unified Target Resolution
         from trade_calculators import UnifiedTargetGenerator
         tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
             interval=str(interval), entry_price=entry_price,
-            atr_dollars=atr_dollars, base_tp_m=tp_multiplier
+            atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
         )
-        sl_dist = sl_multiplier * atr_dollars
+
+        # (d) Dynamic Stop Loss Multiplier based on prediction confidence
+        sl_multiplier_adjusted = sl_multiplier
+        if calibrated_confidence > effective_min_conf:
+            confidence_ratio = (calibrated_confidence - effective_min_conf) / max(1e-9, 1.0 - effective_min_conf)
+            sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
+
+        sl_dist = sl_multiplier_adjusted * atr_dollars
         tp_dist = tp_m * atr_dollars
 
         # S-01: Timeframe-Adaptive Minimum Stop Loss Floor
         min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
         min_sl_pct = min_sl_cfg.get(str(interval), min_sl_cfg.get("default", 0.008))
         min_sl_dist = entry_price * min_sl_pct
-        target_rr = tp_m / max(1e-9, sl_multiplier)
+        target_rr = tp_m / max(1e-9, sl_multiplier_adjusted)
         if sl_dist < min_sl_dist:
             sl_dist = min_sl_dist
             tp_dist = sl_dist * target_rr
@@ -584,20 +650,20 @@ def run_backtest():
     print("\n[Step 4] Simulating backtest scenario comparisons...")
     
     scenarios = {
-        "A (Production Baseline: Economic Gate p*, Trend Align)": {
+        "A (Production Baseline: Dynamic Economic Gate p*, Trend Align)": {
             "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": True, "require_trend_alignment": True
         },
-        "B (Pure Economic Gate p*, Trend Align)": {
+        "B (Pure Dynamic Economic Gate p*, Trend Align)": {
             "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": True
         },
-        "C (High Conviction: Base Conf + 3%, Trend Align)": {
-            "min_confidence": (MIN_CONFIDENCE + 0.03 if MIN_CONFIDENCE is not None else 0.43), "use_regressor_fee_check": False, "require_trend_alignment": True
+        "C (High Conviction: Base Dynamic + 3%, Trend Align)": {
+            "min_confidence": ("dynamic_plus_3" if MIN_CONFIDENCE is None else MIN_CONFIDENCE + 0.03), "use_regressor_fee_check": False, "require_trend_alignment": True
         },
         "D (Pure Model Signals: Production Floor, No HTF Filter)": {
             "min_confidence": MIN_CONFIDENCE, "use_regressor_fee_check": False, "require_trend_alignment": False
         },
-        "E (High Conviction: Base Conf + 3%, No HTF Filter)": {
-            "min_confidence": (MIN_CONFIDENCE + 0.03 if MIN_CONFIDENCE is not None else 0.43), "use_regressor_fee_check": False, "require_trend_alignment": False
+        "E (High Conviction: Base Dynamic + 3%, No HTF Filter)": {
+            "min_confidence": ("dynamic_plus_3" if MIN_CONFIDENCE is None else MIN_CONFIDENCE + 0.03), "use_regressor_fee_check": False, "require_trend_alignment": False
         }
     }
 
