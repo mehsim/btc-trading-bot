@@ -1873,8 +1873,8 @@ def api_strategy_health():
     mae_vals = [float(t.get("mae") or t.get("mae_r") or 0.88) for t in history if isinstance(t, dict)] if history else [0.88]
     avg_mae = float(np.mean(mae_vals))
 
-    r30_pnls = [float(t.get("pnl_usd", 0.0)) for t in history[:30] if isinstance(t, dict)] if history else []
-    r30_sl = [abs(float(t.get("entry_price", 0)) - float(t.get("stop_loss", 0))) / max(1e-4, float(t.get("entry_price", 0))) if float(t.get("entry_price", 0)) > 0 else 0.01 for t in history[:30] if isinstance(t, dict)] if history else 0.01
+    r30_pnls = [float(t.get("pnl_usd") or 0.0) for t in history[:30] if isinstance(t, dict)] if history else []
+    r30_sl = [abs(float(t.get("entry_price") or 0.0) - float(t.get("stop_loss") or 0.0)) / max(1e-4, float(t.get("entry_price") or 0.0)) if float(t.get("entry_price") or 0.0) > 0 else 0.01 for t in history[:30] if isinstance(t, dict)] if history else 0.01
     r30_stats = calculate_replay_statistics(r30_pnls, initial_equity=100.0, risk_per_trade_pct=r30_sl) if r30_pnls else stats
     r30_pf = round(float(r30_stats.get("profit_factor", 1.84)), 2)
     r30_exp = r30_stats.get("expectancy_r", 0.36)
@@ -1882,10 +1882,10 @@ def api_strategy_health():
 
     # 4. Dynamic Risk Metrics
     pos_dict = bot_state.get("positions", {})
-    active_pos_val = sum(float(p.get("position_size_usd", 0.0)) for p in pos_dict.values()) if isinstance(pos_dict, dict) else 0.0
-    wallet_bal = float(bot_state.get("wallet_balance", 1000.0))
+    active_pos_val = sum(float(p.get("position_size_usd") or 0.0) for p in pos_dict.values()) if isinstance(pos_dict, dict) else 0.0
+    wallet_bal = float(bot_state.get("wallet_balance") or 1000.0)
     portfolio_exposure = (active_pos_val / max(1.0, wallet_bal)) * 100.0
-    open_risk = (sum(abs(float(p.get("entry_price",0))-float(p.get("stop_loss",0)))/max(1,float(p.get("entry_price",1)))*float(p.get("position_size_usd",0)) for p in pos_dict.values())/max(1, wallet_bal)*100.0) if isinstance(pos_dict, dict) else 0.85
+    open_risk = (sum(abs(float(p.get("entry_price") or 0.0) - float(p.get("stop_loss") or 0.0)) / max(1, float(p.get("entry_price") or 1.0)) * float(p.get("position_size_usd") or 0.0) for p in pos_dict.values()) / max(1, wallet_bal) * 100.0) if isinstance(pos_dict, dict) else 0.85
 
     today_str = time.strftime("%Y-%m-%d", time.gmtime())
     today_trades = [t for t in history if str(t.get("exit_time", "")).startswith(today_str) or str(t.get("entry_time", "")).startswith(today_str)]

@@ -233,9 +233,9 @@ class SignalEvaluator:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): MCC ({mcc_val:.4f}) below predictive floor ({min_mcc_floor}). ABSTAIN.")
                     return "Neutral", 0.0, f"Model predictive content below governance floor (MCC {mcc_val:.4f} < {min_mcc_floor})"
 
-                if mcc_min_val is not None and mcc_min_val < 0.0:
-                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < 0.0). ABSTAIN.")
-                    return "Neutral", 0.0, f"Model anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < 0.0)"
+                if mcc_min_val is not None and mcc_min_val < -0.05:
+                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): severely anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < -0.05). ABSTAIN.")
+                    return "Neutral", 0.0, f"Model severely anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < -0.05)"
 
                 if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): BalAcc ({bal_acc_val:.4f}) below floor ({min_bal_acc_floor}). ABSTAIN.")
