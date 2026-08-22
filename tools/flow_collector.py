@@ -52,8 +52,45 @@ def create_empty_bucket():
 
 current_buckets = {sym: create_empty_bucket() for sym in SUPPORTED_SYMBOLS}
 
+cumulative_cvd_map = {}
+
+def bridge_to_sqlite(sym, ts_ms, data):
+    import sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kline_cache.db")
+    try:
+        global cumulative_cvd_map
+        delta_vol = float(data["taker_buy_vol"] - data["taker_sell_vol"])
+        cumulative_cvd_map[sym] = cumulative_cvd_map.get(sym, 0.0) + delta_vol
+        cvd_val = cumulative_cvd_map[sym]
+        ofi_val = delta_vol
+        liq_long = float(data["liq_long_vol"])
+        liq_short = float(data["liq_short_vol"])
+        
+        with sqlite3.connect(db_path, timeout=10.0) as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS historical_order_flow (
+                    symbol TEXT,
+                    timestamp REAL,
+                    cvd REAL,
+                    ofi REAL,
+                    ob_imbalance_L2 REAL,
+                    ob_spread_L2 REAL,
+                    liq_long_1h REAL,
+                    liq_short_1h REAL,
+                    PRIMARY KEY (symbol, timestamp)
+                )
+            """)
+            conn.execute(
+                "INSERT OR REPLACE INTO historical_order_flow (symbol, timestamp, cvd, ofi, ob_imbalance_L2, ob_spread_L2, liq_long_1h, liq_short_1h) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (sym, ts_ms, cvd_val, ofi_val, 0.0, 0.0, liq_long, liq_short)
+            )
+            conn.commit()
+    except Exception as ex_db:
+        print(f"[Flow Collector SQLite Bridge Error] {sym}: {ex_db}", file=sys.stderr)
+
 def flush_symbol_bucket(sym, ts_ms, data):
-    """Flushes a completed 1-minute bar for a specific symbol to its daily Parquet file."""
+    """Flushes a completed 1-minute bar for a specific symbol to its daily Parquet file and SQLite cache."""
     # Only write if there was at least some trade or liquidation activity or valid bucket
     total_vol = data["taker_buy_vol"] + data["taker_sell_vol"]
     total_liq = data["liq_long_vol"] + data["liq_short_vol"]
@@ -96,6 +133,8 @@ def flush_symbol_bucket(sym, ts_ms, data):
             df_new.to_parquet(parquet_path, index=False)
     else:
         df_new.to_parquet(parquet_path, index=False)
+
+    bridge_to_sqlite(sym, ts_ms, data)
 
 def flush_all_buckets(ts_ms):
     global current_buckets

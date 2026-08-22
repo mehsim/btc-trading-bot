@@ -38,7 +38,9 @@ db_lock = threading.RLock()
 
 _in_quarantine_recovery = False
 
-def get_db_connection(target_db=DB_FILE):
+def get_db_connection(target_db=None):
+    if target_db is None:
+        target_db = get_db_path()
     global _in_quarantine_recovery
     for attempt in range(5):
         conn = None

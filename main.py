@@ -1908,72 +1908,6 @@ def run_daily_journal_scheduler():
         except Exception as e:
             print(f"[Journal Scheduler] Error: {e}")
 
-FUNDING_ARB_THRESHOLD = 0.001  # 0.1% — above this, shorts earn funding income
-FUNDING_ARB_SIZE_USD = 20.0    # Fixed notional size per arbitrage position
-
-def run_funding_rate_arbitrage_monitor():
-    """Monitor funding rates. When rate > 0.1%, open a small short to collect funding income."""
-    print("[Funding Arb] Monitor started.")
-    time.sleep(60)  # Wait for bot to initialize
-    while True:
-        try:
-            for sym in SUPPORTED_SYMBOLS:
-                rate = get_funding_rate(sym)
-                arb_key = f"funding_arb_{sym}"
-                existing = bot_state.get(arb_key)
-
-                if rate > FUNDING_ARB_THRESHOLD and not existing:
-                    # Check Circuit Breaker
-                    if circuit_breaker.is_circuit_active(symbol=sym):
-                        print(f"[Funding Arb] {sym} circuit breaker active. Skipping arb open.")
-                        continue
-                    # Check Pre-trade Checklist
-                    chk_passed, chk_msg, _, _ = risk_engine.evaluate_pre_trade_checklist(
-                        symbol=sym,
-                        position_size_usd=FUNDING_ARB_SIZE_USD,
-                        leverage_val=1.0,
-                        active_trades=bot_state.get("active_trades", []),
-                        bot_state=bot_state,
-                        df_dict={},
-                        interval="60",
-                        direction="Bearish"
-                    )
-                    if not chk_passed:
-                        print(f"[Funding Arb] {sym} pre-trade checklist blocked: {chk_msg}")
-                        continue
-
-                    # High positive funding — shorts earn. Open small short.
-                    print(f"[Funding Arb] {sym} funding rate {rate*100:.4f}% > 0.1%. Opening arb short.")
-                    if TRADE_MODE == "live":
-                        curr_sym_price = bot_state.get(f"live_price_{sym}") or get_fallback_price(sym) or 1.0
-                        qty_str = format_bybit_qty(sym, FUNDING_ARB_SIZE_USD / max(1e-6, curr_sym_price))
-                        res = place_bybit_order(symbol=sym, side="Sell", qty=qty_str, reduce_only=False)
-                        if res and res.get("retCode") == 0:
-                            bot_state[arb_key] = {"qty": qty_str, "open_rate": rate}
-                            send_telegram_alert(
-                                f"💰 *FUNDING ARB OPENED*\n"
-                                f"• Asset: {sym}\n"
-                                f"• Funding Rate: {rate*100:.4f}%\n"
-                                f"• Side: Short (collecting funding)\n"
-                                f"• Size: ${FUNDING_ARB_SIZE_USD}"
-                            )
-                elif existing and rate < FUNDING_ARB_THRESHOLD * 0.3:
-                    # Funding rate has normalized — close the arb short
-                    print(f"[Funding Arb] {sym} funding rate normalized ({rate*100:.4f}%). Closing arb short.")
-                    if TRADE_MODE == "live":
-                        qty_str = existing["qty"]
-                        res = place_bybit_order(symbol=sym, side="Buy", qty=qty_str, reduce_only=True)
-                        if res and res.get("retCode") == 0:
-                            bot_state.pop(arb_key, None)
-                            send_telegram_alert(
-                                f"✅ *FUNDING ARB CLOSED*\n"
-                                f"• Asset: {sym}\n"
-                                f"• Current Rate: {rate*100:.4f}%"
-                            )
-        except Exception as e:
-            print(f"[Funding Arb] Error: {e}")
-        time.sleep(300)  # Check every 5 minutes
-
 def run_daily_backup_scheduler():
     """
     Background scheduler that runs daily at 00:00 UTC.
@@ -8014,8 +7948,10 @@ def run_order_flow_persister():
                 # Extract and clear/reset current CVD & OFI buffers
                 to_write = []
                 for sym, state in list(order_flow_data.items()):
-                    cvd_val = state.get("cvd", 0.0)
-                    ofi_val = state.get("ofi", 0.0)
+                    minute_delta = state.get("cvd", 0.0)
+                    state["cumulative_cvd"] = state.get("cumulative_cvd", 0.0) + minute_delta
+                    cvd_val = state["cumulative_cvd"]
+                    ofi_val = state.get("ofi", 0.0) or minute_delta
                     ob_imb = state.get("ob_imbalance_L2", 0.0)
                     ob_spr = state.get("ob_spread_L2", 0.0)
                     liq_l = state.get("liq_long_1h", 0.0)
@@ -8032,6 +7968,19 @@ def run_order_flow_persister():
                 with db_write_lock:
                     conn = sqlite3.connect(DB_PATH, timeout=30.0)
                     conn.execute("PRAGMA journal_mode=WAL;")
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS historical_order_flow (
+                            symbol TEXT,
+                            timestamp REAL,
+                            cvd REAL,
+                            ofi REAL,
+                            ob_imbalance_L2 REAL,
+                            ob_spread_L2 REAL,
+                            liq_long_1h REAL,
+                            liq_short_1h REAL,
+                            PRIMARY KEY (symbol, timestamp)
+                        )
+                    """)
                     conn.executemany(
                         "INSERT OR REPLACE INTO historical_order_flow (symbol, timestamp, cvd, ofi, ob_imbalance_L2, ob_spread_L2, liq_long_1h, liq_short_1h) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         to_write
@@ -8104,8 +8053,6 @@ if __name__ == "__main__":
     threading.Thread(target=run_fallback_price_updater, name="price-fallback", daemon=True).start()
     # Start background order flow persister thread
     threading.Thread(target=run_order_flow_persister, name="order-flow-persister", daemon=True).start()
-    # Start funding rate arbitrage monitor thread
-    threading.Thread(target=run_funding_rate_arbitrage_monitor, name="funding-arb-monitor", daemon=True).start()
     # Start daily database and trade journal backup thread
     threading.Thread(target=run_daily_backup_scheduler, name="daily-backup-scheduler", daemon=True).start()
     # Start daily 00:00 UTC performance summary report thread

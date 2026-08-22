@@ -11,6 +11,7 @@ import os
 import sqlite3
 import threading
 import time
+import tempfile
 import unittest
 from typing import Dict, Any
 
@@ -27,6 +28,27 @@ from feature_availability import record_feature_sample, init_availability_db
 
 
 class TestConcurrencyRaces(unittest.TestCase):
+    temp_db = None
+    orig_db_path = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.orig_db_path = os.environ.get("DATABASE_PATH")
+        cls.temp_db = tempfile.NamedTemporaryFile(suffix="_concurrency_test.db", delete=False)
+        cls.temp_db.close()
+        os.environ["DATABASE_PATH"] = cls.temp_db.name
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.orig_db_path is not None:
+            os.environ["DATABASE_PATH"] = cls.orig_db_path
+        else:
+            os.environ.pop("DATABASE_PATH", None)
+        if cls.temp_db and os.path.exists(cls.temp_db.name):
+            try:
+                os.remove(cls.temp_db.name)
+            except Exception:
+                pass
 
     def setUp(self):
         init_decision_journal_db()

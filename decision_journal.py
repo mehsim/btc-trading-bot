@@ -113,7 +113,7 @@ _last_initialized_db = None
 def init_decision_journal_db(force: bool = False):
     global _last_initialized_db
     import database
-    curr_db = getattr(database, "DB_FILE", None)
+    curr_db = database.get_db_path()
     if _last_initialized_db == curr_db and not force:
         return
     with db_lock:
