@@ -1682,19 +1682,29 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     "reason":                 reason,
                 })
                 champ_mcc_val = champ_manifest.get("holdout_mcc", champ_manifest.get("cv_metrics", {}).get("mcc", {}).get("mean"))
-                champion_t = None
-                champion_p = None
+                if champion_exists and champ_names:
+                    try:
+                        n_champ = champ_manifest.get("feature_count", len(champ_names))
+                        champion_t = load_ensemble_classifier(c_prefix_t, n_features=n_champ, feature_names=champ_names)
+                        champion_p = load_ensemble_regressor(c_prefix_p, n_features=n_champ, feature_names=champ_names)
+                    except Exception as _le_compat:
+                        print(f"  [Champion-Challenger Warning] Failed to load legacy champion for paired test: {_le_compat}")
+                        champion_t = None
+                        champion_p = None
+                else:
+                    champion_t = None
+                    champion_p = None
             else:
                 try:
                     n_champ = champ_manifest.get("feature_count", X_holdout.shape[1])
-                    champion_t = load_ensemble_classifier(c_prefix_t, n_features=n_champ)
-                    champion_p = load_ensemble_regressor(c_prefix_p, n_features=n_champ)
+                    champion_t = load_ensemble_classifier(c_prefix_t, n_features=n_champ, feature_names=challenger_feature_names)
+                    champion_p = load_ensemble_regressor(c_prefix_p, n_features=n_champ, feature_names=challenger_feature_names)
                 except Exception as _le:
                     print(f"  [Champion-Challenger Warning] Failed to load champion: {_le}. Champion comparison unavailable; requiring challenger to strictly pass all predictive floors and holdout quality gates.")
                     champion_t = None
                     champion_p = None
         else:
-            print(f"  [Champion-Challenger] No existing champion for {name.upper()}. Saving challenger.")
+            print(f"  [Champion-Challenger] No existing champion for {name.upper()}. Evaluating challenger against absolute governance floors.")
 
         # Always compute challenger predictions on frozen holdout dataset
         chal_pred_t = final_ensemble_t.predict(X_holdout)
@@ -1717,8 +1727,19 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         if champion_t is not None:
             try:
-                champ_pred_t = champion_t.predict(X_holdout)
-                champ_pred_p = champion_p.predict(X_holdout)
+                # Construct champion holdout feature slice matching its exact feature names
+                champ_features = getattr(champion_t, "feature_names", None) or champ_manifest.get("feature_names", list(X_holdout.columns))
+                X_holdout_champ = pd.DataFrame(index=X_holdout.index)
+                for f_name in champ_features:
+                    if f_name in X_holdout.columns:
+                        X_holdout_champ[f_name] = X_holdout[f_name]
+                    elif "df" in locals() and f_name in df.columns:
+                        X_holdout_champ[f_name] = df.iloc[split_idx + embargo_len:][f_name]
+                    else:
+                        X_holdout_champ[f_name] = 0.0
+
+                champ_pred_t = champion_t.predict(X_holdout_champ)
+                champ_pred_p = champion_p.predict(X_holdout_champ)
                 champ_acc = float(balanced_accuracy_score(y_holdout_trend, champ_pred_t))
                 champ_mae = float(mean_absolute_error(y_holdout_price, champ_pred_p))
                 champ_mcc = float(matthews_corrcoef(y_holdout_trend, champ_pred_t))
@@ -1772,9 +1793,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_brier = 0.99
                 chal_ece = 0.99
         else:
-            print(f"  [Champion-Challenger] No live champion model for {name.upper()} (contract updated or new model). Evaluating against recorded manifest baseline.")
+            print(f"  [Champion-Challenger] No live champion model available for {name.upper()}. Evaluating against governance floors and baseline.")
             champ_manifest_mcc = champ_manifest.get("holdout_mcc", champ_manifest.get("cv_metrics", {}).get("mcc", {}).get("mean")) if isinstance(champ_manifest, dict) else None
-            if champ_manifest_mcc is not None:
+            
+            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+            _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+            _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+
+            if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc:
+                print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                should_save = False
+            elif champ_manifest_mcc is not None:
                 champ_mcc_baseline = float(champ_manifest_mcc)
                 if holdout_mcc < (champ_mcc_baseline - 0.010):
                     print(f"  [Champion-Challenger] REJECTED: Challenger holdout MCC ({holdout_mcc:.4f}) regressed against champion manifest baseline ({champ_mcc_baseline:.4f} - 0.010 tolerance).")
@@ -1783,7 +1812,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     print(f"  [Champion-Challenger] PASSED: Challenger holdout MCC ({holdout_mcc:.4f}) meets or exceeds champion manifest baseline ({champ_mcc_baseline:.4f}).")
                     should_save = True
             else:
-                should_save = True
+                _min_mcc = TIMEFRAME_MIN_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_mcc", 0.05))
+                _cv_mcc = float(np.mean(primary_mccs)) if primary_mccs else holdout_mcc
+                if _cv_mcc < _min_mcc:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger CV MCC ({_cv_mcc:.4f}) below primary floor ({_min_mcc}).")
+                    should_save = False
+                else:
+                    print(f"  [Champion-Challenger] PASSED: Challenger cleared all initial predictive floors.")
+                    should_save = True
 
         # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
         import config

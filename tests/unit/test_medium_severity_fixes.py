@@ -347,6 +347,42 @@ def test_calculate_replay_statistics_interval_scaling():
     assert stats_15m["expectancy_r"] > 0
 
 
+def test_walk_forward_evaluation_type_accurate_labeling():
+    """Verify walk_forward_engine accurately labels evaluation_type based on whether train_fn succeeded."""
+    import pandas as pd
+    from walk_forward_engine import run_walk_forward_backtest
+    
+    # Generate mock df
+    df = pd.DataFrame({
+        "timestamp": [1000000 + i * 900000 for i in range(1500)],
+        "close": [100.0 + i * 0.1 for i in range(1500)],
+        "open": [100.0 + i * 0.1 for i in range(1500)],
+        "high": [101.0 + i * 0.1 for i in range(1500)],
+        "low": [99.0 + i * 0.1 for i in range(1500)],
+        "volume": [1000.0 for _ in range(1500)],
+    })
+    
+    # Dummy simulator
+    def dummy_sim(test_df):
+        return {"trades": [{"net_return": 0.01, "sl_frac": 0.01}]}
+        
+    # 1. Without train_fn -> rolling_window_replay
+    res_replay = run_walk_forward_backtest(df, train_window_bars=500, test_window_bars=100, step_bars=200, trade_simulator_fn=dummy_sim)
+    assert res_replay["status"] == "success"
+    assert res_replay["windows"][0]["evaluation_type"] == "rolling_window_replay"
+    assert res_replay["windows"][0]["is_refitted"] is False
+
+    # 2. With failing train_fn -> fallback simulator + rolling_window_replay (not refitted)
+    def failing_train_fn(train_df):
+        raise ValueError("Simulated train error")
+        
+    res_failed_train = run_walk_forward_backtest(df, train_window_bars=500, test_window_bars=100, step_bars=200, trade_simulator_fn=dummy_sim, train_fn=failing_train_fn)
+    assert res_failed_train["status"] == "success"
+    assert res_failed_train["windows"][0]["evaluation_type"] == "rolling_window_replay"
+    assert res_failed_train["windows"][0]["is_refitted"] is False
+
+
+
 
 
 

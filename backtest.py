@@ -774,7 +774,45 @@ def run_backtest():
             pessimistic_mode=True,
             return_trades=True
         )
-        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn)
+
+        def train_window_models(train_df):
+            try:
+                feat_cols = [c for c in train_df.columns if c not in ["timestamp", "open", "high", "low", "close", "volume", "target_trend", "target_price", "target_direction", "future_ret"]]
+                if not feat_cols or len(train_df) < 100:
+                    return None
+                
+                df_t = train_df.dropna(subset=["close"]).copy()
+                if "target_trend" not in df_t.columns:
+                    ret = df_t["close"].pct_change(12).shift(-12).fillna(0.0)
+                    df_t["target_trend"] = np.where(ret > 0.005, 2, np.where(ret < -0.005, 0, 1))
+                    df_t["target_price"] = ret * df_t["close"]
+                    
+                X_tr = df_t[feat_cols].fillna(0.0)
+                y_tr_t = df_t["target_trend"].astype(int)
+                y_tr_p = df_t["target_price"].astype(float)
+                
+                from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+                m_t = HistGradientBoostingClassifier(max_iter=30, random_state=42).fit(X_tr, y_tr_t)
+                m_p = HistGradientBoostingRegressor(max_iter=30, random_state=42).fit(X_tr, y_tr_p)
+                
+                return partial(
+                    run_single_backtest,
+                    models_trending={"trend": m_t, "price": m_p},
+                    models_ranging={"trend": m_t, "price": m_p},
+                    p95=p95,
+                    max_conf=max_conf,
+                    min_confidence=MIN_CONFIDENCE,
+                    fee_rate=FEE_RATE,
+                    interval=INTERVAL,
+                    rule_feature=RULE_FEATURE,
+                    pessimistic_mode=True,
+                    return_trades=True
+                )
+            except Exception as ex_tr:
+                log_event("WARNING", f"Window model refit warning: {ex_tr}")
+                return None
+
+        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn, train_fn=train_window_models)
         if wf_summary.get("status") == "success":
             print("=" * 90)
             print("ROLLING WINDOW WALK-FORWARD VALIDATION SUMMARY")

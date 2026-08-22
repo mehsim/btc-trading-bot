@@ -112,12 +112,17 @@ def run_walk_forward_backtest(
         test_df = df.iloc[start_idx + train_window_bars : start_idx + train_window_bars + test_window_bars].copy()
         
         sim_fn_to_use = trade_simulator_fn
-        if is_refitted:
+        window_is_refitted = False
+        if callable(train_fn):
             try:
                 fitted_models = train_fn(train_df)
                 if callable(fitted_models):
                     sim_fn_to_use = fitted_models
+                    window_is_refitted = True
+                else:
+                    log_event("WARNING", f"[WalkForward Warning] train_fn returned non-callable {type(fitted_models)}. Using fallback simulator.")
             except Exception as tr_err:
+                log_event("WARNING", f"[WalkForward Warning] train_fn execution failed: {tr_err}. Using fallback simulator.")
                 sim_fn_to_use = trade_simulator_fn
 
         trade_returns = []
@@ -195,8 +200,8 @@ def run_walk_forward_backtest(
             "window_end": _get_ts(test_df.iloc[-1]),
             "trades": len(trade_returns),
             "status": "completed" if len(trade_returns) > 0 else "no_trades",
-            "evaluation_type": "refitted_walk_forward" if is_refitted else "rolling_window_replay",
-            "is_refitted": is_refitted,
+            "evaluation_type": "refitted_walk_forward" if window_is_refitted else "rolling_window_replay",
+            "is_refitted": window_is_refitted,
             "win_rate": win_rate,
             "cum_return": cum_ret,
             "max_drawdown": max_dd,
