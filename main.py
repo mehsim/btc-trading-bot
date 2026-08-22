@@ -6314,15 +6314,18 @@ def main():
                             mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
                             bal_acc_val = getattr(active_model_trend, "manifest_bal_acc", None) or models_tf.get(regime_key, {}).get("manifest_bal_acc") or models_tf.get("manifest_bal_acc")
 
-                            if mcc_val is None:
+                            if mcc_val is None or bal_acc_val is None or mcc_min_val is None:
                                 man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
                                 if os.path.exists(man_path):
                                     try:
                                         with open(man_path, "r") as mf:
                                             _mdata = json.load(mf)
-                                            mcc_val = _mdata.get("manifest_mcc")
-                                            mcc_min_val = _mdata.get("manifest_mcc_min")
-                                            bal_acc_val = _mdata.get("manifest_bal_acc")
+                                            if mcc_val is None:
+                                                mcc_val = _mdata.get("manifest_mcc") or _mdata.get("cv_metrics", {}).get("mcc", {}).get("mean")
+                                            if mcc_min_val is None:
+                                                mcc_min_val = _mdata.get("manifest_mcc_min") or _mdata.get("cv_metrics", {}).get("mcc", {}).get("min")
+                                            if bal_acc_val is None:
+                                                bal_acc_val = _mdata.get("manifest_bal_acc") or _mdata.get("cv_metrics", {}).get("balanced_accuracy", {}).get("mean")
                                     except Exception as mf_err:
                                         log_event("WARNING", f"Failed to load manifest {man_path}: {mf_err}")
 
@@ -6713,6 +6716,10 @@ def main():
                                         _meta_feats_to_use = features
                                     X_meta_live = latest_candle_weighted[_meta_feats_to_use].to_frame().T if isinstance(latest_candle_weighted[_meta_feats_to_use], pd.Series) else latest_candle_weighted[_meta_feats_to_use]
                                     X_meta_input = _slice_model_input(active_meta_model, X_meta_live)
+                                    if hasattr(X_meta_input, "apply"):
+                                        X_meta_input = X_meta_input.apply(pd.to_numeric, errors='coerce').fillna(0.0)
+                                    else:
+                                        X_meta_input = np.nan_to_num(np.array(X_meta_input, dtype=float), nan=0.0)
                                     meta_pred = int(active_meta_model.predict(X_meta_input)[0])
                                     if meta_pred == 1:
                                         meta_adjustment = -0.05  # Lowers required gate threshold by 5%

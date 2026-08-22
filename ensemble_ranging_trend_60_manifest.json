@@ -207,7 +207,10 @@
     8750,
     20121
   ],
-  "hmac_signature": "d6b0fb76bbc4abfb8c778df61fce80b1c14c48f6d3188b3dd2cb4159a6a91534",
   "feature_pipeline_version": "v3.1.0",
-  "manifest_mcc": 0.0951
+  "manifest_mcc": 0.0951,
+  "manifest_bal_acc": 0.3615,
+  "manifest_mcc_min": -0.0068,
+  "promoted": true,
+  "hmac_signature": "e79ead4adb7823f1499c371c3411324ba24e6133f37a5423f297ec43bdf3f893"
 }
