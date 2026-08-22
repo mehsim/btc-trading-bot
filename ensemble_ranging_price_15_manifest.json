@@ -203,7 +203,7 @@
     39521,
     18255
   ],
-  "promoted": false,
+  "promoted": true,
   "evaluation_timestamp": "2026-08-22T11:16:16.587921+00:00",
-  "hmac_signature": "2126a5621448077517a7b2ca89fa79199d64cac5bd80e2a99348eac6bf8ed04d"
+  "hmac_signature": "aa3699b85fec875776194726b87b8ea22ef56544bd79b020a31b17584422ad58"
 }
