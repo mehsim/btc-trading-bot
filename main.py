@@ -1388,7 +1388,7 @@ def get_bybit_closed_pnl(symbol, limit=1):
             return pnl_list[0]
     return None
 
-def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms):
+def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms, expected_total_qty=None):
     """Retrieve all closed PnL records for a symbol from entry_time_ms to now and sum them up."""
     if not entry_time_ms or float(entry_time_ms) <= 0:
         entry_time_ms = int((time.time() - 86400) * 1000)
@@ -1420,6 +1420,13 @@ def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms):
                     
         if matched_count == 0:
             return None
+
+        # If trade previously scaled out, ensure all legs (cumulative closed quantity) are published
+        if expected_total_qty is not None and expected_total_qty > 0:
+            total_closed_qty = sum(exit_quantities)
+            if total_closed_qty < 0.90 * expected_total_qty:
+                # Missing final leg from venue lag — signal retry loop to wait for venue publication
+                return None
 
         avg_exit_price = None
         if exit_prices and exit_quantities:
@@ -1459,15 +1466,21 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
     if active_trade:
         current_sl = float(active_trade.get("stop_loss", 0.0))
         direction_val = active_trade.get("direction", "Bullish")
-        is_long = direction_val in ("Bullish", "Buy", "Long")
-        # Monotonic Stop Loss Invariant: Locked risk cannot increase
+        curr_state_str = active_trade.get("stop_state", "INITIAL")
+        target_state_str = active_trade.get("target_stop_state", curr_state_str)
+        # Institutional Monotonic Stop Loss State Machine Invariant
         if current_sl > 0:
-            if is_long and sl_price < (current_sl - 1e-4):
-                print(f"[Bybit API Monotonic Guard] Rejected Long SL widening: proposed ${sl_price:.4f} < current ${current_sl:.4f}.")
+            is_valid_transition, reason_msg = StopStateMachine.validate_monotonic_stop_update(
+                direction=direction_val,
+                current_sl=current_sl,
+                proposed_sl=sl_price,
+                current_state_str=curr_state_str,
+                target_state_str=target_state_str
+            )
+            if not is_valid_transition:
+                print(f"[Bybit API Monotonic Guard] Rejected SL update: {reason_msg}.")
                 return False
-            elif not is_long and sl_price > (current_sl + 1e-4):
-                print(f"[Bybit API Monotonic Guard] Rejected Short SL widening: proposed ${sl_price:.4f} > current ${current_sl:.4f}.")
-                return False
+            active_trade["stop_state"] = target_state_str
 
     if live_price is not None:
         if side == "Buy" or side == "Long":  # Long position: Stop Loss must be < current price
@@ -5445,12 +5458,13 @@ def main():
                             if not entry_time_ms:
                                 entry_time_ms = int((end_time - (int(iv) * 60)) * 1000)
                             
+                            expected_qty = float(active_trade.get("qty", 0.0))
                             bybit_pnl_data = None
-                            for pnl_attempt in range(3):
-                                bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms)
+                            for pnl_attempt in range(5):
+                                bybit_pnl_data = get_bybit_accumulated_closed_pnl(active_symbol, entry_time_ms, expected_total_qty=expected_qty)
                                 if bybit_pnl_data is not None:
                                     break
-                                time.sleep(0.4)
+                                time.sleep(0.5)
 
                             if bybit_pnl_data:
                                 bybit_realized_pnl = bybit_pnl_data["total_pnl"]
@@ -5461,6 +5475,11 @@ def main():
                                     actual_margin = round(bybit_pnl_data["total_entry_value"] / lev, 2)
                                     active_trade["position_size_usd"] = actual_margin
                                     position_size_usd = actual_margin
+                            elif bybit_realized_pnl is None and entry_price > 0 and expected_qty > 0:
+                                # Venue publication delay fallback: estimate realized PnL from exit price rather than leaving as 0.0
+                                est_exit = bybit_exit_price if bybit_exit_price is not None else current_price
+                                price_diff = (est_exit - entry_price) if direction == "Bullish" else (entry_price - est_exit)
+                                bybit_realized_pnl = round(price_diff * expected_qty, 4)
 
                             actual_exit = bybit_exit_price if bybit_exit_price is not None else current_price
                             tp_hit = (actual_exit >= take_profit) if direction == "Bullish" else (actual_exit <= take_profit)
@@ -7651,11 +7670,13 @@ def main():
                                                     scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
                                                     new_stop_dist = original_stop_dist * scale_ratio
                                                 
-                                                    # Enforce absolute floor: Never compress SL tighter than 0.75x ATR to protect against spread noise
-                                                    min_allowed_sl_dist = atr_dollars * 0.75
+                                                    # Enforce absolute approved floor: Never compress SL tighter than approved leverage-aware ATR floor and % floor
+                                                    min_atr_mult = 1.0 if float(leverage_val) > 10.0 else 0.75
+                                                    min_sl_pct = getattr(config, "MIN_SL_PCT_CONFIG", {}).get(str(iv), 0.008)
+                                                    min_allowed_sl_dist = max(atr_dollars * min_atr_mult, entry_price * min_sl_pct)
                                                     if new_stop_dist < min_allowed_sl_dist:
                                                         new_stop_dist = min_allowed_sl_dist
-                                                        print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to 0.75x ATR (${min_allowed_sl_dist:.4f}) to protect against spread noise.")
+                                                        print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to approved floor {min_atr_mult}x ATR (${min_allowed_sl_dist:.4f}).")
                                                 
                                                     if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
                                                         new_sl_price = entry_price - new_stop_dist

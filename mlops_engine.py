@@ -289,7 +289,7 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
 
         cand_ece = cand.get("ece", cand.get("calibrator_ece", 0.0))
         cand_brier = cand.get("brier_score", 0.20)
-        cand_sharpe = cand.get("sharpe_oos", 1.0)
+        cand_sharpe = cand.get("sharpe_oos", 0.0)
         cand_std = cand.get("cv_bal_acc_std", 0.0)
         cand_range = cand.get("cv_bal_acc_range", 0.0)
 

@@ -1924,6 +1924,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         chal_losses = abs(sum(r for r in chal_trade_rets if r < 0))
                         pf_chal = float(chal_gains / max(1e-6, chal_losses)) if chal_losses > 0 else (1.5 if chal_gains > 0 else 1.0)
 
+                        # Empirical out-of-sample trade Sharpe ratio
+                        chal_sharpe = 0.0
+                        if chal_trade_rets and len(chal_trade_rets) >= 5:
+                            _rets_arr = np.array(chal_trade_rets, dtype=float)
+                            _ret_std = float(np.std(_rets_arr))
+                            if _ret_std > 1e-9:
+                                chal_sharpe = float((np.mean(_rets_arr) / _ret_std) * np.sqrt(max(1, len(_rets_arr))))
+
                         # Compute empirical holdout profit factor for champion (or baseline)
                         pf_champ = 1.0
                         if champion_t is not None and "champ_pred_t" in locals():
@@ -2000,7 +2008,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "brier_score": chal_brier,
                 "val_accuracy": chal_acc,
                 "val_mae": locals().get("chal_mae", 0.0),
-                "sharpe_oos": locals().get("chal_sharpe", 1.0),
+                "sharpe_oos": locals().get("chal_sharpe", 0.0),
                 "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
             }
             champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and not is_distribution_shifted) else None

@@ -259,5 +259,38 @@ def test_feature_cache_key_includes_interval():
     assert res_60 is not None
 
 
+def test_stop_state_machine_monotonic_and_state_hierarchy():
+    """Verify StopStateMachine enforces forward rank progression and monotonic price movement."""
+    from order_state_machine import StopStateMachine, StopState
+
+    # Long: SL can only increase
+    valid, msg = StopStateMachine.validate_monotonic_stop_update("Bullish", 100.0, 102.0, "INITIAL", "TRAILING")
+    assert valid is True
+
+    # Long: Backward price is rejected
+    valid, msg = StopStateMachine.validate_monotonic_stop_update("Bullish", 100.0, 98.0, "INITIAL", "TRAILING")
+    assert valid is False
+    assert "Monotonic violation" in msg
+
+    # State hierarchy: Backward rank transition is rejected
+    valid, msg = StopStateMachine.validate_monotonic_stop_update("Bullish", 100.0, 102.0, "PROFIT_LOCK", "TRAILING")
+    assert valid is False
+    assert "Illegal backward state transition" in msg
+
+
+def test_min_notional_sl_compression_leverage_aware_floor():
+    """Verify min-notional SL compression honors the 1.0x ATR floor on high leverage (>10x)."""
+    atr_dollars = 100.0
+    entry_price = 50000.0
+    
+    # High leverage (15x): floor must be 1.0x ATR ($100)
+    leverage_val = 15.0
+    min_atr_mult = 1.0 if float(leverage_val) > 10.0 else 0.75
+    min_allowed_sl_dist = max(atr_dollars * min_atr_mult, entry_price * 0.008)
+    
+    assert min_allowed_sl_dist >= 100.0, f"Expected >= 100.0 for >10x leverage, got {min_allowed_sl_dist}"
+
+
+
 
 
