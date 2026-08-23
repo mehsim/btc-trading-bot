@@ -155,7 +155,10 @@ def run_pain_feedback_verifier():
             time.sleep(3600)
             from data import get_history
             import pain_feedback
-            pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
+            if hasattr(pain_feedback, 'verify_pending_pain_trades'):
+                pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
+            elif hasattr(pain_feedback, 'pain_feedback') and hasattr(pain_feedback.pain_feedback, 'verify_pending_pain_trades'):
+                pain_feedback.pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
         except Exception as e:
             print(f"[Pain Feedback Verifier Error] Exception in verification loop: {e}")
 

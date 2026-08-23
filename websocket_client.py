@@ -295,7 +295,7 @@ def start_ws(bot_state=None):
             except Exception as ex_websocket_client:
                 log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
             ws.run_forever(
-                ping_interval=20, ping_timeout=10,
+                ping_interval=0,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,
@@ -441,7 +441,7 @@ def start_private_ws(bot_state=None):
             except Exception as ex_websocket_client:
                 log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
             ws.run_forever(
-                ping_interval=20, ping_timeout=10,
+                ping_interval=0,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,

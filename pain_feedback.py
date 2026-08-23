@@ -153,3 +153,13 @@ class PainFeedbackLoop:
 # Global instance for app-wide access
 pain_feedback = PainFeedbackLoop()
 
+def verify_pending_pain_trades(database_module=None, fetch_kline_func=None):
+    return pain_feedback.verify_pending_pain_trades(database_module=database_module, fetch_kline_func=fetch_kline_func)
+
+def register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor):
+    return pain_feedback.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor)
+
+def get_effective_floor(symbol):
+    return pain_feedback.get_effective_floor(symbol)
+
+

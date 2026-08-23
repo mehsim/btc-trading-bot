@@ -251,7 +251,7 @@ def run_collector():
                 on_error=on_error,
                 on_close=on_close
             )
-            ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE}, ping_interval=20, ping_timeout=10)
+            ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE}, ping_interval=0)
         except Exception as e:
             print(f"[Flow Collector Exception] {e}. Reconnecting in 5s...")
             time.sleep(5)

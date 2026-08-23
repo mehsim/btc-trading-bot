@@ -1983,7 +1983,10 @@ def run_pain_feedback_verifier():
             time.sleep(3600)  # Check hourly
             from data import get_history
             import pain_feedback
-            pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
+            if hasattr(pain_feedback, 'verify_pending_pain_trades'):
+                pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
+            elif hasattr(pain_feedback, 'pain_feedback') and hasattr(pain_feedback.pain_feedback, 'verify_pending_pain_trades'):
+                pain_feedback.pain_feedback.verify_pending_pain_trades(database_module=database, fetch_kline_func=get_history)
         except Exception as e:
             print(f"[Pain Feedback Verifier Error] Exception in verification loop: {e}")
 
@@ -2751,7 +2754,7 @@ def start_ws():
             except Exception:
                 pass
             ws.run_forever(
-                ping_interval=20, ping_timeout=10,
+                ping_interval=0,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,
@@ -2912,7 +2915,7 @@ def start_private_ws():
             except Exception:
                 pass
             ws.run_forever(
-                ping_interval=20, ping_timeout=10,
+                ping_interval=0,
                 http_proxy_host=proxy_host,
                 http_proxy_port=proxy_port,
                 http_proxy_auth=proxy_auth,
