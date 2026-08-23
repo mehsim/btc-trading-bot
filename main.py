@@ -3611,10 +3611,10 @@ def get_orderbook_imbalance(symbol=None):
 def calculate_historical_thresholds(model_trend, interval):
     if model_trend is None:
         return 0.55, 0.75
-    print(f"Fetching historical data to calibrate confidence percentiles (last 5,000 candles for {SYMBOL} + BTCUSDT on {interval}m interval)...")
+    print(f"Fetching historical data to calibrate confidence percentiles (last 1,000 candles for {SYMBOL} + BTCUSDT on {interval}m interval)...")
     try:
-        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=5)
-        df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=5)
+        df_target = get_history(symbol=SYMBOL, interval=interval, limit=1000, pages=1)
+        df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=1)
         
         if df_target is not None and len(df_target) > 0 and df_btc is not None and len(df_btc) > 0:
             df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
