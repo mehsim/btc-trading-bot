@@ -194,8 +194,8 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         conn = safe_get_sqlite_conn(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT timestamp, open, high, low, close, volume, turnover FROM kline_data WHERE symbol=? AND interval=? ORDER BY timestamp ASC",
-            (symbol, str(interval))
+            "SELECT timestamp, open, high, low, close, volume, turnover FROM (SELECT timestamp, open, high, low, close, volume, turnover FROM kline_data WHERE symbol=? AND interval=? ORDER BY timestamp DESC LIMIT ?) ORDER BY timestamp ASC",
+            (symbol, str(interval), max(target_count * 2, 5000))
         )
         rows = cursor.fetchall()
         conn.close()
@@ -502,14 +502,35 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             df_combined = df_combined.iloc[-30000:]
             
         try:
-            with db_write_lock:
-                conn = safe_get_sqlite_conn(DB_PATH)
-                conn.executemany(
-                    "INSERT OR REPLACE INTO kline_data (symbol, interval, timestamp, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [(symbol, str(interval), float(row["timestamp"]), float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row["volume"]), float(row["turnover"])) for _, row in df_combined.iterrows()]
-                )
-                conn.commit()
-                conn.close()
+            # Only insert new/updated candles into SQLite to avoid slow re-inserting 30,000 rows on every query
+            rows_to_save = None
+            if 'df_new' in locals() and df_new is not None and not df_new.empty:
+                rows_to_save = df_new
+            elif 'new_data' in locals() and new_data:
+                rows_to_save = pd.DataFrame(new_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
+            elif df_cache is None or df_cache.empty:
+                rows_to_save = df_history
+            
+            if rows_to_save is not None and len(rows_to_save) > 0:
+                with db_write_lock:
+                    conn = safe_get_sqlite_conn(DB_PATH)
+                    records = list(zip(
+                        [symbol] * len(rows_to_save),
+                        [str(interval)] * len(rows_to_save),
+                        rows_to_save["timestamp"].astype(float).tolist(),
+                        rows_to_save["open"].astype(float).tolist(),
+                        rows_to_save["high"].astype(float).tolist(),
+                        rows_to_save["low"].astype(float).tolist(),
+                        rows_to_save["close"].astype(float).tolist(),
+                        rows_to_save["volume"].astype(float).tolist(),
+                        rows_to_save["turnover"].astype(float).tolist()
+                    ))
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO kline_data (symbol, interval, timestamp, open, high, low, close, volume, turnover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        records
+                    )
+                    conn.commit()
+                    conn.close()
         except Exception as e:
             print(f"[Cache Write Error] {e}")
 
