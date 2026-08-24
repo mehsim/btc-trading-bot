@@ -318,11 +318,11 @@ TIMEFRAME_CONFIG = {
     },
     "60": {   # 1H Timeframe - High-Conviction Swing (Targets ~3-4 trades/day across portfolio)
         "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 10)),
-        "sl_mult": _get_tf_env("TF_60M_SL_MULT", 1.00),
+        "sl_mult": _get_tf_env("TF_60M_SL_MULT", 0.6585006543095501),
         "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.40),
         "min_adx": _get_tf_env("TF_60M_MIN_ADX", 24.0),
-        "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.20),
-        "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.40)
+        "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.258257285199672),
+        "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.4746788008303522)
     },
     "120": {  # 2H Timeframe - Extended Swing
         "lookahead": int(_get_tf_env("TF_120M_LOOKAHEAD", 12)),
