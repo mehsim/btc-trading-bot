@@ -259,11 +259,11 @@ class SignalEvaluator:
                     probs = models["trend"].predict_proba(row_X_sliced)[0]
                     pred_pct = float(models["price"].predict(row_X_sliced)[0])
 
-                    _model_key = f"ensemble_{_regime_key}_trend_{interval}"
+                    _model_key = f"{symbol}_ensemble_{_regime_key}_trend_{interval}"
                     _recent_argmax[_model_key].append(int(np.argmax(probs)))
-                    if len(_recent_argmax[_model_key]) >= 5:
+                    if len(_recent_argmax[_model_key]) >= 30:
                         shares = np.bincount(_recent_argmax[_model_key], minlength=3) / len(_recent_argmax[_model_key])
-                        if shares.max() > 0.95:
+                        if shares.max() >= 0.98:
                             log_event("WARNING", f"[{_model_key}] degenerate: {shares.round(3)} over "
                                                  f"{len(_recent_argmax[_model_key])} predictions — abstaining")
                             return "Neutral", 0.0, f"Model {_model_key} degenerate on live predictions"
