@@ -485,7 +485,9 @@ class JointRiskBudgetAllocator:
         df_completed: Optional[pd.DataFrame] = None,
         context_multipliers: Optional[Dict[str, float]] = None,
         database_module = None,
-        mcc_val: Optional[float] = None
+        mcc_val: Optional[float] = None,
+        stop_distance: Optional[float] = None,
+        target_distance: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Jointly optimizes (stop_distance, target_distance, position_size, capital_at_risk, expected_utility).
@@ -503,19 +505,27 @@ class JointRiskBudgetAllocator:
         max_available_risk_usd = total_equity * self.max_capital_risk_pct * avail_budget_factor
 
         # 2. Invariant Stop Loss Distance (Structure + Volatility Grounded, NOT confidence-squeezed)
-        base_stop_dist = calculate_final_stop_distance(
-            entry_price=entry_price,
-            atr_dollar=atr_dollars,
-            symbol=symbol,
-            df=df_completed,
-            gmm_multiplier=1.5 * stop_exp,
-            database_module=database_module
-        )
-        stop_distance = max(base_stop_dist, entry_price * 0.005) # Minimum 0.5% stop floor
+        if stop_distance is not None and stop_distance > 0:
+            stop_dist = max(float(stop_distance), entry_price * 0.002)
+        else:
+            base_stop_dist = calculate_final_stop_distance(
+                entry_price=entry_price,
+                atr_dollar=atr_dollars,
+                symbol=symbol,
+                df=df_completed,
+                gmm_multiplier=1.5 * stop_exp,
+                database_module=database_module
+            )
+            stop_dist = max(base_stop_dist, entry_price * 0.005) # Minimum 0.5% stop floor
+        stop_distance = stop_dist
 
         # 3. Dynamic Target Distance
-        raw_target_dist = stop_distance * self.base_min_rr * target_exp
-        target_distance = max(raw_target_dist, entry_price * 0.008) # Minimum 0.8% target floor
+        if target_distance is not None and target_distance > 0:
+            target_dist = max(float(target_distance), entry_price * 0.003)
+        else:
+            raw_target_dist = stop_distance * self.base_min_rr * target_exp
+            target_dist = max(raw_target_dist, entry_price * 0.008) # Minimum 0.8% target floor
+        target_distance = target_dist
 
         # 4. MHI-Tied Fractional Kelly Sizing
         max_kelly_frac = self.get_mhi_max_kelly(mhi_score)

@@ -7266,7 +7266,9 @@ def main():
                                             portfolio_heat=portfolio_heat,
                                             mhi_score=mhi_val,
                                             df_completed=df_completed,
-                                            mcc_val=_mcc_val
+                                            mcc_val=_mcc_val,
+                                            stop_distance=abs(entry_price - stop_loss_price),
+                                            target_distance=abs(entry_price - take_profit_price)
                                         )
                                         if not budget_res.get("execution_permitted", True):
                                             rej_reason = budget_res.get("reason", "Halted by Risk Budget Allocator")
