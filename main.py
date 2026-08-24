@@ -7835,8 +7835,13 @@ def main():
                                 matched_pred["dynamic_threshold"] = float(dynamic_conf_threshold)
                                 matched_pred["threshold_base"] = float(economic_base_threshold) if 'economic_base_threshold' in locals() else None
                                 matched_pred["threshold_adjustments"] = adjustments_applied if 'adjustments_applied' in locals() else []
+                                try:
+                                    database.save_prediction(matched_pred)
+                                except Exception as ex_db1:
+                                    log_event("WARNING", f"[Prediction DB] Failed saving matched prediction: {ex_db1}")
                             else:
                                 bot_state["prediction_history"].append({
+                                    "prediction_id": f"{symbol}_{iv}_{int(c_ts_target)}",
                                     "symbol": symbol,
                                     "timestamp": float(time.time()),
                                     "candle_timestamp": c_ts_target,
@@ -7859,6 +7864,10 @@ def main():
                                         "success": None
                                     }
                                 })
+                                try:
+                                    database.save_prediction(bot_state["prediction_history"][-1])
+                                except Exception as ex_db2:
+                                    log_event("WARNING", f"[Prediction DB] Failed saving new prediction: {ex_db2}")
                             
                                 max_pred_cap = getattr(config, "MAX_PREDICTION_HISTORY_MEMORY", 500)
                                 if len(bot_state["prediction_history"]) > max_pred_cap:

@@ -374,6 +374,7 @@ class SignalEvaluator:
                                 existing_p["dynamic_threshold"] = float(eval_threshold)
                             else:
                                 new_pred = {
+                                    "prediction_id": f"{symbol}_{interval}_{int(c_ts)}",
                                     "symbol": str(symbol),
                                     "timestamp": float(time.time()),
                                     "candle_timestamp": c_ts,

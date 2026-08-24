@@ -415,7 +415,9 @@ def get_completed_trades(limit: int = 100) -> List[Dict[str, Any]]:
 
 
 def save_prediction(pred) -> bool:
-    p_id = pred.get("prediction_id") or f"{pred.get('symbol')}_{int(pred.get('timestamp', 0))}"
+    c_ts = pred.get("candle_timestamp") or pred.get("timestamp", 0)
+    p_id = pred.get("prediction_id") or f"{pred.get('symbol')}_{pred.get('interval', '15')}_{int(c_ts)}"
+    pred["prediction_id"] = p_id
     with db_lock:
         conn = get_db_connection()
         try:
