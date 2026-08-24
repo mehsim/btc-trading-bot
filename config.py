@@ -43,10 +43,10 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.015, "30": 0.035, "default": 0.050}
-TIMEFRAME_MIN_BAL_ACC = {"15": 0.345, "30": 0.350, "default": 0.360}
-TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.010, "30": 0.015, "default": 0.020}
-TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.335, "30": 0.338, "default": 0.340}
+TIMEFRAME_MIN_MCC = {"15": 0.015, "30": 0.035, "60": 0.040, "default": 0.050}
+TIMEFRAME_MIN_BAL_ACC = {"15": 0.345, "30": 0.350, "60": 0.348, "default": 0.360}
+TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.010, "30": 0.015, "60": 0.015, "default": 0.020}
+TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.335, "30": 0.338, "60": 0.338, "default": 0.340}
 
 # Dynamic Regime-Based Model Routing (Trending vs Ranging)
 # When False (Default): Routes to validated universal/trending models across all market regimes.

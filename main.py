@@ -6538,8 +6538,12 @@ def main():
                             dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
                             adjustments_applied = [("economic_base", dynamic_conf_threshold)]
 
-                            # ADX Regime Floor Filter
-                            min_adx_thresh = float(cfg.get("min_adx", 16.0))
+                            # ADX Regime Floor Filter (Regime-aware: Ranging models trade 10-24 ADX; Trending requires high momentum)
+                            is_ranging_regime = "Ranging" in regime_name
+                            if is_ranging_regime:
+                                min_adx_thresh = float(cfg.get("min_adx_ranging", 10.0 if str(iv) in ["15", "30"] else 12.0))
+                            else:
+                                min_adx_thresh = float(cfg.get("min_adx", 16.0 if str(iv) in ["15", "30"] else 24.0))
                             if adx_regime < min_adx_thresh:
                                 log_event("INFO", f"[{symbol} {iv}m ADX Filter] ADX {adx_regime:.1f} < min required {min_adx_thresh:.1f}. Skipping lower-conviction chop.")
                                 continue
