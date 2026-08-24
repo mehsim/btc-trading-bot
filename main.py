@@ -6395,8 +6395,11 @@ def main():
                                 all_pass = False
                                 continue
 
-                            # Degenerate live prediction detector (requires statistically sufficient sample size N >= 30)
-                            _model_key = f"ensemble_{regime_key}_trend_{iv}"
+                            # Degenerate live prediction detector (requires statistically sufficient sample size N >= 30 per symbol)
+                            _model_key = f"{symbol}_ensemble_{regime_key}_trend_{iv}"
+                            if _model_key not in _recent_runtime_argmax:
+                                from collections import deque
+                                _recent_runtime_argmax[_model_key] = deque(maxlen=50)
                             _recent_runtime_argmax[_model_key].append(int(np.argmax(probs)))
                             if len(_recent_runtime_argmax[_model_key]) >= 30:
                                 _shares = np.bincount(_recent_runtime_argmax[_model_key], minlength=3) / len(_recent_runtime_argmax[_model_key])
@@ -6450,20 +6453,6 @@ def main():
                             if _manifest_mcc_val is not None and _manifest_mcc_val < min_mcc_floor:
                                 log_event("WARNING", f"[{symbol} {iv}m] Model MCC ({_manifest_mcc_val:.4f}) below governance floor ({min_mcc_floor}). ABSTAIN.")
                                 continue
-
-                            # Live Degenerate Prediction Detector
-                            if not hasattr(main, "_recent_live_argmax"):
-                                from collections import deque
-                                main._recent_live_argmax = {}
-                            _model_key = f"ensemble_{regime_name.lower()}_trend_{iv}"
-                            if _model_key not in main._recent_live_argmax:
-                                main._recent_live_argmax[_model_key] = deque(maxlen=20)
-                            main._recent_live_argmax[_model_key].append(int(np.argmax(probs)))
-                            if len(main._recent_live_argmax[_model_key]) >= 5:
-                                _shares = np.bincount(main._recent_live_argmax[_model_key], minlength=3) / len(main._recent_live_argmax[_model_key])
-                                if _shares.max() > 0.95:
-                                    log_event("WARNING", f"[{_model_key}] Degenerate prediction distribution ({_shares.round(3)}) — ABSTAIN.")
-                                    continue
 
                             expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
