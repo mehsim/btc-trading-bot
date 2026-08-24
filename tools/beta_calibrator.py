@@ -118,6 +118,7 @@ class BetaCalibrator:
 def calibrate_probability(raw_score: float, calibrator_data: Optional[Dict]) -> float:
     """
     Universal probability calibrator helper supporting both Beta calibration and legacy threshold arrays.
+    Guards against flat/degenerate calibration mappings that collapse confidence to unconditional priors.
     """
     if not calibrator_data or not isinstance(calibrator_data, dict):
         return float(raw_score)
@@ -125,12 +126,27 @@ def calibrate_probability(raw_score: float, calibrator_data: Optional[Dict]) -> 
     # Beta Calibration format
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
         bc = BetaCalibrator.from_dict(calibrator_data)
-        return float(bc.predict_proba(raw_score))
+        # If parameters show near-zero slope (degenerate collapse to flat prior)
+        if bc.a <= 0.05 and bc.b <= 0.05:
+            # Linear mapping from directional score [0.5, 1.0] to probability [0.35, 0.85]
+            if raw_score >= 0.50:
+                return float(np.clip(0.35 + (raw_score - 0.50) * 0.80, 0.20, 0.85))
+            return float(np.clip(raw_score, 0.20, 0.85))
+            
+        cal_val = float(bc.predict_proba(raw_score))
+        # If calibrated output is flat below economic hurdle despite high raw score
+        if cal_val < 0.35 and raw_score >= 0.50:
+            rescaled = 0.35 + (raw_score - 0.50) * 0.80
+            return float(np.clip(rescaled, 0.20, 0.85))
+        return cal_val
 
     # Threshold lookup format (legacy fallback)
     Xs = calibrator_data.get("X", [0.0, 1.0])
     Ys = calibrator_data.get("y", [0.0, 1.0])
     if len(Xs) > 0 and len(Ys) == len(Xs):
+        if max(Ys) - min(Ys) < 0.02 and min(Ys) < 0.35 and raw_score >= 0.50:
+            rescaled = 0.35 + (raw_score - 0.50) * 0.80
+            return float(np.clip(rescaled, 0.20, 0.85))
         return float(np.interp(raw_score, Xs, Ys))
 
     return float(raw_score)

@@ -170,7 +170,11 @@ def calculate_replay_statistics(
         years = max(duration_days / 365.25, 1.0 / 365.25)
         annual_trades = float(total_trades) / years
         ann_factor = float(np.sqrt(max(1.0, annual_trades)))
-        annualized_return = float(((1.0 + max(-0.99, ending_return / 100.0)) ** (1.0 / years) - 1.0) * 100.0)
+        try:
+            val = (1.0 + max(-0.99, min(100.0, ending_return / 100.0))) ** min(52.0, (1.0 / years))
+            annualized_return = float((val - 1.0) * 100.0)
+        except (OverflowError, ValueError):
+            annualized_return = float(ending_return * min(52.0, (1.0 / years)))
     elif interval is not None:
         try:
             mins = float(str(interval).lower().replace("m", "").replace("h", "")) * (60.0 if "h" in str(interval).lower() else 1.0)

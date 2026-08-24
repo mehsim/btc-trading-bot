@@ -119,7 +119,7 @@ CVAR_PARAMETRIC_FALLBACK_RATIO = 1.25
 PSI_INSUFFICIENT_CYCLES_THRESHOLD = 5
 MIN_LIQUIDITY_MULTIPLIER = 0.20
 MIN_EVAL_THRESHOLD_FLOOR = 0.25  # Minimum decision threshold floor based on risk preference & calibration uncertainty
-MAX_THRESHOLD_UPLIFT = 0.12     # Maximum allowed threshold uplift above economic base threshold
+MAX_THRESHOLD_UPLIFT = 0.08     # Maximum allowed threshold uplift above economic base threshold
 ALMGREN_CHRISS_CALIBRATION_INTERVAL_DAYS = 30
 ALMGREN_CHRISS_MIN_FILLS = 1000
 HISTORICAL_STRESS_QUANTILE = 0.001
@@ -303,11 +303,11 @@ def _get_tf_env(key: str, default: float) -> float:
 TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe - High-Conviction Scalp (Targets ~4-5 trades/day across portfolio)
         "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.15),
-        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.55),
-        "min_adx": _get_tf_env("TF_15M_MIN_ADX", 20.0),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.20),
-        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.80)
+        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.85),
+        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.38),
+        "min_adx": _get_tf_env("TF_15M_MIN_ADX", 16.0),
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.40),
+        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.85)
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),

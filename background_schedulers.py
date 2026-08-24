@@ -228,10 +228,11 @@ def run_statistical_governance_scheduler():
             all_trades = database.get_completed_trades(limit=1000)
             if all_trades:
                 import numpy as np
+                now_ts = time.time()
                 for iv in intervals_to_monitor:
-                    slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv]
+                    slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv and float(t.get("exit_time", 0)) >= (now_ts - 14 * 86400)]
                     n_trades = len(slot_trades)
-                    if n_trades >= 5:
+                    if n_trades >= 30:
                         returns = [float(t.get("change_pct", t.get("pnl_pct", 0.0))) for t in slot_trades]
                         # Empirical fee/slippage hurdle baseline (-0.05% per roundtrip) with slight variance
                         baseline_rets = [-0.05 + float(np.random.normal(0, 0.001)) for _ in range(n_trades)]

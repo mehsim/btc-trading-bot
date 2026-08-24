@@ -4776,6 +4776,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
 def main():
     global live_price, last_ws_update_time
+    from datetime import datetime, timezone, timedelta
     # Load model weights here (deferred from module level)
     for iv in ["15", "30", "60", "120", "240"]:
         load_model_weights(iv)
@@ -6517,10 +6518,14 @@ def main():
                         
                             # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
                             from config import TIMEFRAME_CONFIG
+                            from config import TIMEFRAME_CONFIG
                             from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, REALIZED_RR_HAIRCUT
                             cfg = TIMEFRAME_CONFIG.get(str(iv), {})
-                            base_tp_m = cfg.get("tp_mult_trending", 1.85)
-                            base_sl_m = cfg.get("sl_mult", 0.8)
+                            if "Ranging" in str(regime_name):
+                                base_tp_m = float(cfg.get("tp_mult_ranging", 1.40))
+                            else:
+                                base_tp_m = float(cfg.get("tp_mult_trending", 1.85))
+                            base_sl_m = float(cfg.get("sl_mult", 0.85))
                             atr_dollars = float(latest_candle.get("ATR", latest_candle["close"] * 0.01))
                             entry_close = float(latest_candle["close"])
                             actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
@@ -6545,14 +6550,14 @@ def main():
                             adjustments_applied = [("economic_base", dynamic_conf_threshold)]
 
                             # ADX Regime Floor Filter
-                            min_adx_thresh = float(cfg.get("min_adx", 24.0))
+                            min_adx_thresh = float(cfg.get("min_adx", 16.0))
                             if adx_regime < min_adx_thresh:
                                 log_event("INFO", f"[{symbol} {iv}m ADX Filter] ADX {adx_regime:.1f} < min required {min_adx_thresh:.1f}. Skipping lower-conviction chop.")
                                 continue
 
                             # 2. Bounded Regime & Volatility Adjustments
                             if "Ranging" in regime_name:
-                                regime_delta = 0.03 if str(iv) in ["15", "30"] else 0.05
+                                regime_delta = 0.02 if str(iv) in ["15", "30"] else 0.04
                                 dynamic_conf_threshold += regime_delta
                                 adjustments_applied.append(("regime_ranging", regime_delta))
                             
@@ -6588,19 +6593,19 @@ def main():
                                 win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
                                 recent_win_rate = (win_count / len(recent_trades)) * 100.0
                                 if recent_win_rate < 45.0:
-                                    perf_delta = 0.10
+                                    perf_delta = 0.04
                                     dynamic_conf_threshold += perf_delta
                                     adjustments_applied.append(("performance_decay", perf_delta))
-                                    print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.10 to {dynamic_conf_threshold:.2f}")
+                                    print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.04 to {dynamic_conf_threshold:.2f}")
                             
 
 
                             # Asian Market Session Awareness (00:00 - 08:00 UTC)
                             utc_hour_now = datetime.now(timezone.utc).hour
                             if 0 <= utc_hour_now < 8:
-                                dynamic_conf_threshold += 0.05
-                                adjustments_applied.append(("asian_session", 0.05))
-                                print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.05 threshold -> {dynamic_conf_threshold:.2f})")
+                                dynamic_conf_threshold += 0.02
+                                adjustments_applied.append(("asian_session", 0.02))
+                                print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.02 threshold -> {dynamic_conf_threshold:.2f})")
                                 
                             # Calculate live market microstructure spread in bps
                             _bid_px = float(latest_candle.get("bid", latest_candle.get("close", 100.0)))
@@ -6902,12 +6907,12 @@ def main():
                             funding_rate = get_funding_rate(symbol)
                             funding_blocked = False
                             if funding_rate > 0.0005 and ml_trend == "Bullish":
-                                dynamic_conf_threshold += 0.05
-                                adjustments_applied.append(("funding_carry_long", 0.05))
+                                dynamic_conf_threshold += 0.02
+                                adjustments_applied.append(("funding_carry_long", 0.02))
                                 print(f"[{symbol} {iv}m] Funding Carry Adjustment: Positive funding rate ({funding_rate*100:.3f}%) raised Long threshold to {dynamic_conf_threshold*100:.1f}%")
                             elif funding_rate < -0.0005 and ml_trend == "Bearish":
-                                dynamic_conf_threshold += 0.05
-                                adjustments_applied.append(("funding_carry_short", 0.05))
+                                dynamic_conf_threshold += 0.02
+                                adjustments_applied.append(("funding_carry_short", 0.02))
                                 print(f"[{symbol} {iv}m] Funding Carry Adjustment: Negative funding rate ({funding_rate*100:.3f}%) raised Short threshold to {dynamic_conf_threshold*100:.1f}%")
 
                             if ml_trend == "Bullish" and funding_rate > 0.001:
@@ -6919,15 +6924,15 @@ def main():
                             try:
                                 oi_delta = df.iloc[-1].get("open_interest_pct_change", 0.0) * 100.0
                                 if oi_delta < 0.5:
-                                    dynamic_conf_threshold += 0.05
-                                    adjustments_applied.append(("oi_momentum_guard", 0.05))
+                                    dynamic_conf_threshold += 0.02
+                                    adjustments_applied.append(("oi_momentum_guard", 0.02))
                                     print(f"[{symbol} {iv}m] OI Momentum Guard: Low Open Interest Delta ({oi_delta:+.2f}%) raised threshold to {dynamic_conf_threshold*100:.1f}%")
                             except Exception as e:
                                 log_event("WARNING", f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
 
                             # Bound final threshold relative to economic base
                             from config import MAX_THRESHOLD_UPLIFT
-                            max_allowed_threshold = min(0.85, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
+                            max_allowed_threshold = min(0.60, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
                             dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(economic_base_threshold, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
