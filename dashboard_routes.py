@@ -796,10 +796,18 @@ def api_status():
                     "reject_reason": r[7],
                     "signal_source": r[8]
                 })
-            status_data["prediction_history"] = journal_preds
+            # Filter out temporary un-evaluated entries so frontend only displays completed evaluations with reasons
+            status_data["prediction_history"] = [
+                p for p in journal_preds 
+                if p and str(p.get("status", "")).strip() not in ["Pending Risk Evaluation", "Initializing"]
+            ]
         except Exception as ex_j:
             pred_hist = state_manager.get("prediction_history", [])
-            status_data["prediction_history"] = pred_hist[-50:] if isinstance(pred_hist, list) else []
+            raw_list = pred_hist[-100:] if isinstance(pred_hist, list) else []
+            status_data["prediction_history"] = [
+                p for p in raw_list 
+                if p and str(p.get("status", "")).strip() not in ["Pending Risk Evaluation", "Initializing"]
+            ]
 
         # Model Governance Summary for Frontend Inspector Modals
         gov_summary = {}
