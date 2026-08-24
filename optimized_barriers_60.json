@@ -1,6 +1,6 @@
 {
-  "tp_mult_ranging": 1.258257285199672,
-  "tp_mult_trending": 1.4746788008303522,
-  "sl_mult": 0.6585006543095501,
+  "tp_mult_ranging": 2.4753397094034253,
+  "tp_mult_trending": 2.2477513293151072,
+  "sl_mult": 1.3091031961687523,
   "lookahead": 10
 }
