@@ -796,17 +796,21 @@ def api_status():
                     "reject_reason": r[7],
                     "signal_source": r[8]
                 })
-            # Filter out temporary un-evaluated entries so frontend only displays completed evaluations with reasons
+            # Filter out temporary un-evaluated entries and Abstain signals so only actionable/evaluated decisions appear
             status_data["prediction_history"] = [
                 p for p in journal_preds 
-                if p and str(p.get("status", "")).strip() not in ["Pending Risk Evaluation", "Initializing"]
+                if p and str(p.get("status", "")).strip().lower() not in ["pending risk evaluation", "initializing", "abstain"]
+                and "abstain" not in str(p.get("status", "")).lower()
+                and str(p.get("direction", "")).lower() != "abstain"
             ]
         except Exception as ex_j:
             pred_hist = state_manager.get("prediction_history", [])
             raw_list = pred_hist[-100:] if isinstance(pred_hist, list) else []
             status_data["prediction_history"] = [
                 p for p in raw_list 
-                if p and str(p.get("status", "")).strip() not in ["Pending Risk Evaluation", "Initializing"]
+                if p and str(p.get("status", "")).strip().lower() not in ["pending risk evaluation", "initializing", "abstain"]
+                and "abstain" not in str(p.get("status", "")).lower()
+                and str(p.get("direction", "")).lower() != "abstain"
             ]
 
         # Model Governance Summary for Frontend Inspector Modals

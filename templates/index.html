@@ -3641,8 +3641,9 @@
 
             let filtered = (allPredictions || []).slice().filter(p => {
                 if (!p) return false;
-                const st = String(p.status || '').trim();
-                if (st === 'Pending Risk Evaluation' || st === 'Initializing') return false;
+                const st = String(p.status || '').trim().toLowerCase();
+                const dir = String(p.direction || '').trim().toLowerCase();
+                if (st === 'pending risk evaluation' || st === 'initializing' || st.includes('abstain') || dir === 'abstain') return false;
                 const conf = p.calibrated_confidence ?? p.raw_confidence ?? p.confidence;
                 const hasValidConf = conf !== null && conf !== undefined && !isNaN(conf);
                 const hasValidDir = p.direction && String(p.direction) !== 'None' && String(p.direction) !== 'undefined' && String(p.direction) !== 'null';
