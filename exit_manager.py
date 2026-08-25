@@ -118,6 +118,7 @@ def evaluate_trailing_and_break_even(
             if break_even_triggered:
                 be_floor = calculate_break_even_stop("Bullish", entry_price, current_price, atr_dollars)
                 potential_sl = max(potential_sl, be_floor)
+            potential_sl = min(potential_sl, current_price * 0.9995)
 
             if potential_sl > stop_loss:
                 if trade_mode != "simulation":
@@ -168,6 +169,7 @@ def evaluate_trailing_and_break_even(
             if break_even_triggered:
                 be_floor = calculate_break_even_stop("Bearish", entry_price, current_price, atr_dollars)
                 potential_sl = min(potential_sl, be_floor)
+            potential_sl = max(potential_sl, current_price * 1.0005)
 
             if potential_sl < stop_loss:
                 if trade_mode != "simulation":

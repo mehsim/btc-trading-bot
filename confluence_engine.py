@@ -379,8 +379,8 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
     is_ranging_regime = "ranging" in str(current_regime).lower()
-    if is_ranging_regime:
-        # In ranging regimes, mean-reversion counter-trend bounces are valid; do not require 3-TF EMA consensus
+    if is_ranging_regime or is_soft_intraday:
+        # In ranging regimes or intraday scalps (5m/15m/30m), do not require 4h EMA consensus as a mandatory hard gate
         trend_gates_passed = True
     else:
         trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True) and results.get("1h_Trend", {}).get("pass", True)

@@ -195,7 +195,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         cursor = conn.cursor()
         cursor.execute(
             "SELECT timestamp, open, high, low, close, volume, turnover FROM (SELECT timestamp, open, high, low, close, volume, turnover FROM kline_data WHERE symbol=? AND interval=? ORDER BY timestamp DESC LIMIT ?) ORDER BY timestamp ASC",
-            (symbol, str(interval), max(target_count * 2, 5000))
+            (symbol, str(interval), min(max(target_count * 2, 500), 5000))
         )
         rows = cursor.fetchall()
         conn.close()

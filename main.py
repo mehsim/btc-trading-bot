@@ -1653,13 +1653,13 @@ def get_bybit_bid_ask(symbol):
 def get_chase_limit_price(symbol, side, chase, entry_price):
     """Calculates dynamic Limit Maker price using real-time bid/ask orderbook."""
     bid, ask, last = get_bybit_bid_ask(symbol)
-    if bid is not None and ask is not None and bid > 0 and ask > 0:
-        spread = max(1e-6, ask - bid)
-        step = spread * 0.1 * chase
+    if bid is not None and ask is not None and bid > 0 and ask > 0 and ask > bid:
+        spread = ask - bid
+        step = spread * 0.1 * min(chase, 8)
         if side in ["Buy", "Bullish"]:
-            return min(ask - 1e-6, bid + step)
+            return min(ask - (spread * 0.05), bid + step)
         else:
-            return max(bid + 1e-6, ask - step)
+            return max(bid + (spread * 0.05), ask - step)
     return float(entry_price)
 
 def get_bybit_last_execution(symbol):

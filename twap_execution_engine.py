@@ -40,9 +40,9 @@ class TWAPExecutionEngine:
             is_last_slice = (i == n_slices - 1)
             cur_qty = total_qty - executed_qty if is_last_slice else slice_qty
             
-            # Attach SL/TP on the final slice or main position
-            cur_sl = sl if is_last_slice else None
-            cur_tp = tp if is_last_slice else None
+            # Attach SL/TP across all slices so position is always protected
+            cur_sl = sl
+            cur_tp = tp
 
             resp = place_bybit_order(
                 symbol=symbol,

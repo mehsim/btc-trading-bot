@@ -95,7 +95,7 @@ def check_interval_position_limit(interval: str, proposed_size: float, balance: 
 def check_symbol_total_exposure(symbol: str, active_trades: list, proposed_size: float, balance: float, max_lev: float = 1.0) -> float:
     current_exposure = sum(
         float(t.get("position_size_usd", 0.0)) * float(t.get("leverage", 1.0))
-        for t in active_trades
+        for t in (active_trades or [])
         if isinstance(t, dict) and t.get("symbol") == symbol
     )
     max_exposure = balance * MAX_SYMBOL_EXPOSURE_PCT * max_lev

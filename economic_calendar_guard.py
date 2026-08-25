@@ -32,9 +32,9 @@ class EconomicCalendarGuard:
         elif hour == 18 and minute <= 15:
             return True, "PAUSE: High-Impact FOMC Announcement in progress"
 
-        # Check CPI / NFP Data Release Window (12:30 UTC)
-        if hour == 12 and minute >= 15:
-            return True, "PAUSE: High-Impact CPI/NFP Data Release in < 15 mins"
+        # Check CPI / NFP Data Release Window (12:30 UTC -> 12:15 to 12:45 UTC)
+        if hour == 12 and 15 <= minute <= 45:
+            return True, "PAUSE: High-Impact CPI/NFP Data Release window (12:15 - 12:45 UTC)"
 
         return False, "SAFE: Normal market hours"
 
