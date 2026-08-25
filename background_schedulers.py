@@ -230,10 +230,10 @@ def run_statistical_governance_scheduler():
                 import numpy as np
                 now_ts = time.time()
                 for iv in intervals_to_monitor:
-                    slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv and float(t.get("exit_time", 0)) >= (now_ts - 14 * 86400)]
+                    slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv and float(t.get("exit_time") or 0.0) >= (now_ts - 14 * 86400)]
                     n_trades = len(slot_trades)
                     if n_trades >= 30:
-                        returns = [float(t.get("change_pct", t.get("pnl_pct", 0.0))) for t in slot_trades]
+                        returns = [float(t.get("change_pct") or t.get("pnl_pct") or 0.0) for t in slot_trades]
                         # Empirical fee/slippage hurdle baseline (-0.05% per roundtrip) with slight variance
                         baseline_rets = [-0.05 + float(np.random.normal(0, 0.001)) for _ in range(n_trades)]
                         matrix_res = statistical_validation.calculate_governed_validation_matrix(
