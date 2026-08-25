@@ -6333,6 +6333,11 @@ def main():
                             
                             # C-1: Preserve strict train/serve feature distribution consistency
                             # Remove ad-hoc inference-time feature multiplier scaling
+                            bybit_success = False
+                            actual_qty = 0.0
+                            raw_qty = 0.0
+                            bybit_order_id = None
+                            bybit_scale_out_order_id = None
                             latest_candle_weighted = latest_candle.copy()
                             if hasattr(latest_candle_weighted.index, "duplicated") and latest_candle_weighted.index.duplicated().any():
                                 latest_candle_weighted = latest_candle_weighted[~latest_candle_weighted.index.duplicated(keep="first")]
