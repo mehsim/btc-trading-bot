@@ -4668,6 +4668,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
         active_trade = {
             "trade_id": f"{symbol}_{trade_uuid}",
+            "interval": str(iv),
+            "timeframe": str(tf),
             "bybit_order_id": bybit_order_id,
             "bybit_scale_out_order_id": bybit_scale_out_order_id,
             "symbol": symbol,
@@ -4970,8 +4972,8 @@ def main():
                             bybit_closed = True
                         else:
                             # Detect scale-out fill from cached and stored qty values
-                            original_qty = active_trade.get("original_qty", active_trade.get("qty", 0.0))
-                            current_qty = active_trade.get("qty", 0.0)
+                            original_qty = float(active_trade.get("original_qty", active_trade.get("qty", 0.0)))
+                            current_qty = float(active_trade.get("qty", 0.0))
                             if original_qty > 0 and current_qty <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
                                 # Verify fill status of the scale-out limit order to prevent premature/false triggers
                                 scale_out_order_id = active_trade.get("bybit_scale_out_order_id")
@@ -4991,18 +4993,17 @@ def main():
                                         else:
                                             print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
                                 else:
-                                    # Fallback if no scale-out order ID is attached: require price to have actually reached scale-out target
+                                    # Fallback only if price has actually reached scale-out profit target
                                     atr_d = active_trade.get("atr_dollars", 0.015 * entry_price)
                                     reached_scale_target = False
-                                    if direction == "Bullish" and active_trade.get("highest_price", entry_price) >= entry_price + 1.0 * atr_d:
+                                    if direction == "Bullish" and current_price >= entry_price + 0.8 * atr_d:
                                         reached_scale_target = True
-                                    elif direction == "Bearish" and active_trade.get("lowest_price", entry_price) <= entry_price - 1.0 * atr_d:
+                                    elif direction == "Bearish" and current_price <= entry_price - 0.8 * atr_d:
                                         reached_scale_target = True
                                         
                                     if reached_scale_target:
                                         bybit_scaled_out = True
                                     else:
-                                        # Reset original_qty to current_qty to prevent continuous false scale-out triggers
                                         active_trade["original_qty"] = current_qty
     
                     # Trailing stop and break-even variables
