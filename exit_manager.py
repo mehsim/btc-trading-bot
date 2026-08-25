@@ -54,12 +54,13 @@ def evaluate_trailing_and_break_even(
             highest_price = current_price
             active_trade["highest_price"] = highest_price
 
+        # Trailing stop only activates once trade has moved at least 0.8x ATR into profit
+        min_trail_profit_hurdle = entry_price + 0.8 * atr_dollars
+        if highest_price >= min_trail_profit_hurdle:
             atr_sl = highest_price - trailing_multiplier * atr_dollars
-            swing_low_3b = active_trade.get("swing_low_3b")
-            if swing_low_3b is not None and swing_low_3b > 0:
-                potential_sl = max(atr_sl, min(highest_price - 0.001 * entry_price, swing_low_3b))
-            else:
-                potential_sl = atr_sl
+            # Ensure trailing stop never trails tighter than 0.4x ATR below current price
+            max_tight_sl = current_price - 0.4 * atr_dollars
+            potential_sl = min(atr_sl, max_tight_sl)
 
             if break_even_triggered:
                 be_floor = calculate_break_even_stop("Bullish", entry_price, current_price, atr_dollars)
@@ -102,12 +103,13 @@ def evaluate_trailing_and_break_even(
             lowest_price = current_price
             active_trade["lowest_price"] = lowest_price
 
+        # Trailing stop only activates once trade has moved at least 0.8x ATR into profit
+        min_trail_profit_hurdle = entry_price - 0.8 * atr_dollars
+        if lowest_price <= min_trail_profit_hurdle:
             atr_sl = lowest_price + trailing_multiplier * atr_dollars
-            swing_high_3b = active_trade.get("swing_high_3b")
-            if swing_high_3b is not None and swing_high_3b > 0:
-                potential_sl = min(atr_sl, max(lowest_price + 0.001 * entry_price, swing_high_3b))
-            else:
-                potential_sl = atr_sl
+            # Ensure trailing stop never trails tighter than 0.4x ATR above current price
+            max_tight_sl = current_price + 0.4 * atr_dollars
+            potential_sl = max(atr_sl, max_tight_sl)
 
             if break_even_triggered:
                 be_floor = calculate_break_even_stop("Bearish", entry_price, current_price, atr_dollars)
