@@ -26,6 +26,47 @@ def compute_trailing_multiplier(active_trade, tf, current_adx):
     return trailing_multiplier
 
 
+def compute_dynamic_trail_params(iv, tf, entry_price, atr_dollars, current_adx, regime="Trending"):
+    """
+    Computes dynamic, adaptive profit hurdle and minimum trailing buffer based on:
+    - Timeframe scale (scalp 15m/30m vs swing 1h/4h)
+    - Market regime & ADX trend strength
+    - Volatility (ATR dollars)
+    """
+    # 1. Base Timeframe Hurdle Multipliers
+    tf_hurdle_map = {
+        "15": 0.60,
+        "30": 0.75,
+        "60": 0.90,
+        "120": 1.05,
+        "240": 1.20,
+        "360": 1.35
+    }
+    base_hurdle_mult = tf_hurdle_map.get(str(iv), 0.85)
+
+    # 2. ADX Trend Strength & Regime Adaptation
+    # Strong trends (ADX >= 30) give more breathing room (+20%) to ride multi-candle momentum.
+    # Ranging/Chop (ADX <= 20) triggers trailing sooner (-15%) to bank quick mean-reversion profits.
+    if current_adx >= 30.0:
+        regime_factor = 1.20
+    elif current_adx <= 20.0 or "Ranging" in regime:
+        regime_factor = 0.85
+    else:
+        regime_factor = 1.0
+
+    dynamic_hurdle_mult = base_hurdle_mult * regime_factor
+    profit_hurdle_dist = dynamic_hurdle_mult * atr_dollars
+
+    # 3. Dynamic Minimum Protective Trail Buffer
+    # Ensures the trailing stop never suffocates within market noise or bid-ask spread
+    # In choppy/low ADX markets, wider safety margin (0.45x ATR); in strong trends, 0.35x ATR
+    adx_clamp = max(10.0, min(50.0, float(current_adx)))
+    trail_buffer_mult = 0.35 + 0.15 * ((50.0 - adx_clamp) / 40.0)
+    min_trail_buffer = max(0.0015 * entry_price, trail_buffer_mult * atr_dollars)
+
+    return profit_hurdle_dist, min_trail_buffer
+
+
 def evaluate_trailing_and_break_even(
     active_symbol,
     iv,
@@ -45,21 +86,33 @@ def evaluate_trailing_and_break_even(
     update_sl_fn,
     trade_mode="live"
 ):
-    """Evaluates trailing stop tightening and break-even triggers for an active open trade."""
+    """Evaluates fully dynamic trailing stop tightening and break-even triggers for an active open trade."""
     active_trades_updated = False
     trade_leverage = float(active_trade.get("leverage", 1.0))
+    current_adx = float(active_trade.get("adx", 22.0))
+    regime = str(active_trade.get("entry_regime", "Trending"))
+
+    # Compute fully adaptive hurdle and safety buffer
+    profit_hurdle_dist, min_trail_buffer = compute_dynamic_trail_params(
+        iv=iv,
+        tf=tf,
+        entry_price=entry_price,
+        atr_dollars=atr_dollars,
+        current_adx=current_adx,
+        regime=regime
+    )
 
     if direction == "Bullish":
         if current_price > highest_price:
             highest_price = current_price
             active_trade["highest_price"] = highest_price
 
-        # Trailing stop only activates once trade has moved at least 0.8x ATR into profit
-        min_trail_profit_hurdle = entry_price + 0.8 * atr_dollars
+        # Trailing stop only activates once trade has cleared the dynamic profit hurdle
+        min_trail_profit_hurdle = entry_price + profit_hurdle_dist
         if highest_price >= min_trail_profit_hurdle:
             atr_sl = highest_price - trailing_multiplier * atr_dollars
-            # Ensure trailing stop never trails tighter than 0.4x ATR below current price
-            max_tight_sl = current_price - 0.4 * atr_dollars
+            # Dynamic safety clamp: trailing stop never suffocates within min_trail_buffer of current price
+            max_tight_sl = current_price - min_trail_buffer
             potential_sl = min(atr_sl, max_tight_sl)
 
             if break_even_triggered:
@@ -75,7 +128,7 @@ def evaluate_trailing_and_break_even(
                         active_trades_updated = True
                         gross_r = (stop_loss - entry_price) / max(1e-4, atr_dollars)
                         net_pnl_est = (stop_loss - entry_price) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                        print(f"[{active_symbol} {iv}m Trailing Engine] Mode: TRAILING | Direction: Bullish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Net Expected PnL: ${net_pnl_est:+.2f}")
+                        print(f"[{active_symbol} {iv}m Dynamic Trailing] Direction: Bullish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Locked: {gross_r:+.2f}R | Est PnL: ${net_pnl_est:+.2f}")
                 else:
                     stop_loss = potential_sl
                     active_trade["stop_loss"] = stop_loss
@@ -91,6 +144,7 @@ def evaluate_trailing_and_break_even(
                     stop_loss = target_sl
                     active_trade["stop_loss"] = stop_loss
                     active_trades_updated = True
+                    print(f"[{active_symbol} {iv}m Dynamic Break-Even] Moved SL to cost-aware break-even: {target_sl:.4f}")
             else:
                 break_even_triggered = True
                 active_trade["break_even_triggered"] = True
@@ -103,12 +157,12 @@ def evaluate_trailing_and_break_even(
             lowest_price = current_price
             active_trade["lowest_price"] = lowest_price
 
-        # Trailing stop only activates once trade has moved at least 0.8x ATR into profit
-        min_trail_profit_hurdle = entry_price - 0.8 * atr_dollars
+        # Trailing stop only activates once trade has cleared the dynamic profit hurdle
+        min_trail_profit_hurdle = entry_price - profit_hurdle_dist
         if lowest_price <= min_trail_profit_hurdle:
             atr_sl = lowest_price + trailing_multiplier * atr_dollars
-            # Ensure trailing stop never trails tighter than 0.4x ATR above current price
-            max_tight_sl = current_price + 0.4 * atr_dollars
+            # Dynamic safety clamp: trailing stop never suffocates within min_trail_buffer of current price
+            max_tight_sl = current_price + min_trail_buffer
             potential_sl = max(atr_sl, max_tight_sl)
 
             if break_even_triggered:
@@ -124,7 +178,7 @@ def evaluate_trailing_and_break_even(
                         active_trades_updated = True
                         gross_r = (entry_price - stop_loss) / max(1e-4, atr_dollars)
                         net_pnl_est = (entry_price - stop_loss) / max(1e-4, entry_price) * position_size_usd * trade_leverage
-                        print(f"[{active_symbol} {iv}m Trailing Engine] Mode: TRAILING | Direction: Bearish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Gross Locked R: {gross_r:+.2f}R | Net Expected PnL: ${net_pnl_est:+.2f}")
+                        print(f"[{active_symbol} {iv}m Dynamic Trailing] Direction: Bearish | Entry: {entry_price:.4f} | New SL: {stop_loss:.4f} | Locked: {gross_r:+.2f}R | Est PnL: ${net_pnl_est:+.2f}")
                 else:
                     stop_loss = potential_sl
                     active_trade["stop_loss"] = stop_loss
@@ -140,6 +194,7 @@ def evaluate_trailing_and_break_even(
                     stop_loss = target_sl
                     active_trade["stop_loss"] = stop_loss
                     active_trades_updated = True
+                    print(f"[{active_symbol} {iv}m Dynamic Break-Even] Moved SL to cost-aware break-even: {target_sl:.4f}")
             else:
                 break_even_triggered = True
                 active_trade["break_even_triggered"] = True
