@@ -494,6 +494,8 @@ def send_telegram_alert(message: str):
     threading.Thread(target=_post, daemon=True).start()
         
 
+_dispatched_exit_alerts = set()
+
 
 # Telegram listener extracted to telegram_listener.py
 
@@ -5640,47 +5642,61 @@ def main():
                             stage2_margin = float(position_size_usd)
                             stage2_pnl = float(realized_pnl)
                             
+                            total_m = stage1_margin + stage2_margin
+                            pct1 = round((stage1_margin / max(1e-6, total_m) * 100.0), 1) if total_m > 0 else 50.0
+                            pct2 = round((stage2_margin / max(1e-6, total_m) * 100.0), 1) if total_m > 0 else 50.0
+                            
+                            stage1_title = "Partial Profit Secured" if stage1_pnl > 0 else "Partial Scale-Out Exit"
+                            stage1_price_label = "Target Price" if stage1_pnl > 0 else "Exit Price"
+                            
                             stage2_name = "Trailing Stop Hit" if "TRAILING" in str(exit_reason).upper() else "Take Profit Hit" if "TAKE PROFIT" in str(exit_reason).upper() else "Final Exit"
                             
                             scale_out_block = (
                                 f"\n\n🥞 *Scale-Out Execution Details*\n"
-                                f"• *Stage 1: Partial Profit Locked (50% Scale-Out)*\n"
-                                f"  - Target Price: `${stage1_price:.4f}`\n"
+                                f"• *Stage 1: {stage1_title} ({pct1}% Scale-Out)*\n"
+                                f"  - {stage1_price_label}: `${stage1_price:.4f}`\n"
                                 f"  - Returned Margin: `${stage1_margin:.2f}`\n"
                                 f"  - PnL Realized: *${stage1_pnl:+.2f}*\n"
-                                f"• *Stage 2: {stage2_name} (Remaining 50%)*\n"
+                                f"• *Stage 2: {stage2_name} ({pct2}% Remaining)*\n"
                                 f"  - Exit Price: `${stage2_price:.4f}`\n"
                                 f"  - Returned Margin: `${stage2_margin:.2f}`\n"
                                 f"  - PnL Realized: *${stage2_pnl:+.2f}*"
                             )
 
-                        if total_pnl > 0:
-                            exit_header = "🚀 *TAKE PROFIT HIT* 🚀" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 *TRAILING STOP HIT (PROFITABLE)* 📈" if "TRAILING" in str(exit_reason).upper() else "🎉 *TRADE CLOSED WITH PROFIT* 🎉"
-                            send_telegram_alert(
-                                f"{exit_header}\n"
-                                f"• *Asset*: {active_symbol}\n"
-                                f"• *Interval*: {iv}m\n"
-                                f"• *Direction*: {direction}\n"
-                                f"• *Entry Price*: ${entry_price:.4f}\n"
-                                f"• *Exit Price*: ${actual_price:.4f}\n"
-                                f"• *Realized PnL*: *${total_pnl:+.2f}* (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
-                                f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
-                                f"• *New Balance*: ${new_bal:.2f}"
-                                f"{scale_out_block}"
-                            )
-                        else:
-                            send_telegram_alert(
-                                f"🔴 *POSITION CLOSED (AUTO)* 🔴\n"
-                                f"• *Asset*: {active_symbol}\n"
-                                f"• *Interval*: {iv}m\n"
-                                f"• *Direction*: {direction}\n"
-                                f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
-                                f"• *Entry Price*: ${entry_price:.4f}\n"
-                                f"• *Exit Price*: ${actual_price:.4f}\n"
-                                f"• *Realized PnL*: ${total_pnl:+.2f} (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
-                                f"• *New Balance*: ${new_bal:.2f}"
-                                f"{scale_out_block}"
-                            )
+                        # Deduplicate exit alerts to avoid sending duplicate close messages
+                        exit_alert_key = (active_symbol, str(iv), str(active_trade.get("trade_id", "")), round(total_pnl, 2))
+                        if exit_alert_key not in _dispatched_exit_alerts:
+                            _dispatched_exit_alerts.add(exit_alert_key)
+                            if len(_dispatched_exit_alerts) > 500:
+                                _dispatched_exit_alerts.clear()
+
+                            if total_pnl > 0:
+                                exit_header = "🚀 *TAKE PROFIT HIT* 🚀" if "TAKE PROFIT" in str(exit_reason).upper() else "📈 *TRAILING STOP HIT (PROFITABLE)* 📈" if "TRAILING" in str(exit_reason).upper() else "🎉 *TRADE CLOSED WITH PROFIT* 🎉"
+                                send_telegram_alert(
+                                    f"{exit_header}\n"
+                                    f"• *Asset*: {active_symbol}\n"
+                                    f"• *Interval*: {iv}m\n"
+                                    f"• *Direction*: {direction}\n"
+                                    f"• *Entry Price*: ${entry_price:.4f}\n"
+                                    f"• *Exit Price*: ${actual_price:.4f}\n"
+                                    f"• *Realized PnL*: *${total_pnl:+.2f}* (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
+                                    f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
+                                    f"• *New Balance*: ${new_bal:.2f}"
+                                    f"{scale_out_block}"
+                                )
+                            else:
+                                send_telegram_alert(
+                                    f"🔴 *POSITION CLOSED (AUTO)* 🔴\n"
+                                    f"• *Asset*: {active_symbol}\n"
+                                    f"• *Interval*: {iv}m\n"
+                                    f"• *Direction*: {direction}\n"
+                                    f"• *Exit Reason*: {exit_reason}" + (" (Scale-Out)" if active_trade.get("half_closed", False) else "") + "\n"
+                                    f"• *Entry Price*: ${entry_price:.4f}\n"
+                                    f"• *Exit Price*: ${actual_price:.4f}\n"
+                                    f"• *Realized PnL*: ${total_pnl:+.2f} (" + (f"{total_net_return_pct:+.2f}" if active_trade.get("half_closed", False) else f"{net_return_pct:+.2f}") + f"%)\n"
+                                    f"• *New Balance*: ${new_bal:.2f}"
+                                    f"{scale_out_block}"
+                                )
                             
                             entry_ts_raw = float(active_trade.get("entry_time", 0))
                             entry_ts_sec = entry_ts_raw / 1000.0 if entry_ts_raw > 1e11 else entry_ts_raw
