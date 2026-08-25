@@ -4257,7 +4257,7 @@ def sync_active_positions_from_bybit():
                         "take_profit": tp_price,
                         "direction": direction,
                         "end_time": float(time.time() + _iv * 60 * _la),
-                        "entry_time": int(pos.get("createdTime") or pos.get("updatedTime") or (time.time() * 1000)),
+                        "entry_time": max(int(pos.get("createdTime") or 0), int(pos.get("updatedTime") or 0)) or int(time.time() * 1000),
                         "atr_dollars": calc_atr,
                         "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
                         "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
