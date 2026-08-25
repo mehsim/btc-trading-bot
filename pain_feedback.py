@@ -118,7 +118,7 @@ class PainFeedbackLoop:
                     if fetch_kline_func and take_profit > 0:
                         try:
                             try:
-                                df_klines = fetch_kline_func(symbol=symbol, interval="15", limit=300)
+                                df_klines = fetch_kline_func(symbol=symbol, interval="15", limit=1000, pages=2)
                             except Exception:
                                 df_klines = fetch_kline_func(symbol, start_ts=int(exit_time*1000), end_ts=int((exit_time + 86400)*1000))
 

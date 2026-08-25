@@ -39,7 +39,14 @@ def main():
         print(f"[retrain_worker] Spawning subprocess for interval {iv}m...")
         cmd = ["nice", "-n", "19", sys.executable, "train.py", "--interval", iv, "--pages", "5", "--live-feedback"]
         p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = p.communicate()
+        try:
+            stdout, stderr = p.communicate(timeout=1800)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            stdout, stderr = p.communicate()
+            print(f"[retrain_worker Error] Retraining for interval {iv}m timed out after 30 minutes.")
+            send_telegram_alert(f"❌ *retrain_worker timeout* ❌\nRetraining for {iv}m timed out after 30 minutes.")
+            continue
         
         if p.returncode != 0:
             print(f"[retrain_worker Error] Retraining for interval {iv}m failed:\n{stderr}")

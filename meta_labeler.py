@@ -44,7 +44,7 @@ def train_meta_labeler() -> tuple[bool, str]:
 
         df_trades["target"] = (df_trades["change_pct"] > 0.0).astype(int)
         df_trades["is_majors"] = df_trades["symbol"].apply(lambda s: 1.0 if str(s).upper() in ("BTCUSDT", "ETHUSDT") else 0.0)
-        df_trades["is_long"] = (df_trades["direction"].str.upper() == "BUY").astype(float)
+        df_trades["is_long"] = df_trades["direction"].astype(str).str.upper().isin(["BUY", "BULLISH", "LONG", "1"]).astype(float)
 
         feature_cols = ["is_majors", "is_long"]
         X = df_trades[feature_cols].values

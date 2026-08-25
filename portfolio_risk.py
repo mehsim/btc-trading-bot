@@ -150,7 +150,7 @@ class PortfolioRiskEngine:
         cov_matrix = sub_returns.cov()
 
         # Variance without candidate
-        weights_curr = np.array([next((p.get("position_size_usd", 0.0) for p in open_positions if p.get("symbol") == s), 0.0) for s in symbols])
+        weights_curr = np.array([next((p.get("position_size_usd", 0.0) for p in (open_positions or []) if p.get("symbol") == s), 0.0) for s in symbols])
         tot_curr = float(np.sum(weights_curr))
         var_curr = float(np.dot(weights_curr.T, np.dot(cov_matrix.values, weights_curr))) if tot_curr > 0 else 0.0
 

@@ -217,6 +217,9 @@ def start_telegram_command_listener(bot_state=None):
                     msg = u.get("message", {})
                     text = msg.get("text", "").strip()
                     cid = str(msg.get("chat", {}).get("id", ""))
+                    if allowed_chat_ids and cid not in allowed_chat_ids:
+                        log_event("WARNING", f"[Telegram Security] Unauthorized command attempt from chat_id {cid}")
+                        continue
                     
                     if text == "/start" or text == "/help":
                         execute_telegram_api_call("sendMessage", {

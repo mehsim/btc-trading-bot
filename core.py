@@ -125,8 +125,8 @@ def generate_triple_barrier_labels(df: pd.DataFrame, interval: str = "60") -> pd
     lows = df["low"].values if "low" in df.columns else prices
     atrs = (df["ATR_norm"] * df["close"]).values if "ATR_norm" in df.columns else (df["close"] * 0.015).values
     
-    labels = np.zeros(n, dtype=int)
-    outcomes = np.full(n, "none", dtype=object)
+    labels = np.ones(n, dtype=int)
+    outcomes = np.full(n, "timed_out", dtype=object)
     ambiguous_count = 0
 
     for i in range(n - lookahead):

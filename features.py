@@ -496,7 +496,9 @@ def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
         new_lag_cols[f"htf_trend_momentum_consensus_lag{lag}"] = df["htf_trend_momentum_consensus"].shift(lag).fillna(0.0)
 
     # Cyclical time features
-    datetime_series = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    first_ts = float(df["timestamp"].dropna().iloc[0]) if ("timestamp" in df.columns and len(df["timestamp"].dropna()) > 0) else 0.0
+    unit_val = "ms" if first_ts > 1e11 else "s"
+    datetime_series = pd.to_datetime(df["timestamp"], unit=unit_val, utc=True)
     new_lag_cols["hour_sin"] = np.sin(2 * np.pi * datetime_series.dt.hour / 24.0)
     new_lag_cols["hour_cos"] = np.cos(2 * np.pi * datetime_series.dt.hour / 24.0)
     new_lag_cols["day_of_week_sin"] = np.sin(2 * np.pi * datetime_series.dt.dayofweek / 7.0)

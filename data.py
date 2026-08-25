@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 raw_trade_mode = os.environ.get("TRADE_MODE", "simulation").lower()
-TRADE_MODE = raw_trade_mode if raw_trade_mode in ["live", "testnet", "simulation"] else "simulation"
+TRADE_MODE = raw_trade_mode if raw_trade_mode in ["live", "real", "testnet", "simulation"] else "simulation"
 BYBIT_BASE_URL = "https://api-testnet.bybit.com" if TRADE_MODE == "testnet" else "https://api.bybit.com"
 
 

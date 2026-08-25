@@ -45,7 +45,7 @@ class OptunaModelRetrainer:
                 clf = XGBClassifier(**params)
                 clf.fit(X_tr, y_tr)
                 preds = clf.predict_proba(X_val)
-                return log_loss(y_val, preds)
+                return log_loss(y_val, preds, labels=np.unique(y))
 
             study = optuna.create_study(direction="minimize")
             study.optimize(objective, n_trials=min(n_trials, 5))

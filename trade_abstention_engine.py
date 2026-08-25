@@ -86,7 +86,8 @@ class TradeAbstentionEngine:
         net_expected_return = expected_return_pct - total_execution_cost - (opportunity_cost_r * (atr_val * 0.5))
         
         # 2. Dynamic Uncertainty & Tail Risk Penalties (scaled dynamically)
-        vol_scale = max(0.5, min(3.0, atr_val / max(1e-5, atr_val)))
+        baseline_atr = 0.010
+        vol_scale = max(0.5, min(3.0, atr_val / max(1e-5, baseline_atr)))
         uncertainty_penalty = std_val * 0.5 * vol_scale
         tail_risk_penalty = abs(cvar_val) * 0.2 * vol_scale
         
