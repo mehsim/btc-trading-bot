@@ -415,31 +415,35 @@ def calculate_entry_signal_attribution(
     if not isinstance(confluence_results, dict):
         confluence_results = {}
 
-    def _check_pass(k):
-        item = confluence_results.get(k, {})
-        return 1.0 if (isinstance(item, dict) and item.get("pass")) else 0.4
+    def _check_pass(*keys):
+        for k in keys:
+            if k in confluence_results:
+                item = confluence_results.get(k, {})
+                if isinstance(item, dict) and "pass" in item:
+                    return 1.0 if item.get("pass") else 0.4
+        return 0.7  # neutral default when check not evaluated for timeframe
 
     t1 = _check_pass("1d_Trend")
-    t2 = _check_pass("4h_Trend")
+    t2 = _check_pass("4h_Trend", "1h_Trend")
     trend_score = round(float((t1 + t2) / 2.0), 2)
 
-    r1 = _check_pass("1h_RSI")
+    r1 = _check_pass("4h_RSI", "1h_RSI", "Regime_RSI_Guard")
     r2 = _check_pass("Counter_Momentum")
     momentum_score = round(float((r1 + r2) / 2.0), 2)
 
-    v1 = _check_pass("Volume_Participation")
+    v1 = _check_pass("Volume_Participation", "Choppiness_Gate")
     volume_score = round(float(v1), 2)
 
-    l1 = _check_pass("BB_Edge_Guard")
-    l2 = _check_pass("Volatility_Guard")
+    l1 = _check_pass("BB_Edge_Guard", "Choppiness_Gate")
+    l2 = _check_pass("Volatility_Guard", "Regime_RSI_Guard")
     liquidity_score = round(float((l1 + l2) / 2.0), 2)
 
     regime_score = round(0.95 if "Trending" in str(regime_name) else 0.75, 2)
 
-    m1 = _check_pass("News_Sentiment")
+    m1 = _check_pass("News_Blackout", "News_Sentiment")
     macro_score = round(float(m1), 2)
 
-    o1 = _check_pass("Orderbook_Imbalance")
+    o1 = _check_pass("Orderbook_L2", "Orderbook_Imbalance")
     orderbook_score = round(float(o1), 2)
 
     return {

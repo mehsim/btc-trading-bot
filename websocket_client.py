@@ -338,15 +338,18 @@ def on_private_open(ws):
     }
     ws.send(json.dumps(auth_payload))
     
-    def send_private_heartbeat():
-        while private_ws_connected:
-            try:
-                ws.send(json.dumps({"op": "ping"}))
-            except Exception as ex_websocket_client:
-                log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
-                break
-            time.sleep(20)
-    threading.Thread(target=send_private_heartbeat, daemon=True).start()
+    global _private_heartbeat_thread
+    if _private_heartbeat_thread is None or not _private_heartbeat_thread.is_alive():
+        def send_private_heartbeat():
+            while private_ws_connected:
+                try:
+                    ws.send(json.dumps({"op": "ping"}))
+                except Exception as ex_websocket_client:
+                    log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
+                    break
+                time.sleep(20)
+        _private_heartbeat_thread = threading.Thread(target=send_private_heartbeat, daemon=True)
+        _private_heartbeat_thread.start()
 
 
 def on_private_message(ws, message, bot_state=None):
@@ -472,8 +475,8 @@ def run_websocket_watchdog():
         
         if ws_connected and active_public_ws:
             silent_duration = now - last_ws_update_time
-            if silent_duration > 60:
-                print(f"[WebSocket Watchdog] Public WebSocket silent for {silent_duration:.1f}s (>60s). Force closing to trigger reconnect...")
+            if silent_duration > 120:
+                print(f"[WebSocket Watchdog] Public WebSocket silent for {silent_duration:.1f}s (>120s). Force closing to trigger reconnect...")
                 try:
                     active_public_ws.close()
                 except Exception as e:

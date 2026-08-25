@@ -193,38 +193,31 @@ def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr
     effective_lev = base_leverage * np.sqrt(target_atr / max(1e-9, current_atr))
     return float(np.clip(effective_lev, min_lev, max_limit))
 
+def _get_returns_series(df: pd.DataFrame) -> Optional[pd.Series]:
+    if df is None or not isinstance(df, pd.DataFrame) or "close" not in df.columns or len(df) < 10:
+        return None
+    s = pd.to_numeric(df["close"], errors="coerce").pct_change().fillna(0.0)
+    if "timestamp" in df.columns:
+        s.index = pd.to_numeric(df["timestamp"], errors="coerce")
+    return s.tail(100)
+
 def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict, interval: str = "60") -> float:
     if not open_positions or symbol not in df_dict or not isinstance(df_dict[symbol], pd.DataFrame):
         return 0.0
     corr_cfg = getattr(config, "CORRELATION_WINDOW_CONFIG", {})
     lookback = corr_cfg.get(str(interval)) or corr_cfg.get("default", 20)
     
-    if "close" not in df_dict[symbol].columns or len(df_dict[symbol]) < lookback:
+    target_s = _get_returns_series(df_dict[symbol])
+    if target_s is None or len(target_s) < lookback:
         return 0.0
     
-    target_df = df_dict[symbol].copy()
-    if "timestamp" in target_df.columns:
-        target_ts_series = pd.to_numeric(target_df["timestamp"], errors="coerce")
-        first_ts = float(target_ts_series.dropna().iloc[0]) if len(target_ts_series.dropna()) > 0 else 0
-        unit_val = "ms" if first_ts > 1e11 else "s"
-        target_df["dt"] = pd.to_datetime(target_ts_series, unit=unit_val, errors="coerce")
-        target_df.set_index("dt", inplace=True)
-    target_s = target_df["close"].pct_change().fillna(0.0).dropna().tail(100)
     max_corr = 0.0
-    
     for pos in open_positions:
         if isinstance(pos, dict):
             pos_symbol = pos.get("symbol")
             if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
-                pos_df = df_dict[pos_symbol].copy()
-                if "close" in pos_df.columns and len(pos_df) >= lookback:
-                    if "timestamp" in pos_df.columns:
-                        pos_ts_series = pd.to_numeric(pos_df["timestamp"], errors="coerce")
-                        pos_first_ts = float(pos_ts_series.dropna().iloc[0]) if len(pos_ts_series.dropna()) > 0 else 0
-                        pos_unit = "ms" if pos_first_ts > 1e11 else "s"
-                        pos_df["dt"] = pd.to_datetime(pos_ts_series, unit=pos_unit, errors="coerce")
-                        pos_df.set_index("dt", inplace=True)
-                    other_s = pos_df["close"].pct_change().fillna(0.0).dropna().tail(100)
+                other_s = _get_returns_series(df_dict[pos_symbol])
+                if other_s is not None and len(other_s) >= lookback:
                     combined = pd.concat([target_s, other_s], axis=1, join="inner").dropna()
                     if len(combined) >= lookback:
                         corr_matrix = combined.corr()

@@ -133,21 +133,6 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
-    offset = get_bybit_time_offset()
-    timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "5000"
-    
-    payload_str = json.dumps(payload)
-    val_str = timestamp + api_key + recv_window + payload_str
-    sign = hmac.new(api_secret.encode("utf-8"), val_str.encode("utf-8"), hashlib.sha256).hexdigest()
-    
-    headers = {
-        "X-BAPI-API-KEY": api_key,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
     url = f"{BYBIT_BASE_URL}{endpoint}"
     
     async def do_post(url, headers, json_data):
@@ -168,6 +153,21 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
     t_start = time.time()
     for attempt in range(max_retries):
         try:
+            offset = get_bybit_time_offset()
+            timestamp = str(int(time.time() * 1000) + offset)
+            recv_window = "5000"
+            
+            payload_str = json.dumps(payload)
+            val_str = timestamp + api_key + recv_window + payload_str
+            sign = hmac.new(api_secret.encode("utf-8"), val_str.encode("utf-8"), hashlib.sha256).hexdigest()
+            
+            headers = {
+                "X-BAPI-API-KEY": api_key,
+                "X-BAPI-SIGN": sign,
+                "X-BAPI-TIMESTAMP": timestamp,
+                "X-BAPI-RECV-WINDOW": recv_window,
+                "Content-Type": "application/json"
+            }
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
             status, res = future.result(timeout=10)
@@ -194,21 +194,7 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
-    offset = get_bybit_time_offset()
-    timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "5000"
-    
     query_string = urllib.parse.urlencode(query_params)
-    val_str = timestamp + api_key + recv_window + query_string
-    sign = hmac.new(api_secret.encode("utf-8"), val_str.encode("utf-8"), hashlib.sha256).hexdigest()
-    
-    headers = {
-        "X-BAPI-API-KEY": api_key,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
     url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
     
     async def do_get(url, headers):
@@ -229,6 +215,20 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
     t_start = time.time()
     for attempt in range(max_retries):
         try:
+            offset = get_bybit_time_offset()
+            timestamp = str(int(time.time() * 1000) + offset)
+            recv_window = "5000"
+            
+            val_str = timestamp + api_key + recv_window + query_string
+            sign = hmac.new(api_secret.encode("utf-8"), val_str.encode("utf-8"), hashlib.sha256).hexdigest()
+            
+            headers = {
+                "X-BAPI-API-KEY": api_key,
+                "X-BAPI-SIGN": sign,
+                "X-BAPI-TIMESTAMP": timestamp,
+                "X-BAPI-RECV-WINDOW": recv_window,
+                "Content-Type": "application/json"
+            }
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
             status, res = future.result(timeout=10)

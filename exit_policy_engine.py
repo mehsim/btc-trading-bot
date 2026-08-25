@@ -516,7 +516,13 @@ class ExitPolicyEngine:
         atr_adj = float(np.clip((float(atr_ratio) - 1.0) * sens, -max_adj, max_adj))
         
         # C-1: Model Health Index (MHI) Continuous Patience Scaling
-        mhi_num = float(mhi_status) if isinstance(mhi_status, (int, float)) else 100.0
+        if isinstance(mhi_status, dict):
+            mhi_num = float(mhi_status.get("mhi", 100.0))
+        else:
+            try:
+                mhi_num = float(mhi_status)
+            except (ValueError, TypeError):
+                mhi_num = 100.0
         mhi_floor = getattr(config, "MHI_MULT_FLOOR", 0.50)
         mhi_mult = float(np.clip(mhi_num / 100.0, mhi_floor, 1.0))
         soft_limit = max(4, int(round((base_soft + atr_adj) * mhi_mult)))

@@ -1149,13 +1149,18 @@ def calculate_break_even_stop(
     cost_buffer = entry_price * total_cost_pct
     target_sl = entry_price + (side_sign * cost_buffer)
 
-    # Immediate trigger safety check: SL must not cross current market price
+    # Immediate trigger safety check: SL must not cross or sit too close to current market price
+    # Bybit requires a clearance buffer of at least 0.05% between stop loss and current market price
     if side_sign == 1:
-        if current_price > 0 and target_sl >= current_price:
-            target_sl = entry_price + (current_price - entry_price) * 0.5
+        if current_price > 0:
+            max_allowed_sl = current_price * 0.9995
+            if target_sl >= max_allowed_sl:
+                target_sl = min(max_allowed_sl, entry_price + max(0.0, (current_price - entry_price) * 0.5))
     else:
-        if current_price > 0 and target_sl <= current_price:
-            target_sl = entry_price - (entry_price - current_price) * 0.5
+        if current_price > 0:
+            min_allowed_sl = current_price * 1.0005
+            if target_sl <= min_allowed_sl:
+                target_sl = max(min_allowed_sl, entry_price - max(0.0, (entry_price - current_price) * 0.5))
 
     return round(target_sl, 4)
 

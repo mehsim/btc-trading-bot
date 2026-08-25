@@ -224,21 +224,42 @@ class SignalEvaluator:
                         except Exception:
                             pass
 
+                # Helper to write neutral abstention state
+                def _record_abstain(reason_msg):
+                    neut_pred = {
+                        "symbol": str(symbol),
+                        "direction": "Neutral",
+                        "confidence": 0.0,
+                        "calibrated_confidence": 0.0,
+                        "predicted_change": 0.0,
+                        "signal_source": "GOVERNANCE_ABSTAIN",
+                        "status": f"Abstain ({reason_msg})",
+                        "timestamp": time.time()
+                    }
+                    with self.state_lock:
+                        self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = neut_pred
+                        if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                            self.bot_state[f"latest_prediction_{tf_key}"] = neut_pred
+
                 # Fail-closed: unmeasured models (no cv_metrics) must not trade
                 if mcc_val is None:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): no CV metrics recorded — quality unverified. ABSTAIN.")
+                    _record_abstain("Model predictive content unverified (no cv_metrics)")
                     return "Neutral", 0.0, "Model predictive content unverified (no cv_metrics)"
 
                 if mcc_val < min_mcc_floor:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): MCC ({mcc_val:.4f}) below predictive floor ({min_mcc_floor}). ABSTAIN.")
+                    _record_abstain(f"MCC {mcc_val:.4f} < {min_mcc_floor}")
                     return "Neutral", 0.0, f"Model predictive content below governance floor (MCC {mcc_val:.4f} < {min_mcc_floor})"
 
                 if mcc_min_val is not None and mcc_min_val < -0.05:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): severely anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < -0.05). ABSTAIN.")
+                    _record_abstain(f"min fold MCC {mcc_min_val:.4f} < -0.05")
                     return "Neutral", 0.0, f"Model severely anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < -0.05)"
 
                 if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): BalAcc ({bal_acc_val:.4f}) below floor ({min_bal_acc_floor}). ABSTAIN.")
+                    _record_abstain(f"BalAcc {bal_acc_val:.4f} < {min_bal_acc_floor}")
                     return "Neutral", 0.0, f"Model balanced accuracy below governance floor ({bal_acc_val:.4f} < {min_bal_acc_floor})"
 
                 try:
@@ -253,7 +274,7 @@ class SignalEvaluator:
                         if f_col not in df.columns:
                             df[f_col] = 0.0
 
-                    row_X = df[_feat_list].iloc[[-1]]
+                    row_X = df[_feat_list].iloc[[-1]].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
                     row_X_sliced = _slice_model_input(models["trend"], row_X)
 
                     probs = models["trend"].predict_proba(row_X_sliced)[0]
@@ -266,6 +287,7 @@ class SignalEvaluator:
                         if shares.max() >= 0.98:
                             log_event("WARNING", f"[{_model_key}] degenerate: {shares.round(3)} over "
                                                  f"{len(_recent_argmax[_model_key])} predictions — abstaining")
+                            _record_abstain("Model degenerate on live predictions")
                             return "Neutral", 0.0, f"Model {_model_key} degenerate on live predictions"
                     
                     if len(probs) >= 3:

@@ -6631,16 +6631,16 @@ def main():
                                     adjustments_applied.append(("htf_decay_penalty", htf_decay_threshold_penalty))
                                     print(f"[{symbol} 15m Time-Decayed Penalty] HTF contradiction gate penalty (+{htf_decay_threshold_penalty*100:.1f}% required threshold).")
                             
-                            # Recent 50-Trade Performance Decay Filter
-                            recent_trades = bot_state.get("trade_history", [])[-50:]
-                            if len(recent_trades) >= 10:
-                                win_count = sum(1 for t in recent_trades if float(t.get("pnl_usd", 0.0)) > 0)
-                                recent_win_rate = (win_count / len(recent_trades)) * 100.0
+                            # Recent 50-Trade Performance Decay Filter (Timeframe-Isolated)
+                            interval_trades = [t for t in bot_state.get("trade_history", []) if isinstance(t, dict) and str(t.get("interval")) == str(iv)][-50:]
+                            if len(interval_trades) >= 10:
+                                win_count = sum(1 for t in interval_trades if float(t.get("pnl_usd", 0.0)) > 0)
+                                recent_win_rate = (win_count / len(interval_trades)) * 100.0
                                 if recent_win_rate < 45.0:
                                     perf_delta = 0.04
                                     dynamic_conf_threshold += perf_delta
                                     adjustments_applied.append(("performance_decay", perf_delta))
-                                    print(f"[{symbol} {iv}m Performance Decay Filter] Win rate {recent_win_rate:.1f}% < 45%. Raised threshold by +0.04 to {dynamic_conf_threshold:.2f}")
+                                    print(f"[{symbol} {iv}m Performance Decay Filter] Interval win rate {recent_win_rate:.1f}% < 45% ({len(interval_trades)} trades). Raised threshold by +0.04 to {dynamic_conf_threshold:.2f}")
                             
 
 

@@ -30,6 +30,8 @@ def default_json_serializer(obj):
         return float(obj)
     elif isinstance(obj, (np.ndarray,)):
         return obj.tolist()
+    elif hasattr(obj, "isoformat"):
+        return obj.isoformat()
     return str(obj)
 
 
@@ -163,6 +165,13 @@ class StateManager:
                     database.save_completed_trade(t)
         elif isinstance(item, dict):
             database.save_completed_trade(item)
+
+        if self._redis:
+            try:
+                raw_list = list(self._cache.get("trade_history", []))
+                self._redis.set("bot_state:trade_history", json.dumps(raw_list, default=default_json_serializer))
+            except Exception as e:
+                log_event("WARNING", f"[StateManager Redis Error] Failed to sync trade_history mutation: {e}")
 
     def _on_mutate_prediction(self, *args):
         item = args[-1] if args else None

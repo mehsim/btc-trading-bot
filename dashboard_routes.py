@@ -36,7 +36,13 @@ def micro_cache(ttl_seconds=5.0):
         @wraps(f)
         def wrapper(*args, **kwargs):
             now = time.time()
-            cache_key = f.__name__
+            try:
+                from flask import request as flask_req
+                req_path = flask_req.full_path if flask_req else ""
+            except Exception as ex_req:
+                log_event("WARNING", f"dashboard micro_cache request path notice: {ex_req}")
+                req_path = ""
+            cache_key = f"{f.__name__}:{req_path}"
             with _endpoint_cache_lock:
                 if cache_key in _endpoint_cache:
                     cached_res, timestamp = _endpoint_cache[cache_key]
@@ -45,6 +51,10 @@ def micro_cache(ttl_seconds=5.0):
             res = f(*args, **kwargs)
             with _endpoint_cache_lock:
                 _endpoint_cache[cache_key] = (res, now)
+                if len(_endpoint_cache) > 200:
+                    stale_keys = [k for k, v in _endpoint_cache.items() if now - v[1] > 60]
+                    for sk in stale_keys:
+                        _endpoint_cache.pop(sk, None)
             return res
         return wrapper
     return decorator

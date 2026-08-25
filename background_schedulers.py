@@ -23,13 +23,17 @@ FUNDING_ARB_SIZE_USD = 20.0
 def run_daily_journal_scheduler(send_daily_journal_digest_func=None):
     """Send daily Telegram digest at 00:00 UTC every day."""
     print("[Journal Scheduler] Daily digest scheduler started.")
+    last_journal_date = ""
     while True:
         now = time.gmtime()
+        today_date_str = time.strftime("%Y-%m-%d", now)
         seconds_to_midnight = 86400 - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
         time.sleep(max(1, seconds_to_midnight))
         try:
-            if send_daily_journal_digest_func:
-                send_daily_journal_digest_func()
+            if last_journal_date != today_date_str:
+                last_journal_date = today_date_str
+                if send_daily_journal_digest_func:
+                    send_daily_journal_digest_func()
         except Exception as e:
             print(f"[Journal Scheduler] Error: {e}")
 
@@ -49,7 +53,7 @@ def run_funding_rate_arbitrage_monitor(bot_state=None, get_funding_rate_func=Non
 
                 if rate > FUNDING_ARB_THRESHOLD and not existing:
                     print(f"[Funding Arb] {sym} funding rate {rate*100:.4f}% > 0.1%. Opening arb short.")
-                    if trade_mode == "live" and place_bybit_market_order_func and format_bybit_qty_func and bot_state:
+                    if trade_mode in ["live", "real"] and place_bybit_market_order_func and format_bybit_qty_func and bot_state:
                         cur_price = bot_state.get(f"live_price_{sym}", 0.0) or 50000.0
                         qty_str = format_bybit_qty_func(sym, FUNDING_ARB_SIZE_USD / cur_price)
                         res = place_bybit_market_order_func(sym, "Sell", qty_str, reduce_only=False)
@@ -65,7 +69,7 @@ def run_funding_rate_arbitrage_monitor(bot_state=None, get_funding_rate_func=Non
                                 )
                 elif existing and rate < FUNDING_ARB_THRESHOLD * 0.3:
                     print(f"[Funding Arb] {sym} funding rate normalized ({rate*100:.4f}%). Closing arb short.")
-                    if trade_mode == "live" and place_bybit_market_order_func:
+                    if trade_mode in ["live", "real"] and place_bybit_market_order_func:
                         qty_str = existing["qty"]
                         res = place_bybit_market_order_func(sym, "Buy", qty_str, reduce_only=True)
                         if res and res.get("retCode") == 0:
@@ -85,11 +89,12 @@ def run_funding_rate_arbitrage_monitor(bot_state=None, get_funding_rate_func=Non
 def run_daily_backup_scheduler():
     """
     Background scheduler that runs daily at 00:00 UTC.
-    Calculates time to UTC midnight, sleeps, then creates a compressed zip file
+    Calculates time to UTC midnight, sleeps, then creates an atomic online backup
     of trading_bot.db and trade_journal.csv, uploading to AWS S3 if credentials are set.
     """
     print("[Backup Scheduler] Daily database backup scheduler started.")
     import zipfile
+    import sqlite3
     from database import DB_FILE
     
     while True:
@@ -105,19 +110,33 @@ def run_daily_backup_scheduler():
                 
             timestamp_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
             zip_filename = os.path.join(backup_dir, f"backup_{timestamp_str}.zip")
+            temp_db_path = os.path.join(backup_dir, f"temp_backup_{timestamp_str}.db")
             
+            # Online atomic SQLite backup to prevent WAL corruption
             current_db = database.get_db_path()
+            if os.path.exists(current_db):
+                src_conn = database.get_db_connection()
+                dst_conn = sqlite3.connect(temp_db_path)
+                try:
+                    src_conn.backup(dst_conn)
+                finally:
+                    dst_conn.close()
+                    src_conn.close()
+            
             with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                if os.path.exists(current_db):
-                    zipf.write(current_db, os.path.basename(current_db))
-                if os.path.exists(current_db + "-wal"):
-                    zipf.write(current_db + "-wal", os.path.basename(current_db + "-wal"))
-                if os.path.exists(current_db + "-shm"):
-                    zipf.write(current_db + "-shm", os.path.basename(current_db + "-shm"))
+                if os.path.exists(temp_db_path):
+                    zipf.write(temp_db_path, os.path.basename(current_db))
                 if os.path.exists(JOURNAL_PATH):
                     zipf.write(JOURNAL_PATH, os.path.basename(JOURNAL_PATH))
                     
-            print(f"[Backup Scheduler] Created local compressed backup: {zip_filename}")
+            if os.path.exists(temp_db_path):
+                try:
+                    os.remove(temp_db_path)
+                except OSError as ex_temp:
+                    from logger import log_event
+                    log_event("WARNING", f"background_schedulers temp remove notice: {ex_temp}")
+                    
+            print(f"[Backup Scheduler] Created local compressed online backup: {zip_filename}")
             
             s3_bucket = os.environ.get("AWS_S3_BUCKET")
             if s3_bucket:
