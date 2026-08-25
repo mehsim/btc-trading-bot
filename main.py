@@ -4914,7 +4914,25 @@ def main():
             rebal_close_set = set()
             rebal_scale_set = set()
             if all_open_trades:
-                portfolio_rebal = PortfolioUtilityOptimizer.optimize_portfolio_capital(all_open_trades)
+                # Filter out trades younger than 1 candle from portfolio rebalancing to prevent premature scale-outs
+                mature_trades = {}
+                for tid, tr in all_open_trades.items():
+                    et_ms = tr.get("entry_time", 0)
+                    if et_ms and et_ms > 1e12:  # valid ms timestamp
+                        age_sec = time.time() - (et_ms / 1000.0)
+                    elif et_ms and et_ms > 1e9:  # valid sec timestamp
+                        age_sec = time.time() - et_ms
+                    else:
+                        age_sec = 0  # unknown age, skip rebalancing
+                    # Require at least 1 candle of age for the trade's timeframe before rebalancing
+                    tr_iv = int(tr.get("interval", 60) or 60)
+                    min_age = tr_iv * 60  # 1 candle in seconds
+                    if age_sec >= min_age:
+                        mature_trades[tid] = tr
+                if mature_trades:
+                    portfolio_rebal = PortfolioUtilityOptimizer.optimize_portfolio_capital(mature_trades)
+                else:
+                    portfolio_rebal = {}
                 if isinstance(portfolio_rebal, dict):
                     rebal_close_set = set(portfolio_rebal.get("close_trades", []))
                     rebal_scale_set = set(portfolio_rebal.get("scale_out_trades", []))
@@ -5271,9 +5289,13 @@ def main():
                     half_closed = active_trade.get("half_closed", False)
                     
                     # 1 & 2. 10-Level Institutional Adaptive Exit Hierarchy Evaluation
-                    entry_time_ms = active_trade.get("entry_time") or (current_time * 1000)
+                    entry_time_ms = active_trade.get("entry_time") or 0
+                    # Guard against corrupted/missing entry_time (epoch 0 or unreasonable values)
+                    if entry_time_ms < 1e12:  # not a valid millisecond timestamp
+                        entry_time_ms = int(time.time() * 1000)  # treat as just opened
+                        active_trade["entry_time"] = entry_time_ms  # persist fix
                     tf_mins = max(1, int(iv))
-                    candles_elapsed = int((time.time() - (entry_time_ms / 1000.0)) / (tf_mins * 60))
+                    candles_elapsed = max(0, int((time.time() - (entry_time_ms / 1000.0)) / (tf_mins * 60)))
                     
                     atr_dollars = active_trade.get("atr_dollars") or max(1e-6, entry_price * 0.01)
                     highest_p = active_trade.get("highest_price", current_price)

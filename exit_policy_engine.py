@@ -577,8 +577,9 @@ class ExitPolicyEngine:
         if current_r <= -3.0:
             return self._build_exit_result(3, "Catastrophic Risk Limit Breach", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
 
-        # LEVEL 4: Expected R Collapse (after soft timeout)
-        if candles_elapsed >= soft_limit and decayed_expected_r < 0.25:
+        # LEVEL 4: Expected R Collapse (after soft timeout AND trade must be underwater)
+        # A trade at breakeven or profit should NOT be killed by time decay alone
+        if candles_elapsed >= soft_limit and decayed_expected_r < 0.25 and current_r < 0.0:
             return self._build_exit_result(4, "Expected R Collapse (<0.25R)", True, current_r, decayed_expected_r, exit_score, candles_elapsed, soft_limit, hard_limit)
 
         # LEVEL 5: Opportunity Cost Rotation (Recommendation 3)
