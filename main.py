@@ -4213,19 +4213,35 @@ def sync_active_positions_from_bybit():
                             if not success:
                                 sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
      
-                    # Dynamic timeframe and confidence resolution from prediction history matching symbol and direction
-                    matched_tf = "1h"  # fallback default
-                    matched_confidence = 0.0
-                    for p in reversed(bot_state.get("prediction_history", [])):
-                        if p.get("symbol") == symbol and p.get("direction") == direction:
-                            # Verify if it was within the last 48 hours to avoid matching ancient predictions
-                            if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
-                                token_val_not_used = None
-                                matched_tf_interval = p.get("interval", "60")
-                                tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-                                matched_tf = tf_map_inv.get(matched_tf_interval, "1h")
-                                matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.63)))
-                                break
+                    # Accurate timeframe and confidence resolution from decision_journal execution records
+                    matched_tf = "4h"  # fallback default
+                    matched_confidence = 0.50
+                    try:
+                        import sqlite3
+                        con = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db"), timeout=10.0)
+                        cur = con.cursor()
+                        cur.execute("""
+                            SELECT interval, calibrated_conf, direction FROM decision_journal 
+                            WHERE symbol = ? AND outcome = 'EXECUTED' 
+                            ORDER BY ts DESC LIMIT 1
+                        """, (symbol,))
+                        exec_row = cur.fetchone()
+                        con.close()
+                        if exec_row:
+                            tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                            matched_tf = tf_map_inv.get(str(exec_row[0]), "4h")
+                            matched_confidence = float(exec_row[1] or 0.50)
+                            print(f"[Crash Recovery] Matched executed journal record for {symbol}: {matched_tf} ({exec_row[0]}m), conf={matched_confidence*100:.2f}%")
+                    except Exception as e_rec:
+                        log_event("WARNING", f"Failed to query decision_journal for recovery: {e_rec}")
+                        for p in reversed(bot_state.get("prediction_history", [])):
+                            if p.get("symbol") == symbol and p.get("direction") == direction:
+                                if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
+                                    matched_tf_interval = p.get("interval", "240")
+                                    tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                                    matched_tf = tf_map_inv.get(str(matched_tf_interval), "4h")
+                                    matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.50)))
+                                    break
 
                     _iv = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "6h": 360}.get(matched_tf, 60)
                     _la = TIMEFRAME_CONFIG.get(str(_iv), {}).get("lookahead", 10)
