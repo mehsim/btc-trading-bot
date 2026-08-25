@@ -629,16 +629,15 @@ def get_liquidity_score(symbol: str, orderbook_depth: int = 10, turnover_24h: Op
         if depth_est <= 0.0:
             return 0.0
             
-        # 1. Dynamic Benchmark Calculation
+        # 1. Dynamic Benchmark Calculation for Top-10 Orderbook Depth
         symbol_upper = symbol.upper() if symbol else "BTCUSDT"
-        if turnover_24h is not None and float(turnover_24h) > 0:
-            dynamic_benchmark = max(50_000.0, min(10_000_000.0, float(turnover_24h) * 0.0005))
-        elif symbol_upper in SYMBOL_LIQUIDITY_BENCHMARKS:
-            dynamic_benchmark = SYMBOL_LIQUIDITY_BENCHMARKS[symbol_upper]
+        # Top-10 level benchmark: $50k for BTC/ETH, $25k for major alts
+        if symbol_upper in ["BTCUSDT", "ETHUSDT"]:
+            dynamic_benchmark = 50_000.0
         else:
-            dynamic_benchmark = 350_000.0  # Dynamic default for altcoins
+            dynamic_benchmark = 25_000.0
 
-        # 2. Depth Score calculation relative to dynamic benchmark
+        # 2. Depth Score calculation relative to top-10 dynamic benchmark
         depth_score = min(depth_est / dynamic_benchmark, 1.0)
         
         # 3. Dynamic Spread Penalty (penalize spreads > 0.15%, zero score if spread > 0.50%)

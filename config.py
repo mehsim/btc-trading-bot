@@ -171,12 +171,12 @@ CONFLUENCE_POLICY: dict = {
     "regime_weight": 10.0,
 }
 
-# H-2: Ensemble Uncertainty Governance Policy & Cutoffs
+# H-2: Ensemble Uncertainty Governance Policy & Cutoffs (Calibrated for 3-class probability distribution)
 UNCERTAINTY_POLICY: dict = {
     "disagreement_weight": 0.7,
     "margin_weight": 0.3,
     "margin_reference": 0.25,
-    "margin_cutoff": 0.08,
+    "margin_cutoff": 0.02,
     "disagreement_cutoff": 0.15,
 }
 

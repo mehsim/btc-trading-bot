@@ -6600,6 +6600,10 @@ def main():
                                 adjustments_applied.append(("asian_session", 0.02))
                                 print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.02 threshold -> {dynamic_conf_threshold:.2f})")
                                 
+                            # Cap additive penalties so 3-class models (random chance 33.3%) are not pushed to unreachable binary thresholds
+                            max_conf_cap = 0.50 if str(iv) in ["15", "30", "60"] else 0.55
+                            dynamic_conf_threshold = min(max_conf_cap, dynamic_conf_threshold)
+
                             # Calculate live market microstructure spread in bps
                             _bid_px = float(latest_candle.get("bid", latest_candle.get("close", 100.0)))
                             _ask_px = float(latest_candle.get("ask", latest_candle.get("close", 100.0)))
@@ -7500,9 +7504,15 @@ def main():
                                             raw_target_margin = target_notional_usd / max(1.0, leverage_val)
 
                                             if raw_target_margin < min_req_margin:
-                                                log_event("INFO", f"[{symbol} {iv}m] Risk budget allocation (${raw_target_margin:.2f}) below exchange minimum (${min_req_margin:.2f}). Cleanly skipping entry.")
-                                                status_msg = "Skipped (Below Risk Allocation Floor)"
-                                                continue
+                                                if available_margin >= min_req_margin:
+                                                    # Bump to minimum exchange order size ($5.10 USDT) for small balance accounts
+                                                    raw_target_margin = min_req_margin
+                                                    target_notional_usd = min_exchange_notional
+                                                    print(f"[{symbol} {iv}m Position Size Bump] Sized up to exchange minimum notional (${min_exchange_notional:.2f}).")
+                                                else:
+                                                    log_event("INFO", f"[{symbol} {iv}m] Risk budget allocation (${raw_target_margin:.2f}) below exchange minimum (${min_req_margin:.2f}). Cleanly skipping entry.")
+                                                    status_msg = "Skipped (Below Risk Allocation Floor)"
+                                                    continue
 
                                             if available_margin < min_req_margin:
                                                 log_event("WARNING", f"[{symbol} {iv}m] Insufficient free margin (${available_margin:.2f}) for required position margin (${min_req_margin:.2f}). Skipping entry.")
