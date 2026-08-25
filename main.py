@@ -4248,6 +4248,8 @@ def sync_active_positions_from_bybit():
 
                     recovered_trade = {
                         "trade_id": f"{symbol}_{trade_uuid}_recovered",
+                        "interval": str(_iv),
+                        "timeframe": str(matched_tf),
                         "bybit_order_id": entry_order_id,
                         "bybit_scale_out_order_id": scale_out_order_id,
                         "symbol": symbol,
@@ -4255,6 +4257,9 @@ def sync_active_positions_from_bybit():
                         "predicted_price": avg_price,
                         "stop_loss": sl_price,
                         "take_profit": tp_price,
+                        "initial_stop_loss": sl_price,
+                        "initial_take_profit": tp_price,
+                        "initial_planned_rr": float(abs(tp_price - avg_price) / max(1e-9, abs(avg_price - sl_price))) if (sl_price and tp_price) else 1.5,
                         "direction": direction,
                         "end_time": float(time.time() + _iv * 60 * _la),
                         "entry_time": max(int(pos.get("createdTime") or 0), int(pos.get("updatedTime") or 0)) or int(time.time() * 1000),
@@ -4351,6 +4356,7 @@ def recover_missed_closed_trades():
                             
                             trade_record = {
                                 "symbol": symbol,
+                                "entry_time": float(item.get("createdTime") or int(time.time() * 1000)),
                                 "exit_time": exit_time_sec,
                                 "interval": "Unknown",
                                 "direction": direction,
@@ -5589,6 +5595,7 @@ def main():
                         # Update Completed Trade History in global state
                         bot_state["trade_history"].append({
                             "symbol": active_symbol,
+                            "entry_time": float(active_trade.get("entry_time", 0)),
                             "exit_time": float(time.time()),
                             "interval": str(iv),
                             "direction": str(direction),
