@@ -6462,8 +6462,9 @@ def main():
                             _recent_runtime_argmax[_model_key].append(int(np.argmax(probs)))
                             if len(_recent_runtime_argmax[_model_key]) >= 30:
                                 _shares = np.bincount(_recent_runtime_argmax[_model_key], minlength=3) / len(_recent_runtime_argmax[_model_key])
-                                if _shares.max() >= 0.98:
-                                    log_event("WARNING", f"[{_model_key}] degenerate: {_shares.round(3)} over {len(_recent_runtime_argmax[_model_key])} predictions — abstaining (Fail-Closed)")
+                                # One-sided directional collapse: exclusively Bearish (0) or Bullish (2) dominating
+                                if len(_shares) >= 3 and (_shares[0] >= 0.95 or _shares[2] >= 0.95):
+                                    log_event("WARNING", f"[{_model_key}] degenerate one-sided directional predictor: {_shares.round(3)} over {len(_recent_runtime_argmax[_model_key])} predictions — abstaining (Fail-Closed)")
                                     status_msg = f"Skipped (Degenerate Prediction: {_model_key})"
                                     continue
                         

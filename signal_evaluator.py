@@ -284,8 +284,9 @@ class SignalEvaluator:
                     _recent_argmax[_model_key].append(int(np.argmax(probs)))
                     if len(_recent_argmax[_model_key]) >= 30:
                         shares = np.bincount(_recent_argmax[_model_key], minlength=3) / len(_recent_argmax[_model_key])
-                        if shares.max() >= 0.98:
-                            log_event("WARNING", f"[{_model_key}] degenerate: {shares.round(3)} over "
+                        # One-sided directional collapse: exclusively Bearish (0) or Bullish (2) dominating
+                        if len(shares) >= 3 and (shares[0] >= 0.95 or shares[2] >= 0.95):
+                            log_event("WARNING", f"[{_model_key}] degenerate one-sided directional predictor: {shares.round(3)} over "
                                                  f"{len(_recent_argmax[_model_key])} predictions — abstaining")
                             _record_abstain("Model degenerate on live predictions")
                             return "Neutral", 0.0, f"Model {_model_key} degenerate on live predictions"
