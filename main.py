@@ -3970,18 +3970,8 @@ def sync_active_positions_from_bybit():
                                 mismatch = True
                                 
                             if mismatch:
-                                print(f"[Side Mismatch Guard] WARNING: {symbol} in {tf_key} has direction {trade_direction} but Bybit position is {pos_side}! Force-closing to prevent inverted SL/TP.")
-                                if TRADE_MODE != "simulation":
-                                    close_side = "Sell" if pos_side == "Buy" else "Buy"
-                                    close_res = place_bybit_order(symbol, close_side, str(pos.get("size", t["qty"])), reduce_only=True)
-                                    if isinstance(close_res, dict) and close_res.get("retCode") == 0:
-                                        if t.get("bybit_scale_out_order_id"):
-                                            cancel_bybit_order(symbol, t["bybit_scale_out_order_id"])
-                                        continue
-                                    else:
-                                        log_event("CRITICAL", f"[Side Mismatch Guard] Close order failed for {symbol}: {close_res}. Retaining trade in state.")
-                                else:
-                                    continue
+                                print(f"[Side Mismatch Guard] Stale local record detected for {symbol} in {tf_key} (Direction: {trade_direction} vs Bybit Live: {pos_side}). Discarding stale local record to preserve live exchange trade.")
+                                continue
         
                             t["entry_price"] = float(pos.get("avgPrice", t["entry_price"]))
                             t["liq_price"] = float(pos.get("liqPrice", 0.0)) if pos.get("liqPrice") else 0.0
