@@ -1020,14 +1020,15 @@ def calculate_adaptive_structural_stop(
         pivot_idx = recent["high"].idxmax() if not recent.empty else None
         bars_ago = (len(df_recent) - 1 - df_recent.index.get_loc(pivot_idx)) if (pivot_idx is not None and pivot_idx in df_recent.index) else 99
 
-    # Refinement 4: Recency Guard — fallback to ATR floor if pivot > 12 bars old
+    # Refinement 4: Recency Guard & Brownian Noise Clearance Envelope
     recency_passed = bars_ago <= 12
+    min_noise_dist = max(1.25 * atr_val, entry_price * 0.008)
     if is_long:
-        structural_sl = swing_price - (0.20 * atr_val) if recency_passed else (entry_price - 1.25 * atr_val)
-        final_sl = min(entry_price - (0.5 * atr_val), structural_sl)
+        structural_sl = swing_price - (0.25 * atr_val) if recency_passed else (entry_price - 1.5 * atr_val)
+        final_sl = min(entry_price - min_noise_dist, structural_sl)
     else:
-        structural_sl = swing_price + (0.20 * atr_val) if recency_passed else (entry_price + 1.25 * atr_val)
-        final_sl = max(entry_price + (0.5 * atr_val), structural_sl)
+        structural_sl = swing_price + (0.25 * atr_val) if recency_passed else (entry_price + 1.5 * atr_val)
+        final_sl = max(entry_price + min_noise_dist, structural_sl)
     # Compute liquidity sweep and volume confirmation
     has_sweep = False
     if len(df_recent) >= 3:

@@ -4427,11 +4427,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     actual_qty = raw_qty
     order_res = {}
     
-    sl_source = "STRUCTURE"
-    sl_override_reason = "None"
-    min_sl_pct = 0.005
+    sl_source = "STRUCTURAL_SWING" if str(iv) in ["15", "30", "60"] else "ATR_DYNAMIC"
+    sl_override_reason = "Dynamic Pivot Envelope" if str(iv) in ["15", "30", "60"] else f"{sl_multiplier_adjusted:.2f}x ATR Target"
+    min_sl_pct = 0.008 if str(iv) in ["15", "30"] else 0.006
     atr_sl_dist = atr_dollars * sl_multiplier_adjusted
-    min_sl_dist = atr_dollars * 0.60
+    min_sl_dist = max(atr_dollars * 1.0, entry_price * min_sl_pct)
     raw_sl_dist = abs(entry_price - stop_loss_price) if stop_loss_price is not None else atr_sl_dist
     
     # 1. Live Exchange Position Guard
@@ -7693,17 +7693,13 @@ def main():
                                                     if final_val > clamped_val:
                                                         log_event("INFO", f"[{symbol} {iv}m] Scaled UP to min order value: ${clamped_val:.2f} -> ${final_val:.2f}")
                                                 
-                                                    # Priority 1: Tighten stop distance proportionally to keep dollar risk constant
-                                                    scale_ratio = original_notional / scaled_notional if scaled_notional > 0 else 1.0
-                                                    new_stop_dist = original_stop_dist * scale_ratio
-                                                
-                                                    # Enforce absolute approved floor: Never compress SL tighter than approved leverage-aware ATR floor and % floor
-                                                    min_atr_mult = 1.0 if float(leverage_val) > 10.0 else 0.75
-                                                    min_sl_pct = getattr(config, "MIN_SL_PCT_CONFIG", {}).get(str(iv), 0.008)
+                                                    # Priority 1: Maintain structural stop width & Brownian noise clearance envelope
+                                                    min_atr_mult = 1.25 if float(leverage_val) > 10.0 else 1.0
+                                                    min_sl_pct = 0.008 if str(iv) in ["15", "30"] else 0.006
                                                     min_allowed_sl_dist = max(atr_dollars * min_atr_mult, entry_price * min_sl_pct)
-                                                    if new_stop_dist < min_allowed_sl_dist:
-                                                        new_stop_dist = min_allowed_sl_dist
-                                                        print(f"[{symbol} {iv}m Risk Guard] Capped SL compression to approved floor {min_atr_mult}x ATR (${min_allowed_sl_dist:.4f}).")
+                                                    
+                                                    # Keep structural stop distance; only compress if stop is excessively wide
+                                                    new_stop_dist = max(original_stop_dist, min_allowed_sl_dist)
                                                 
                                                     if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
                                                         new_sl_price = entry_price - new_stop_dist
@@ -7712,17 +7708,17 @@ def main():
 
                                                     scaled_risk_usd = (scaled_notional / max(1e-8, entry_price)) * new_stop_dist
                                                 
-                                                    # Priority 2: Hard Cap - Never exceed 110% of approved original risk
-                                                    risk_cap_ratio = getattr(config, "MAX_SCALED_RISK_CAP_RATIO", 1.10)
-                                                    if original_risk_usd <= 0.0 or scaled_risk_usd > original_risk_usd * risk_cap_ratio:
-                                                        print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed risk limits (Scaled: ${scaled_risk_usd:.2f} vs Approved: ${original_risk_usd:.2f})")
+                                                    # Priority 2: Risk Check — Allow minimum notional trade if max loss <= 1.5% of balance ($1.40)
+                                                    max_allowed_risk_usd = max(original_risk_usd * 1.50, current_bal * 0.015)
+                                                    if scaled_risk_usd > max_allowed_risk_usd:
+                                                        print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed risk budget (Scaled: ${scaled_risk_usd:.2f} vs Max: ${max_allowed_risk_usd:.2f})")
                                                         status_msg = "Skipped (Exceeds Risk Cap)"
                                                         wallet_exceeded = True
                                                     else:
                                                         stop_loss_price = new_sl_price
                                                         position_size_usd = final_val
                                                         is_oversized_trade = True
-                                                        print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Tightened SL from ${original_stop_dist:.2f} to ${new_stop_dist:.2f} to keep risk constant at ${scaled_risk_usd:.2f}.")
+                                                        print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Applied noise-clearance SL (${new_stop_dist:.4f}) with total risk ${scaled_risk_usd:.2f}.")
 
                                                 # Priority 3: Balance Guard - If margin exceeds 90% of available wallet balance, reject trade.
                                                 required_margin = (qty_val * entry_price) / max(1e-8, leverage_val)
