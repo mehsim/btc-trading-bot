@@ -326,7 +326,14 @@ class SignalEvaluator:
                     atr_norm = (atr_val / close_price) if close_price > 0 else 0.01
                     p_star = sl_m / (actual_tp_m + sl_m)
                     cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + sl_m) * max(1e-4, atr_norm))
-                    eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj)), 4)
+                    
+                    # Information-Theoretic Regime Entropy Hurdle:
+                    # In quiet sideways markets (ADX < 25), demand higher statistical signal-to-noise ratio (up to +0.15).
+                    # In strong trending markets (ADX >= 30), scale smoothly down to economic p_star baseline.
+                    adx_cur = float(df["ADX"].iloc[-1]) if ("ADX" in df.columns and len(df) > 0 and pd.notna(df["ADX"].iloc[-1])) else 20.0
+                    entropy_penalty = 0.15 * max(0.0, 1.0 - (adx_cur / 30.0))
+                    prior_hurdle = 0.333 + entropy_penalty
+                    eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle)), 4)
 
                     from ensemble import resolve_direction
                     _top_trend, _top_conf = resolve_direction(probs)

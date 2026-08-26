@@ -7243,16 +7243,12 @@ def main():
 
                                         # Take-Profit distance tp_change resolved via UnifiedTargetGenerator above
                                     
-                                        # Dynamically adjust Stop Loss multiplier based on prediction confidence
+                                        # Stop Loss multiplier maintained at statistical optimum without shrinking into Brownian noise
                                         sl_multiplier_adjusted = sl_multiplier
-                                        if calibrated_confidence > dynamic_conf_threshold:
-                                            confidence_ratio = (calibrated_confidence - dynamic_conf_threshold) / (1.0 - dynamic_conf_threshold)
-                                            # Scale SL down by up to 30% for maximum confidence trades
-                                            sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
                                         
-                                        # Refinements 3, 4, 7: Adaptive Structural Swing Stop & Recency Guard for 15m
+                                        # Adaptive Structural Swing Stop & Recency Guard for intraday timeframes (15m, 30m, 60m)
                                         scaled_lev = None
-                                        if str(iv) == "15":
+                                        if str(iv) in ["15", "30", "60"]:
                                             struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
                                                 df_recent=df_completed,
                                                 entry_price=entry_price,
@@ -7265,19 +7261,19 @@ def main():
                                             raw_sl_dist = abs(entry_price - stop_loss_price)
                                         
                                             # Refinements 5 & 6: Dynamic Leverage Scaling & Floor
-                                            base_sl_pct = max(0.4, (atr_dollars * 0.75 / entry_price) * 100.0)
+                                            base_sl_pct = max(0.6, (atr_dollars * 1.0 / entry_price) * 100.0)
                                             scaled_lev, is_valid_lev = trade_calculators.scale_leverage_for_fixed_risk(
-                                                base_leverage=7.5,
+                                                base_leverage=5.0,
                                                 base_sl_pct=base_sl_pct,
                                                 structural_sl_pct=struct_sl_dist_pct
                                             )
                                             if not is_valid_lev:
-                                                print(f"[{symbol} 15m Filter] Trade skipped: Scaled leverage ({scaled_lev}x) below 1.5x floor limit.")
+                                                print(f"[{symbol} {iv}m Filter] Trade skipped: Scaled leverage ({scaled_lev}x) below 1.5x floor limit.")
                                                 status_msg = "Skipped (Leverage Floor < 1.5x)"
                                                 all_pass = False
 
                                             take_profit_price = (entry_price + tp_change) if ml_trend == "Bullish" else (entry_price - tp_change)
-                                            print(f"[15m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
+                                            print(f"[{iv}m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
                                         else:
                                             raw_sl_dist = risk_engine.calculate_final_stop_distance(
                                                 entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database

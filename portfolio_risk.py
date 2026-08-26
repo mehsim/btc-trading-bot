@@ -109,6 +109,44 @@ class PortfolioRiskEngine:
 
         return var_dollars, var_pct_equity, is_within_limit
 
+    def check_directional_budget(
+        self,
+        proposed_direction: str,
+        proposed_size_usd: float,
+        open_positions: List[Dict],
+        total_equity: float,
+        max_directional_ratio: float = 0.125
+    ) -> Tuple[bool, float, str]:
+        """
+        Dynamically limits aggregate portfolio directional delta (Long vs Short concentration).
+        Prevents multi-asset correlated basket wipeouts during broad market swings.
+        Returns: (is_approved: bool, current_directional_exposure: float, reason: str)
+        """
+        if total_equity <= 0:
+            return True, 0.0, "OK (Zero Equity)"
+
+        dir_sign = 1.0 if str(proposed_direction).title() in ["Bullish", "Long", "Buy"] else -1.0
+        
+        current_net_margin = 0.0
+        for p in (open_positions or []):
+            if isinstance(p, dict):
+                p_dir = str(p.get("direction", "Bullish")).title()
+                p_sign = 1.0 if p_dir in ["Bullish", "Long", "Buy"] else -1.0
+                p_size = float(p.get("position_size_usd", 0.0))
+                current_net_margin += p_size * p_sign
+                
+        proposed_net_margin = current_net_margin + (proposed_size_usd * dir_sign)
+        directional_ratio = abs(proposed_net_margin) / max(1e-9, total_equity)
+        
+        # If the candidate trade acts as a hedge (reduces net directional imbalance), always approve
+        if abs(proposed_net_margin) < abs(current_net_margin):
+            return True, directional_ratio, f"APPROVED (Hedge/De-risking: Net Directional Exposure {directional_ratio*100:.1f}%)"
+            
+        if directional_ratio > max_directional_ratio:
+            return False, directional_ratio, f"REJECTED: Net Directional Exposure ({directional_ratio*100:.1f}%) exceeds {max_directional_ratio*100:.1f}% budget cap"
+            
+        return True, directional_ratio, f"APPROVED (Net Directional Exposure {directional_ratio*100:.1f}% <= {max_directional_ratio*100:.1f}%)"
+
     def calculate_mcr(self, candidate_symbol: str, candidate_size_usd: float, open_positions: List[Dict], returns_df: pd.DataFrame) -> Tuple[float, bool]:
         """
         Computes Marginal Contribution to Risk (MCR):

@@ -403,14 +403,17 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
     }
     logs = []
     
-    # 1. Enforce minimum stop width for ALL trades
-    min_stop = atr_dollars * 1.0 if leverage > 10.0 else atr_dollars * 0.75
+    # 1. Enforce Brownian Noise Clearance minimum stop width for ALL trades
+    min_pct_floor = 0.008 if str(interval) in ["15", "30", "15m", "30m"] else 0.006
+    noise_floor_dist = entry_price * min_pct_floor
+    atr_min_stop = atr_dollars * 1.5 if leverage > 10.0 else atr_dollars * 1.0
+    min_stop = max(atr_min_stop, noise_floor_dist)
     if stop_dist < min_stop:
         if leverage > 10.0:
             adjusted["leverage"] = 10.0
-            logs.append(f"[LEVERAGE_CAPPED] {symbol} {interval} leverage reduced from {leverage:.1f}x to 10.0x & SL widened from ${stop_dist:.4f} to 1.0x ATR (${min_stop:.4f})")
+            logs.append(f"[LEVERAGE_CAPPED] {symbol} {interval} leverage reduced from {leverage:.1f}x to 10.0x & SL widened from ${stop_dist:.4f} to noise clearance (${min_stop:.4f})")
         else:
-            logs.append(f"[STOP_WIDENED] {symbol} {interval} SL widened from ${stop_dist:.4f} to 0.75x ATR (${min_stop:.4f})")
+            logs.append(f"[STOP_WIDENED] {symbol} {interval} SL widened from ${stop_dist:.4f} to noise clearance (${min_stop:.4f})")
             
         required_stop = min_stop
         if direction == "Bearish":

@@ -367,6 +367,17 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if not heat_safe or heat_pct > max_heat:
             return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit ({max_heat}%)", dd_mult, 0.0
 
+        # 2.3 Net Directional Beta / Portfolio Delta Capping
+        dir_ok, dir_ratio, dir_reason = portfolio_risk_engine.check_directional_budget(
+            proposed_direction=direction,
+            proposed_size_usd=capped_size,
+            open_positions=active_trades,
+            total_equity=equity,
+            max_directional_ratio=0.125
+        )
+        if not dir_ok:
+            return False, dir_reason, dd_mult, 0.0
+
         # 2.5 Monte Carlo -30% Stress Test Check
         mc_approved, mc_scale_factor, mc_loss_pct, mc_summary = portfolio_risk_engine.check_candidate_stress_budget(
             candidate_symbol=symbol,

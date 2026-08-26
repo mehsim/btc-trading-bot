@@ -623,43 +623,34 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
         conn = get_db_connection()
         try:
             conn.execute("BEGIN TRANSACTION;")
-            # Step 1: Insert into completed_trades (with IntegrityError fallback handling)
-            try:
-                conn.execute("""
-                    INSERT INTO completed_trades (
-                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
-                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """, (
-                    t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
-                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
-                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
-                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
-                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
-                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
-                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
-                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
-                ))
-            except sqlite3.IntegrityError:
-                t_id = f"tr_{symbol}_{exit_ts}_{uuid.uuid4()}"
-                trade["trade_id"] = t_id
-                conn.execute("""
-                    INSERT INTO completed_trades (
-                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
-                        change_pct, success, reason, position_size_usd, original_size, pnl_usd,
-                        balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """, (
-                    t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
-                    round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
-                    round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
-                    trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
-                    round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
-                    round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
-                    round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
-                    round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
-                ))
+            # Step 1: Idempotent Insert/Update into completed_trades
+            conn.execute("""
+                INSERT INTO completed_trades (
+                    trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                    change_pct, success, reason, position_size_usd, original_size, pnl_usd,
+                    balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(trade_id) DO UPDATE SET
+                    exit_time=excluded.exit_time,
+                    exit_price=excluded.exit_price,
+                    change_pct=excluded.change_pct,
+                    success=excluded.success,
+                    reason=excluded.reason,
+                    position_size_usd=excluded.position_size_usd,
+                    original_size=excluded.original_size,
+                    pnl_usd=excluded.pnl_usd,
+                    balance=excluded.balance,
+                    raw_data=excluded.raw_data;
+            """, (
+                t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
+                round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
+                round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
+                trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
+                round_monetary(trade.get("pnl_usd"), 4), round_monetary(trade.get("balance"), 4), round_monetary(trade.get("leverage"), 2),
+                round_monetary(trade.get("confidence"), 4), round_monetary(trade.get("take_profit"), 4),
+                round_monetary(trade.get("stop_loss"), 4), round_monetary(trade.get("atr_dollars"), 4),
+                round_monetary(trade.get("fill_pct"), 2), json.dumps(trade)
+            ))
 
             # Step 1b: Set initial stop/TP/RR and size breakdown columns if available
             try:
