@@ -5484,8 +5484,10 @@ def main():
                                 exit_reason = "TRAILING STOP / BREAK-EVEN HIT [SUCCESS]"
                             elif is_profit:
                                 exit_reason = "PROFITABLE EXIT [SUCCESS]"
-                            else:
+                            elif sl_hit:
                                 exit_reason = "STOP LOSS HIT [FAIL]"
+                            else:
+                                exit_reason = "EXCHANGE / EARLY CLOSE [CONTROLLED]"
     
                     if TRADE_MODE == "simulation":
                         is_exited = (exit_reason is not None)
