@@ -334,7 +334,11 @@ class SignalEvaluator:
                     adx_cur = float(df["ADX"].iloc[-1]) if ("ADX" in df.columns and len(df) > 0 and pd.notna(df["ADX"].iloc[-1])) else 20.0
                     entropy_penalty = 0.15 * max(0.0, 1.0 - (adx_cur / 30.0))
                     prior_hurdle = 0.333 + entropy_penalty
-                    eval_threshold = round(min(0.52, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle)), 4)
+                    
+                    # Low-Timeframe Chop Gate: on 15m/30m, quiet market chop (ADX < 22.0) requires +5% higher conviction to avoid fee churn
+                    ltf_chop_penalty = 0.05 if (str(interval) in ["15", "30"] and adx_cur < 22.0) else 0.0
+                    
+                    eval_threshold = round(min(0.55, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle) + ltf_chop_penalty), 4)
 
                     from ensemble import resolve_direction
                     _top_trend, _top_conf = resolve_direction(probs)
@@ -346,7 +350,7 @@ class SignalEvaluator:
 
                     if direction in ["Bullish", "Bearish"]:
                         from meta_labeler import evaluate_meta_filter
-                        meta_approved, meta_prob = evaluate_meta_filter(symbol, interval, direction)
+                        meta_approved, meta_prob = evaluate_meta_filter(symbol, interval, direction, confidence=raw_conf)
                         if not meta_approved:
                             log_event("INFO", f"[MetaLabeler Filtered] {symbol} {interval}m {direction} signal rejected by second-stage meta-classifier (meta_prob={meta_prob*100:.1f}%). Filtered to Neutral.")
                             direction = "Neutral"

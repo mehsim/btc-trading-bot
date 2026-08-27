@@ -33,7 +33,7 @@ def train_meta_labeler() -> tuple[bool, str]:
     try:
         conn = sqlite3.connect(db_path)
         df_trades = pd.read_sql_query(
-            "SELECT symbol, interval, direction, change_pct, pnl_usd FROM completed_trades ORDER BY exit_time DESC",
+            "SELECT symbol, interval, direction, change_pct, pnl_usd, confidence FROM completed_trades ORDER BY exit_time DESC",
             conn
         )
         conn.close()
@@ -46,8 +46,10 @@ def train_meta_labeler() -> tuple[bool, str]:
         df_trades["target"] = (df_trades["change_pct"] > 0.0).astype(int)
         df_trades["is_majors"] = df_trades["symbol"].apply(lambda s: 1.0 if str(s).upper() in ("BTCUSDT", "ETHUSDT") else 0.0)
         df_trades["is_long"] = df_trades["direction"].astype(str).str.upper().isin(["BUY", "BULLISH", "LONG", "1"]).astype(float)
+        df_trades["tf_norm"] = df_trades["interval"].astype(str).str.replace("m", "").str.replace("h", "").apply(lambda v: float(v) if v.isdigit() else 60.0) / 240.0
+        df_trades["conf_val"] = pd.to_numeric(df_trades["confidence"], errors="coerce").fillna(0.50)
 
-        feature_cols = ["is_majors", "is_long"]
+        feature_cols = ["is_majors", "is_long", "tf_norm", "conf_val"]
         X = df_trades[feature_cols].values
         y = df_trades["target"].values
 
@@ -79,7 +81,7 @@ def train_meta_labeler() -> tuple[bool, str]:
         return True, str(ex_meta)
 
 
-def evaluate_meta_filter(symbol: str, interval: str, direction: str, min_prob: float = 0.30) -> tuple[bool, float]:
+def evaluate_meta_filter(symbol: str, interval: str, direction: str, confidence: float = 0.50, min_prob: float = 0.30) -> tuple[bool, float]:
     """
     Evaluates whether second-stage MetaLabeler approves taking the primary signal.
     Returns (approved: bool, meta_prob: float).
@@ -96,12 +98,15 @@ def evaluate_meta_filter(symbol: str, interval: str, direction: str, min_prob: f
         model = _META_MODEL_CACHE["model"]
         is_majors = 1.0 if str(symbol).upper() in ("BTCUSDT", "ETHUSDT") else 0.0
         is_long = 1.0 if str(direction).upper() in ("BUY", "BULLISH", "LONG") else 0.0
+        iv_clean = str(interval).replace("m", "").replace("h", "")
+        tf_norm = float(iv_clean) / 240.0 if iv_clean.isdigit() else 0.25
+        conf_val = float(confidence) if confidence is not None else 0.50
 
-        x_vec = np.array([[is_majors, is_long]])
+        x_vec = np.array([[is_majors, is_long, tf_norm, conf_val]])
         prob_success = float(model.predict_proba(x_vec)[0, 1])
 
         approved = prob_success >= min_prob
-        log_event("INFO", f"[MetaLabeler Evaluated] {symbol} {interval}m {direction} -> MetaProb: {prob_success*100:.1f}% | Approved: {approved}")
+        log_event("INFO", f"[MetaLabeler Evaluated] {symbol} {interval}m {direction} (conf={conf_val*100:.1f}%) -> MetaProb: {prob_success*100:.1f}% | Approved: {approved}")
         return approved, prob_success
 
     except Exception as ex_eval:

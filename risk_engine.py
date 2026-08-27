@@ -185,6 +185,23 @@ def get_regime_sizing_multiplier(regime_name: str) -> float:
     return float(np.clip(raw_m, 0.5, 1.0))
 
 
+def get_timeframe_sizing_multiplier(interval: str) -> float:
+    """
+    Timeframe Capital Allocation Multiplier.
+    Weights higher-timeframe trends (4h/2h/1h) with higher capital priority
+    while scaling down lower-timeframe micro-signals (15m/30m) to minimize fee friction.
+    """
+    iv_str = str(interval).replace("m", "").replace("h", "")
+    tf_weights = {
+        "240": 1.25, # 4h
+        "120": 1.10, # 2h
+        "60": 1.00,  # 1h
+        "30": 0.75,  # 30m
+        "15": 0.60,  # 15m
+    }
+    return float(tf_weights.get(iv_str, 1.0))
+
+
 def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr: float, target_atr: float = 0.005, min_lev: float = 1.0, max_lev: float = 10.0) -> float:
     if current_atr <= 0:
         return base_leverage

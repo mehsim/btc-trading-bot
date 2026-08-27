@@ -5254,7 +5254,46 @@ def main():
                                 active_trade["break_even_triggered"] = True
                                 active_trades_updated = True
                                 print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
-    
+                    
+                    # Tier-2 Runner Profit Ratchet: When half-closed runner reaches >= +1.5x ATR, lock in +0.5x ATR guaranteed profit
+                    if half_closed and atr_dollars > 0:
+                        tier2_trigger = 1.5 * atr_dollars
+                        tier2_lock = 0.5 * atr_dollars
+                        if direction == "Bullish" and current_price >= entry_price + tier2_trigger:
+                            target_tier2_sl = entry_price + tier2_lock
+                            if target_tier2_sl > stop_loss:
+                                if TRADE_MODE != "simulation":
+                                    t2_ok = update_bybit_stop_loss(active_symbol, target_tier2_sl, active_trade)
+                                    if t2_ok:
+                                        stop_loss = target_tier2_sl
+                                        active_trade["stop_loss"] = target_tier2_sl
+                                        active_trade["tier2_profit_locked"] = True
+                                        active_trades_updated = True
+                                        log_event("INFO", f"[{active_symbol} {iv}m Tier-2 Ratchet] Runner at +1.5x ATR! Guaranteed profit stop trailed to +0.5x ATR (${stop_loss:.2f})")
+                                else:
+                                    stop_loss = target_tier2_sl
+                                    active_trade["stop_loss"] = target_tier2_sl
+                                    active_trade["tier2_profit_locked"] = True
+                                    active_trades_updated = True
+                                    log_event("INFO", f"[{active_symbol} {iv}m Tier-2 Ratchet] Runner at +1.5x ATR! Guaranteed profit stop trailed to +0.5x ATR (${stop_loss:.2f})")
+                        elif direction == "Bearish" and current_price <= entry_price - tier2_trigger:
+                            target_tier2_sl = entry_price - tier2_lock
+                            if target_tier2_sl < stop_loss:
+                                if TRADE_MODE != "simulation":
+                                    t2_ok = update_bybit_stop_loss(active_symbol, target_tier2_sl, active_trade)
+                                    if t2_ok:
+                                        stop_loss = target_tier2_sl
+                                        active_trade["stop_loss"] = target_tier2_sl
+                                        active_trade["tier2_profit_locked"] = True
+                                        active_trades_updated = True
+                                        log_event("INFO", f"[{active_symbol} {iv}m Tier-2 Ratchet] Runner at -1.5x ATR! Guaranteed profit stop trailed to -0.5x ATR (${stop_loss:.2f})")
+                                else:
+                                    stop_loss = target_tier2_sl
+                                    active_trade["stop_loss"] = target_tier2_sl
+                                    active_trade["tier2_profit_locked"] = True
+                                    active_trades_updated = True
+                                    log_event("INFO", f"[{active_symbol} {iv}m Tier-2 Ratchet] Runner at -1.5x ATR! Guaranteed profit stop trailed to -0.5x ATR (${stop_loss:.2f})")
+                    
                     remaining_seconds = max(0, int(end_time - current_time))
                     mins, secs = divmod(remaining_seconds, 60)
                     countdown_str = f"{mins:02d}m {secs:02d}s"
@@ -7367,7 +7406,10 @@ def main():
                                         # Volatility Regime Sizing Multiplier (Sweet spot 1.2x boost, extreme vol 0.5x, flat chop 0.3x)
                                         vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
                                         target_notional_usd = target_notional_usd * vol_regime_mult
-                                        print(f"[{symbol} {iv}m Volatility Regime Sizing] Multiplier: {vol_regime_mult:.2f}x -> Target Notional: ${target_notional_usd:.2f}")
+                                        
+                                        # Timeframe-Weighted Capital Allocation Multiplier
+                                        tf_sizing_mult = risk_engine.get_timeframe_sizing_multiplier(iv)
+                                        log_event("INFO", f"[{symbol} {iv}m Timeframe & Vol Sizing] VolMult: {vol_regime_mult:.2f}x | TFMult: {tf_sizing_mult:.2f}x -> Target Notional: ${target_notional_usd:.2f}")
 
                                         # Phase 1 Continuous Learning Engine Risk Multiplier (Enforces >= 50 closed trades floor)
                                         from learning_engine import continuous_learning_engine
