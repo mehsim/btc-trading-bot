@@ -202,6 +202,23 @@ def get_timeframe_sizing_multiplier(interval: str) -> float:
     return float(tf_weights.get(iv_str, 1.0))
 
 
+def get_timeframe_stop_multiplier(interval: str) -> float:
+    """
+    Timeframe-Adaptive ATR Stop Distance Multiplier.
+    Provides wider structural cushions for high-timeframe swing trades (4H/2H)
+    to absorb intraday flash wicks without premature stopouts.
+    """
+    iv_str = str(interval).replace("m", "").replace("h", "")
+    tf_stop_mults = {
+        "240": 1.35, # 4h: 1.35x ATR Stop Cushion
+        "120": 1.15, # 2h: 1.15x ATR Stop Cushion
+        "60": 1.00,  # 1h: 1.00x ATR
+        "30": 0.80,  # 30m: 0.80x ATR
+        "15": 0.80,  # 15m: 0.80x ATR
+    }
+    return float(tf_stop_mults.get(iv_str, 1.0))
+
+
 def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr: float, target_atr: float = 0.005, min_lev: float = 1.0, max_lev: float = 10.0) -> float:
     if current_atr <= 0:
         return base_leverage
@@ -519,9 +536,10 @@ class JointRiskBudgetAllocator:
         stop_exp = float(ctx_mults.get("stop_expansion", 1.0))
         size_boost = float(ctx_mults.get("size_multiplier", 1.0))
 
-        # 1. Upstream Portfolio Heat Reduction
-        # Available Risk Budget decreases linearly as Portfolio Heat increases
-        heat_ratio = min(1.0, max(0.0, portfolio_heat / 0.20)) if portfolio_heat > 0 else 0.0
+        # 1. Upstream Portfolio Heat Reduction with High-Conviction Ladder Expansion
+        # Base heat ceiling is 0.30 (30%); expands dynamically to 0.40 (40%) when calibrated confidence >= 0.55
+        heat_ceiling = 0.40 if calibrated_confidence >= 0.55 else 0.30
+        heat_ratio = min(1.0, max(0.0, portfolio_heat / heat_ceiling)) if portfolio_heat > 0 else 0.0
         avail_budget_factor = max(0.0, 1.0 - heat_ratio)
         max_available_risk_usd = total_equity * self.max_capital_risk_pct * avail_budget_factor
 

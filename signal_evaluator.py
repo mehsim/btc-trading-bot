@@ -349,6 +349,20 @@ class SignalEvaluator:
                         direction = "Neutral"
 
                     if direction in ["Bullish", "Bearish"]:
+                        # Multi-Timeframe Trend Confluence Filter (15m/30m/1h/2h align with 4h macro trend)
+                        if str(interval) in ["15", "30", "60", "120"]:
+                            macro_pred = None
+                            if hasattr(self, "bot_state") and isinstance(self.bot_state, dict):
+                                macro_pred = self.bot_state.get(f"latest_prediction_240m_{symbol}") or self.bot_state.get("latest_prediction_240m") or self.bot_state.get("latest_prediction_4h")
+                            if macro_pred and isinstance(macro_pred, dict):
+                                macro_dir = macro_pred.get("direction")
+                                if macro_dir in ["Bullish", "Bearish"] and macro_dir != direction:
+                                    # Counter-trend trade against 4H macro trend requires >= 58% conviction
+                                    if raw_conf < 0.58:
+                                        log_event("INFO", f"[Confluence Filter] {symbol} {interval}m {direction} signal opposes 4H {macro_dir} macro trend (conf={raw_conf*100:.1f}% < 58.0% hurdle). Filtered to Neutral.")
+                                        direction = "Neutral"
+
+                    if direction in ["Bullish", "Bearish"]:
                         from meta_labeler import evaluate_meta_filter
                         meta_approved, meta_prob = evaluate_meta_filter(symbol, interval, direction, confidence=raw_conf)
                         if not meta_approved:

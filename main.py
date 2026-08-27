@@ -5122,9 +5122,15 @@ def main():
                                     active_trades_updated = True
                                     print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
 
-                    # Scale-Out (50% partial profit taking at 1.0 * ATR)
+                    # Scale-Out (50% partial profit taking at trend-adaptive ATR multiple)
                     from config import TAKER_FEE_PCT, SCALE_OUT_CONFIG
-                    scale_out_mult = SCALE_OUT_CONFIG.get("atr_trigger_mult", 1.0)
+                    trade_adx = float(active_trade.get("adx", active_trade.get("entry_adx", 25.0)))
+                    if trade_adx >= 35.0:
+                        scale_out_mult = 1.40  # Extended runner trigger in strong breakout trends
+                    elif trade_adx < 22.0:
+                        scale_out_mult = 0.80  # Fast profit locking in sideways chop
+                    else:
+                        scale_out_mult = float(SCALE_OUT_CONFIG.get("atr_trigger_mult", 1.0))
                     scale_out_portion = SCALE_OUT_CONFIG.get("position_portion", 0.50)
                     half_closed = active_trade.get("half_closed", False)
                     trigger_scale_out = False
@@ -7307,6 +7313,8 @@ def main():
                                             take_profit_price = (entry_price + tp_change) if ml_trend == "Bullish" else (entry_price - tp_change)
                                             print(f"[{iv}m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
                                         else:
+                                            tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv)
+                                            sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
                                             raw_sl_dist = risk_engine.calculate_final_stop_distance(
                                                 entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
                                             )
@@ -7316,7 +7324,7 @@ def main():
                                             else:
                                                 stop_loss_price = entry_price + raw_sl_dist
                                                 take_profit_price = entry_price - tp_change
-                                            print(f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x) | Regressor TP: {take_profit_price:.2f} (Expected: {pred_change:+.3f})")
+                                            log_event("INFO", f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x, TFStopMult: {tf_sl_mult:.2f}x) | Regressor TP: {take_profit_price:.2f}")
 
 
                                         # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
