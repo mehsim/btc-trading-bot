@@ -1095,9 +1095,18 @@ def api_institutional_summary():
     today_pf = round(today_gross_gains / today_gross_losses, 2) if today_gross_losses > 0 else (1.00 if today_gross_gains > 0 else 0.00)
 
     today_returns = [safe_float(t.get("pnl_usd", 0.0)) for t in today_trades]
-    today_sl_fracs = [abs(safe_float(t.get("entry_price", 0)) - safe_float(t.get("stop_loss", 0))) / max(1e-4, safe_float(t.get("entry_price", 0))) if safe_float(t.get("entry_price", 0)) > 0 else 0.01 for t in today_trades]
-    today_stats = calculate_replay_statistics(today_returns, initial_equity=100.0, risk_per_trade_pct=today_sl_fracs, duration_days=1.0) if today_returns else {}
-    today_dd = round(today_stats.get("max_drawdown_pct", 0.0), 1)
+    sim_balance = float(state_manager.get("simulated_balance", 100.0))
+    if today_trades and sim_balance > 0:
+        cur_e = sim_balance
+        eq_pts = [cur_e]
+        for r_pnl in today_returns:
+            cur_e += r_pnl
+            eq_pts.append(cur_e)
+        pk_e = max(eq_pts)
+        mn_e = min(eq_pts)
+        today_dd = round(max(0.0, ((pk_e - mn_e) / max(1.0, pk_e)) * 100.0), 1)
+    else:
+        today_dd = 0.0
 
     now_ts = time.time()
     week_start_ts = now_ts - (7 * 86400.0)
