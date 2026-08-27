@@ -21,9 +21,8 @@ from config import (
     REGIME_ADX_ENTER_BY_INTERVAL, REGIME_ADX_EXIT_BY_INTERVAL
 )
 
-from collections import OrderedDict, defaultdict, deque
-_recent_argmax = defaultdict(lambda: deque(maxlen=100))
-_last_eval_candle_ts = {}
+from collections import OrderedDict
+
 
 TF_MAP = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
 
@@ -280,24 +279,6 @@ class SignalEvaluator:
 
                     probs = models["trend"].predict_proba(row_X_sliced)[0]
                     pred_pct = float(models["price"].predict(row_X_sliced)[0])
-
-                    _model_key = f"{symbol}_ensemble_{_regime_key}_trend_{interval}"
-                    _candle_ts = df["timestamp"].iloc[-1] if ("timestamp" in df.columns and len(df) > 0) else None
-                    if _candle_ts is not None:
-                        if _last_eval_candle_ts.get(_model_key) != _candle_ts:
-                            _last_eval_candle_ts[_model_key] = _candle_ts
-                            _recent_argmax[_model_key].append(int(np.argmax(probs)))
-                    else:
-                        _recent_argmax[_model_key].append(int(np.argmax(probs)))
-
-                    if len(_recent_argmax[_model_key]) >= 60:
-                        shares = np.bincount(_recent_argmax[_model_key], minlength=3) / len(_recent_argmax[_model_key])
-                        # One-sided directional collapse: exclusively Bearish (0) or Bullish (2) dominating across 60+ distinct bars
-                        if len(shares) >= 3 and (shares[0] >= 0.98 or shares[2] >= 0.98):
-                            log_event("WARNING", f"[{_model_key}] degenerate one-sided directional predictor: {shares.round(3)} over "
-                                                 f"{len(_recent_argmax[_model_key])} unique candle bars — abstaining")
-                            _record_abstain("Model degenerate on live predictions")
-                            return "Neutral", 0.0, f"Model {_model_key} degenerate on live predictions"
                     
                     if len(probs) >= 3:
                         prob_bearish = float(probs[0])
