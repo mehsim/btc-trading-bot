@@ -1378,6 +1378,7 @@ def api_institutional_summary():
             "today_leveraged_volume_usd": float(round(today_leveraged_volume, 2)),
             "today_win_rate_pct": float(round(today_win_rate, 1)),
             "today_pf": today_pf,
+            "today_drawdown_pct": float(round(today_dd, 1)),
             "real_bybit_balance": real_bybit_bal,
         },
         "shs_breakdown": {

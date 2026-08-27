@@ -4203,9 +4203,9 @@
                                 document.getElementById("today-vol-val").innerText = "$0.00";
                             }
                         }
-                        if (document.getElementById("today-wr-val")) document.getElementById("today-wr-val").innerText = `${qs.today_win_rate_pct}%`;
-                        if (document.getElementById("today-pf-val")) document.getElementById("today-pf-val").innerText = qs.today_pf;
-                        if (document.getElementById("today-dd-val")) document.getElementById("today-dd-val").innerText = `${qs.today_drawdown_pct}%`;
+                        if (document.getElementById("today-wr-val")) document.getElementById("today-wr-val").innerText = `${qs.today_win_rate_pct !== undefined ? qs.today_win_rate_pct : '0.0'}%`;
+                        if (document.getElementById("today-pf-val")) document.getElementById("today-pf-val").innerText = qs.today_pf !== undefined ? qs.today_pf : '0.00';
+                        if (document.getElementById("today-dd-val")) document.getElementById("today-dd-val").innerText = `${(qs.today_drawdown_pct !== undefined && !isNaN(qs.today_drawdown_pct)) ? qs.today_drawdown_pct : '0.0'}%`;
                     }
 
                     // Section 2 Strategy Health Breakdown
