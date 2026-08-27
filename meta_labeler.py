@@ -16,13 +16,14 @@ _META_MODEL_CACHE = {}
 
 
 MIN_META_TRAIN_TRADES = 200
+MIN_META_CV_AUC = 0.60
 
 
 def train_meta_labeler() -> tuple[bool, str]:
     """
     Fits second-stage MetaLabeler model on completed trades dataset from trading_bot.db.
     Target y = 1 if change_pct > 0 (profitable trade), else 0.
-    Enforces fail-open safety guards: MIN_META_TRAIN_TRADES >= 200 & CV AUC >= 0.55.
+    Enforces fail-open safety guards: MIN_META_TRAIN_TRADES >= 200 & CV AUC >= 0.60.
     """
     db_path = "trading_bot.db"
     if not os.path.exists(db_path):
@@ -57,10 +58,10 @@ def train_meta_labeler() -> tuple[bool, str]:
         auc_scores = cross_val_score(model, X, y, cv=3, scoring="roc_auc")
         mean_auc = float(np.mean(auc_scores))
 
-        if mean_auc < 0.55:
-            log_event("WARNING", f"[MetaLabeler Fail-Open] Meta-model CV AUC ({mean_auc:.4f}) below random-chance floor (0.55). Passing all signals.")
+        if mean_auc < MIN_META_CV_AUC:
+            log_event("WARNING", f"[MetaLabeler Fail-Open] Meta-model CV AUC ({mean_auc:.4f}) below statistical significance floor ({MIN_META_CV_AUC}). Passing all signals.")
             _META_MODEL_CACHE["pass_all"] = True
-            return True, f"CV AUC {mean_auc:.4f} < 0.55 (fail-open engaged)"
+            return True, f"CV AUC {mean_auc:.4f} < {MIN_META_CV_AUC} (fail-open engaged)"
 
         model.fit(X, y)
 
@@ -78,7 +79,7 @@ def train_meta_labeler() -> tuple[bool, str]:
         return True, str(ex_meta)
 
 
-def evaluate_meta_filter(symbol: str, interval: str, direction: str, min_prob: float = 0.40) -> tuple[bool, float]:
+def evaluate_meta_filter(symbol: str, interval: str, direction: str, min_prob: float = 0.30) -> tuple[bool, float]:
     """
     Evaluates whether second-stage MetaLabeler approves taking the primary signal.
     Returns (approved: bool, meta_prob: float).
