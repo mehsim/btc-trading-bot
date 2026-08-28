@@ -453,17 +453,30 @@ def add_triple_barrier_labels(df, interval):
         elif adx_t <= _exit_thr:
             is_trending_state = False
             
-        tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
+        if is_trending_state:
+            tp_mult = tp_mult_trending
+            cur_sl_mult = sl_mult
+            effective_lookahead = lookahead
+        else:
+            # Symmetrical mean-reversion configuration for Ranging
+            if str(interval) == "15":
+                tp_mult = 1.25
+                cur_sl_mult = 0.80
+                effective_lookahead = 7
+            else:
+                tp_mult = tp_mult_ranging
+                cur_sl_mult = sl_mult
+                effective_lookahead = lookahead
         
         tp_dist = tp_mult * atr_t
-        sl_dist = sl_mult * atr_t
+        sl_dist = cur_sl_mult * atr_t
 
         long_tp,  long_sl  = p_t + tp_dist, p_t - sl_dist
         short_tp, short_sl = p_t - tp_dist, p_t + sl_dist
 
         long_res = short_res = None
         long_step = short_step = None
-        for step in range(1, lookahead + 1):
+        for step in range(1, effective_lookahead + 1):
             if i + step >= n_samples:
                 break
             h, l = highs[i + step], lows[i + step]
@@ -658,15 +671,27 @@ def tune_triple_barrier_multipliers(df_coin, interval, n_trials=30):
 def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if str(globals().get("interval", "15")) in ["15", "30"]:
+        iv_str = str(globals().get("interval", "15"))
+        if regime == "ranging" and iv_str == "15":
+            max_depth_min, max_depth_max = 2, 3
+            lr_min, lr_max = 0.02, 0.05
+            reg_lambda_param = trial.suggest_float('reg_lambda', 2.0, 20.0, log=True)
+            min_child_param = trial.suggest_int('min_child_weight', 15, 40)
+        elif iv_str in ["15", "30"]:
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.02, 0.08
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_weight', 1, 10)
         elif regime == "trending":
             max_depth_min, max_depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_weight', 1, 10)
         else:
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_weight', 1, 10)
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 30, 80),
             'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
@@ -674,8 +699,8 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.7, 0.9),
             'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
-            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+            'reg_lambda': reg_lambda_param,
+            'min_child_weight': min_child_param,
             'gamma': trial.suggest_float('gamma', 1e-8, 1.0, log=True),
             'objective': 'multi:softprob',
             'num_class': 3,
@@ -694,15 +719,27 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if str(globals().get("interval", "15")) in ["15", "30"]:
+        iv_str = str(globals().get("interval", "15"))
+        if regime == "ranging" and iv_str == "15":
+            max_depth_min, max_depth_max = 2, 3
+            lr_min, lr_max = 0.02, 0.05
+            reg_lambda_param = trial.suggest_float('reg_lambda', 2.0, 20.0, log=True)
+            min_child_param = trial.suggest_int('min_child_samples', 20, 50)
+        elif iv_str in ["15", "30"]:
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.02, 0.08
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_samples', 5, 100)
         elif regime == "trending":
             max_depth_min, max_depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_samples', 5, 100)
         else:
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_samples', 5, 100)
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 30, 80),
             'max_depth': trial.suggest_int('max_depth', max_depth_min, max_depth_max),
@@ -710,8 +747,8 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
             'subsample': trial.suggest_float('subsample', 0.7, 0.9),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.4, 1.0),
             'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
-            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+            'reg_lambda': reg_lambda_param,
+            'min_child_samples': min_child_param,
             'objective': 'multiclass',
             'num_class': 3,
             'verbose': -1,
@@ -729,20 +766,28 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if str(globals().get("interval", "15")) in ["15", "30"]:
+        iv_str = str(globals().get("interval", "15"))
+        if regime == "ranging" and iv_str == "15":
+            depth_min, depth_max = 2, 3
+            lr_min, lr_max = 0.02, 0.05
+            l2_reg_param = trial.suggest_float('l2_leaf_reg', 2.0, 20.0, log=True)
+        elif iv_str in ["15", "30"]:
             depth_min, depth_max = 3, 4
             lr_min, lr_max = 0.02, 0.08
+            l2_reg_param = trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True)
         elif regime == "trending":
             depth_min, depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
+            l2_reg_param = trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True)
         else:
             depth_min, depth_max = 3, 4
             lr_min, lr_max = 0.04, 0.12
+            l2_reg_param = trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True)
         params = {
             'iterations': trial.suggest_int('iterations', 30, 80),
             'depth': trial.suggest_int('depth', depth_min, depth_max),
             'learning_rate': trial.suggest_float('learning_rate', lr_min, lr_max, log=True),
-            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True),
+            'l2_leaf_reg': l2_reg_param,
             'loss_function': 'MultiClass',
             'verbose': 0,
             'thread_count': 1,
@@ -1141,32 +1186,49 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 y_rfecv = df_sub["target_trend"]
 
             # ---- Stage 1: cheap importance prefilter ----
-            prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
-            prefilter.fit(X_rfecv_prelim, y_rfecv)
-
-            n_keep = min(60, X_rfecv_prelim.shape[1])
-            top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
-            top_feats = list(X_rfecv_prelim.columns[top_idx])
-            print(f"[Regime {name.upper()} Stage 1] Prefiltered {X_rfecv_prelim.shape[1]} → {len(top_feats)} candidates.")
+            if name == "ranging" and str(interval) == "15":
+                # Specialized bounded mean-reversion feature candidate pool
+                ranging_priority_candidates = [
+                    "close_to_VWAP", "vwap_deviation", "BB_pct", "BB_width", "RSI_z", "btc_rsi",
+                    "close_to_Kalman", "bid_ask_imbalance_ohlc", "volatility_gk", "roll_spread",
+                    "fear_greed", "day_of_week_cos", "day_of_week_sin", "ATR_norm", "MFI",
+                    "volatility_24h", "hour_sin", "hour_cos", "ROC_24", "MACD_diff", "close_to_EMA200"
+                ]
+                available_candidates = [c for c in ranging_priority_candidates if c in X_rfecv_prelim.columns]
+                prefilter = XGBClassifier(n_estimators=30, max_depth=2, random_state=42, n_jobs=1, reg_lambda=5.0)
+                prefilter.fit(X_rfecv_prelim[available_candidates], y_rfecv)
+                n_keep = min(20, len(available_candidates))
+                top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
+                top_feats = list(np.array(available_candidates)[top_idx])
+                print(f"[Regime RANGING 15m Stage 1] Specialized mean-reversion filter → {len(top_feats)} candidates.")
+            else:
+                prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
+                prefilter.fit(X_rfecv_prelim, y_rfecv)
+                n_keep = min(60, X_rfecv_prelim.shape[1])
+                top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
+                top_feats = list(X_rfecv_prelim.columns[top_idx])
+                print(f"[Regime {name.upper()} Stage 1] Prefiltered {X_rfecv_prelim.shape[1]} → {len(top_feats)} candidates.")
             del prefilter
             gc.collect()
 
             estimator = XGBClassifier(
                 n_estimators=60,
-                max_depth=3,
-                learning_rate=0.1,
+                max_depth=2 if (name == "ranging" and str(interval) == "15") else 3,
+                learning_rate=0.05 if (name == "ranging" and str(interval) == "15") else 0.1,
+                reg_lambda=5.0 if (name == "ranging" and str(interval) == "15") else 1.0,
                 random_state=42,
                 tree_method="hist",
                 n_jobs=1
             )
             from config import CV_N_SPLITS
             cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
+            min_feats_select = 8 if (name == "ranging" and str(interval) == "15") else 10
             selector = RFECV(
                 estimator=estimator,
                 step=1,
                 cv=cv_rfecv,
                 scoring="balanced_accuracy",
-                min_features_to_select=10,
+                min_features_to_select=min_feats_select,
                 n_jobs=1
             )
             selector.fit(X_rfecv_prelim[top_feats], y_rfecv)
@@ -1179,10 +1241,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if pf not in regime_features and pf in df_regime.columns and pf not in NON_STATIONARY_EXCLUDE:
                     regime_features.append(pf)
                 
+            if name == "ranging" and str(interval) == "15" and len(regime_features) > 16:
+                regime_features = regime_features[:16]
+
             with open(features_filename, "w") as f:
                 json.dump(regime_features, f)
             print(f"Saved {name.upper()} regime selected features to {features_filename}")
 
+        chal_pf = 1.0
+        chal_sharpe = 0.0
         X_full = df_regime[regime_features]
         y_trend_full = df_regime["target_trend"]
         y_price_full = df_regime["target_price_change"]
