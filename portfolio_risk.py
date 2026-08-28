@@ -735,8 +735,54 @@ class PortfolioRiskEngine:
             "position_tail_contributions": tail_contributions
         }
 
+    CORRELATION_CLUSTERS = {
+        "LAYER_1": {"SOLUSDT", "AVAXUSDT", "ADAUSDT", "DOTUSDT", "ETHUSDT"},
+        "LEGACY_PAYMENTS": {"XRPUSDT", "LTCUSDT"},
+        "EXCHANGE": {"BNBUSDT"},
+        "MACRO_LEADER": {"BTCUSDT"}
+    }
+
+    def check_correlated_cluster_exposure(
+        self,
+        candidate_symbol: str,
+        candidate_direction: str,
+        open_positions: List[Dict],
+        max_same_cluster_count: int = 2
+    ) -> Tuple[bool, str]:
+        """
+        Checks if opening the candidate trade violates correlated cluster concentration caps.
+        Prevents stacking >2 simultaneous same-direction positions in the same correlation cluster (e.g. Layer-1s).
+        """
+        candidate_cluster = None
+        for c_name, c_syms in self.CORRELATION_CLUSTERS.items():
+            if candidate_symbol in c_syms:
+                candidate_cluster = c_name
+                break
+                
+        if not candidate_cluster or not open_positions:
+            return True, "APPROVED_NO_CLUSTER_CONFLICT"
+            
+        cand_dir = str(candidate_direction).capitalize()
+        same_cluster_same_dir = 0
+        conflicting_symbols = []
+        
+        for p in open_positions:
+            if not isinstance(p, dict):
+                continue
+            sym = p.get("symbol")
+            p_dir = str(p.get("direction", "Bullish")).capitalize()
+            if sym and sym in self.CORRELATION_CLUSTERS.get(candidate_cluster, set()) and p_dir == cand_dir:
+                same_cluster_same_dir += 1
+                conflicting_symbols.append(sym)
+                
+        if same_cluster_same_dir >= max_same_cluster_count:
+            return False, f"CLUSTER_EXPOSURE_LIMIT: Max {max_same_cluster_count} active {cand_dir} positions reached in {candidate_cluster} ({', '.join(conflicting_symbols)})"
+            
+        return True, f"APPROVED_CLUSTER_{candidate_cluster}"
+
 
 portfolio_risk_engine = PortfolioRiskEngine()
+
 
 
 

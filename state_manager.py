@@ -71,21 +71,25 @@ class StateManager:
             "latest_prediction_30m": None,
             "latest_prediction_1h": None,
             "latest_prediction_2h": None,
+            "latest_prediction_4h": None,
             
             "confluence_results_15m": None,
             "confluence_results_30m": None,
             "confluence_results_1h": None,
             "confluence_results_2h": None,
+            "confluence_results_4h": None,
             
             "regime_15m": "Unknown",
             "regime_30m": "Unknown",
             "regime_1h": "Unknown",
             "regime_2h": "Unknown",
+            "regime_4h": "Unknown",
             
             "adx_15m": 0.0,
             "adx_30m": 0.0,
             "adx_1h": 0.0,
             "adx_2h": 0.0,
+            "adx_4h": 0.0,
             
             "status": "Initializing",
             "retraining_status": "Idle",
@@ -94,11 +98,12 @@ class StateManager:
             "calibration_30m": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
             "calibration_1h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
             "calibration_2h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
+            "calibration_4h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
             
             "daily_drawdown_start_balance": 80.0,
             "daily_drawdown_reset_day": -1,
             "circuit_breaker_active": False,
-            "win_rate_by_tf": {"15": None, "30": None, "60": None, "120": None}
+            "win_rate_by_tf": {"15": None, "30": None, "60": None, "120": None, "240": None}
         }
         database.init_db()
         import sys

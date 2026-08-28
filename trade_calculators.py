@@ -1135,13 +1135,13 @@ def calculate_break_even_stop(
     atr_dollars: float = 0.0,
     taker_fee_pct: float = 0.00055,
     spread_pct: float = 0.00015,
-    slippage_pct: float = 0.00050
+    slippage_pct: float = 0.00050,
+    interval: Optional[str] = None
 ) -> float:
     """
-    Calculates dynamic transaction-cost-aware break-even stop loss.
-    Guarantees non-negative NET PnL after taker fees (entry + exit), spread, and slippage.
-    For Longs: SL >= Entry + CostBuffer
-    For Shorts: SL <= Entry - CostBuffer
+    Calculates dynamic transaction-cost-aware break-even stop loss with timeframe-scaled breathing room.
+    Guarantees non-negative NET PnL after taker fees (entry + exit), spread, and slippage,
+    while giving higher timeframes (60m, 120m, 240m, 360m) proper room to absorb candle wicks.
     """
     dir_str = str(direction).lower()
     side_sign = 1 if dir_str in ["bullish", "long", "buy", "1"] else -1
@@ -1151,20 +1151,35 @@ def calculate_break_even_stop(
     total_cost_pct = roundtrip_fee_pct + spread_pct + slippage_pct # ~0.00175 (0.175%)
 
     cost_buffer = entry_price * total_cost_pct
-    target_sl = entry_price + (side_sign * cost_buffer)
-
-    # Immediate trigger safety check: SL must not cross or sit too close to current market price
-    # Bybit requires a clearance buffer of at least 0.05% between stop loss and current market price
-    if side_sign == 1:
-        if current_price > 0:
-            max_allowed_sl = current_price * 0.9995
-            if target_sl >= max_allowed_sl:
-                target_sl = min(max_allowed_sl, entry_price + max(0.0, (current_price - entry_price) * 0.5))
+    
+    iv_str = str(interval or "15")
+    # Timeframe-scaled breathing room multiplier for trailed stops:
+    # 240m/360m -> 0.50x ATR buffer from peak price, 60m/120m -> 0.35x ATR buffer
+    if iv_str in ["240", "360"]:
+        min_atr_cushion = 0.50 * float(atr_dollars) if atr_dollars > 0 else (0.008 * entry_price)
+    elif iv_str in ["60", "120"]:
+        min_atr_cushion = 0.35 * float(atr_dollars) if atr_dollars > 0 else (0.005 * entry_price)
     else:
-        if current_price > 0:
-            min_allowed_sl = current_price * 1.0005
-            if target_sl <= min_allowed_sl:
-                target_sl = max(min_allowed_sl, entry_price - max(0.0, (entry_price - current_price) * 0.5))
+        min_atr_cushion = 0.15 * float(atr_dollars) if atr_dollars > 0 else (0.002 * entry_price)
+
+    base_be = entry_price + (side_sign * cost_buffer)
+
+    if side_sign == 1:
+        if current_price > entry_price and atr_dollars > 0:
+            trailed_sl = max(base_be, current_price - min_atr_cushion)
+            target_sl = min(trailed_sl, current_price * 0.9995)
+        else:
+            target_sl = base_be
+            if current_price > 0 and target_sl >= current_price * 0.9995:
+                target_sl = min(current_price * 0.9995, entry_price + (current_price - entry_price) * 0.5)
+    else:
+        if current_price > 0 and current_price < entry_price and atr_dollars > 0:
+            trailed_sl = min(base_be, current_price + min_atr_cushion)
+            target_sl = max(trailed_sl, current_price * 1.0005)
+        else:
+            target_sl = base_be
+            if current_price > 0 and target_sl <= current_price * 1.0005:
+                target_sl = max(current_price * 1.0005, entry_price - (entry_price - current_price) * 0.5)
 
     return round(target_sl, 4)
 

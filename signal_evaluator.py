@@ -26,6 +26,39 @@ from collections import OrderedDict
 
 TF_MAP = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
 
+
+def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
+    """
+    Resolves the dominant 4-Hour (240m) macro trend direction, strength, and regime posture.
+    """
+    if not isinstance(bot_state, dict):
+        return {"direction": "Neutral", "confidence": 0.50, "adx": 25.0, "is_trending": False, "setup_type": "Neutral"}
+    
+    macro_pred = (
+        bot_state.get(f"latest_prediction_{symbol}_4h") or
+        bot_state.get(f"latest_prediction_{symbol}_240") or
+        bot_state.get(f"latest_prediction_240m_{symbol}") or
+        bot_state.get("latest_prediction_4h") or
+        bot_state.get("latest_prediction_240m")
+    )
+    macro_dir = "Neutral"
+    macro_conf = 0.50
+    if isinstance(macro_pred, dict):
+        macro_dir = str(macro_pred.get("direction", "Neutral"))
+        macro_conf = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.50)
+        
+    macro_adx = float(bot_state.get(f"adx_{symbol}_4h") or bot_state.get("adx_4h") or 25.0)
+    is_trending = macro_adx >= 25.0
+    
+    return {
+        "direction": macro_dir,
+        "confidence": macro_conf,
+        "adx": macro_adx,
+        "is_trending": is_trending,
+        "setup_type": f"4H_{macro_dir}"
+    }
+
+
 class SignalEvaluator:
     def __init__(self, bot_state):
         self.bot_state = bot_state
@@ -337,19 +370,31 @@ class SignalEvaluator:
                     else:
                         direction = "Neutral"
 
+                    setup_type = "Standard"
+                    macro_bias = get_hierarchical_macro_bias(getattr(self, "bot_state", {}), symbol)
+                    
                     if direction in ["Bullish", "Bearish"]:
-                        # Multi-Timeframe Trend Confluence Filter (15m/30m/1h/2h align with 4h macro trend)
+                        # Multi-Timeframe Hierarchical Trend Lock (15m/30m/1h/2h align with 4h macro trend)
                         if str(interval) in ["15", "30", "60", "120"]:
-                            macro_pred = None
-                            if hasattr(self, "bot_state") and isinstance(self.bot_state, dict):
-                                macro_pred = self.bot_state.get(f"latest_prediction_240m_{symbol}") or self.bot_state.get("latest_prediction_240m") or self.bot_state.get("latest_prediction_4h")
-                            if macro_pred and isinstance(macro_pred, dict):
-                                macro_dir = macro_pred.get("direction")
-                                if macro_dir in ["Bullish", "Bearish"] and macro_dir != direction:
-                                    # Counter-trend trade against 4H macro trend requires >= 58% conviction
-                                    if raw_conf < 0.58:
-                                        log_event("INFO", f"[Confluence Filter] {symbol} {interval}m {direction} signal opposes 4H {macro_dir} macro trend (conf={raw_conf*100:.1f}% < 58.0% hurdle). Filtered to Neutral.")
-                                        direction = "Neutral"
+                            macro_dir = macro_bias.get("direction", "Neutral")
+                            rsi_val = float(df["RSI"].iloc[-1]) if ("RSI" in df.columns and len(df) > 0 and pd.notna(df["RSI"].iloc[-1])) else 50.0
+                            
+                            if macro_dir == "Bullish":
+                                if direction == "Bearish":
+                                    # Hard Directional Lock: Suppress counter-trend short entries into 4H bull trend
+                                    log_event("INFO", f"[Hierarchical 4H Lock] {symbol} {interval}m Bearish suppressed under 4H Bullish macro trend (ADX {macro_bias.get('adx', 0):.1f}). Waiting for dip support.")
+                                    direction = "Neutral"
+                                    setup_type = "Waiting for Dip Support"
+                                elif direction == "Bullish":
+                                    setup_type = "Pullback Long" if rsi_val <= 55.0 else "Breakout Long"
+                            elif macro_dir == "Bearish":
+                                if direction == "Bullish":
+                                    # Hard Directional Lock: Suppress counter-trend long entries into 4H bear trend
+                                    log_event("INFO", f"[Hierarchical 4H Lock] {symbol} {interval}m Bullish suppressed under 4H Bearish macro trend (ADX {macro_bias.get('adx', 0):.1f}). Waiting for resistance rejection.")
+                                    direction = "Neutral"
+                                    setup_type = "Waiting for Resistance Rejection"
+                                elif direction == "Bearish":
+                                    setup_type = "Relief Bounce Short" if rsi_val >= 45.0 else "Breakdown Short"
 
                     if direction in ["Bullish", "Bearish"]:
                         from meta_labeler import evaluate_meta_filter
@@ -381,6 +426,8 @@ class SignalEvaluator:
                         "calibrator_ece": cal_ece,
                         "manifest_mcc": mcc_val,
                         "is_fallback": False,
+                        "setup_type": setup_type,
+                        "macro_4h_direction": str(macro_bias.get("direction", "Neutral")),
                         "timestamp": time.time()
                     }
                     with self.state_lock:

@@ -82,11 +82,15 @@ MIN_SL_PCT_CONFIG = {"15": 0.006, "30": 0.008, "60": 0.010, "120": 0.012, "240":
 MIN_TARGET_ATR_MULT = {"15": 1.50, "60": 1.50, "default": 1.50}  # Enforces tp_mult >= 1.50 ATR
 
 def resolve_min_sl_pct(symbol: str = "BTCUSDT", interval: str = "60") -> float:
-    iv_str = str(interval).replace("m", "").replace("h", "0")
-    if interval == "1h": iv_str = "60"
-    elif interval == "2h": iv_str = "120"
-    elif interval == "4h": iv_str = "240"
-    elif interval == "6h": iv_str = "360"
+    iv_clean = str(interval).lower().strip().replace("m", "")
+    if iv_clean in ("1h", "60"): iv_str = "60"
+    elif iv_clean in ("2h", "120"): iv_str = "120"
+    elif iv_clean in ("4h", "240"): iv_str = "240"
+    elif iv_clean in ("6h", "360"): iv_str = "360"
+    elif iv_clean in ("15m", "15"): iv_str = "15"
+    elif iv_clean in ("30m", "30"): iv_str = "30"
+    elif iv_clean in ("5m", "5"): iv_str = "5"
+    else: iv_str = iv_clean
     val = MIN_SL_PCT_CONFIG.get(iv_str, MIN_SL_PCT_CONFIG.get("default", 0.008))
     return float(val) * 100.0
 HORIZON_REACHABILITY_FACTOR = 1.5  # Canonical horizon reachability scale factor (lookahead^0.5 * ATR * factor)

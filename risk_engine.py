@@ -659,3 +659,91 @@ class JointRiskBudgetAllocator:
 
 joint_risk_budget_allocator = JointRiskBudgetAllocator()
 
+
+def calculate_atr_risk_parity_size(
+    symbol: str,
+    price: float,
+    atr_dollars: float,
+    sl_multiplier: float = 1.0,
+    target_risk_usd: float = 10.0,
+    max_position_size_usd: float = 500.0,
+    leverage: float = 3.0
+) -> Dict[str, Any]:
+    """
+    Calculates volatility-equalized position size (ATR Risk Parity).
+    Ensures that a 1.0x ATR stop loss results in the exact same dollar loss
+    regardless of whether trading low-volatility BTC or high-beta altcoins (SOL/AVAX/DOGE).
+    """
+    price = max(1e-6, float(price))
+    atr_dollars = max(price * 0.005, float(atr_dollars))
+    sl_dist = max(1e-6, float(sl_multiplier) * atr_dollars)
+    stop_pct = sl_dist / price
+    
+    # Position Size (USD) such that: Position Size * Stop % = Target Risk USD
+    ideal_size_usd = target_risk_usd / max(1e-4, stop_pct)
+    capped_size_usd = min(ideal_size_usd, max_position_size_usd)
+    effective_dollar_risk = capped_size_usd * stop_pct
+    
+    return {
+        "symbol": symbol,
+        "price": price,
+        "atr_dollars": atr_dollars,
+        "stop_distance_pct": round(stop_pct * 100.0, 3),
+        "ideal_size_usd": round(ideal_size_usd, 2),
+        "position_size_usd": round(capped_size_usd, 2),
+        "dollar_risk_at_stop": round(effective_dollar_risk, 2),
+        "leverage": leverage
+    }
+
+
+def calculate_anti_martingale_risk_multiplier(
+    current_equity: float,
+    peak_equity: float,
+    recent_trades: Optional[List[Dict]] = None
+) -> Dict[str, Any]:
+    """
+    Computes dynamic Anti-Martingale equity curve risk scaling:
+    - Compounding Mode (Hot Streak / High-Watermark): Multiplier = 1.25x to 1.50x
+    - Normal Mode: Multiplier = 1.0x
+    - Drawdown Defense Mode: Multiplier = 0.50x to 0.75x
+    """
+    current_equity = max(1.0, float(current_equity))
+    peak_equity = max(current_equity, float(peak_equity or current_equity))
+    
+    drawdown_pct = (peak_equity - current_equity) / peak_equity
+    
+    recent_wins = 0
+    total_recent = 0
+    if recent_trades:
+        for t in recent_trades[-5:]:
+            if isinstance(t, dict):
+                total_recent += 1
+                succ = str(t.get("success", "")).lower()
+                pnl = float(t.get("pnl_usd", 0.0) or 0.0)
+                if succ in ["true", "1", "yes"] or pnl > 0.0:
+                    recent_wins += 1
+                    
+    win_rate_recent = (recent_wins / total_recent) if total_recent >= 3 else 0.50
+    
+    if drawdown_pct >= 0.05:
+        multiplier = 0.50
+        regime = "SEVERE_DRAWDOWN_DEFENSE"
+    elif drawdown_pct >= 0.025:
+        multiplier = 0.75
+        regime = "MODERATE_DRAWDOWN_DEFENSE"
+    elif drawdown_pct < 0.015 and win_rate_recent >= 0.60:
+        multiplier = 1.25 if win_rate_recent < 0.80 else 1.50
+        regime = "HOT_STREAK_COMPOUNDING"
+    else:
+        multiplier = 1.00
+        regime = "STANDARD_RISK"
+        
+    return {
+        "multiplier": multiplier,
+        "regime": regime,
+        "drawdown_pct": round(drawdown_pct * 100.0, 2),
+        "recent_win_rate_pct": round(win_rate_recent * 100.0, 1)
+    }
+
+
+

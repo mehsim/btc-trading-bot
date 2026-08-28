@@ -201,6 +201,8 @@ def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
         df["btc_lead_1"]     = _rb.shift(1)
         df["btc_lead_2"]     = _rb.shift(2)
         df["rel_strength"]   = _r.rolling(20, min_periods=5).mean() - _rb.rolling(20, min_periods=5).mean()
+        df["btc_surge_5m"]   = _rb.rolling(5, min_periods=2).sum().fillna(0.0)
+        df["btc_surge_15m"]  = _rb.rolling(15, min_periods=5).sum().fillna(0.0)
 
 
     df["RSI"] = RSIIndicator(df["close"], window=14).rsi()

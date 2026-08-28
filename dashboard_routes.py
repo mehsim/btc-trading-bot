@@ -511,11 +511,24 @@ def api_status():
                         s = item.get("symbol")
                         if s in symbols:
                             lp = float(item.get("lastPrice", 0.0))
+                            hp = float(item.get("highPrice24h", 0.0) or lp)
+                            low_p = float(item.get("lowPrice24h", 0.0) or lp)
+                            chg = float(item.get("price24hPcnt", 0.0) or 0.0) * 100.0
                             status_data[f"live_price_{s}"] = lp
                             state_manager[f"live_price_{s}"] = lp
+                            status_data[f"24h_high_{s}"] = hp
+                            state_manager[f"24h_high_{s}"] = hp
+                            status_data[f"24h_low_{s}"] = low_p
+                            state_manager[f"24h_low_{s}"] = low_p
+                            status_data[f"24h_change_{s}"] = chg
+                            state_manager[f"24h_change_{s}"] = chg
                             if s == "BTCUSDT":
                                 status_data["live_price"] = lp
                                 state_manager["live_price"] = lp
+                                status_data["24h_high"] = hp
+                                state_manager["24h_high"] = hp
+                                status_data["24h_low"] = low_p
+                                state_manager["24h_low"] = low_p
             except Exception as ex_dashboard_routes:
                 log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
@@ -564,6 +577,38 @@ def api_status():
             )
             if sym_conf:
                 status_data[f"confluence_results_{tf}"] = sym_conf
+
+        # Multi-Timeframe 4H -> 1H Synergy Matrix for all supported coins
+        synergy_matrix = {}
+        for s in symbols:
+            p4 = status_data.get(f"latest_prediction_{s}_4h") or status_data.get(f"latest_prediction_{s}_240") or {}
+            p1 = status_data.get(f"latest_prediction_{s}_1h") or status_data.get(f"latest_prediction_{s}_60") or {}
+            adx4 = status_data.get(f"adx_{s}_4h") if status_data.get(f"adx_{s}_4h") is not None else status_data.get(f"adx_{s}_240", 25.0)
+            
+            d4 = str(p4.get("direction", "Neutral")) if isinstance(p4, dict) else "Neutral"
+            d1 = str(p1.get("direction", "Neutral")) if isinstance(p1, dict) else "Neutral"
+            setup1 = str(p1.get("setup_type", "Standard")) if isinstance(p1, dict) else "Standard"
+            
+            try:
+                adx4_val = float(adx4) if adx4 is not None else 25.0
+            except Exception:
+                adx4_val = 25.0
+                
+            if d4 == "Bullish":
+                status_summary = f"4H Bullish (ADX {adx4_val:.1f}) ➔ 1H: {setup1 if d1 == 'Bullish' else 'Waiting for Dip Support'}"
+            elif d4 == "Bearish":
+                status_summary = f"4H Bearish (ADX {adx4_val:.1f}) ➔ 1H: {setup1 if d1 == 'Bearish' else 'Waiting for Bounce Rejection'}"
+            else:
+                status_summary = f"4H Neutral (Range) ➔ 1H: {d1}"
+                
+            synergy_matrix[s] = {
+                "macro_4h_direction": d4,
+                "macro_4h_adx": round(adx4_val, 1),
+                "precision_1h_direction": d1,
+                "precision_1h_setup": setup1,
+                "status_summary": status_summary
+            }
+        status_data["htf_synergy_matrix"] = synergy_matrix
 
         # Timeframe defaults for UI rendering
         for tf in ["15m", "30m", "1h", "2h", "4h"]:

@@ -25,13 +25,14 @@ def train_meta_labeler() -> tuple[bool, str]:
     Target y = 1 if change_pct > 0 (profitable trade), else 0.
     Enforces fail-open safety guards: MIN_META_TRAIN_TRADES >= 200 & CV AUC >= 0.60.
     """
-    db_path = "trading_bot.db"
+    import database
+    db_path = database.get_db_path()
     if not os.path.exists(db_path):
         _META_MODEL_CACHE["pass_all"] = True
         return True, "Database file not found (fail-open engaged)"
 
     try:
-        conn = sqlite3.connect(db_path)
+        conn = database.get_db_connection()
         df_trades = pd.read_sql_query(
             "SELECT symbol, interval, direction, change_pct, pnl_usd, confidence FROM completed_trades ORDER BY exit_time DESC",
             conn

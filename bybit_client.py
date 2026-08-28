@@ -8,6 +8,7 @@ import urllib.parse
 import threading
 import asyncio
 import aiohttp
+import numpy as np
 from typing import Dict, List, Tuple, Optional, Any, Union
 from dotenv import load_dotenv
 load_dotenv()
@@ -415,6 +416,7 @@ def get_bybit_accumulated_closed_pnl(symbol: str, entry_time_ms: int) -> float:
 
 
 def update_bybit_stop_loss(symbol: str, sl_price: float, active_trade: Optional[Dict] = None) -> Dict[str, Any]:
+    """Sends Stop Loss update to Bybit v5 position trading-stop endpoint. Returns raw API response dict."""
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -425,6 +427,7 @@ def update_bybit_stop_loss(symbol: str, sl_price: float, active_trade: Optional[
 
 
 def update_bybit_take_profit(symbol: str, tp_price: float, active_trade: Optional[Dict] = None) -> Dict[str, Any]:
+    """Sends Take Profit update to Bybit v5 position trading-stop endpoint. Returns raw API response dict."""
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -662,3 +665,97 @@ def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
         except Exception as ex_bybit_client:
             log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         time.sleep(5)
+
+
+def get_orderbook_imbalance(symbol: str, depth: int = 10) -> Dict[str, Any]:
+    """
+    Fetches real-time L2 orderbook and computes Orderbook Imbalance (OBI)
+    across the top `depth` price levels.
+    """
+    default_res = {
+        "best_bid": 0.0,
+        "best_ask": 0.0,
+        "mid_price": 0.0,
+        "spread_bps": 3.0,
+        "bid_vol": 0.0,
+        "ask_vol": 0.0,
+        "obi": 0.0,
+        "status": "FALLBACK"
+    }
+    try:
+        res = bybit_get_request("/v5/market/orderbook", {"category": "linear", "symbol": symbol, "limit": max(25, depth)})
+        if res and isinstance(res, dict) and res.get("retCode") == 0:
+            result = res.get("result", {})
+            bids = result.get("b", [])
+            asks = result.get("a", [])
+            
+            if bids and asks:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                mid_p = (best_bid + best_ask) / 2.0
+                spread = ((best_ask - best_bid) / max(1e-9, best_bid)) * 10000.0
+                
+                bid_v = sum(float(b[1]) for b in bids[:depth])
+                ask_v = sum(float(a[1]) for a in asks[:depth])
+                total_v = bid_v + ask_v
+                
+                obi = (bid_v - ask_v) / max(1e-9, total_v)
+                obi_clipped = float(np.clip(obi, -1.0, 1.0))
+                
+                return {
+                    "best_bid": best_bid,
+                    "best_ask": best_ask,
+                    "mid_price": mid_p,
+                    "spread_bps": round(spread, 2),
+                    "bid_vol": round(bid_v, 4),
+                    "ask_vol": round(ask_v, 4),
+                    "obi": round(obi_clipped, 4),
+                    "status": "OK"
+                }
+    except Exception as e:
+        log_event("WARNING", f"[OBI Warning] Failed to compute orderbook imbalance for {symbol}: {e}")
+        
+    return default_res
+
+
+def calculate_optimal_maker_price(
+    symbol: str,
+    side: str,
+    obi_data: Optional[Dict[str, Any]] = None,
+    reference_price: Optional[float] = None
+) -> float:
+    """
+    Computes optimal Post-Only Limit Maker price using Orderbook Imbalance (OBI).
+    Places passive orders at the micro-support/resistance level with maximum queue fill probability.
+    """
+    specs = get_instrument_specs(symbol)
+    tick = float(specs.get("tickSize", "0.01"))
+    
+    if obi_data is None or obi_data.get("status") != "OK":
+        obi_data = get_orderbook_imbalance(symbol, depth=10)
+        
+    best_bid = float(obi_data.get("best_bid", 0.0))
+    best_ask = float(obi_data.get("best_ask", 0.0))
+    obi = float(obi_data.get("obi", 0.0))
+    
+    if best_bid <= 0 or best_ask <= 0:
+        ref = float(reference_price or 100.0)
+        return float(quantize_bybit_price(symbol, ref - (tick if side.upper() in ["BUY", "LONG"] else -tick)))
+        
+    if side.upper() in ["BUY", "LONG"]:
+        if obi > 0.25:
+            target = best_bid
+        elif obi < -0.25:
+            target = max(1e-6, best_bid - tick)
+        else:
+            target = best_bid
+    else:
+        if obi < -0.25:
+            target = best_ask
+        elif obi > 0.25:
+            target = best_ask + tick
+        else:
+            target = best_ask
+            
+    return float(quantize_bybit_price(symbol, target))
+

@@ -1653,12 +1653,30 @@ def get_bybit_bid_ask(symbol):
     return None, None, None
 
 def get_chase_limit_price(symbol, side, chase, entry_price):
-    """Calculates dynamic Limit Maker price using real-time bid/ask orderbook."""
+    """Calculates dynamic Limit Maker price using Orderbook Imbalance (OBI) and real-time orderbook depth."""
+    try:
+        from bybit_client import calculate_optimal_maker_price, get_orderbook_imbalance
+        obi_data = get_orderbook_imbalance(symbol, depth=10)
+        if obi_data and obi_data.get("status") == "OK":
+            base_maker = calculate_optimal_maker_price(symbol, side, obi_data=obi_data, reference_price=entry_price)
+            bid = float(obi_data.get("best_bid", 0.0))
+            ask = float(obi_data.get("best_ask", 0.0))
+            if bid > 0 and ask > 0 and ask > bid:
+                spread = ask - bid
+                step = spread * 0.1 * min(chase, 8)
+                if side in ["Buy", "Bullish", "LONG", "BUY"]:
+                    return min(ask - (spread * 0.05), base_maker + step)
+                else:
+                    return max(bid + (spread * 0.05), base_maker - step)
+            return float(base_maker)
+    except Exception:
+        pass
+
     bid, ask, last = get_bybit_bid_ask(symbol)
     if bid is not None and ask is not None and bid > 0 and ask > 0 and ask > bid:
         spread = ask - bid
         step = spread * 0.1 * min(chase, 8)
-        if side in ["Buy", "Bullish"]:
+        if side in ["Buy", "Bullish", "LONG", "BUY"]:
             return min(ask - (spread * 0.05), bid + step)
         else:
             return max(bid + (spread * 0.05), ask - step)
@@ -4153,64 +4171,13 @@ def sync_active_positions_from_bybit():
                     import uuid
                     trade_uuid = str(uuid.uuid4())
                     
-                    # Calculate proper ATR on recovery: prefer measured ATR over inversion
-                    calc_atr = None
-                    try:
-                        _df_r = get_history(symbol=symbol, interval="60", limit=50)
-                        if _df_r is not None and "ATR" in _df_r.columns and len(_df_r) > 0:
-                            _a = float(_df_r["ATR"].iloc[-1])
-                            if _a > 0:
-                                calc_atr = _a
-                    except Exception as _e:
-                        log_event("DEBUG", f"Recovery ATR fetch failed for {symbol}: {_e}")
-
-                    if calc_atr is None:
-                        calc_atr = abs(avg_price - sl_price) / 0.75 if sl_price > 0 else 0.015 * avg_price
-                        log_event("WARNING", f"[{symbol}] Recovery ATR inverted from stop — may be inaccurate")
-
-                    if calc_atr > 0.05 * avg_price or calc_atr == 0:
-                        calc_atr = 0.015 * avg_price
-                        log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
-                    
-                    # Sanitize TP and SL on recovery
-                    if tp_price == 0.0:
-                        if direction == "Bullish":
-                            tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
-                        else:
-                            tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
-                            
-                    if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
-                        if direction == "Bullish":
-                            sl_price = avg_price - 0.75 * calc_atr
-                            if liq_price > 0.0 and sl_price <= liq_price:
-                                sl_price = min(avg_price * 0.999, liq_price + 0.2 * calc_atr)
-                            if sl_price >= avg_price:
-                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid long stop — leaving exchange SL")
-                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
-                                sl_price = None
-                        else:
-                            sl_price = avg_price + 0.75 * calc_atr
-                            if liq_price > 0.0 and sl_price >= liq_price:
-                                sl_price = max(avg_price * 1.001, liq_price - 0.2 * calc_atr)
-                            if sl_price <= avg_price:
-                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid short stop — leaving exchange SL")
-                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
-                                sl_price = None
-                                
-                    # Push the recovered/sanitized TP & SL to Bybit
-                    if TRADE_MODE != "simulation":
-                        update_bybit_take_profit(symbol, tp_price)
-                        if sl_price is not None:
-                            success = update_bybit_stop_loss(symbol, sl_price)
-                            if not success:
-                                sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
-     
                     # Accurate timeframe and confidence resolution from decision_journal execution records
                     matched_tf = "4h"  # fallback default
                     matched_confidence = 0.50
                     try:
+                        import database
                         import sqlite3
-                        con = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db"), timeout=10.0)
+                        con = database.get_db_connection()
                         cur = con.cursor()
                         cur.execute("""
                             SELECT interval, calibrated_conf, direction FROM decision_journal 
@@ -4234,6 +4201,58 @@ def sync_active_positions_from_bybit():
                                     matched_tf = tf_map_inv.get(str(matched_tf_interval), "4h")
                                     matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.50)))
                                     break
+
+                    recov_sl_mult = risk_engine.get_timeframe_stop_multiplier(matched_tf)
+
+                    # Calculate proper ATR on recovery: prefer measured ATR over inversion
+                    calc_atr = None
+                    try:
+                        _df_r = get_history(symbol=symbol, interval="60", limit=50)
+                        if _df_r is not None and "ATR" in _df_r.columns and len(_df_r) > 0:
+                            _a = float(_df_r["ATR"].iloc[-1])
+                            if _a > 0:
+                                calc_atr = _a
+                    except Exception as _e:
+                        log_event("DEBUG", f"Recovery ATR fetch failed for {symbol}: {_e}")
+
+                    if calc_atr is None:
+                        calc_atr = abs(avg_price - sl_price) / max(0.1, recov_sl_mult) if sl_price > 0 else 0.015 * avg_price
+                        log_event("WARNING", f"[{symbol}] Recovery ATR inverted from stop ({recov_sl_mult:.2f}x TF multiplier) — may be inaccurate")
+
+                    if calc_atr > 0.05 * avg_price or calc_atr == 0:
+                        calc_atr = 0.015 * avg_price
+                        log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
+                    
+                    # Sanitize TP and SL on recovery
+                    if tp_price == 0.0:
+                        if direction == "Bullish":
+                            tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
+                        else:
+                            tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
+                            
+                    if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
+                        if direction == "Bullish":
+                            sl_price = avg_price - recov_sl_mult * calc_atr
+                            if liq_price > 0.0 and sl_price <= liq_price:
+                                sl_price = min(avg_price * 0.999, liq_price + 0.2 * calc_atr)
+                            if sl_price >= avg_price:
+                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid long stop — leaving exchange SL")
+                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
+                                sl_price = None
+                        else:
+                            sl_price = avg_price + recov_sl_mult * calc_atr
+                            if liq_price > 0.0 and sl_price >= liq_price:
+                                sl_price = max(avg_price * 1.001, liq_price - 0.2 * calc_atr)
+                            if sl_price <= avg_price:
+                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid short stop — leaving exchange SL")
+                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
+                    # Push the recovered/sanitized TP & SL to Bybit
+                    if TRADE_MODE != "simulation":
+                        update_bybit_take_profit(symbol, tp_price)
+                        if sl_price is not None:
+                            success = update_bybit_stop_loss(symbol, sl_price)
+                            if not success:
+                                sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
 
                     _iv = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "6h": 360}.get(matched_tf, 60)
                     _la = TIMEFRAME_CONFIG.get(str(_iv), {}).get("lookahead", 10)
@@ -4646,9 +4665,16 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 if not tp_ok:
                     log_event("WARNING", f"[{symbol} {iv}m] Failed to place Take Profit on Bybit after fill (SL is active).")
             
-            # Place scale-out limit order on Bybit
+            # Place scale-out limit order on Bybit using timeframe and trend-adaptive ATR target
             limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
-            limit_price = entry_price + 1.0 * atr_dollars if ml_trend == "Bullish" else entry_price - 1.0 * atr_dollars
+            entry_adx_val = float(latest_candle.get("ADX", 25.0)) if isinstance(latest_candle, dict) and "ADX" in latest_candle else 25.0
+            if str(iv) in ["240", "360"]:
+                entry_scale_mult = 1.60 if entry_adx_val >= 35.0 else (1.20 if entry_adx_val < 22.0 else 1.40)
+            elif str(iv) in ["60", "120"]:
+                entry_scale_mult = 1.40 if entry_adx_val >= 35.0 else (1.00 if entry_adx_val < 22.0 else 1.20)
+            else:
+                entry_scale_mult = 1.20 if entry_adx_val >= 35.0 else (0.80 if entry_adx_val < 22.0 else 1.00)
+            limit_price = entry_price + entry_scale_mult * atr_dollars if ml_trend == "Bullish" else entry_price - entry_scale_mult * atr_dollars
             limit_qty_str = format_bybit_qty(symbol, actual_qty * 0.5)
             limit_qty_val = float(limit_qty_str)
             scale_out_val = limit_qty_val * limit_price
@@ -5017,20 +5043,32 @@ def main():
                                         status_msg = order_details.get("orderStatus") if order_details else "Unknown"
                                         stuck_since = active_trade.get("scale_out_stuck_since", time.time())
                                         active_trade.setdefault("scale_out_stuck_since", stuck_since)
-                                        if time.time() - stuck_since > 600:  # 10-minute timeout
-                                            print(f"[{active_symbol}] Scale-out stuck >10 min ({status_msg}). Cancelling stale order and marking half_closed.")
-                                            cancel_bybit_order(active_symbol, scale_out_order_id)
-                                            active_trade["half_closed"] = True
-                                            active_trade.pop("scale_out_stuck_since", None)
+                                        
+                                        # Timeframe-scaled scale-out timeout
+                                        if str(iv) in ["240", "360"]:
+                                            max_scale_out_wait = 43200  # 12 hours for 4H/6H swing runners
+                                        elif str(iv) in ["60", "120"]:
+                                            max_scale_out_wait = 7200   # 2 hours for 1H/2H trades
+                                        elif str(iv) == "30":
+                                            max_scale_out_wait = 1800   # 30 mins
                                         else:
-                                            print(f"[{active_symbol}] Size check indicates scale-out, but limit order status is not Filled ({status_msg}). Waiting.")
+                                            max_scale_out_wait = 600    # 10 mins for 15m scalps
+                                            
+                                        if time.time() - stuck_since > max_scale_out_wait:
+                                            print(f"[{active_symbol} {iv}m] Scale-out limit order expired after {max_scale_out_wait//60} min ({status_msg}). Cancelling stale order.")
+                                            cancel_bybit_order(active_symbol, scale_out_order_id)
+                                            active_trade.pop("scale_out_stuck_since", None)
+                                            active_trade["bybit_scale_out_order_id"] = None
+                                        else:
+                                            pass
                                 else:
                                     # Fallback only if price has actually reached scale-out profit target
                                     atr_d = active_trade.get("atr_dollars", 0.015 * entry_price)
+                                    scale_mult_req = 1.40 if str(iv) in ["240", "360"] else (1.20 if str(iv) in ["60", "120"] else 0.80)
                                     reached_scale_target = False
-                                    if direction == "Bullish" and current_price >= entry_price + 0.8 * atr_d:
+                                    if direction == "Bullish" and current_price >= entry_price + scale_mult_req * atr_d:
                                         reached_scale_target = True
-                                    elif direction == "Bearish" and current_price <= entry_price - 0.8 * atr_d:
+                                    elif direction == "Bearish" and current_price <= entry_price - scale_mult_req * atr_d:
                                         reached_scale_target = True
                                         
                                     if reached_scale_target:
@@ -5073,7 +5111,10 @@ def main():
                     # Rule 10: ATR Fibonacci Step-Lock (38.2% -> lock 25%, 50% -> lock 40%, 61.8% -> lock 55%)
                     take_profit_val = active_trade.get("take_profit", 0.0)
                     total_tp_range = abs(take_profit_val - entry_price)
-                    current_move = abs(current_price - entry_price)
+                    if direction == "Bullish":
+                        current_move = max(0.0, current_price - entry_price)
+                    else:
+                        current_move = max(0.0, entry_price - current_price)
                     progress_pct = (current_move / total_tp_range) if total_tp_range > 0 else 0.0
                     
                     raw_fib = getattr(config, "FIBONACCI_STEP_LOCKS", {0.618: 0.55, 0.50: 0.40, 0.382: 0.25})
@@ -5090,7 +5131,7 @@ def main():
                             locked_pct = fib_locks[threshold]
                             break
                         
-                    if locked_pct > 0.0:
+                    if locked_pct > 0.0 and current_move > 0.0:
                         if direction == "Bullish":
                             fib_sl = max(stop_loss, entry_price + (current_price - entry_price) * locked_pct)
                             if fib_sl > stop_loss:
@@ -5122,15 +5163,15 @@ def main():
                                     active_trades_updated = True
                                     print(f"[{iv}m Fib Step-Lock] Progress {progress_pct*100:.1f}%. Locked {locked_pct*100:.0f}% profit. SL: {stop_loss:.2f}")
 
-                    # Scale-Out (50% partial profit taking at trend-adaptive ATR multiple)
+                    # Scale-Out (50% partial profit taking at timeframe & trend-adaptive ATR multiple)
                     from config import TAKER_FEE_PCT, SCALE_OUT_CONFIG
                     trade_adx = float(active_trade.get("adx", active_trade.get("entry_adx", 25.0)))
-                    if trade_adx >= 35.0:
-                        scale_out_mult = 1.40  # Extended runner trigger in strong breakout trends
-                    elif trade_adx < 22.0:
-                        scale_out_mult = 0.80  # Fast profit locking in sideways chop
+                    if str(iv) in ["240", "360"]:
+                        scale_out_mult = 1.60 if trade_adx >= 35.0 else (1.20 if trade_adx < 22.0 else 1.40)
+                    elif str(iv) in ["60", "120"]:
+                        scale_out_mult = 1.40 if trade_adx >= 35.0 else (1.00 if trade_adx < 22.0 else 1.20)
                     else:
-                        scale_out_mult = float(SCALE_OUT_CONFIG.get("atr_trigger_mult", 1.0))
+                        scale_out_mult = 1.20 if trade_adx >= 35.0 else (0.80 if trade_adx < 22.0 else 1.00)
                     scale_out_portion = SCALE_OUT_CONFIG.get("position_portion", 0.50)
                     half_closed = active_trade.get("half_closed", False)
                     trigger_scale_out = False
@@ -5185,8 +5226,8 @@ def main():
                             position_size_usd = remaining_size
                             active_trade["position_size_usd"] = remaining_size
                             
-                            # Move stop loss to fee-adjusted break-even
-                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
+                            # Move stop loss to timeframe-scaled break-even
+                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=str(iv))
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
                                 if success:
@@ -5220,12 +5261,15 @@ def main():
                             lev = active_trade.get("leverage", 1.0)
                             gross_pnl = closed_size * (raw_return_pct * lev / 100.0)
                             taker_fee_cost = closed_size * lev * TAKER_FEE_PCT  # exit side only
-                            pnl_usd = round(gross_pnl - taker_fee_cost, 2)
+                            from decimal import Decimal, ROUND_HALF_UP
+                            def _q2_short(v):
+                                return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                            pnl_usd = _q2_short(gross_pnl - taker_fee_cost)
                             if pnl_usd < -closed_size:
                                 pnl_usd = -closed_size
                                 net_return_pct = -100.0
                             else:
-                                net_return_pct = round((pnl_usd / closed_size) * 100.0, 2) if closed_size > 0 else 0.0
+                                net_return_pct = _q2_short((pnl_usd / closed_size) * 100.0) if closed_size > 0 else 0.0
                             
                             # Save scaled out pnl and execution metadata
                             active_trade["scaled_out_pnl"] = pnl_usd
@@ -5241,7 +5285,7 @@ def main():
                             active_trade["position_size_usd"] = remaining_size
                             
                             # Move stop loss to fee-adjusted break-even floor
-                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
+                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=str(iv))
                             
                             if TRADE_MODE != "simulation":
                                 success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
@@ -5372,8 +5416,10 @@ def main():
                         if other_sym != active_symbol:
                             pred_other = bot_state.get(f"latest_prediction_{other_sym}_{iv}", {})
                             if isinstance(pred_other, dict) and pred_other.get("direction") in ["Bullish", "Bearish"]:
-                                change_pct = abs(float(pred_other.get("predicted_change", 0.0))) / max(1e-6, current_price)
-                                r_cand = change_pct / max(1e-4, garch_vol_val)
+                                other_ref_price = float(pred_other.get("ref_price") or pred_other.get("entry_price") or bot_state.get(f"live_price_{other_sym}") or 1.0)
+                                other_change_pct = abs(float(pred_other.get("predicted_change", 0.0))) / max(1e-6, other_ref_price)
+                                other_atr_pct = float(bot_state.get(f"atr_norm_{other_sym}_{iv}") or 0.015)
+                                r_cand = other_change_pct / max(1e-4, other_atr_pct)
                                 if best_incoming_r is None or r_cand > best_incoming_r:
                                     best_incoming_r = r_cand
 
@@ -5903,42 +5949,58 @@ def main():
                 pass
             return False, ""
 
-        # --- Consecutive Losses Cooldown Circuit Breaker ---
+        # --- Consecutive Losses & Post-Trade Single-Candle Cooldown ---
         def is_symbol_interval_cooling_off(symbol, interval):
             """
-            Checks if a symbol and interval combination is in a 6-hour cool-off period
-            after suffering 2 consecutive loss trades.
+            Checks if a symbol and interval combination is in:
+            1. Post-trade single candle cool-off (prevents immediate re-entry on same bar).
+            2. A 6-hour cool-off period after suffering 2 consecutive loss trades.
             """
             trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol and str(t.get("interval")) == str(interval)]
-            if len(trades) < 2:
+            if not trades:
                 return False, 0
                 
             sorted_trades = sorted(trades, key=lambda x: float(x.get("exit_time", 0.0) or 0.0), reverse=True)
-            
             latest_trade = sorted_trades[0]
-            second_latest = sorted_trades[1]
+            latest_exit_time = float(latest_trade.get("exit_time", 0.0) or 0.0)
             
-            def _is_loss(t):
-                succ = str(t.get("success", "")).lower()
-                if succ in ["false", "0", "no"]:
-                    return True
-                try:
-                    pnl = float(t.get("pnl_usd", 0.0) or 0.0)
-                    return pnl < 0.0
-                except Exception:
-                    return False
+            # 1. Post-Trade Single-Candle Pause
+            try:
+                iv_str = str(interval).strip()
+                if iv_str.endswith("h"):
+                    iv_minutes = int(iv_str[:-1]) * 60
+                elif iv_str.endswith("m"):
+                    iv_minutes = int(iv_str[:-1])
+                else:
+                    iv_minutes = int(iv_str)
+            except Exception:
+                iv_minutes = 60
+            
+            candle_duration_sec = iv_minutes * 60
+            time_since_exit = time.time() - latest_exit_time
+            if time_since_exit < candle_duration_sec:
+                remaining_minutes = max(1, int((candle_duration_sec - time_since_exit) / 60))
+                return True, remaining_minutes
+            
+            # 2. Consecutive Losses Cooldown
+            if len(sorted_trades) >= 2:
+                second_latest = sorted_trades[1]
+                def _is_loss(t):
+                    succ = str(t.get("success", "")).lower()
+                    if succ in ["false", "0", "no"]:
+                        return True
+                    try:
+                        pnl = float(t.get("pnl_usd", 0.0) or 0.0)
+                        return pnl < 0.0
+                    except Exception:
+                        return False
 
-            is_latest_loss = _is_loss(latest_trade)
-            is_second_loss = _is_loss(second_latest)
-            
-            if is_latest_loss and is_second_loss:
-                exit_time = float(latest_trade.get("exit_time", 0.0) or 0.0)
-                cooldown_duration = 6 * 3600  # 6 hours
-                time_elapsed = time.time() - exit_time
-                if time_elapsed < cooldown_duration:
-                    remaining_minutes = int((cooldown_duration - time_elapsed) / 60)
-                    return True, remaining_minutes
-                    
+                if _is_loss(latest_trade) and _is_loss(second_latest):
+                    cooldown_duration = 6 * 3600  # 6 hours
+                    if time_since_exit < cooldown_duration:
+                        remaining_minutes = int((cooldown_duration - time_since_exit) / 60)
+                        return True, remaining_minutes
+                        
             return False, 0
 
         def get_learned_confidence_threshold(symbol: str, interval: str, regime: str) -> float:
@@ -7005,21 +7067,21 @@ def main():
                                             adjustments_applied.append(("macro_opposition", 0.10))
                                             print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
-                            # Funding Rate Carry Overlay
+                            # Funding Rate Carry Overlay & Crowdedness Friction Guard
                             funding_rate = get_funding_rate(symbol)
                             funding_blocked = False
-                            if funding_rate > 0.0005 and ml_trend == "Bullish":
-                                dynamic_conf_threshold += 0.02
-                                adjustments_applied.append(("funding_carry_long", 0.02))
-                                print(f"[{symbol} {iv}m] Funding Carry Adjustment: Positive funding rate ({funding_rate*100:.3f}%) raised Long threshold to {dynamic_conf_threshold*100:.1f}%")
-                            elif funding_rate < -0.0005 and ml_trend == "Bearish":
-                                dynamic_conf_threshold += 0.02
-                                adjustments_applied.append(("funding_carry_short", 0.02))
-                                print(f"[{symbol} {iv}m] Funding Carry Adjustment: Negative funding rate ({funding_rate*100:.3f}%) raised Short threshold to {dynamic_conf_threshold*100:.1f}%")
+                            if funding_rate > 0.0003 and ml_trend == "Bullish":
+                                penalty = min(0.06, (funding_rate - 0.0003) * 100.0 + 0.02)
+                                dynamic_conf_threshold += penalty
+                                adjustments_applied.append(("funding_carry_long", round(penalty, 3)))
+                                print(f"[{symbol} {iv}m] Funding Carry Friction: High Long funding ({funding_rate*100:.3f}%) raised threshold (+{penalty*100:.1f}% to {dynamic_conf_threshold*100:.1f}%)")
+                            elif funding_rate < -0.0003 and ml_trend == "Bearish":
+                                penalty = min(0.06, (abs(funding_rate) - 0.0003) * 100.0 + 0.02)
+                                dynamic_conf_threshold += penalty
+                                adjustments_applied.append(("funding_carry_short", round(penalty, 3)))
+                                print(f"[{symbol} {iv}m] Funding Carry Friction: High Short funding ({funding_rate*100:.3f}%) raised threshold (+{penalty*100:.1f}% to {dynamic_conf_threshold*100:.1f}%)")
 
-                            if ml_trend == "Bullish" and funding_rate > 0.001:
-                                funding_blocked = True
-                            elif ml_trend == "Bearish" and funding_rate < -0.001:
+                            if (ml_trend == "Bullish" and funding_rate > 0.0008) or (ml_trend == "Bearish" and funding_rate < -0.0008):
                                 funding_blocked = True
                             
                             # Open Interest Momentum Guard
@@ -7084,6 +7146,18 @@ def main():
                             liq_score = get_liquidity_score(symbol)
                             low_liquidity = (str(iv) in ["15", "30"] and liq_score < 0.3)
 
+                            # P3: Correlated Portfolio Cluster Exposure Guard
+                            cluster_blocked = False
+                            cluster_block_reason = ""
+                            if ml_trend in ["Bullish", "Bearish"]:
+                                all_open_positions = []
+                                for _k_tf in ["15m", "30m", "1h", "2h", "4h"]:
+                                    all_open_positions.extend(bot_state.get(f"active_trade_{_k_tf}", []))
+                                from portfolio_risk import portfolio_risk_engine
+                                cluster_approved, cluster_block_reason = portfolio_risk_engine.check_correlated_cluster_exposure(symbol, ml_trend, all_open_positions, max_same_cluster_count=2)
+                                if not cluster_approved:
+                                    cluster_blocked = True
+
                             if not bot_state.get("bot_running", True):
                                 status_msg = "Skipped (Bot Stopped)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
@@ -7099,6 +7173,9 @@ def main():
                             elif already_active:
                                 status_msg = "Skipped (Already Active)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
+                            elif cluster_blocked:
+                                status_msg = "Skipped (Cluster Limit)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: {cluster_block_reason}")
                             elif not in_session:
                                 status_msg = "Skipped (Off-Session)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
@@ -7706,8 +7783,11 @@ def main():
                                                 wallet_exceeded = True
                                                 bybit_success = False
                                             else:
-                                                # Apply final capped size and drawdown multiplier
-                                                position_size_usd = max(0.0, float(capped_size * dd_mult))
+                                                # Apply final capped size, drawdown multiplier, and P4 Anti-Martingale scaling
+                                                from risk_engine import calculate_anti_martingale_risk_multiplier
+                                                am_res = calculate_anti_martingale_risk_multiplier(current_bal, bot_state.get("peak_wallet_balance", current_bal), bot_state.get("trade_history", []))
+                                                am_mult = float(am_res.get("multiplier", 1.0))
+                                                position_size_usd = max(0.0, float(capped_size * dd_mult * am_mult))
                                                 leveraged_size = position_size_usd * leverage_val
                                                 raw_qty = leveraged_size / entry_price if entry_price > 0 else 0.0
                                                 qty_str = format_bybit_qty(symbol, raw_qty)

@@ -695,14 +695,16 @@ class PortfolioUtilityOptimizer:
 
         import config
         util_policy = getattr(config, "PORTFOLIO_UTILITY_POLICY", {})
-        loss_cutoff = util_policy.get("loss_utility_cutoff", -2.0)
         min_util = util_policy.get("min_utility_threshold", 0.20)
         max_stag = util_policy.get("max_stagnant_candles", 15)
         scaleout_util = util_policy.get("scaleout_utility_threshold", 0.50)
 
         total_trades = len(ranked_trades)
         for idx, (t_id, util, t_data) in enumerate(ranked_trades):
-            if util < loss_cutoff or (util < min_util and t_data.get("candles_elapsed", 0) > max_stag):
+            # Do NOT market-close active trades on normal dips — Stop Loss governs risk.
+            # Only harvest margin if the trade is confirmed stagnant past max_stagnant_candles.
+            candles = t_data.get("candles_elapsed", 0)
+            if util < min_util and candles > max_stag:
                 close_list.append(t_id)
             elif idx >= total_trades // 2 and util < scaleout_util and not t_data.get("half_closed", False):
                 scale_out_list.append(t_id)

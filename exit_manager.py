@@ -116,7 +116,7 @@ def evaluate_trailing_and_break_even(
             potential_sl = min(atr_sl, max_tight_sl)
 
             if break_even_triggered:
-                be_floor = calculate_break_even_stop("Bullish", entry_price, current_price, atr_dollars)
+                be_floor = calculate_break_even_stop("Bullish", entry_price, current_price, atr_dollars, interval=iv)
                 potential_sl = max(potential_sl, be_floor)
             potential_sl = min(potential_sl, current_price * 0.9995)
 
@@ -136,7 +136,7 @@ def evaluate_trailing_and_break_even(
                     active_trades_updated = True
 
         if not break_even_triggered and current_price >= entry_price + required_be_dist:
-            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
+            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=iv)
             if trade_mode != "simulation":
                 success = update_sl_fn(active_symbol, target_sl, active_trade)
                 if success:
@@ -167,7 +167,7 @@ def evaluate_trailing_and_break_even(
             potential_sl = max(atr_sl, max_tight_sl)
 
             if break_even_triggered:
-                be_floor = calculate_break_even_stop("Bearish", entry_price, current_price, atr_dollars)
+                be_floor = calculate_break_even_stop("Bearish", entry_price, current_price, atr_dollars, interval=iv)
                 potential_sl = min(potential_sl, be_floor)
             potential_sl = max(potential_sl, current_price * 1.0005)
 
@@ -187,7 +187,7 @@ def evaluate_trailing_and_break_even(
                     active_trades_updated = True
 
         if not break_even_triggered and current_price <= entry_price - required_be_dist:
-            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars)
+            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=iv)
             if trade_mode != "simulation":
                 success = update_sl_fn(active_symbol, target_sl, active_trade)
                 if success:
