@@ -240,7 +240,10 @@
     21590,
     17526
   ],
-  "promoted": true,
+  "promoted": false,
   "evaluation_timestamp": "2026-08-22T10:52:11.331901+00:00",
-  "hmac_signature": "fc5dd35bc506fe295f0a4def21290d565c336ff161e432396f31f3f90b9fdd0b"
+  "hmac_signature": "3ab73f8db7fc1c7944e927be002bdaa044de6bf3b01909cfde63790df105d5a6",
+  "status": "champion",
+  "deployed_stage": "Production",
+  "holdout_mcc_promoted": true
 }
