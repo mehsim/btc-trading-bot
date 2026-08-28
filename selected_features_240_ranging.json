@@ -1,1 +1,18 @@
-["open_interest", "funding_rate", "fear_greed", "oi_change_1h", "oi_change_4h", "RSI", "MACD_diff", "EMA_9", "EMA_21", "EMA_50", "EMA_200", "BB_high", "BB_low", "BB_mid", "MFI", "ATR_norm", "close_to_EMA9", "close_to_EMA21", "close_to_EMA50", "close_to_EMA200", "EMA9_to_EMA21", "BB_pct", "BB_width", "return_5m", "volatility_10m", "volume_ratio"]
+[
+  "RSI_z",
+  "close_to_VWAP",
+  "ROC_24",
+  "close_to_EMA200",
+  "roll_spread",
+  "volatility_24h",
+  "MACD_diff",
+  "ATR_norm",
+  "volatility_gk",
+  "btc_rsi",
+  "fear_greed",
+  "BB_pct",
+  "day_of_week_cos",
+  "day_of_week_sin",
+  "close_to_Kalman",
+  "ADX"
+]

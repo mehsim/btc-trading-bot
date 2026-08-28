@@ -463,6 +463,10 @@ def add_triple_barrier_labels(df, interval):
                 tp_mult = 1.25
                 cur_sl_mult = 0.80
                 effective_lookahead = 7
+            elif str(interval) == "240":
+                tp_mult = 1.35
+                cur_sl_mult = 0.85
+                effective_lookahead = 7
             else:
                 tp_mult = tp_mult_ranging
                 cur_sl_mult = sl_mult
@@ -672,7 +676,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
         iv_str = str(globals().get("interval", "15"))
-        if regime == "ranging" and iv_str == "15":
+        if regime == "ranging" and iv_str in ["15", "240"]:
             max_depth_min, max_depth_max = 2, 3
             lr_min, lr_max = 0.02, 0.05
             reg_lambda_param = trial.suggest_float('reg_lambda', 2.0, 20.0, log=True)
@@ -720,7 +724,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
         iv_str = str(globals().get("interval", "15"))
-        if regime == "ranging" and iv_str == "15":
+        if regime == "ranging" and iv_str in ["15", "240"]:
             max_depth_min, max_depth_max = 2, 3
             lr_min, lr_max = 0.02, 0.05
             reg_lambda_param = trial.suggest_float('reg_lambda', 2.0, 20.0, log=True)
@@ -767,7 +771,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
         iv_str = str(globals().get("interval", "15"))
-        if regime == "ranging" and iv_str == "15":
+        if regime == "ranging" and iv_str in ["15", "240"]:
             depth_min, depth_max = 2, 3
             lr_min, lr_max = 0.02, 0.05
             l2_reg_param = trial.suggest_float('l2_leaf_reg', 2.0, 20.0, log=True)
@@ -1186,7 +1190,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 y_rfecv = df_sub["target_trend"]
 
             # ---- Stage 1: cheap importance prefilter ----
-            if name == "ranging" and str(interval) == "15":
+            if name == "ranging" and str(interval) in ["15", "240"]:
                 # Specialized bounded mean-reversion feature candidate pool
                 ranging_priority_candidates = [
                     "close_to_VWAP", "vwap_deviation", "BB_pct", "BB_width", "RSI_z", "btc_rsi",
@@ -1200,7 +1204,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 n_keep = min(20, len(available_candidates))
                 top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
                 top_feats = list(np.array(available_candidates)[top_idx])
-                print(f"[Regime RANGING 15m Stage 1] Specialized mean-reversion filter → {len(top_feats)} candidates.")
+                print(f"[Regime RANGING {interval}m Stage 1] Specialized mean-reversion filter → {len(top_feats)} candidates.")
             else:
                 prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
                 prefilter.fit(X_rfecv_prelim, y_rfecv)
@@ -1213,16 +1217,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
             estimator = XGBClassifier(
                 n_estimators=60,
-                max_depth=2 if (name == "ranging" and str(interval) == "15") else 3,
-                learning_rate=0.05 if (name == "ranging" and str(interval) == "15") else 0.1,
-                reg_lambda=5.0 if (name == "ranging" and str(interval) == "15") else 1.0,
+                max_depth=2 if (name == "ranging" and str(interval) in ["15", "240"]) else 3,
+                learning_rate=0.05 if (name == "ranging" and str(interval) in ["15", "240"]) else 0.1,
+                reg_lambda=5.0 if (name == "ranging" and str(interval) in ["15", "240"]) else 1.0,
                 random_state=42,
                 tree_method="hist",
                 n_jobs=1
             )
             from config import CV_N_SPLITS
             cv_rfecv = PurgedEmbargoTimeSeriesSplit(n_splits=CV_N_SPLITS, interval=interval, embargo_pct=0.01)
-            min_feats_select = 8 if (name == "ranging" and str(interval) == "15") else 10
+            min_feats_select = 8 if (name == "ranging" and str(interval) in ["15", "240"]) else 10
             selector = RFECV(
                 estimator=estimator,
                 step=1,
@@ -1241,7 +1245,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if pf not in regime_features and pf in df_regime.columns and pf not in NON_STATIONARY_EXCLUDE:
                     regime_features.append(pf)
                 
-            if name == "ranging" and str(interval) == "15" and len(regime_features) > 16:
+            if name == "ranging" and str(interval) in ["15", "240"] and len(regime_features) > 16:
                 regime_features = regime_features[:16]
 
             with open(features_filename, "w") as f:
@@ -1924,7 +1928,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
                 should_save = False
             elif holdout_mcc_ci_low < min_holdout_mcc_floor:
-                _mde_val = stat_validator.compute_mde(eff_n=len(y_holdout_trend) / max(1, _lookahead_bl))
+                _eff_n = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
+                _mde_val = round(2.8 / np.sqrt(_eff_n), 4)
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) < minimum floor ({min_holdout_mcc_floor:.4f}). MDE(80%) was {_mde_val:.4f}.")
                 should_save = False
             elif holdout_mcc_ci_high < 0.0:
