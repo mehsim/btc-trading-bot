@@ -205,8 +205,8 @@
   ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-22T11:16:16.587921+00:00",
-  "hmac_signature": "cd243bc9cf7c20960efdaa2545490b45e0c2d10357778ec01c28c4f58dbc040d",
   "status": "champion",
   "deployed_stage": "Production",
-  "holdout_mcc_promoted": true
+  "holdout_mcc_promoted": true,
+  "hmac_signature": "49e701c403f293fad5b189c7bde452f2668b8c3929d63ff7453fd4c9d8599423"
 }
