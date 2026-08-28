@@ -1297,102 +1297,97 @@
             </div>
 
             <!-- 15M Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('15m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
+            <div class="card" onclick="openActiveTradesModal('15m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 18px;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>15M STRATEGY<span id="leverage-badge-15m" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-15m" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-15m" style="font-size: 22px; margin-top: 8px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-15m" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 12px;">
+                    <div class="card-value" id="model-prediction-15m" style="font-size: 20px; margin-top: 6px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-15m" style="font-size: 10.5px; margin-top: 4px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-15m" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
-                    <div id="position-container-15m">
-                        <div class="no-position-text">No active positions</div>
-                    </div>
+                <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+                    <div id="position-container-15m"></div>
+                    <div id="coins-radar-container-15m"></div>
                 </div>
             </div>
 
             <!-- 30M Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('30m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
+            <div class="card" onclick="openActiveTradesModal('30m')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 18px;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>30M STRATEGY<span id="leverage-badge-30m" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-30m" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-30m" style="font-size: 22px; margin-top: 8px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-30m" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 12px;">
+                    <div class="card-value" id="model-prediction-30m" style="font-size: 20px; margin-top: 6px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-30m" style="font-size: 10.5px; margin-top: 4px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-30m" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
-                    <div id="position-container-30m">
-                        <div class="no-position-text">No active positions</div>
-                    </div>
+                <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+                    <div id="position-container-30m"></div>
+                    <div id="coins-radar-container-30m"></div>
                 </div>
             </div>
 
             <!-- 1H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('1h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
+            <div class="card" onclick="openActiveTradesModal('1h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 18px;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>1H STRATEGY<span id="leverage-badge-1h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-1h" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-1h" style="font-size: 22px; margin-top: 8px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 12px;">
+                    <div class="card-value" id="model-prediction-1h" style="font-size: 20px; margin-top: 6px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-1h" style="font-size: 10.5px; margin-top: 4px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-1h" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
-                    <div id="position-container-1h">
-                        <div class="no-position-text">No active positions</div>
-                    </div>
+                <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+                    <div id="position-container-1h"></div>
+                    <div id="coins-radar-container-1h"></div>
                 </div>
             </div>
 
             <!-- 2H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('2h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
+            <div class="card" onclick="openActiveTradesModal('2h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 18px;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>2H STRATEGY<span id="leverage-badge-2h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-2h" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-2h" style="font-size: 22px; margin-top: 8px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 12px;">
+                    <div class="card-value" id="model-prediction-2h" style="font-size: 20px; margin-top: 6px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-2h" style="font-size: 10.5px; margin-top: 4px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-2h" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
-                    <div id="position-container-2h">
-                        <div class="no-position-text">No active positions</div>
-                    </div>
+                <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+                    <div id="position-container-2h"></div>
+                    <div id="coins-radar-container-2h"></div>
                 </div>
             </div>
 
             <!-- 4H Strategy Card -->
-            <div class="card" onclick="openActiveTradesModal('4h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 20px;">
+            <div class="card" onclick="openActiveTradesModal('4h')" style="cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 18px;">
                 <div>
                     <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>4H STRATEGY<span id="leverage-badge-4h" style="font-size: 10px; color: var(--accent-orange); font-weight: 800; margin-left: 5px;"></span></span>
                         <span id="regime-badge-4h" style="font-size: 10px; color: var(--text-secondary); font-weight: 700; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">Unknown</span>
                     </div>
-                    <div class="card-value" id="model-prediction-4h" style="font-size: 22px; margin-top: 8px;">No Signal</div>
-                    <div class="card-subtitle" id="model-details-subtitle-4h" style="font-size: 11px; margin-top: 6px;">Calibrated Conf: 0%</div>
-                    <div class="meter-container" style="margin-top: 12px;">
+                    <div class="card-value" id="model-prediction-4h" style="font-size: 20px; margin-top: 6px;">No Signal</div>
+                    <div class="card-subtitle" id="model-details-subtitle-4h" style="font-size: 10.5px; margin-top: 4px;">Calibrated Conf: 0%</div>
+                    <div class="meter-container" style="margin-top: 8px;">
                         <div class="meter-bar" id="confidence-meter-bar-4h" style="width: 0%;"></div>
                     </div>
                 </div>
-                <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
-                    <div id="position-container-4h">
-                        <div class="no-position-text">No active positions</div>
-                    </div>
+                <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+                    <div id="position-container-4h"></div>
+                    <div id="coins-radar-container-4h"></div>
                 </div>
             </div>
         </div>
@@ -3138,15 +3133,54 @@
                                 const count = activeTradesList.length;
                                 const countText = count === 1 ? "1 Active Position" : `${count} Active Positions`;
                                 positionContainer.innerHTML = `
-                                    <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; background: rgba(139,92,246,0.05); transition: background 0.2s;">
-                                        <span style="color: var(--accent-purple); font-weight: 800; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                                    <div style="display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 8px; border: 1px solid rgba(139,92,246,0.35); border-radius: 6px; background: rgba(139,92,246,0.12); margin-bottom: 5px;">
+                                        <span style="color: var(--accent-purple); font-weight: 800; font-size: 10px; display: flex; align-items: center; gap: 4px;">
                                             💼 ${countText}
                                         </span>
-                                        <span style="font-size: 10px; color: var(--text-muted); font-weight: 600;">(Click card to view details / close)</span>
                                     </div>
                                 `;
                             } else {
-                                positionContainer.innerHTML = `<div class="no-position-text" style="font-size: 11px; opacity: 0.6;">No active positions</div>`;
+                                positionContainer.innerHTML = '';
+                            }
+                        }
+
+                        // Render All-Coins Compact Direction Radar (Parallel 3x3 Micro-Chips)
+                        const radarContainer = document.getElementById(`coins-radar-container-${tf}`);
+                        const radarData = data[`all_coins_radar_${tf}`] || (data.all_coins_radar ? data.all_coins_radar[tf] : null);
+                        if (radarContainer) {
+                            if (Array.isArray(radarData) && radarData.length > 0) {
+                                let chipsHtml = `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5px; width: 100%;">`;
+                                radarData.forEach(c => {
+                                    const sym = c.symbol;
+                                    const dir = c.direction || "Neutral";
+                                    let bg = "rgba(255,255,255,0.02)";
+                                    let border = "rgba(255,255,255,0.06)";
+                                    let color = "var(--text-secondary)";
+                                    let dot = "⚪";
+                                    
+                                    if (dir === "Bullish") {
+                                        bg = "rgba(16,185,129,0.12)";
+                                        border = "rgba(16,185,129,0.28)";
+                                        color = "#10B981";
+                                        dot = "🟢";
+                                    } else if (dir === "Bearish") {
+                                        bg = "rgba(239,68,68,0.12)";
+                                        border = "rgba(239,68,68,0.28)";
+                                        color = "#EF4444";
+                                        dot = "🔴";
+                                    }
+                                    
+                                    chipsHtml += `
+                                        <div title="${sym}: ${dir} (${c.conf || 0}%)" style="background: ${bg}; border: 1px solid ${border}; border-radius: 4px; padding: 2px 4px; display: flex; align-items: center; justify-content: space-between; font-size: 8.5px; font-weight: 800; color: ${color}; line-height: 1.2; user-select: none;">
+                                            <span>${sym}</span>
+                                            <span style="font-size: 7px; opacity: 0.9;">${dot}</span>
+                                        </div>
+                                    `;
+                                });
+                                chipsHtml += `</div>`;
+                                radarContainer.innerHTML = chipsHtml;
+                            } else {
+                                radarContainer.innerHTML = `<div style="font-size: 9px; color: var(--text-muted); text-align: center; padding: 2px 0;">Scanning market...</div>`;
                             }
                         }
                     });

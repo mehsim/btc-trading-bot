@@ -610,6 +610,33 @@ def api_status():
             }
         status_data["htf_synergy_matrix"] = synergy_matrix
 
+        # Multi-coin compact direction radar for all timeframes
+        all_coins_radar = {}
+        tf_to_iv = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"}
+        for tf in ["15m", "30m", "1h", "2h", "4h"]:
+            iv_key = tf_to_iv.get(tf, tf)
+            coin_signals = []
+            for s in symbols:
+                pred = status_data.get(f"latest_prediction_{s}_{tf}") or status_data.get(f"latest_prediction_{s}_{iv_key}")
+                if not pred and s == "BTCUSDT":
+                    pred = status_data.get(f"latest_prediction_{tf}") or status_data.get(f"latest_prediction_{iv_key}")
+                
+                short_name = s.replace("USDT", "")
+                direction = "Neutral"
+                conf = 0.0
+                if isinstance(pred, dict):
+                    direction = str(pred.get("direction", "Neutral"))
+                    conf = float(pred.get("calibrated_confidence", pred.get("confidence", 0.0)) or 0.0) * 100.0
+                
+                coin_signals.append({
+                    "symbol": short_name,
+                    "direction": direction,
+                    "conf": round(conf, 1)
+                })
+            all_coins_radar[tf] = coin_signals
+            status_data[f"all_coins_radar_{tf}"] = coin_signals
+        status_data["all_coins_radar"] = all_coins_radar
+
         # Timeframe defaults for UI rendering
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
             if not status_data.get(f"regime_{tf}") or status_data.get(f"regime_{tf}") == "Unknown":

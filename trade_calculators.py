@@ -1165,21 +1165,23 @@ def calculate_break_even_stop(
     base_be = entry_price + (side_sign * cost_buffer)
 
     if side_sign == 1:
-        if current_price > entry_price and atr_dollars > 0:
-            trailed_sl = max(base_be, current_price - min_atr_cushion)
-            target_sl = min(trailed_sl, current_price * 0.9995)
+        if current_price > entry_price:
+            if atr_dollars > 0:
+                trailed_sl = max(base_be, current_price - min_atr_cushion)
+                target_sl = min(trailed_sl, current_price * 0.9995)
+            else:
+                target_sl = min(base_be, current_price * 0.9995)
         else:
             target_sl = base_be
-            if current_price > 0 and target_sl >= current_price * 0.9995:
-                target_sl = min(current_price * 0.9995, entry_price + (current_price - entry_price) * 0.5)
     else:
-        if current_price > 0 and current_price < entry_price and atr_dollars > 0:
-            trailed_sl = min(base_be, current_price + min_atr_cushion)
-            target_sl = max(trailed_sl, current_price * 1.0005)
+        if current_price > 0 and current_price < entry_price:
+            if atr_dollars > 0:
+                trailed_sl = min(base_be, current_price + min_atr_cushion)
+                target_sl = max(trailed_sl, current_price * 1.0005)
+            else:
+                target_sl = max(base_be, current_price * 1.0005)
         else:
             target_sl = base_be
-            if current_price > 0 and target_sl <= current_price * 1.0005:
-                target_sl = max(current_price * 1.0005, entry_price - (entry_price - current_price) * 0.5)
 
     return round(target_sl, 4)
 
