@@ -1966,6 +1966,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         rollback_def = bool(attestation_data.get("rollback_plan_defined", False))
 
                         # Compute empirical holdout profit factor & Sharpe ratio using true barrier trade simulation
+                        chal_pf = 1.0
+                        chal_sharpe = 0.0
                         chal_trade_rets = []
                         _sl_fracs = []
                         for p_dir, p_ret in zip(chal_pred_t, y_holdout_price):
