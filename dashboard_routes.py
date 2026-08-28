@@ -532,6 +532,19 @@ def api_status():
             except Exception as ex_dashboard_routes:
                 log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 
+        # Build quick lookup from prediction_history (newest first)
+        ph = status_data.get("prediction_history", [])
+        latest_by_sym_iv = {}
+        if isinstance(ph, list):
+            for p in reversed(ph):
+                if isinstance(p, dict):
+                    sym_name = p.get("symbol")
+                    iv_val = str(p.get("interval"))
+                    if sym_name and iv_val:
+                        k = f"{sym_name}_{iv_val}"
+                        if k not in latest_by_sym_iv:
+                            latest_by_sym_iv[k] = p
+
         # Map symbol-specific predictions, regime, adx, and confluence to default UI keys
         active_sym = request.args.get("symbol") or status_data.get("active_symbol", "BTCUSDT")
         status_data["active_symbol"] = active_sym
@@ -545,7 +558,9 @@ def api_status():
                 status_data.get(f"latest_prediction_{tf}") or 
                 status_data.get(f"latest_prediction_{iv_key}") or 
                 status_data.get(f"latest_prediction_BTCUSDT_{tf}") or
-                status_data.get(f"latest_prediction_BTCUSDT_{iv_key}")
+                status_data.get(f"latest_prediction_BTCUSDT_{iv_key}") or
+                latest_by_sym_iv.get(f"{active_sym}_{iv_key}") or
+                latest_by_sym_iv.get(f"BTCUSDT_{iv_key}")
             )
             if sym_pred:
                 status_data[f"latest_prediction_{tf}"] = sym_pred
@@ -581,8 +596,8 @@ def api_status():
         # Multi-Timeframe 4H -> 1H Synergy Matrix for all supported coins
         synergy_matrix = {}
         for s in symbols:
-            p4 = status_data.get(f"latest_prediction_{s}_4h") or status_data.get(f"latest_prediction_{s}_240") or {}
-            p1 = status_data.get(f"latest_prediction_{s}_1h") or status_data.get(f"latest_prediction_{s}_60") or {}
+            p4 = status_data.get(f"latest_prediction_{s}_4h") or status_data.get(f"latest_prediction_{s}_240") or latest_by_sym_iv.get(f"{s}_240") or {}
+            p1 = status_data.get(f"latest_prediction_{s}_1h") or status_data.get(f"latest_prediction_{s}_60") or latest_by_sym_iv.get(f"{s}_60") or {}
             adx4 = status_data.get(f"adx_{s}_4h") if status_data.get(f"adx_{s}_4h") is not None else status_data.get(f"adx_{s}_240", 25.0)
             
             d4 = str(p4.get("direction", "Neutral")) if isinstance(p4, dict) else "Neutral"
@@ -612,12 +627,11 @@ def api_status():
 
         # Multi-coin compact direction radar for all timeframes
         all_coins_radar = {}
-        tf_to_iv = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"}
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
             iv_key = tf_to_iv.get(tf, tf)
             coin_signals = []
             for s in symbols:
-                pred = status_data.get(f"latest_prediction_{s}_{tf}") or status_data.get(f"latest_prediction_{s}_{iv_key}")
+                pred = latest_by_sym_iv.get(f"{s}_{iv_key}") or status_data.get(f"latest_prediction_{s}_{tf}") or status_data.get(f"latest_prediction_{s}_{iv_key}")
                 if not pred and s == "BTCUSDT":
                     pred = status_data.get(f"latest_prediction_{tf}") or status_data.get(f"latest_prediction_{iv_key}")
                 
@@ -626,7 +640,11 @@ def api_status():
                 conf = 0.0
                 if isinstance(pred, dict):
                     direction = str(pred.get("direction", "Neutral"))
-                    conf = float(pred.get("calibrated_confidence", pred.get("confidence", 0.0)) or 0.0) * 100.0
+                    raw_conf = pred.get("calibrated_confidence", pred.get("confidence", 0.0))
+                    try:
+                        conf = float(raw_conf or 0.0) * 100.0
+                    except Exception:
+                        conf = 0.0
                 
                 coin_signals.append({
                     "symbol": short_name,
