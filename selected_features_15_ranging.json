@@ -1,1 +1,14 @@
-["close_to_EMA200", "btc_rsi_lag2", "btc_rsi", "roll_spread", "MACD_diff_lag2", "ROC_24", "volatility_24h", "day_of_week_sin", "close_to_VWAP", "roll_spread_lag2", "hour_cos", "hour_sin", "MACD_diff", "day_of_week_cos", "fear_greed", "close_to_Kalman", "ADX", "ATR_norm"]
+[
+  "volatility_gk",
+  "volatility_24h",
+  "hour_sin",
+  "fear_greed",
+  "roll_spread",
+  "day_of_week_cos",
+  "ROC_24",
+  "day_of_week_sin",
+  "close_to_Kalman",
+  "btc_rsi",
+  "ADX",
+  "ATR_norm"
+]
