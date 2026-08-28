@@ -217,9 +217,9 @@
     "git_sha": "9f56d47c"
   },
   "barrier_config": {
-    "tp_mult_trending": 1.1191795909907887,
-    "tp_mult_ranging": 0.9996827578790153,
-    "sl_mult": 0.5016884584379878,
+    "tp_mult_trending": 2.6,
+    "tp_mult_ranging": 2.2,
+    "sl_mult": 0.9,
     "lookahead": 12,
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
@@ -234,5 +234,5 @@
   ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-18T12:09:02.137552+00:00",
-  "hmac_signature": "c8f985186b9d5ba5bbdadeb77e798b69745453cdd0f6ab5143d3e4b90e4d085f"
+  "hmac_signature": "4e55035e566eac0711fecb4fc3241bb4466833ed3ffe0f9a40b204f43f99487a"
 }

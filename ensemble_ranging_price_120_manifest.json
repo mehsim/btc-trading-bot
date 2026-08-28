@@ -228,9 +228,9 @@
     "git_sha": "073eeb61"
   },
   "barrier_config": {
-    "tp_mult_trending": 3.5220347741598514,
-    "tp_mult_ranging": 2.3502696284633258,
-    "sl_mult": 0.9961627467784075,
+    "tp_mult_trending": 2.6,
+    "tp_mult_ranging": 2.2,
+    "sl_mult": 0.9,
     "lookahead": 12,
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
@@ -238,5 +238,5 @@
   "manifest_mcc": 0.1177,
   "manifest_mcc_min": 0.0858,
   "manifest_bal_acc": 0.3989,
-  "hmac_signature": "94073858ec241b330987456932319b2a28c65a636af2d3f8ba541f47e2521187"
+  "hmac_signature": "eb2f4655264e1473dcd141870f5c14ae713723402502ff77c135b01a5b391c7e"
 }
