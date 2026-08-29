@@ -454,9 +454,14 @@ def add_triple_barrier_labels(df, interval):
             is_trending_state = False
             
         if is_trending_state:
-            tp_mult = tp_mult_trending
-            cur_sl_mult = sl_mult
-            effective_lookahead = lookahead
+            if str(interval) == "120":
+                tp_mult = 1.65
+                cur_sl_mult = 0.75
+                effective_lookahead = 10
+            else:
+                tp_mult = tp_mult_trending
+                cur_sl_mult = sl_mult
+                effective_lookahead = lookahead
         else:
             # Symmetrical mean-reversion configuration for Ranging
             if str(interval) == "15":

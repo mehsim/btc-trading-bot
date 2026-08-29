@@ -841,7 +841,8 @@ def get_fear_and_greed_history():
         df_cache = None
         try:
             import sqlite3
-            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+            conn = sqlite3.connect(DB_PATH, timeout=60.0)
+            conn.execute("PRAGMA busy_timeout = 60000;")
             conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             cursor.execute("SELECT timestamp, fear_greed FROM fng_data ORDER BY timestamp ASC;")
@@ -879,7 +880,8 @@ def get_fear_and_greed_history():
                     # Write to database cache
                     try:
                         with db_write_lock:
-                            conn = sqlite3.connect(DB_PATH, timeout=30.0)
+                            conn = sqlite3.connect(DB_PATH, timeout=60.0)
+                            conn.execute("PRAGMA busy_timeout = 60000;")
                             conn.execute("PRAGMA journal_mode=WAL;")
                             conn.executemany(
                                 "INSERT OR REPLACE INTO fng_data (timestamp, fear_greed) VALUES (?, ?);",
