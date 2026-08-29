@@ -251,7 +251,7 @@ def run_statistical_governance_scheduler():
                 for iv in intervals_to_monitor:
                     slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv and float(t.get("exit_time") or 0.0) >= (now_ts - 14 * 86400)]
                     n_trades = len(slot_trades)
-                    if n_trades >= 30:
+                    if n_trades >= 100:
                         returns = [float(t.get("change_pct") or t.get("pnl_pct") or 0.0) for t in slot_trades]
                         # Empirical fee/slippage hurdle baseline (-0.05% per roundtrip) with slight variance
                         baseline_rets = [-0.05 + float(np.random.normal(0, 0.001)) for _ in range(n_trades)]
@@ -264,7 +264,8 @@ def run_statistical_governance_scheduler():
                             num_trials=1
                         )
                         decision = matrix_res.get("governance", {}).get("decision")
-                        if decision == "REJECT":
+                        stat_power = matrix_res.get("governance", {}).get("power", 0.0)
+                        if decision == "REJECT" and stat_power >= 0.50:
                             reasons_str = "; ".join(matrix_res.get("governance", {}).get("reasons", ["Statistical rejection"]))
                             log_event("WARNING", f"[Statistical Governance Live Gate] Denylisting trending_{iv} and ranging_{iv} due to statistical rejection: {reasons_str}")
                             _record_to_governance_denylist(f"trending_{iv}", reason=f"Live statistical rejection: {reasons_str}")
