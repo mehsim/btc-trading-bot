@@ -112,7 +112,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     bid, ask = entry_price, entry_price
                 limit_price = bid if side == "Buy" else ask
                 print(f"[{symbol} {iv}m API] Placing Limit Maker order at ${limit_price:.4f} (Chase {chase+1}/5)...")
-                order_res = place_bybit_limit_order(symbol, side, qty_str, limit_price)
+                order_res = place_bybit_limit_order(
+                    symbol, side, qty_str, limit_price, sl=stop_loss_price, tp=take_profit_price, post_only=True
+                )
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
                     filled = False

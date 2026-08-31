@@ -1,7 +1,7 @@
 import time
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pandas as pd
+
 
 def test_chase_loop_deducts_partial_fills():
     """Verify chase loop deducts cancelled order partial fills so subsequent chases only order remaining qty."""
@@ -23,13 +23,13 @@ def test_chase_loop_deducts_partial_fills():
     dynamic_conf_threshold = 0.55
     latest_completed_ts = int(time.time() * 1000)
     latest_candle = {"ATR_norm": 0.01}
-    df_completed = pd.DataFrame({"ATR_norm": [0.01]*30})
+    df_completed = pd.DataFrame({"ATR_norm": [0.01] * 30})
 
     # Track limit orders placed
     placed_orders = []
-    
-    def mock_place_limit(sym, side, q_str, px, post_only=False, reduce_only=False):
-        placed_orders.append({"qty": q_str, "price": px, "reduce_only": reduce_only})
+
+    def mock_place_limit(sym, side, q_str, px, sl=None, tp=None, post_only=False, reduce_only=False, **kwargs):
+        placed_orders.append({"qty": q_str, "price": px, "sl": sl, "tp": tp, "reduce_only": reduce_only})
         return {"retCode": 0, "result": {"orderId": f"order_{len(placed_orders)}"}}
 
     # Mock order details:

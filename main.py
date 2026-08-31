@@ -4508,7 +4508,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
                 limit_entry_price = get_chase_limit_price(symbol, side, chase, entry_price)
                 print(f"[{symbol} {iv}m API] Chase {chase+1}/5: Placing Limit Maker order for {chase_qty_str} (remaining of {raw_qty}) at {limit_entry_price:.2f}...")
-                order_res = place_bybit_limit_order(symbol, side, chase_qty_str, limit_entry_price, post_only=True)
+                order_res = place_bybit_limit_order(symbol, side, chase_qty_str, limit_entry_price, sl=stop_loss_price, tp=take_profit_price, post_only=True)
                 
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
