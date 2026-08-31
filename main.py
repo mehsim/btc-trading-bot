@@ -2275,11 +2275,13 @@ def load_model_weights(iv):
                     models_by_interval[iv]["trending"]["calibrator"] = json.load(f)
                 print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
             else:
-                models_by_interval[iv]["trending"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-                print(f"Initialized identity calibrator for trending_{iv}")
+                models_by_interval[iv]["trending"]["calibrator"] = None
+                log_event("CRITICAL", f"[Calibrator Missing] Trending calibrator '{trending_cal_file}' not found. Slot set to None (Fail-Closed).")
+                send_telegram_alert(f"🚨 *MISSING CALIBRATOR ARTIFACT* 🚨\n• Interval: `{iv}m`\n• Regime: `Trending`\n• File: `{trending_cal_file}`\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
         except Exception as e:
-            models_by_interval[iv]["trending"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-            log_event("WARNING", f"Error loading trending calibrator for {iv}m: {e}")
+            models_by_interval[iv]["trending"]["calibrator"] = None
+            log_event("CRITICAL", f"[Calibrator Error] Failed loading trending calibrator for {iv}m: {e}. Slot set to None (Fail-Closed).")
+            send_telegram_alert(f"🚨 *CALIBRATOR LOAD ERROR* 🚨\n• Interval: `{iv}m`\n• Regime: `Trending`\n• Error: {e}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
 
         try:
             ranging_cal_file = f"calibrator_ranging_{iv}.json"
@@ -2288,11 +2290,13 @@ def load_model_weights(iv):
                     models_by_interval[iv]["ranging"]["calibrator"] = json.load(f)
                 print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
             else:
-                models_by_interval[iv]["ranging"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-                print(f"Initialized identity calibrator for ranging_{iv}")
+                models_by_interval[iv]["ranging"]["calibrator"] = None
+                log_event("CRITICAL", f"[Calibrator Missing] Ranging calibrator '{ranging_cal_file}' not found. Slot set to None (Fail-Closed).")
+                send_telegram_alert(f"🚨 *MISSING CALIBRATOR ARTIFACT* 🚨\n• Interval: `{iv}m`\n• Regime: `Ranging`\n• File: `{ranging_cal_file}`\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
         except Exception as e:
-            models_by_interval[iv]["ranging"]["calibrator"] = {"X": [0.0, 1.0], "y": [0.0, 1.0]}
-            log_event("WARNING", f"Error loading ranging calibrator for {iv}m: {e}")
+            models_by_interval[iv]["ranging"]["calibrator"] = None
+            log_event("CRITICAL", f"[Calibrator Error] Failed loading ranging calibrator for {iv}m: {e}. Slot set to None (Fail-Closed).")
+            send_telegram_alert(f"🚨 *CALIBRATOR LOAD ERROR* 🚨\n• Interval: `{iv}m`\n• Regime: `Ranging`\n• Error: {e}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
             
         print(f"Successfully loaded ensemble and meta models for interval {iv}")
         try:
@@ -6563,6 +6567,8 @@ def main():
                             abstain_reason = None
                             if m_price is None or m_trend is None or not feat_list:
                                 abstain_reason = f"{served_regime} model offline"
+                            elif active_calibrator is None or (isinstance(active_calibrator, dict) and active_calibrator.get("is_fallback", False)):
+                                abstain_reason = f"{served_regime} calibrator missing or fallback (Fail-Closed)"
                             elif mcc_val is not None and mcc_val < min_mcc_floor:
                                 abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
                             elif mcc_min_val is not None and mcc_min_val < -0.05:
@@ -6870,11 +6876,10 @@ def main():
                             adjustments_applied = [("economic_base", dynamic_conf_threshold)]
 
                             # Calibrator Economic Viability Guard
-                            if active_calibrator is not None:
-                                from tools.beta_calibrator import is_calibrator_viable
-                                if not is_calibrator_viable(active_calibrator, min_required_p_star=economic_base_threshold):
-                                    log_event("WARNING", f"[{symbol} {iv}m Calibrator Unviable] Active calibrator achievable ceiling cannot reach fee-inclusive break-even p* ({economic_base_threshold:.4f}). Abstaining.")
-                                    continue
+                            from tools.beta_calibrator import is_calibrator_viable
+                            if active_calibrator is None or not is_calibrator_viable(active_calibrator, min_required_p_star=economic_base_threshold):
+                                log_event("WARNING", f"[{symbol} {iv}m Calibrator Guard] Active calibrator missing, fallback, or achievable ceiling cannot reach fee-inclusive break-even p* ({economic_base_threshold:.4f}). Abstaining (Fail-Closed).")
+                                continue
 
                             # ADX Regime Floor Filter (Regime-aware: Ranging models trade 10-24 ADX; Trending requires high momentum)
                             is_ranging_regime = "Ranging" in regime_name

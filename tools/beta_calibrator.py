@@ -156,7 +156,9 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
     whose achievable ceiling exceeds the fee-inclusive break-even p*.
     """
     if not calibrator_data or not isinstance(calibrator_data, dict):
-        return True
+        return False
+    if calibrator_data.get("is_fallback", False) is True:
+        return False
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
         bc = BetaCalibrator.from_dict(calibrator_data)
         return bc.is_viable(min_required_p_star=min_required_p_star)

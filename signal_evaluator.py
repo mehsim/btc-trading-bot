@@ -134,10 +134,14 @@ class SignalEvaluator:
                     cal_ver_str = calibrator_data.get("version", f"v1.0_isotonic_{interval}m")
                     cal_ece_val = float(calibrator_data.get("ece", 0.035))
             except Exception as ex_cal:
-                log_event("WARNING", f"[SignalEvaluator Warning] Failed reading calibrator {cal_path}: {ex_cal}")
+                log_event("CRITICAL", f"[SignalEvaluator CRITICAL] Failed reading calibrator {cal_path}: {ex_cal}. Setting slot to fallback.")
+                calibrator_data = None
+        else:
+            log_event("CRITICAL", f"[SignalEvaluator CRITICAL] Calibrator {cal_path} not found on disk. Setting slot to fallback.")
+            calibrator_data = None
 
         if calibrator_data is None:
-            calibrator_data = {"X": [0.0, 1.0], "y": [0.0, 1.0], "version": cal_ver_str, "ece": cal_ece_val}
+            calibrator_data = {"scaling_method": "identity", "is_fallback": True, "version": "v0.0_missing", "ece": 0.080}
 
         try:
             m_trend = load_ensemble_classifier(f"ensemble_{regime_key}_trend_{interval}", n_features=len(feat_list), feature_names=feat_list)
@@ -412,9 +416,15 @@ class SignalEvaluator:
                         from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
                         p_star_req = float(round(p_star + cost_adj, 4))
                         if not is_calibrator_viable(calibrator, min_required_p_star=p_star_req):
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m calibrator achievable ceiling cannot reach break-even p* ({p_star_req:.4f}). Filtering to Neutral.")
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m calibrator unviable or fallback. Filtering to Neutral (Fail-Closed).")
                             direction = "Neutral"
-                        calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
+                            calibrated_conf = 0.50
+                        else:
+                            calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
+                    elif direction in ["Bullish", "Bearish"]:
+                        log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m missing calibrator. Filtering to Neutral (Fail-Closed).")
+                        direction = "Neutral"
+                        calibrated_conf = 0.50
                     else:
                         calibrated_conf = float(raw_conf)
 
