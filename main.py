@@ -66,7 +66,8 @@ from bybit_client import (
     format_bybit_price,
     format_bybit_qty,
     get_bybit_time_offset,
-    execute_bybit_order_ws_or_rest
+    execute_bybit_order_ws_or_rest,
+    get_orderbook_imbalance as bybit_get_orderbook_imbalance
 )
 from confluence_engine import check_pre_trade_confluence
 from telegram_bot import send_telegram_alert, execute_telegram_api_call
@@ -7989,7 +7990,6 @@ def main():
 
                                                 if not wallet_exceeded:
                                                     from execution_validator import ExecutionValidator
-                                                    from bybit_client import get_orderbook_imbalance
 
                                                     # Fetch live market bid/ask/last to guard against executing when price has already breached the stop loss or drifted adversely
                                                     live_bid, live_ask, live_last = get_bybit_bid_ask(symbol)
@@ -8018,7 +8018,7 @@ def main():
                                                     # Fetch real top-of-book depth from orderbook imbalance
                                                     top_book_depth = 50000.0
                                                     try:
-                                                        obi_res = get_orderbook_imbalance(symbol, depth=10)
+                                                        obi_res = bybit_get_orderbook_imbalance(symbol, depth=10)
                                                         if obi_res and obi_res.get("status") == "OK":
                                                             mid_ref = float(obi_res.get("mid_price", live_current_price) or live_current_price)
                                                             top_depth_calc = float((obi_res.get("bid_vol", 0.0) + obi_res.get("ask_vol", 0.0)) * mid_ref)
