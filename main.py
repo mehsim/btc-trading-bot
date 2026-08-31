@@ -7891,17 +7891,21 @@ def main():
                                                         print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed risk budget (Scaled: ${scaled_risk_usd:.2f} vs Max: ${max_allowed_risk_usd:.2f})")
                                                         status_msg = "Skipped (Exceeds Risk Cap)"
                                                         wallet_exceeded = True
+                                                    elif final_val > available_margin:
+                                                        print(f"[{symbol} {iv}m Margin Guard] REJECTED: Min order value required margin (${final_val:.2f}) exceeds free available margin (${available_margin:.2f}). Trade entry aborted.")
+                                                        status_msg = "Skipped (Insufficient Free Margin for Min Order)"
+                                                        wallet_exceeded = True
                                                     else:
                                                         stop_loss_price = new_sl_price
-                                                        position_size_usd = final_val
+                                                        position_size_usd = min(available_margin, final_val)
                                                         is_oversized_trade = True
                                                         print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Applied noise-clearance SL (${new_stop_dist:.4f}) with total risk ${scaled_risk_usd:.2f}.")
 
-                                                # Priority 3: Balance Guard - If margin exceeds 90% of available wallet balance, reject trade.
+                                                # Priority 3: Balance Guard - If margin exceeds 90% of free available margin, reject trade.
                                                 required_margin = (qty_val * entry_price) / max(1e-8, leverage_val)
-                                                if not wallet_exceeded and required_margin > current_bal * 0.90:
-                                                    print(f"[{symbol} {iv}m Margin Guard] REJECTED: Required margin (${required_margin:.2f}) exceeds 90% of available wallet balance (${current_bal:.2f}). Trade entry aborted.")
-                                                    status_msg = "Skipped (Exceeds Wallet Margin)"
+                                                if not wallet_exceeded and required_margin > available_margin * 0.90:
+                                                    print(f"[{symbol} {iv}m Margin Guard] REJECTED: Required margin (${required_margin:.2f}) exceeds 90% of free available margin (${available_margin:.2f}). Trade entry aborted.")
+                                                    status_msg = "Skipped (Exceeds Free Margin)"
                                                     wallet_exceeded = True
 
                                                 # Post-Floor Geometry & Economic Viability Recheck
