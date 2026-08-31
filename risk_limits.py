@@ -90,6 +90,13 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
             f"exceeds hard safety cap ({HARD_MAX_RISK_PER_TRADE_PCT*100:.1f}%)."
         )
 
+    active_pos_frac = getattr(config_module, "MAX_POSITION_BALANCE_FRAC", None)
+    if active_pos_frac is not None and active_pos_frac > HARD_MAX_RISK_PER_TRADE_PCT:
+        raise PermissionError(
+            f"[Governance Violation] MAX_POSITION_BALANCE_FRAC ({active_pos_frac*100:.1f}%) "
+            f"exceeds hard per-trade risk limit ({HARD_MAX_RISK_PER_TRADE_PCT*100:.1f}%)."
+        )
+
     # M-2 Startup Assertion: Verify shared constants between train.py and config.py match
     try:
         import config as cfg

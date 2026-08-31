@@ -105,6 +105,26 @@ def test_risk_per_trade_breach_detected():
         assert_risk_governance_invariants(BreachedRiskConfig)
 
 
+def test_max_position_balance_frac_breach_detected():
+    """Setting MAX_POSITION_BALANCE_FRAC > HARD_MAX_RISK_PER_TRADE_PCT raises PermissionError."""
+    class BreachedPosFracConfig:
+        TIMEFRAME_MAX_LEVERAGE_CAPS = dict(HARD_TIMEFRAME_MAX_LEVERAGE_CAPS)
+        MAX_WALLET_MARGIN_UTILIZATION_PCT = 0.90
+        MAX_SYMBOL_EXPOSURE_PCT = 0.20
+        MAX_DRAWDOWN_HALT_PCT = 0.20
+        MAX_RISK_PER_TRADE_PCT = 0.03
+        MAX_POSITION_BALANCE_FRAC = 0.05  # Breaches 0.03 hard limit
+
+    with pytest.raises(PermissionError, match="MAX_POSITION_BALANCE_FRAC"):
+        assert_risk_governance_invariants(BreachedPosFracConfig)
+
+
+def test_risk_engine_imports_symbol_exposure_from_config():
+    """Verify risk_engine.py uses config.MAX_SYMBOL_EXPOSURE_PCT."""
+    import risk_engine
+    assert risk_engine.MAX_SYMBOL_EXPOSURE_PCT == config.MAX_SYMBOL_EXPOSURE_PCT
+
+
 def test_runtime_drawdown_and_trade_risk_enforcement():
     """Verify runtime calculate_drawdown_multiplier and sizing honor hard bounds."""
     # At or above HARD_MAX_DRAWDOWN_HALT_PCT (20%), multiplier must be 0.0 (halt)

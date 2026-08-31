@@ -84,9 +84,7 @@ def calculate_final_stop_distance(entry_price: float, atr_dollar: float, symbol:
     final_stop = max(atr_stop, min_floor_dist, wick_dist)
     return final_stop
 
-from config import INTERVAL_MAX_POSITION_PCT
-
-MAX_SYMBOL_EXPOSURE_PCT = 0.20   # Max 20% total balance in one symbol across all intervals
+from config import INTERVAL_MAX_POSITION_PCT, MAX_SYMBOL_EXPOSURE_PCT
 
 def check_interval_position_limit(interval: str, proposed_size: float, balance: float, max_lev: float = 1.0) -> float:
     max_pct = INTERVAL_MAX_POSITION_PCT.get(str(interval), 0.15)
