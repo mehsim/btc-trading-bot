@@ -758,15 +758,26 @@ def run_backtest():
         })
 
     # Export per-trade granular backtest context to JSONL
-    try:
-        import jsonlines
-        with jsonlines.open("backtest_trades.jsonl", mode="w") as writer:
-            writer.write_all(all_scenario_trades)
-    except Exception:
-        with open("backtest_trades.jsonl", "w") as f_trades:
-            for tr in all_scenario_trades:
-                f_trades.write(json.dumps(tr) + "\n")
-    print(f"[Backtest] Emitted {len(all_scenario_trades)} rich per-trade context records to backtest_trades.jsonl.")
+    if all_scenario_trades and len(all_scenario_trades) > 0:
+        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs("backtest_runs", exist_ok=True)
+        archive_path = f"backtest_runs/backtest_trades_{ts_str}.jsonl"
+        try:
+            import jsonlines
+            with jsonlines.open(archive_path, mode="w") as writer:
+                writer.write_all(all_scenario_trades)
+            with jsonlines.open("backtest_trades.jsonl", mode="w") as writer:
+                writer.write_all(all_scenario_trades)
+        except Exception:
+            with open(archive_path, "w") as f_trades:
+                for tr in all_scenario_trades:
+                    f_trades.write(json.dumps(tr) + "\n")
+            with open("backtest_trades.jsonl", "w") as f_trades:
+                for tr in all_scenario_trades:
+                    f_trades.write(json.dumps(tr) + "\n")
+        print(f"[Backtest] Emitted {len(all_scenario_trades)} rich per-trade context records to backtest_trades.jsonl and {archive_path}.")
+    else:
+        log_event("WARNING", "[Backtest Warning] Zero scenario trades generated across all scenarios. Refusing to overwrite backtest_trades.jsonl.")
 
     # Print Comparison Table
     results_df = pd.DataFrame(results)
@@ -886,6 +897,11 @@ def run_backtest():
             export_data["walk_forward_validation"] = wf_summary
     except Exception as wf_err:
         print(f"[Walk-Forward Engine] Info: {wf_err}")
+
+    total_trades_count = sum(int(r.get("Trades", 0)) for r in results)
+    if total_trades_count == 0:
+        log_event("ERROR", "[Backtest Critical Error] Zero trades were generated across all test scenarios. Refusing to overwrite backtest_results.json with a misleading zero-trade 0.00% result.")
+        raise RuntimeError("Zero-trade backtest generated across all scenarios. Backtest failed to produce valid trading signals.")
 
     with open("backtest_results.json", "w") as f:
         json.dump(export_data, f, indent=2)

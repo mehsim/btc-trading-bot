@@ -1,81 +1,81 @@
 {
-  "timestamp": "2026-08-28T16:36:28.089216",
+  "timestamp": "2026-08-22T18:34:41.292210",
   "scenarios": [
     {
       "Scenario": "A (Production Baseline: Dynamic Economic Gate p*, Trend Align)",
-      "Trades": 0,
-      "Pessimistic Return": "0.00%",
-      "Avg Net / Trade": "0.00%",
-      "Expectancy (R)": "0.00R",
-      "Optimistic Return": "0.00%",
-      "Pessimistic MDD": "N/A",
-      "Pessimistic WinRate": "N/A"
+      "Trades": 41,
+      "Pessimistic Return": "-5.40%",
+      "Avg Net / Trade": "-0.13%",
+      "Expectancy (R)": "-0.14R",
+      "Optimistic Return": "+5.52%",
+      "Pessimistic MDD": "14.79%",
+      "Pessimistic WinRate": "46.34%"
     },
     {
       "Scenario": "B (Pure Dynamic Economic Gate p*, Trend Align)",
-      "Trades": 0,
-      "Pessimistic Return": "0.00%",
-      "Avg Net / Trade": "0.00%",
-      "Expectancy (R)": "0.00R",
-      "Optimistic Return": "0.00%",
-      "Pessimistic MDD": "N/A",
-      "Pessimistic WinRate": "N/A"
+      "Trades": 45,
+      "Pessimistic Return": "-5.80%",
+      "Avg Net / Trade": "-0.13%",
+      "Expectancy (R)": "-0.14R",
+      "Optimistic Return": "+5.87%",
+      "Pessimistic MDD": "16.51%",
+      "Pessimistic WinRate": "46.67%"
     },
     {
       "Scenario": "C (High Conviction: Base Dynamic + 3%, Trend Align)",
-      "Trades": 0,
-      "Pessimistic Return": "0.00%",
-      "Avg Net / Trade": "0.00%",
-      "Expectancy (R)": "0.00R",
-      "Optimistic Return": "0.00%",
-      "Pessimistic MDD": "N/A",
-      "Pessimistic WinRate": "N/A"
+      "Trades": 25,
+      "Pessimistic Return": "-1.52%",
+      "Avg Net / Trade": "-0.06%",
+      "Expectancy (R)": "-0.07R",
+      "Optimistic Return": "+3.46%",
+      "Pessimistic MDD": "12.17%",
+      "Pessimistic WinRate": "56.00%"
     },
     {
       "Scenario": "D (Pure Model Signals: Production Floor, No HTF Filter)",
-      "Trades": 0,
-      "Pessimistic Return": "0.00%",
-      "Avg Net / Trade": "0.00%",
-      "Expectancy (R)": "0.00R",
-      "Optimistic Return": "0.00%",
-      "Pessimistic MDD": "N/A",
-      "Pessimistic WinRate": "N/A"
+      "Trades": 95,
+      "Pessimistic Return": "-33.40%",
+      "Avg Net / Trade": "-0.35%",
+      "Expectancy (R)": "-0.36R",
+      "Optimistic Return": "-11.92%",
+      "Pessimistic MDD": "40.21%",
+      "Pessimistic WinRate": "38.95%"
     },
     {
       "Scenario": "E (High Conviction: Base Dynamic + 3%, No HTF Filter)",
-      "Trades": 0,
-      "Pessimistic Return": "0.00%",
-      "Avg Net / Trade": "0.00%",
-      "Expectancy (R)": "0.00R",
-      "Optimistic Return": "0.00%",
-      "Pessimistic MDD": "N/A",
-      "Pessimistic WinRate": "N/A"
+      "Trades": 62,
+      "Pessimistic Return": "-23.50%",
+      "Avg Net / Trade": "-0.38%",
+      "Expectancy (R)": "-0.38R",
+      "Optimistic Return": "-12.19%",
+      "Pessimistic MDD": "29.17%",
+      "Pessimistic WinRate": "41.94%"
     }
   ],
   "fee_sensitivity": [
     {
       "Fee Structure": "1. Spot Taker Fee (0.20% roundtrip)",
-      "Trades": 0,
-      "Win Rate": "0.00%",
-      "Profit Factor": "0.00",
-      "Max Drawdown": "0.00%",
-      "Net Cumulative Return": "+0.00%"
+      "Trades": 95,
+      "Win Rate": "38.95%",
+      "Profit Factor": "0.52",
+      "Max Drawdown": "40.21%",
+      "Net Cumulative Return": "-33.40%"
     },
     {
       "Fee Structure": "2. Futures Taker Fee (0.10% roundtrip)",
-      "Trades": 0,
-      "Win Rate": "0.00%",
-      "Profit Factor": "0.00",
-      "Max Drawdown": "0.00%",
-      "Net Cumulative Return": "+0.00%"
+      "Trades": 282,
+      "Win Rate": "35.82%",
+      "Profit Factor": "0.61",
+      "Max Drawdown": "58.38%",
+      "Net Cumulative Return": "-53.33%"
     },
     {
       "Fee Structure": "3. Futures Limit/Maker Fee (0.04% roundtrip)",
-      "Trades": 0,
-      "Win Rate": "0.00%",
-      "Profit Factor": "0.00",
-      "Max Drawdown": "0.00%",
-      "Net Cumulative Return": "+0.00%"
+      "Trades": 379,
+      "Win Rate": "40.90%",
+      "Profit Factor": "0.80",
+      "Max Drawdown": "42.91%",
+      "Net Cumulative Return": "-35.55%"
     }
   ]
 }
