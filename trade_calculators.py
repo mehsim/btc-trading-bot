@@ -44,7 +44,89 @@ def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
         raise ValueError(f"[{symbol}] Un-economical R:R ratio ({rr:.2f} < 0.40): entry={entry}, sl={sl}, tp={tp}")
     return True
 
-REALIZED_RR_HAIRCUT = 0.80  # Realistic limit maker exit realization factor
+REALIZED_RR_HAIRCUT = 0.28  # Empirical realized limit maker exit realization factor (calibrated from pooled backtest trade logs)
+DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT = 0.28
+
+def estimate_empirical_realized_rr(
+    closed_trades: Optional[List[Dict]] = None,
+    interval: Optional[str] = None,
+    regime: Optional[str] = None,
+    min_samples: int = 20
+) -> Optional[float]:
+    """
+    Estimates empirical realized R:R (ratio of average winning PnL to average losing PnL)
+    from historical closed trades.
+    Can filter by interval and regime if provided.
+    Returns None if fewer than min_samples valid trades exist.
+    """
+    if closed_trades is None:
+        try:
+            import database
+            closed_trades = database.get_trade_history(limit=200)
+        except Exception:
+            closed_trades = []
+
+    if not closed_trades or len(closed_trades) < min_samples:
+        return None
+
+    # Filter by interval and regime if specified
+    filtered = []
+    for tr in closed_trades:
+        if not isinstance(tr, dict):
+            continue
+        if interval is not None:
+            tr_iv = str(tr.get("interval", tr.get("timeframe", "")))
+            if tr_iv and tr_iv != str(interval):
+                continue
+        if regime is not None:
+            tr_reg = str(tr.get("regime", "")).lower()
+            if tr_reg and str(regime).lower() not in tr_reg:
+                continue
+        filtered.append(tr)
+
+    if len(filtered) < min_samples:
+        return None
+
+    wins = []
+    losses = []
+    for tr in filtered:
+        pnl = float(tr.get("pnl", tr.get("realized_pnl", 0.0)) or 0.0)
+        if pnl > 0:
+            wins.append(pnl)
+        elif pnl < 0:
+            losses.append(abs(pnl))
+
+    if not wins or not losses:
+        return None
+
+    mean_win = float(np.mean(wins))
+    mean_loss = float(np.mean(losses))
+    if mean_loss <= 1e-6:
+        return None
+
+    return float(mean_win / mean_loss)
+
+
+def get_realized_rr_haircut(
+    interval: Optional[str] = None,
+    regime: Optional[str] = None,
+    nominal_rr: Optional[float] = None,
+    closed_trades: Optional[List[Dict]] = None,
+    default_haircut: float = DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT
+) -> float:
+    """
+    Computes empirical realized R:R haircut factor.
+    If sufficient closed trades exist to estimate realized R:R and nominal_rr is provided,
+    calculates empirical_haircut = min(1.0, max(0.10, empirical_rr / nominal_rr)).
+    Otherwise, falls back to conservative default_haircut (0.28).
+    """
+    if nominal_rr is not None and nominal_rr > 0:
+        emp_rr = estimate_empirical_realized_rr(closed_trades=closed_trades, interval=interval, regime=regime)
+        if emp_rr is not None and emp_rr > 0:
+            return float(np.clip(emp_rr / nominal_rr, 0.10, 1.0))
+
+    return float(default_haircut)
+
 
 def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> float:
     """

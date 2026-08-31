@@ -194,14 +194,15 @@ def test_backtest_dynamic_economic_gate_and_geometry_alignment():
     atr_norm = 0.010
     
     # 1. Verify dimensional p* formula matching main.py:6571-6582
+    from trade_calculators import REALIZED_RR_HAIRCUT
     cost_bps = (fee_rate * 2.0) * 10000.0
-    effective_tp_m = tp_multiplier * 0.80
+    effective_tp_m = tp_multiplier * REALIZED_RR_HAIRCUT
     p_star = sl_multiplier / (effective_tp_m + sl_multiplier)
     cost_adj = (cost_bps / 1e4) / ((effective_tp_m + sl_multiplier) * atr_norm)
     economic_base_threshold = round(p_star + cost_adj, 4)
     
-    assert 0.30 <= p_star <= 0.60, f"p_star {p_star} should be in economic break-even range"
-    assert 0.001 <= cost_adj <= 0.30, f"cost_adj {cost_adj} should be correctly ATR-scaled"
+    assert 0.30 <= p_star <= 0.70, f"p_star {p_star} should be in economic break-even range"
+    assert 0.001 <= cost_adj <= 0.35, f"cost_adj {cost_adj} should be correctly ATR-scaled"
     assert economic_base_threshold > p_star, "Economic threshold must exceed pure break-even to cover costs"
     
     # 2. Verify 4-layer TP/SL geometry formulas matching main.py:7147-7205

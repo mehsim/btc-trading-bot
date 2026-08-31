@@ -6777,7 +6777,7 @@ def main():
                             # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
                             from config import TIMEFRAME_CONFIG
                             from config import TIMEFRAME_CONFIG
-                            from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, REALIZED_RR_HAIRCUT
+                            from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, REALIZED_RR_HAIRCUT, get_realized_rr_haircut
                             cfg = TIMEFRAME_CONFIG.get(str(iv), {})
                             if "Ranging" in str(regime_name):
                                 base_tp_m = float(cfg.get("tp_mult_ranging", 1.40))
@@ -6799,7 +6799,9 @@ def main():
                                 is_maker=True,
                             )
                             cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
-                            effective_tp_m = actual_tp_m * REALIZED_RR_HAIRCUT
+                            nominal_rr = actual_tp_m / max(1e-6, base_sl_m)
+                            realized_haircut = get_realized_rr_haircut(interval=str(iv), regime=str(regime_name), nominal_rr=nominal_rr)
+                            effective_tp_m = actual_tp_m * realized_haircut
                             p_star = base_sl_m / (effective_tp_m + base_sl_m)
                             cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + base_sl_m) * max(1e-4, atr_norm_val))
                             economic_base_threshold = float(round(p_star + cost_adj, 4))

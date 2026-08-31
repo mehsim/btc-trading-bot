@@ -216,7 +216,10 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         # 1. Economic Break-Even Threshold (p*) + Production Dynamic Confidence Gate (mirrors main.py:6571-6625)
         atr_norm = float(df.loc[i, "ATR_norm"]) if "ATR_norm" in df.columns else 0.01
         cost_bps = (fee_rate * 2.0) * 10000.0  # round-trip in bps
-        effective_tp_m = tp_multiplier * 0.80  # REALIZED_RR_HAIRCUT
+        from trade_calculators import REALIZED_RR_HAIRCUT, get_realized_rr_haircut
+        nominal_rr = tp_multiplier / max(1e-6, sl_multiplier)
+        realized_haircut = get_realized_rr_haircut(interval=str(interval), regime="trending" if is_trending_state else "ranging", nominal_rr=nominal_rr)
+        effective_tp_m = tp_multiplier * realized_haircut
         p_star = sl_multiplier / max(1e-6, (effective_tp_m + sl_multiplier))
         cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + sl_multiplier) * max(1e-4, atr_norm))
         economic_base_threshold = float(round(p_star + cost_adj, 4))
