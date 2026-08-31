@@ -4521,10 +4521,27 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 print(f"[{symbol} {iv}m API ERROR] Taker IOC order failed: {order_res.get('retMsg')}")
         else:
             # Normal Volatility: Place Limit Maker entry order with dynamic price chasing
+            filled_so_far = 0.0
+            weighted_sum_px = 0.0
+            
             for chase in range(5):
+                remaining_qty = max(0.0, raw_qty - filled_so_far)
+                if remaining_qty <= 0:
+                    bybit_success = True
+                    break
+                    
+                chase_qty_str = format_bybit_qty(symbol, remaining_qty)
+                try:
+                    if float(chase_qty_str) <= 0:
+                        if filled_so_far > 0:
+                            bybit_success = True
+                        break
+                except (ValueError, TypeError):
+                    break
+
                 limit_entry_price = get_chase_limit_price(symbol, side, chase, entry_price)
-                print(f"[{symbol} {iv}m API] Chase {chase+1}/5: Placing Limit Maker order for {qty_str} at {limit_entry_price:.2f}...")
-                order_res = place_bybit_limit_order(symbol, side, qty_str, limit_entry_price, post_only=True)
+                print(f"[{symbol} {iv}m API] Chase {chase+1}/5: Placing Limit Maker order for {chase_qty_str} (remaining of {raw_qty}) at {limit_entry_price:.2f}...")
+                order_res = place_bybit_limit_order(symbol, side, chase_qty_str, limit_entry_price, post_only=True)
                 
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
@@ -4536,28 +4553,36 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         time.sleep(0.3)
                         order_details = get_bybit_order_details(symbol, bybit_order_id)
                         if order_details:
-                            entry_price = float(order_details.get("avgPrice", limit_entry_price))
-                            actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                            fill_px = float(order_details.get("avgPrice", limit_entry_price))
+                            fill_q = float(order_details.get("cumExecQty", remaining_qty))
                         else:
                             fill_exec = get_bybit_last_execution(symbol)
-                            if fill_exec:
-                                entry_price = float(fill_exec.get("execPrice", limit_entry_price))
-                            actual_qty = raw_qty
+                            fill_px = float(fill_exec.get("execPrice", limit_entry_price)) if fill_exec else limit_entry_price
+                            fill_q = float(fill_exec.get("execQty", remaining_qty)) if fill_exec else remaining_qty
+                        
+                        filled_so_far += fill_q
+                        weighted_sum_px += (fill_q * fill_px)
                         break
                     else:
                         print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s. Cancelling and recalculating price...")
                         cancel_res = cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.3)
-                        # Re-verify order status after cancel to catch fills that occurred in-flight
+                        # Re-verify order status after cancel to catch fills that occurred in-flight or partial fills
                         post_cancel_details = get_bybit_order_details(symbol, bybit_order_id)
                         if post_cancel_details:
                             status = post_cancel_details.get("orderStatus")
                             cum_qty = float(post_cancel_details.get("cumExecQty", 0.0))
-                            if status == "Filled" or (raw_qty > 0 and cum_qty >= (0.95 * raw_qty)):
-                                print(f"[{symbol} {iv}m API] Order {bybit_order_id} filled during cancel window. Preserving fill.")
+                            avg_px = float(post_cancel_details.get("avgPrice", limit_entry_price))
+                            
+                            # Track any partial fill executed before/during cancellation
+                            if cum_qty > 0:
+                                filled_so_far += cum_qty
+                                weighted_sum_px += (cum_qty * avg_px)
+                                print(f"[{symbol} {iv}m API] Order {bybit_order_id} executed {cum_qty} (Total filled so far: {filled_so_far:.4f}/{raw_qty:.4f}).")
+
+                            if status == "Filled" or (raw_qty > 0 and filled_so_far >= (0.95 * raw_qty)):
+                                print(f"[{symbol} {iv}m API] Order {bybit_order_id} reached target fill threshold. Completing chase.")
                                 bybit_success = True
-                                entry_price = float(post_cancel_details.get("avgPrice", limit_entry_price))
-                                actual_qty = cum_qty
                                 break
                             elif status in ["New", "PartiallyFilled"]:
                                 print(f"[{symbol} {iv}m API WARNING] Order {bybit_order_id} still {status} after cancel. Retrying cancellation...")
@@ -4571,35 +4596,65 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     print(f"[{symbol} {iv}m API ERROR] Limit order placement failed: {order_res.get('retMsg')}")
                     break
                     
-            # Fallback to Taker IOC if all 5 Limit Maker chase attempts fail
-            if not bybit_success:
-                # Re-verify last execution before placing market taker IOC order
-                last_exec = get_bybit_last_execution(symbol)
-                now_ts_sec = time.time()
-                if last_exec and (now_ts_sec - (float(last_exec.get("execTime", 0))/1000.0)) < 5.0 and last_exec.get("side") == side:
-                    print(f"[{symbol} {iv}m API] Recent fill detected right before IOC fallback. Skipping duplicate IOC.")
+            if filled_so_far > 0:
+                actual_qty = filled_so_far
+                entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                if filled_so_far >= (0.95 * raw_qty):
                     bybit_success = True
-                    entry_price = float(last_exec.get("execPrice", entry_price))
-                    actual_qty = float(last_exec.get("execQty", raw_qty))
-                else:
-                    print(f"[{symbol} {iv}m API] Limit Maker chasing exhausted. Executing fallback Taker IOC entry...")
-                    order_res = place_bybit_taker_ioc_order(symbol, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
-                    if order_res.get("retCode") == 0:
-                        bybit_order_id = order_res.get("result", {}).get("orderId")
+
+            # Fallback to Taker IOC if Limit Maker chase attempts did not reach completion
+            if not bybit_success:
+                remaining_qty = max(0.0, raw_qty - filled_so_far)
+                ioc_qty_str = format_bybit_qty(symbol, remaining_qty)
+                try:
+                    ioc_valid = float(ioc_qty_str) > 0
+                except (ValueError, TypeError):
+                    ioc_valid = False
+
+                if not ioc_valid:
+                    if filled_so_far > 0:
                         bybit_success = True
-                        time.sleep(0.5)
-                        order_details = get_bybit_order_details(symbol, bybit_order_id)
-                        if order_details:
-                            entry_price = float(order_details.get("avgPrice", entry_price))
-                            actual_qty = float(order_details.get("cumExecQty", raw_qty))
-                        else:
-                            fill_exec = get_bybit_last_execution(symbol)
-                            if fill_exec:
-                                entry_price = float(fill_exec.get("execPrice", entry_price))
-                            actual_qty = raw_qty
+                else:
+                    # Re-verify last execution before placing market taker IOC order
+                    last_exec = get_bybit_last_execution(symbol)
+                    now_ts_sec = time.time()
+                    if last_exec and (now_ts_sec - (float(last_exec.get("execTime", 0))/1000.0)) < 5.0 and last_exec.get("side") == side:
+                        print(f"[{symbol} {iv}m API] Recent fill detected right before IOC fallback. Skipping duplicate IOC.")
+                        bybit_success = True
+                        fill_px = float(last_exec.get("execPrice", entry_price))
+                        fill_q = float(last_exec.get("execQty", remaining_qty))
+                        filled_so_far += fill_q
+                        weighted_sum_px += (fill_q * fill_px)
+                        actual_qty = filled_so_far
+                        entry_price = weighted_sum_px / max(1e-9, filled_so_far)
                     else:
-                        print(f"[{symbol} {iv}m API ERROR] Fallback Taker IOC order failed: {order_res.get('retMsg')}")
-                        bybit_success = False
+                        print(f"[{symbol} {iv}m API] Limit Maker chasing exhausted. Executing fallback Taker IOC for remaining {ioc_qty_str}...")
+                        order_res = place_bybit_taker_ioc_order(symbol, side, ioc_qty_str, sl=stop_loss_price, tp=take_profit_price)
+                        if order_res.get("retCode") == 0:
+                            bybit_order_id = order_res.get("result", {}).get("orderId")
+                            bybit_success = True
+                            time.sleep(0.5)
+                            order_details = get_bybit_order_details(symbol, bybit_order_id)
+                            if order_details:
+                                fill_px = float(order_details.get("avgPrice", entry_price))
+                                fill_q = float(order_details.get("cumExecQty", remaining_qty))
+                            else:
+                                fill_exec = get_bybit_last_execution(symbol)
+                                fill_px = float(fill_exec.get("execPrice", entry_price)) if fill_exec else entry_price
+                                fill_q = float(fill_exec.get("execQty", remaining_qty)) if fill_exec else remaining_qty
+                            
+                            filled_so_far += fill_q
+                            weighted_sum_px += (fill_q * fill_px)
+                            actual_qty = filled_so_far
+                            entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                        else:
+                            print(f"[{symbol} {iv}m API ERROR] Fallback Taker IOC order failed: {order_res.get('retMsg')}")
+                            if filled_so_far > 0:
+                                actual_qty = filled_so_far
+                                entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                                bybit_success = True
+                            else:
+                                bybit_success = False
                         
         min_fill_pct = getattr(config, "MIN_ACCEPTABLE_FILL_PCT", 0.60)
         if raw_qty > 0 and actual_qty > 0:
