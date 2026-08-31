@@ -373,13 +373,6 @@ def load_history(bot_state):
                 bot_state["trade_history"] = [t for t in data.get("trade_history", []) if str(t.get("interval", "60")) != "5"]
                 bot_state["prediction_history"] = [p for p in data.get("prediction_history", []) if str(p.get("interval", "60")) != "5"]
                 
-                bot_state["active_trade_15m"] = data.get("active_trade_15m", [])
-                bot_state["active_trade_30m"] = data.get("active_trade_30m", [])
-                bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
-                bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
-                bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
-                bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
-                
                 for tf_key in ACTIVE_TRADE_TF_KEYS:
                     migrate_active_trades(bot_state.get(f"active_trade_{tf_key}", []))
                     

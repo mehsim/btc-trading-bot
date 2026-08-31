@@ -33,6 +33,7 @@ from websocket_client import (
     _ws_filled_orders_lock
 )
 from telegram_bot import send_telegram_alert
+from logger import log_event
 
 active_execution_lock = threading.Lock()
 active_execution_symbols = set()
@@ -53,7 +54,7 @@ def execute_bybit_trade_async(*args, **kwargs):
             active_execution_symbols.discard(symbol)
 
 
-def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, bot_state=None, save_history_func=None):
+def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, bot_state=None, save_history_func=None, decision_ts=None):
 
     if latest_candle is None:
         latest_candle = {}
@@ -64,6 +65,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     bybit_order_id = None
     bybit_scale_out_order_id = None
     actual_qty = raw_qty
+
+    # 0. Signal TTL Guard
+    signal_ttl_seconds = min(120.0, max(30.0, int(iv) * 60 * 0.10))
+    if decision_ts is not None:
+        elapsed_since_decision = time.time() - float(decision_ts)
+        if elapsed_since_decision > signal_ttl_seconds:
+            log_event("WARNING", f"[{symbol} {iv}m Signal TTL] Decision expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s). Aborting order submission.")
+            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s).")
+            return
     
     try:
         pos_list = get_all_bybit_positions()
@@ -74,6 +84,22 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 return
     except Exception as pos_check_err:
         print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
+
+    # Adverse Price-Drift Check
+    bid_live, ask_live = get_bybit_bid_ask(symbol)
+    mid_live = (bid_live + ask_live) / 2.0 if (bid_live > 0 and ask_live > 0) else float(entry_price)
+    max_drift = max(0.25 * atr_dollars, float(entry_price) * 0.0025)
+
+    if ml_trend in ["Bullish", "BUY", "LONG", "UP"] and (float(entry_price) - mid_live) > max_drift:
+        adverse_pts = float(entry_price) - mid_live
+        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({mid_live:.2f}) drifted {adverse_pts:.2f} below entry ({entry_price:.2f}) > max allowed {max_drift:.2f}. Aborting.")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Adverse price drift ({adverse_pts:.2f} > {max_drift:.2f}).")
+        return
+    elif ml_trend in ["Bearish", "SELL", "SHORT", "DOWN"] and (mid_live - float(entry_price)) > max_drift:
+        adverse_pts = mid_live - float(entry_price)
+        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({mid_live:.2f}) drifted {adverse_pts:.2f} above entry ({entry_price:.2f}) > max allowed {max_drift:.2f}. Aborting.")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Adverse price drift ({adverse_pts:.2f} > {max_drift:.2f}).")
+        return
 
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
     leverage_ok = set_bybit_leverage(symbol, leverage_val)
@@ -107,6 +133,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 print(f"[{symbol} {iv}m API ERROR] Taker IOC order failed: {order_res.get('retMsg')}")
         else:
             for chase in range(5):
+                if decision_ts is not None:
+                    elapsed = time.time() - float(decision_ts)
+                    if elapsed > signal_ttl_seconds:
+                        log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting remaining chase.")
+                        break
+
                 bid, ask = get_bybit_bid_ask(symbol)
                 if bid == 0.0 or ask == 0.0:
                     bid, ask = entry_price, entry_price

@@ -843,17 +843,9 @@ def load_history():
                     if "interval" not in p:
                         p["interval"] = "60"
                 
-                # Load active trades
-                bot_state["active_trade_15m"] = data.get("active_trade_15m", [])
-                bot_state["active_trade_30m"] = data.get("active_trade_30m", [])
-                bot_state["active_trade_1h"] = data.get("active_trade_1h", [])
-                bot_state["active_trade_2h"] = data.get("active_trade_2h", [])
-                bot_state["active_trade_4h"] = data.get("active_trade_4h", [])
-                bot_state["active_trade_6h"] = data.get("active_trade_6h", [])
-                
-                # Migrate legacy active trades
+                # Migrate legacy active trades loaded from SQLite
                 for tf_key in ACTIVE_TRADE_TF_KEYS:
-                    migrate_active_trades(bot_state[f"active_trade_{tf_key}"])
+                    migrate_active_trades(bot_state.get(f"active_trade_{tf_key}", []))
                     
                 sqlite_running = database.get_setting("bot_running")
                 if sqlite_running is not None:
@@ -875,12 +867,6 @@ def load_history():
     bot_state["simulated_balance"] = 80.0
     bot_state["trade_history"] = []
     bot_state["prediction_history"] = []
-    bot_state["active_trade_15m"] = []
-    bot_state["active_trade_30m"] = []
-    bot_state["active_trade_1h"] = []
-    bot_state["active_trade_2h"] = []
-    bot_state["active_trade_4h"] = []
-    bot_state["active_trade_6h"] = []
 
     # Force auto-reset if it's the first time running this updated version
     if not bot_state.get("fresh_reset_v3", False):
@@ -889,12 +875,6 @@ def load_history():
         bot_state["daily_drawdown_start_balance"] = 80.0
         bot_state["trade_history"] = []
         bot_state["prediction_history"] = []
-        bot_state["active_trade_15m"] = []
-        bot_state["active_trade_30m"] = []
-        bot_state["active_trade_1h"] = []
-        bot_state["active_trade_2h"] = []
-        bot_state["active_trade_4h"] = []
-        bot_state["active_trade_6h"] = []
         bot_state["fresh_reset_v3"] = True
         save_history()
         
@@ -2813,6 +2793,34 @@ _ws_filled_orders = {}
 _ws_filled_orders_lock = threading.Lock()
 _last_ws_pos_sync_time = 0.0
 
+_pos_sync_event = threading.Event()
+_pos_sync_worker_started = False
+_pos_sync_worker_lock = threading.Lock()
+
+def _position_sync_worker_loop():
+    while True:
+        try:
+            _pos_sync_event.wait()
+            _pos_sync_event.clear()
+            sync_active_positions_from_bybit()
+            time.sleep(1.0)  # Rate-limit between consecutive background syncs
+        except Exception as e:
+            log_event("WARNING", f"[Position Sync Worker Error] {e}")
+            time.sleep(2.0)
+
+def start_position_sync_worker():
+    global _pos_sync_worker_started
+    with _pos_sync_worker_lock:
+        if not _pos_sync_worker_started:
+            _pos_sync_worker_started = True
+            t = threading.Thread(target=_position_sync_worker_loop, daemon=True, name="PositionSyncWorker")
+            t.start()
+
+def request_position_sync():
+    """Trigger debounced position sync via dedicated background worker."""
+    start_position_sync_worker()
+    _pos_sync_event.set()
+
 def on_private_message(ws, message):
     import json
     import time
@@ -2859,12 +2867,11 @@ def on_private_message(ws, message):
                             if len(_ws_filled_orders) > 500:
                                 _ws_filled_orders.clear()
             
-            # Debounce position sync to max once every 3.0s to avoid thread storms
+            # Debounce position sync request to dedicated background worker
             now_t = time.time()
-            if now_t - _last_ws_pos_sync_time >= 3.0:
+            if now_t - _last_ws_pos_sync_time >= 1.0:
                 _last_ws_pos_sync_time = now_t
-                import threading
-                threading.Thread(target=sync_active_positions_from_bybit, daemon=True).start()
+                request_position_sync()
     except Exception as e:
         print(f"[WebSocket Private Message Error] {e}")
 
@@ -3893,21 +3900,21 @@ def sync_active_positions_from_bybit():
         return True
     
     try:
-        pos_list = get_all_bybit_positions()
-        if pos_list is None:
-            print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
-            return False
-        
-        # Filter for positions with non-zero size
-        open_positions = {}
-        for pos in pos_list:
-            qty_val = float(pos.get("size", "0"))
-            if qty_val > 0:
-                open_positions[pos.get("symbol")] = pos
-
-        # Re-sync bot_state active trades with unified lock acquisition hierarchy
+        # Acquire unified lock hierarchy before fetching live exchange snapshot
         with active_execution_lock:
             with active_trades_lock:
+                pos_list = get_all_bybit_positions()
+                if pos_list is None:
+                    print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
+                    return False
+                
+                # Filter for positions with non-zero size
+                open_positions = {}
+                for pos in pos_list:
+                    qty_val = float(pos.get("size", "0"))
+                    if qty_val > 0:
+                        open_positions[pos.get("symbol")] = pos
+
                 matched_symbols = set()
                 for tf_key in ACTIVE_TRADE_TF_KEYS:
                     current_trades = bot_state.get(f"active_trade_{tf_key}", [])
@@ -4091,179 +4098,177 @@ def sync_active_positions_from_bybit():
                     
                     bot_state[f"active_trade_{tf_key}"] = updated_trades
     
-            # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
-            recovered = 0
-            for symbol, pos in open_positions.items():
-                in_active_execution = symbol in active_execution_symbols
-                if in_active_execution:
-                    print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
-                    continue
-                # FIX: Re-check ALL active timeframes live in bot_state at this moment.
-                # matched_symbols is built at the START of the sync loop and may be stale
-                # if a manual trade was added to bot_state between the sync loop start and now.
-                currently_tracked = any(
-                    any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
-                    for k in ACTIVE_TRADE_TF_KEYS
-                )
-                if currently_tracked:
-                    print(f"[Crash Recovery] Skipped recovery for {symbol} - already tracked in current bot_state (live re-check).")
-                    continue
-                if symbol not in matched_symbols:
-                    avg_price = float(pos.get("avgPrice", "0"))
-                    liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
-                    mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
-                    leverage_val = float(pos.get("leverage", "1"))
-                    side_str = pos.get("side", "Buy")
-                    direction = "Bullish" if side_str == "Buy" else "Bearish"
-                    sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
-                    tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
-                    position_value = float(pos.get("positionValue", "0"))
-                    position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
-                    qty_val = float(pos.get("size", "0"))
-                    
-                    # Retrieve the original target qty of the entry order
-                    orig_qty, filled_qty, entry_order_id = get_bybit_entry_order_qty(symbol, side_str)
-                    if orig_qty is not None and orig_qty > 0.0:
-                        original_size = (orig_qty * avg_price) / leverage_val if leverage_val > 0 else (orig_qty * avg_price)
-                        fill_pct = round((filled_qty / orig_qty) * 100.0, 2)
-                        original_size_reconstructed = True
-                        print(f"[Crash Recovery] Discovered target size for {symbol}: target={original_size:.2f}, filled={position_size_usd:.2f} ({fill_pct}%)")
-                    else:
-                        original_size = position_size_usd
-                        fill_pct = 100.0
-                        original_size_reconstructed = False
-                    
-                    limit_side = "Sell" if side_str == "Buy" else "Buy"
-                    scale_out_order_id = get_bybit_active_limit_order_id(symbol, limit_side)
-                    
-                    import uuid
-                    trade_uuid = str(uuid.uuid4())
-                    
-                    # Accurate timeframe and confidence resolution from decision_journal execution records
-                    matched_tf = "4h"  # fallback default
-                    matched_confidence = 0.50
-                    try:
-                        import database
-                        import sqlite3
-                        con = database.get_db_connection()
-                        cur = con.cursor()
-                        cur.execute("""
-                            SELECT interval, calibrated_conf, direction FROM decision_journal 
-                            WHERE symbol = ? AND outcome = 'EXECUTED' 
-                            ORDER BY ts DESC LIMIT 1
-                        """, (symbol,))
-                        exec_row = cur.fetchone()
-                        con.close()
-                        if exec_row:
-                            tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-                            matched_tf = tf_map_inv.get(str(exec_row[0]), "4h")
-                            matched_confidence = float(exec_row[1] or 0.50)
-                            print(f"[Crash Recovery] Matched executed journal record for {symbol}: {matched_tf} ({exec_row[0]}m), conf={matched_confidence*100:.2f}%")
-                    except Exception as e_rec:
-                        log_event("WARNING", f"Failed to query decision_journal for recovery: {e_rec}")
-                        for p in reversed(bot_state.get("prediction_history", [])):
-                            if p.get("symbol") == symbol and p.get("direction") == direction:
-                                if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
-                                    matched_tf_interval = p.get("interval", "240")
-                                    tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-                                    matched_tf = tf_map_inv.get(str(matched_tf_interval), "4h")
-                                    matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.50)))
-                                    break
-
-                    recov_sl_mult = risk_engine.get_timeframe_stop_multiplier(matched_tf)
-
-                    # Calculate proper ATR on recovery: prefer measured ATR over inversion
-                    calc_atr = None
-                    try:
-                        _df_r = get_history(symbol=symbol, interval="60", limit=50)
-                        if _df_r is not None and "ATR" in _df_r.columns and len(_df_r) > 0:
-                            _a = float(_df_r["ATR"].iloc[-1])
-                            if _a > 0:
-                                calc_atr = _a
-                    except Exception as _e:
-                        log_event("DEBUG", f"Recovery ATR fetch failed for {symbol}: {_e}")
-
-                    if calc_atr is None:
-                        calc_atr = abs(avg_price - sl_price) / max(0.1, recov_sl_mult) if sl_price > 0 else 0.015 * avg_price
-                        log_event("WARNING", f"[{symbol}] Recovery ATR inverted from stop ({recov_sl_mult:.2f}x TF multiplier) — may be inaccurate")
-
-                    if calc_atr > 0.05 * avg_price or calc_atr == 0:
-                        calc_atr = 0.015 * avg_price
-                        log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
-                    
-                    # Sanitize TP and SL on recovery
-                    if tp_price == 0.0:
-                        if direction == "Bullish":
-                            tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
+                # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
+                recovered = 0
+                for symbol, pos in open_positions.items():
+                    in_active_execution = symbol in active_execution_symbols
+                    if in_active_execution:
+                        print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
+                        continue
+                    # Re-check ALL active timeframes live in bot_state at this moment
+                    currently_tracked = any(
+                        any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
+                        for k in ACTIVE_TRADE_TF_KEYS
+                    )
+                    if currently_tracked:
+                        print(f"[Crash Recovery] Skipped recovery for {symbol} - already tracked in current bot_state (live re-check).")
+                        continue
+                    if symbol not in matched_symbols:
+                        avg_price = float(pos.get("avgPrice", "0"))
+                        liq_price = float(pos.get("liqPrice", "0")) if pos.get("liqPrice") else 0.0
+                        mark_price = float(pos.get("markPrice", "0")) if pos.get("markPrice") else 0.0
+                        leverage_val = float(pos.get("leverage", "1"))
+                        side_str = pos.get("side", "Buy")
+                        direction = "Bullish" if side_str == "Buy" else "Bearish"
+                        sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+                        tp_price = float(pos.get("takeProfit", "0")) if pos.get("takeProfit") else 0.0
+                        position_value = float(pos.get("positionValue", "0"))
+                        position_size_usd = position_value / leverage_val if leverage_val > 0 else position_value
+                        qty_val = float(pos.get("size", "0"))
+                        
+                        # Retrieve the original target qty of the entry order
+                        orig_qty, filled_qty, entry_order_id = get_bybit_entry_order_qty(symbol, side_str)
+                        if orig_qty is not None and orig_qty > 0.0:
+                            original_size = (orig_qty * avg_price) / leverage_val if leverage_val > 0 else (orig_qty * avg_price)
+                            fill_pct = round((filled_qty / orig_qty) * 100.0, 2)
+                            original_size_reconstructed = True
+                            print(f"[Crash Recovery] Discovered target size for {symbol}: target={original_size:.2f}, filled={position_size_usd:.2f} ({fill_pct}%)")
                         else:
-                            tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
-                            
-                    if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
-                        if direction == "Bullish":
-                            sl_price = avg_price - recov_sl_mult * calc_atr
-                            if liq_price > 0.0 and sl_price <= liq_price:
-                                sl_price = min(avg_price * 0.999, liq_price + 0.2 * calc_atr)
-                            if sl_price >= avg_price:
-                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid long stop — leaving exchange SL")
-                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
-                                sl_price = None
-                        else:
-                            sl_price = avg_price + recov_sl_mult * calc_atr
-                            if liq_price > 0.0 and sl_price >= liq_price:
-                                sl_price = max(avg_price * 1.001, liq_price - 0.2 * calc_atr)
-                            if sl_price <= avg_price:
-                                log_event("ERROR", f"[{symbol}] Liquidation too close for a valid short stop — leaving exchange SL")
-                                send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
-                    # Push the recovered/sanitized TP & SL to Bybit
-                    if TRADE_MODE != "simulation":
-                        update_bybit_take_profit(symbol, tp_price)
-                        if sl_price is not None:
-                            success = update_bybit_stop_loss(symbol, sl_price)
-                            if not success:
-                                sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+                            original_size = position_size_usd
+                            fill_pct = 100.0
+                            original_size_reconstructed = False
+                        
+                        limit_side = "Sell" if side_str == "Buy" else "Buy"
+                        scale_out_order_id = get_bybit_active_limit_order_id(symbol, limit_side)
+                        
+                        import uuid
+                        trade_uuid = str(uuid.uuid4())
+                        
+                        # Accurate timeframe and confidence resolution from decision_journal execution records
+                        matched_tf = "4h"  # fallback default
+                        matched_confidence = 0.50
+                        try:
+                            import database
+                            import sqlite3
+                            con = database.get_db_connection()
+                            cur = con.cursor()
+                            cur.execute("""
+                                SELECT interval, calibrated_conf, direction FROM decision_journal 
+                                WHERE symbol = ? AND outcome = 'EXECUTED' 
+                                ORDER BY ts DESC LIMIT 1
+                            """, (symbol,))
+                            exec_row = cur.fetchone()
+                            con.close()
+                            if exec_row:
+                                tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                                matched_tf = tf_map_inv.get(str(exec_row[0]), "4h")
+                                matched_confidence = float(exec_row[1] or 0.50)
+                                print(f"[Crash Recovery] Matched executed journal record for {symbol}: {matched_tf} ({exec_row[0]}m), conf={matched_confidence*100:.2f}%")
+                        except Exception as e_rec:
+                            log_event("WARNING", f"Failed to query decision_journal for recovery: {e_rec}")
+                            for p in reversed(bot_state.get("prediction_history", [])):
+                                if p.get("symbol") == symbol and p.get("direction") == direction:
+                                    if abs(p.get("timestamp", 0) - time.time()) < 86400 * 2:
+                                        matched_tf_interval = p.get("interval", "240")
+                                        tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                                        matched_tf = tf_map_inv.get(str(matched_tf_interval), "4h")
+                                        matched_confidence = float(p.get("calibrated_confidence", p.get("confidence", 0.50)))
+                                        break
 
-                    _iv = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "6h": 360}.get(matched_tf, 60)
-                    _la = TIMEFRAME_CONFIG.get(str(_iv), {}).get("lookahead", 10)
+                        recov_sl_mult = risk_engine.get_timeframe_stop_multiplier(matched_tf)
 
-                    recovered_trade = {
-                        "trade_id": f"{symbol}_{trade_uuid}_recovered",
-                        "interval": str(_iv),
-                        "timeframe": str(matched_tf),
-                        "bybit_order_id": entry_order_id,
-                        "bybit_scale_out_order_id": scale_out_order_id,
-                        "symbol": symbol,
-                        "entry_price": avg_price,
-                        "predicted_price": avg_price,
-                        "stop_loss": sl_price,
-                        "take_profit": tp_price,
-                        "initial_stop_loss": sl_price,
-                        "initial_take_profit": tp_price,
-                        "initial_planned_rr": float(abs(tp_price - avg_price) / max(1e-9, abs(avg_price - sl_price))) if (sl_price and tp_price) else 1.5,
-                        "direction": direction,
-                        "end_time": float(time.time() + _iv * 60 * _la),
-                        "entry_time": max(int(pos.get("createdTime") or 0), int(pos.get("updatedTime") or 0)) or int(time.time() * 1000),
-                        "atr_dollars": calc_atr,
-                        "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
-                        "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
-                        "break_even_triggered": False,
-                        "half_closed": False,
-                        "original_size": original_size,
-                        "position_size_usd": position_size_usd,
-                        "fill_pct": fill_pct,
-                        "original_size_reconstructed": original_size_reconstructed,
-                        "scaled_out_pnl": 0.0,
-                        "kelly_fraction": 0.0,
-                        "leverage": leverage_val,
-                        "confidence": matched_confidence,
-                        "qty": qty_val,
-                        "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
-                        "liq_price": liq_price,
-                        "mark_price": mark_price,
-                        "recovered": True
-                    }
-                    
-                    tf_key = matched_tf
-                    with active_trades_lock:
+                        # Calculate proper ATR on recovery: prefer measured ATR over inversion
+                        calc_atr = None
+                        try:
+                            _df_r = get_history(symbol=symbol, interval="60", limit=50)
+                            if _df_r is not None and "ATR" in _df_r.columns and len(_df_r) > 0:
+                                _a = float(_df_r["ATR"].iloc[-1])
+                                if _a > 0:
+                                    calc_atr = _a
+                        except Exception as _e:
+                            log_event("DEBUG", f"Recovery ATR fetch failed for {symbol}: {_e}")
+
+                        if calc_atr is None:
+                            calc_atr = abs(avg_price - sl_price) / max(0.1, recov_sl_mult) if sl_price > 0 else 0.015 * avg_price
+                            log_event("WARNING", f"[{symbol}] Recovery ATR inverted from stop ({recov_sl_mult:.2f}x TF multiplier) — may be inaccurate")
+
+                        if calc_atr > 0.05 * avg_price or calc_atr == 0:
+                            calc_atr = 0.015 * avg_price
+                            log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
+                        
+                        # Sanitize TP and SL on recovery
+                        if tp_price == 0.0:
+                            if direction == "Bullish":
+                                tp_price = max(mark_price + 1.25 * calc_atr, avg_price + 1.25 * calc_atr)
+                            else:
+                                tp_price = min(mark_price - 1.25 * calc_atr, avg_price - 1.25 * calc_atr)
+                                
+                        if sl_price == 0.0 or abs(avg_price - sl_price) > 3.0 * calc_atr:
+                            if direction == "Bullish":
+                                sl_price = avg_price - recov_sl_mult * calc_atr
+                                if liq_price > 0.0 and sl_price <= liq_price:
+                                    sl_price = min(avg_price * 0.999, liq_price + 0.2 * calc_atr)
+                                if sl_price >= avg_price:
+                                    log_event("ERROR", f"[{symbol}] Liquidation too close for a valid long stop — leaving exchange SL")
+                                    send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
+                                    sl_price = None
+                            else:
+                                sl_price = avg_price + recov_sl_mult * calc_atr
+                                if liq_price > 0.0 and sl_price >= liq_price:
+                                    sl_price = max(avg_price * 1.001, liq_price - 0.2 * calc_atr)
+                                if sl_price <= avg_price:
+                                    log_event("ERROR", f"[{symbol}] Liquidation too close for a valid short stop — leaving exchange SL")
+                                    send_telegram_alert(f"🚨 {symbol}: cannot place valid SL, liq {liq_price} too close to entry {avg_price}")
+                                    sl_price = None
+                        # Push the recovered/sanitized TP & SL to Bybit
+                        if TRADE_MODE != "simulation":
+                            update_bybit_take_profit(symbol, tp_price)
+                            if sl_price is not None:
+                                success = update_bybit_stop_loss(symbol, sl_price)
+                                if not success:
+                                    sl_price = float(pos.get("stopLoss", "0")) if pos.get("stopLoss") else 0.0
+
+                        _iv = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "6h": 360}.get(matched_tf, 60)
+                        _la = TIMEFRAME_CONFIG.get(str(_iv), {}).get("lookahead", 10)
+
+                        recovered_trade = {
+                            "trade_id": f"{symbol}_{trade_uuid}_recovered",
+                            "interval": str(_iv),
+                            "timeframe": str(matched_tf),
+                            "bybit_order_id": entry_order_id,
+                            "bybit_scale_out_order_id": scale_out_order_id,
+                            "symbol": symbol,
+                            "entry_price": avg_price,
+                            "predicted_price": avg_price,
+                            "stop_loss": sl_price,
+                            "take_profit": tp_price,
+                            "initial_stop_loss": sl_price,
+                            "initial_take_profit": tp_price,
+                            "initial_planned_rr": float(abs(tp_price - avg_price) / max(1e-9, abs(avg_price - sl_price))) if (sl_price and tp_price) else 1.5,
+                            "direction": direction,
+                            "end_time": float(time.time() + _iv * 60 * _la),
+                            "entry_time": max(int(pos.get("createdTime") or 0), int(pos.get("updatedTime") or 0)) or int(time.time() * 1000),
+                            "atr_dollars": calc_atr,
+                            "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
+                            "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
+                            "break_even_triggered": False,
+                            "half_closed": False,
+                            "original_size": original_size,
+                            "position_size_usd": position_size_usd,
+                            "fill_pct": fill_pct,
+                            "original_size_reconstructed": original_size_reconstructed,
+                            "scaled_out_pnl": 0.0,
+                            "kelly_fraction": 0.0,
+                            "leverage": leverage_val,
+                            "confidence": matched_confidence,
+                            "qty": qty_val,
+                            "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
+                            "liq_price": liq_price,
+                            "mark_price": mark_price,
+                            "recovered": True
+                        }
+                        
+                        tf_key = matched_tf
                         # Cross-timeframe duplicate guard: skip if symbol already active in ANY timeframe
                         already_in_any_tf = any(
                             any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
@@ -4284,10 +4289,10 @@ def sync_active_positions_from_bybit():
                             print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
                         recovered += 1
                         print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
-                    
-            if recovered > 0:
-                save_history()
-            return True
+                        
+                if recovered > 0:
+                    save_history()
+                return True
     except Exception as e:
         print(f"[Crash Recovery] Error checking Bybit: {e}")
         return False
@@ -4391,7 +4396,7 @@ def execute_bybit_trade_async(*args, **kwargs):
         with active_execution_lock:
             active_execution_symbols.discard(symbol)
 
-def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None):
+def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None, decision_ts=None):
 
     if latest_candle is None:
         latest_candle = {}
@@ -4404,6 +4409,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     actual_qty = raw_qty
     order_res = {}
     
+    # 0. Signal TTL Guard (Hard Abort if decision was made too long ago)
+    signal_ttl_seconds = min(120.0, max(30.0, int(iv) * 60 * 0.10))
+    if decision_ts is not None:
+        elapsed_since_decision = time.time() - float(decision_ts)
+        if elapsed_since_decision > signal_ttl_seconds:
+            log_event("WARNING", f"[{symbol} {iv}m Signal TTL] Decision expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s). Aborting order submission.")
+            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s).")
+            return
+
     sl_source = "STRUCTURAL_SWING" if str(iv) in ["15", "30", "60"] else "ATR_DYNAMIC"
     sl_override_reason = "Dynamic Pivot Envelope" if str(iv) in ["15", "30", "60"] else f"{sl_multiplier_adjusted:.2f}x ATR Target"
     min_sl_pct = 0.008 if str(iv) in ["15", "30"] else 0.006
@@ -4457,6 +4471,22 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     pre_sl_dist = abs(pre_entry_price - stop_loss_price) if stop_loss_price is not None else (sl_multiplier_adjusted * atr_dollars)
     pre_tp_dist = abs(take_profit_price - pre_entry_price) if take_profit_price is not None else (tp_multiplier_adjusted * atr_dollars)
 
+    # 4. Pre-Flight Adverse Price-Drift Check (Live Mid vs Stale Candle Close Entry)
+    live_bid, live_ask, live_last = get_bybit_bid_ask(symbol)
+    live_mid = (live_bid + live_ask) / 2.0 if (live_bid is not None and live_ask is not None and live_bid > 0 and live_ask > 0) else (live_last or pre_entry_price)
+    max_adverse_drift = max(0.25 * atr_dollars, pre_entry_price * 0.0025)
+
+    if ml_trend == "Bullish" and (pre_entry_price - live_mid) > max_adverse_drift:
+        adverse_pts = pre_entry_price - live_mid
+        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_mid:.2f}) drifted {adverse_pts:.2f} below entry ({pre_entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Aborting order.")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Adverse price drift ({adverse_pts:.2f} > {max_adverse_drift:.2f}).")
+        return
+    elif ml_trend == "Bearish" and (live_mid - pre_entry_price) > max_adverse_drift:
+        adverse_pts = live_mid - pre_entry_price
+        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_mid:.2f}) drifted {adverse_pts:.2f} above entry ({pre_entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Aborting order.")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Adverse price drift ({adverse_pts:.2f} > {max_adverse_drift:.2f}).")
+        return
+
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
     leverage_ok = set_bybit_leverage(symbol, leverage_val)
     if leverage_ok:
@@ -4493,6 +4523,14 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             weighted_sum_px = 0.0
             
             for chase in range(5):
+                if decision_ts is not None:
+                    elapsed = time.time() - float(decision_ts)
+                    if elapsed > signal_ttl_seconds:
+                        print(f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting remaining chase iterations.")
+                        if filled_so_far > 0:
+                            bybit_success = True
+                        break
+
                 remaining_qty = max(0.0, raw_qty - filled_so_far)
                 if remaining_qty <= 0:
                     bybit_success = True
@@ -6344,30 +6382,26 @@ def main():
                     last_processed_timestamps[last_ts_key] = 0
                     print(f"Initialized completed candle timestamp tracking for {symbol} on {iv}m: {get_local_time_str(latest_completed_ts/1000)}")
  
-                # Hard freshness assertion: (now_ms - latest_completed_ts) <= 2.5 * interval_ms
+                # Hard candle freshness check: Completed candle must have closed recently
                 now_ms = time.time() * 1000.0
                 interval_ms = int(iv) * 60 * 1000
-                is_forced = iv in forced_intervals
-                if (now_ms - latest_completed_ts) > (2.5 * interval_ms) and not is_forced:
-                    log_event("WARNING", f"[{symbol} {iv}m] Stale candle rejected in main evaluation: completed bar age {(now_ms - latest_completed_ts)/1000:.1f}s exceeds threshold ({2.5*interval_ms/1000:.1f}s). Skipping.")
+                candle_close_ms = latest_completed_ts + interval_ms
+                candle_age_sec = (now_ms - candle_close_ms) / 1000.0
+                max_allowed_age_sec = min(300.0, max(180.0, int(iv) * 60 * 0.15))
+
+                if candle_age_sec > max_allowed_age_sec or candle_age_sec < -30.0:
+                    log_event("INFO", f"[{symbol} {iv}m] Stale candle skipped: completed bar closed {candle_age_sec:.1f}s ago (max allowed: {max_allowed_age_sec:.1f}s). Skipping.")
                     continue
 
-                # Validate if candle is up to date based on expected window boundary
-                expected_start_ms = current_hour_ts - interval_ms
-                is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_forced
-                
-                if not is_up_to_date:
-                    # Candle is stale, wait for exchange to finalize the new candle
-                    continue
-                    
                 completed_this_hour.add((symbol, iv))
                 
-                if (latest_completed_ts != last_processed_timestamps[last_ts_key]) or is_forced:
+                if latest_completed_ts != last_processed_timestamps[last_ts_key]:
                     last_processed_timestamps[last_ts_key] = latest_completed_ts
                     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Completed {symbol} {iv}-minute candle evaluation triggered (TS: {latest_completed_ts})")
                     log_event("INFO", f"[{symbol} {iv}m] Evaluation start — candle {latest_completed_ts}")
                     rec = DecisionRecord(symbol=symbol, interval=str(iv))
                     rec.candle_timestamp = latest_completed_ts
+                    decision_ts = time.time()
                     status_msg = "Abstain"
                     placed = False
                     try:
@@ -7935,7 +7969,7 @@ def main():
                                                     from execution_validator import ExecutionValidator
                                                     from bybit_client import get_orderbook_imbalance
 
-                                                    # Fetch live market bid/ask/last to guard against executing when price has already breached the stop loss
+                                                    # Fetch live market bid/ask/last to guard against executing when price has already breached the stop loss or drifted adversely
                                                     live_bid, live_ask, live_last = get_bybit_bid_ask(symbol)
                                                     if live_bid is not None and live_ask is not None and live_bid > 0 and live_ask > 0:
                                                         live_current_price = (live_bid + live_ask) / 2.0
@@ -7943,6 +7977,21 @@ def main():
                                                         live_current_price = live_last
                                                     else:
                                                         live_current_price = entry_price
+
+                                                    # Adverse Price-Drift Check (comparing live mid to stale candle close entry)
+                                                    max_adverse_drift = max(0.25 * atr_dollars, entry_price * 0.0025)
+                                                    if str(ml_trend).upper() in ("BUY", "LONG", "BULLISH") and (entry_price - live_current_price) > max_adverse_drift:
+                                                        adverse_pts = entry_price - live_current_price
+                                                        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_current_price:.2f}) drifted {adverse_pts:.2f} below entry ({entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Skipping.")
+                                                        status_msg = "Skipped (Adverse Price Drift)"
+                                                        wallet_exceeded = True
+                                                        bybit_success = False
+                                                    elif str(ml_trend).upper() in ("SELL", "SHORT", "BEARISH") and (live_current_price - entry_price) > max_adverse_drift:
+                                                        adverse_pts = live_current_price - entry_price
+                                                        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_current_price:.2f}) drifted {adverse_pts:.2f} above entry ({entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Skipping.")
+                                                        status_msg = "Skipped (Adverse Price Drift)"
+                                                        wallet_exceeded = True
+                                                        bybit_success = False
 
                                                     # Fetch real top-of-book depth from orderbook imbalance
                                                     top_book_depth = 50000.0
@@ -7956,30 +8005,31 @@ def main():
                                                     except Exception:
                                                         pass
 
-                                                    ev_valid, ev_msg = ExecutionValidator().validate_order(
-                                                        symbol=symbol,
-                                                        direction=ml_trend,
-                                                        entry_price=entry_price,
-                                                        stop_loss_price=stop_loss_price,
-                                                        take_profit_price=take_profit_price,
-                                                        position_size_usd=position_size_usd,
-                                                        live_price=live_current_price,
-                                                        top_book_depth_usd=top_book_depth,
-                                                        portfolio_heat=portfolio_heat,
-                                                        atr_norm=float(pred_info.get("atr_norm", 0.01)) if isinstance(pred_info, dict) and pred_info.get("atr_norm") is not None else 0.01
-                                                    )
-                                                    if not ev_valid:
-                                                        log_event("WARNING", f"[{symbol} {iv}m ExecutionValidator] REJECTED: {ev_msg}")
-                                                        status_msg = f"Skipped ({ev_msg})"
-                                                        wallet_exceeded = True
-                                                        bybit_success = False
-                                                    else:
-                                                        raw_qty = qty_val
-                                                        actual_qty = raw_qty
-                                                        bybit_success = True
-                                                        bybit_order_id = None
-                                                        bybit_scale_out_order_id = None
-                                            
+                                                    if not wallet_exceeded:
+                                                        ev_valid, ev_msg = ExecutionValidator().validate_order(
+                                                            symbol=symbol,
+                                                            direction=ml_trend,
+                                                            entry_price=entry_price,
+                                                            stop_loss_price=stop_loss_price,
+                                                            take_profit_price=take_profit_price,
+                                                            position_size_usd=position_size_usd,
+                                                            live_price=live_current_price,
+                                                            top_book_depth_usd=top_book_depth,
+                                                            portfolio_heat=portfolio_heat,
+                                                            atr_norm=float(pred_info.get("atr_norm", 0.01)) if isinstance(pred_info, dict) and pred_info.get("atr_norm") is not None else 0.01
+                                                        )
+                                                        if not ev_valid:
+                                                            log_event("WARNING", f"[{symbol} {iv}m ExecutionValidator] REJECTED: {ev_msg}")
+                                                            status_msg = f"Skipped ({ev_msg})"
+                                                            wallet_exceeded = True
+                                                            bybit_success = False
+                                                        else:
+                                                            raw_qty = qty_val
+                                                            actual_qty = raw_qty
+                                                            bybit_success = True
+                                                            bybit_order_id = None
+                                                            bybit_scale_out_order_id = None
+                                                
                                                 if TRADE_MODE != "simulation":
                                                     # Live trading execution offloaded to background thread to minimize latency
                                                     just_opened_symbols.add(symbol)
@@ -7991,7 +8041,7 @@ def main():
                                                         actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
                                                         threading.Thread(
                                                             target=execute_bybit_trade_async,
-                                                            args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size),
+                                                            args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size, decision_ts),
                                                             daemon=True
                                                         ).start()
                                                         bybit_success = False # Skip the simulation path for this trade

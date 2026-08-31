@@ -758,13 +758,26 @@ def save_active_trades(tf, trades) -> bool:
     with db_lock:
         conn = get_db_connection()
         try:
-            conn.execute("DELETE FROM active_trades WHERE tf = ?;", (tf,))
+            if not isinstance(trades, list):
+                trades = [trades] if isinstance(trades, dict) else []
+
+            current_ids = set()
             for t in trades:
+                if not isinstance(t, dict):
+                    continue
                 t_id = t.get("trade_id") or f"{t.get('symbol')}_{int(t.get('entry_time', 0))}"
+                current_ids.add(t_id)
                 conn.execute("""
                     INSERT OR REPLACE INTO active_trades (trade_id, tf, symbol, raw_data)
                     VALUES (?, ?, ?, ?);
                 """, (t_id, tf, t.get("symbol"), json.dumps(t)))
+
+            # Reconcile: delete only trades that are for this tf but not in current_ids
+            if current_ids:
+                placeholders = ",".join("?" for _ in current_ids)
+                conn.execute(f"DELETE FROM active_trades WHERE tf = ? AND trade_id NOT IN ({placeholders});", (tf, *current_ids))  # nosec B608
+            else:
+                conn.execute("DELETE FROM active_trades WHERE tf = ?;", (tf,))
             conn.commit()
             return True
         except Exception as e:
