@@ -240,7 +240,10 @@ class ExitPolicyEngine:
             # Compute dynamic BE buffer
             be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
             target_sl = (entry_price + be_buffer) if direction == "Bullish" else (entry_price - be_buffer)
-            updates["new_stop_loss"] = target_sl
+            is_tighter = (target_sl > stop_loss + 1e-4) if direction == "Bullish" else (target_sl < stop_loss - 1e-4)
+            if is_tighter:
+                updates["new_stop_loss"] = target_sl
+                stop_loss = target_sl
             updates["break_even_triggered"] = True
 
         # 2. Check Break-Even trigger if price moved past be_trigger_atr_mult without scale-out
@@ -250,9 +253,11 @@ class ExitPolicyEngine:
             if be_reached:
                 be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
                 target_sl = (entry_price + be_buffer) if direction == "Bullish" else (entry_price - be_buffer)
-                updates["new_stop_loss"] = target_sl
+                is_tighter = (target_sl > stop_loss + 1e-4) if direction == "Bullish" else (target_sl < stop_loss - 1e-4)
+                if is_tighter:
+                    updates["new_stop_loss"] = target_sl
+                    stop_loss = target_sl
                 updates["break_even_triggered"] = True
-                stop_loss = target_sl
 
         # 3. Check Take Profit Hit (Cleaned fix: allowed regardless of half_closed)
         if direction == "Bullish":
@@ -296,8 +301,10 @@ class ExitPolicyEngine:
         # 5. Hybrid Trailing Stop Update
         if not exit_reason and params.get("enable_structure_trailing", True):
             updated_sl = self.evaluate_hybrid_trailing_stop(direction, current_price, entry_price, stop_loss, swing_price, atr_dollars)
-            if updated_sl != stop_loss:
+            is_tighter = (updated_sl > stop_loss + 1e-4) if direction == "Bullish" else (updated_sl < stop_loss - 1e-4)
+            if is_tighter:
                 updates["new_stop_loss"] = updated_sl
+                stop_loss = updated_sl
 
         # 6. Generate Exit Decision Trace
         risk_dist = abs(entry_price - float(active_trade.get("original_sl", stop_loss)))

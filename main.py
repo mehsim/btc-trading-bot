@@ -1404,10 +1404,10 @@ def get_bybit_accumulated_closed_pnl(symbol, entry_time_ms, expected_total_qty=N
         }
     return None
 
-def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
+def update_bybit_stop_loss(symbol, sl_price, active_trade=None, current_sl_snapshot=None):
     if active_trade:
         qty_val = float(active_trade.get("qty", 0.0))
-        side = "Buy" if active_trade.get("direction") == "Bullish" else "Sell"
+        side = "Buy" if active_trade.get("direction") in ["Bullish", "BUY", "LONG", "UP"] else "Sell"
     else:
         pos = get_bybit_position(symbol)
         if not pos:
@@ -1425,7 +1425,7 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None):
         live_price = get_fallback_price(symbol)
         
     if active_trade:
-        current_sl = float(active_trade.get("stop_loss", 0.0))
+        current_sl = float(current_sl_snapshot) if current_sl_snapshot is not None else float(active_trade.get("stop_loss", 0.0))
         direction_val = active_trade.get("direction", "Bullish")
         curr_state_str = active_trade.get("stop_state", "INITIAL")
         target_state_str = active_trade.get("target_stop_state", curr_state_str)
@@ -5288,25 +5288,29 @@ def main():
                             position_size_usd = remaining_size
                             active_trade["position_size_usd"] = remaining_size
                             
-                            # Move stop loss to timeframe-scaled break-even
-                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=str(iv))
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                                if success:
+                            # Move stop loss to timeframe-scaled break-even (monotonic non-widening)
+                            be_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=str(iv))
+                            target_sl = max(be_sl, stop_loss)
+                            if target_sl > stop_loss + 1e-4:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(active_symbol, target_sl, active_trade, current_sl_snapshot=stop_loss)
+                                    if success:
+                                        stop_loss = target_sl
+                                        active_trade["stop_loss"] = target_sl
+                                        active_trade["break_even_triggered"] = True
+                                        active_trades_updated = True
+                                        print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
+                                        update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                                    else:
+                                        print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to entry on Bybit. SL remains at {stop_loss:.2f}")
+                                else:
                                     stop_loss = target_sl
                                     active_trade["stop_loss"] = target_sl
                                     active_trade["break_even_triggered"] = True
                                     active_trades_updated = True
                                     print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
-                                    update_bybit_take_profit(active_symbol, take_profit, active_trade)
-                                else:
-                                    print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to entry on Bybit. SL remains at {stop_loss:.2f}")
                             else:
-                                stop_loss = target_sl
-                                active_trade["stop_loss"] = target_sl
                                 active_trade["break_even_triggered"] = True
-                                active_trades_updated = True
-                                print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to entry: {entry_price:.2f}")
                             
                         elif direction == "Bearish":
                             # Scale-Out Triggered for Short
@@ -5346,23 +5350,29 @@ def main():
                             position_size_usd = remaining_size
                             active_trade["position_size_usd"] = remaining_size
                             
-                            # Move stop loss to fee-adjusted break-even floor
-                            target_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=str(iv))
-                            
-                            if TRADE_MODE != "simulation":
-                                success = update_bybit_stop_loss(active_symbol, target_sl, active_trade)
-                                if success:
+                            # Move stop loss to fee-adjusted break-even floor (monotonic non-widening)
+                            be_sl = calculate_break_even_stop(direction, entry_price, current_price, atr_dollars, interval=str(iv))
+                            target_sl = min(be_sl, stop_loss)
+                            if target_sl < stop_loss - 1e-4:
+                                if TRADE_MODE != "simulation":
+                                    success = update_bybit_stop_loss(active_symbol, target_sl, active_trade, current_sl_snapshot=stop_loss)
+                                    if success:
+                                        stop_loss = target_sl
+                                        active_trade["stop_loss"] = target_sl
+                                        active_trade["break_even_triggered"] = True
+                                        active_trades_updated = True
+                                        print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
+                                        update_bybit_take_profit(active_symbol, take_profit, active_trade)
+                                    else:
+                                        print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to fee-adjusted entry on Bybit. SL remains at {stop_loss:.2f}")
+                                else:
                                     stop_loss = target_sl
                                     active_trade["stop_loss"] = target_sl
                                     active_trade["break_even_triggered"] = True
                                     active_trades_updated = True
                                     print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
-                                    update_bybit_take_profit(active_symbol, take_profit, active_trade)
-                                else:
-                                    print(f"[{active_symbol} {iv}m Scale-Out ERROR] Failed to update Stop Loss to fee-adjusted entry on Bybit. SL remains at {stop_loss:.2f}")
                             else:
-                                stop_loss = target_sl
-                                active_trade["stop_loss"] = target_sl
+                                active_trade["break_even_triggered"] = True
                                 active_trade["break_even_triggered"] = True
                                 active_trades_updated = True
                                 print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
@@ -5521,15 +5531,27 @@ def main():
                             swing_price=float(active_trade.get("swing_low_3b", current_price)) if direction == "Bullish" else float(active_trade.get("swing_high_3b", current_price))
                         )
                         if champ_updates:
-                            active_trade.update(champ_updates)
                             if "new_stop_loss" in champ_updates:
                                 new_sl_val = float(champ_updates["new_stop_loss"])
-                                if new_sl_val > 0 and abs(new_sl_val - stop_loss) > 1e-4:
-                                    stop_loss = new_sl_val
-                                    active_trade["stop_loss"] = stop_loss
-                                    active_trades_updated = True
+                                is_long = direction in ["Bullish", "BUY", "LONG", "UP"]
+                                is_tighter = (new_sl_val > stop_loss + 1e-4) if is_long else (new_sl_val < stop_loss - 1e-4)
+                                if new_sl_val > 0 and is_tighter:
+                                    current_sl_snapshot = float(stop_loss)
                                     if TRADE_MODE != "simulation":
-                                        update_bybit_stop_loss(active_symbol, stop_loss, active_trade=active_trade)
+                                        success = update_bybit_stop_loss(
+                                            active_symbol,
+                                            new_sl_val,
+                                            active_trade=active_trade,
+                                            current_sl_snapshot=current_sl_snapshot
+                                        )
+                                        if success:
+                                            stop_loss = new_sl_val
+                                            active_trade["stop_loss"] = stop_loss
+                                            active_trades_updated = True
+                                    else:
+                                        stop_loss = new_sl_val
+                                        active_trade["stop_loss"] = stop_loss
+                                        active_trades_updated = True
                             if champ_updates.get("break_even_triggered"):
                                 active_trade["break_even_triggered"] = True
                             if champ_updates.get("trigger_scale_out") and not half_closed:
