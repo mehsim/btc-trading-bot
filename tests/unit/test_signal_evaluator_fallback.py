@@ -38,10 +38,13 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
             "ADX": [25.0 for _ in range(260)]
         })
 
-        # Mock get_history to return dummy df
+        # Mock get_history and is_model_slot_denied to return dummy df
         import signal_evaluator
+        import ensemble
         orig_get_history = signal_evaluator.get_history
+        orig_denied = ensemble.is_model_slot_denied
         signal_evaluator.get_history = lambda symbol, interval, limit: df
+        ensemble.is_model_slot_denied = lambda slot: False
 
         try:
             self.evaluator.evaluate_interval("BTCUSDT", "15")
@@ -53,6 +56,7 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
             self.assertLessEqual(pred.get("calibrated_confidence"), 0.55)
         finally:
             signal_evaluator.get_history = orig_get_history
+            ensemble.is_model_slot_denied = orig_denied
 
     def test_ml_ensemble_healthy_provenance_and_calibrator_telemetry(self):
         """Verify C-01: Healthy ML model inference emits signal_source='ML_ENSEMBLE', is_fallback=False, and includes calibrator telemetry."""

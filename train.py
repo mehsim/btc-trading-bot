@@ -2340,7 +2340,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                if should_save or force_save:
+                if (should_save or force_save) and chal_brier != 0.99 and chal_ece != 0.99 and holdout_mcc >= 0.0:
                     with open(manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
 

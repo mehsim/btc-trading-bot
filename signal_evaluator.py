@@ -218,16 +218,19 @@ class SignalEvaluator:
             _regime_key = "trending" if is_trending else "ranging"
             if is_model_slot_denied(f"{_regime_key}_trend_{interval}") or is_model_slot_denied(f"{_regime_key}_price_{interval}"):
                 log_event("INFO", f"[SignalEvaluator Denylist] {symbol} {interval}m ({_regime_key}) is denied by governance policy — skipping safely.")
+                denied_entry = {
+                    "symbol": str(symbol),
+                    "direction": "Neutral",
+                    "confidence": 0.0,
+                    "calibrated_confidence": 0.0,
+                    "predicted_change": 0.0,
+                    "signal_source": "GOVERNANCE_DENIED",
+                    "timestamp": time.time()
+                }
                 with self.state_lock:
-                    self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = {
-                        "symbol": str(symbol),
-                        "direction": "Neutral",
-                        "confidence": 0.0,
-                        "calibrated_confidence": 0.0,
-                        "predicted_change": 0.0,
-                        "signal_source": "GOVERNANCE_DENIED",
-                        "timestamp": time.time()
-                    }
+                    self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = denied_entry
+                    if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                        self.bot_state[f"latest_prediction_{tf_key}"] = denied_entry
                 return
 
             # Lazy model evaluation

@@ -1,1 +1,6 @@
-{}
+{
+  "trending_15": {
+    "reason": "Holdout MCC -0.0064 < 0.0, crash sentinels brier/ece=0.99 in manifest",
+    "timestamp": "2026-08-31T11:25:00Z"
+  }
+}

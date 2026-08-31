@@ -66,7 +66,7 @@ if os.path.exists("governance_denylist.json"):
         pass
 
 MODEL_SLOT_DENYLIST = {
-    # 15m trending & ranging lifted 2026-08-20: retrained with verified barrier contract (23 feats, Delta PF +0.15)
+    "trending_15",    # holdout MCC -0.0064 < 0.0, crash sentinels brier/ece=0.99 in manifest
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     # trending_240 & ranging_240 lifted: retrained with 16-page RFECV (+0.0667 / +0.0567 CV MCC, +0.0253 / +0.0494 Holdout MCC)
 }.union(_persisted_denylist)
