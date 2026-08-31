@@ -7756,6 +7756,18 @@ def main():
                                                 position_size_usd *= 0.50
                                                 print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
 
+                                            # Apply P4 Anti-Martingale scaling to candidate sizing before risk gates
+                                            from risk_engine import calculate_anti_martingale_risk_multiplier
+                                            am_res = calculate_anti_martingale_risk_multiplier(
+                                                current_bal,
+                                                bot_state.get("peak_wallet_balance", current_bal),
+                                                bot_state.get("trade_history", [])
+                                            )
+                                            am_mult = float(am_res.get("multiplier", 1.0))
+                                            position_size_usd = max(0.0, float(position_size_usd * am_mult))
+                                            if am_mult != 1.0:
+                                                print(f"[{symbol} {iv}m Anti-Martingale] Applied streak multiplier {am_mult:.2f}x to candidate size -> ${position_size_usd:.2f}")
+
                                             # Adaptive Volume Gate Check
                                             vol_pass, vol_msg, vol_pctile = adaptive_volume_gate.check(symbol, kline_df=df_completed)
                                             print(f"[{symbol} {iv}m Volume Gate] {vol_msg}")
@@ -7809,7 +7821,7 @@ def main():
                                                 rec.outcome = "EXECUTED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
                                                 rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else checklist_msg
                                                 if passed_checklist and not wallet_exceeded:
-                                                    rec.position_size_usd = capped_size * dd_mult
+                                                    rec.position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
                                                     rec.trade_id = f"{symbol}_{trade_uuid}"
                                             except Exception as risk_err:
                                                 rec.outcome = "ERROR"
@@ -7828,11 +7840,8 @@ def main():
                                                 wallet_exceeded = True
                                                 bybit_success = False
                                             else:
-                                                # Apply final capped size, drawdown multiplier, and P4 Anti-Martingale scaling
-                                                from risk_engine import calculate_anti_martingale_risk_multiplier
-                                                am_res = calculate_anti_martingale_risk_multiplier(current_bal, bot_state.get("peak_wallet_balance", current_bal), bot_state.get("trade_history", []))
-                                                am_mult = float(am_res.get("multiplier", 1.0))
-                                                position_size_usd = max(0.0, float(capped_size * dd_mult * am_mult))
+                                                # Final position size strictly clamped to validated checklist cap with drawdown scaling
+                                                position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
                                                 leveraged_size = position_size_usd * leverage_val
                                                 raw_qty = leveraged_size / entry_price if entry_price > 0 else 0.0
                                                 qty_str = format_bybit_qty(symbol, raw_qty)
