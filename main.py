@@ -1822,7 +1822,7 @@ def retrain_models_thread(is_manual=False):
     return True
 
 JOURNAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_journal.csv")
-JOURNAL_HEADER = ["timestamp", "symbol", "interval", "direction", "entry_price", "exit_price", "pnl_usd", "change_pct", "success", "reason", "balance", "leverage", "confidence"]
+JOURNAL_HEADER = ["timestamp", "symbol", "interval", "direction", "entry_price", "exit_price", "pnl_usd", "change_pct", "success", "reason", "balance", "leverage", "confidence", "pnl_source"]
 
 def log_trade_journal(trade: dict):
     """Append a closed trade to trade_journal.csv."""
@@ -1847,6 +1847,7 @@ def log_trade_journal(trade: dict):
                 "balance": trade.get("balance"),
                 "leverage": trade.get("leverage"),
                 "confidence": trade.get("confidence"),
+                "pnl_source": trade.get("pnl_source", "ESTIMATED"),
             })
     except Exception as e:
         print(f"[Journal] Failed to write journal: {e}")
@@ -5015,6 +5016,7 @@ def main():
                     bybit_exit_price = None
                     bybit_realized_pnl = None
                     bybit_pnl_data = None
+                    pnl_source = "SIMULATION" if TRADE_MODE == "simulation" else "ESTIMATED"
                     
                     if TRADE_MODE != "simulation":
                         # Active recovery for sl_failed / unanchored stop loss
@@ -5560,6 +5562,7 @@ def main():
 
                             if bybit_pnl_data:
                                 bybit_realized_pnl = bybit_pnl_data["total_pnl"]
+                                pnl_source = "EXCHANGE"
                                 if bybit_pnl_data["avg_exit_price"] is not None:
                                     bybit_exit_price = bybit_pnl_data["avg_exit_price"]
                                 if bybit_pnl_data["total_entry_value"] is not None:
@@ -5567,11 +5570,13 @@ def main():
                                     actual_margin = round(bybit_pnl_data["total_entry_value"] / lev, 2)
                                     active_trade["position_size_usd"] = actual_margin
                                     position_size_usd = actual_margin
-                            elif bybit_realized_pnl is None and entry_price > 0 and expected_qty > 0:
-                                # Venue publication delay fallback: estimate realized PnL from exit price rather than leaving as 0.0
-                                est_exit = bybit_exit_price if bybit_exit_price is not None else current_price
-                                price_diff = (est_exit - entry_price) if direction == "Bullish" else (entry_price - est_exit)
-                                bybit_realized_pnl = round(price_diff * expected_qty, 4)
+                            else:
+                                # Venue publication delay fallback: do NOT set bybit_realized_pnl to a gross estimate!
+                                # Leaving bybit_realized_pnl as None ensures the downstream fee-aware local calculation
+                                # (gross_pnl - fee_cost) is executed and tagged as ESTIMATED.
+                                pnl_source = "ESTIMATED"
+                                if bybit_exit_price is None:
+                                    bybit_exit_price = current_price
 
                             actual_exit = bybit_exit_price if bybit_exit_price is not None else current_price
                             tp_hit = (actual_exit >= take_profit) if direction == "Bullish" else (actual_exit <= take_profit)
@@ -5731,7 +5736,8 @@ def main():
                             "modeled_slippage_bps": float(active_trade.get("modeled_slippage_bps")) if active_trade.get("modeled_slippage_bps") is not None else None,
                             "realized_slippage_bps": float(active_trade.get("realized_slippage_bps")) if active_trade.get("realized_slippage_bps") is not None else None,
                             "bybit_order_id": active_trade.get("bybit_order_id"),
-                            "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id")
+                            "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id"),
+                            "pnl_source": pnl_source
                         })
                         # Log to trade journal CSV
                         log_trade_journal(bot_state["trade_history"][-1])

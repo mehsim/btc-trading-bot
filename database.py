@@ -215,7 +215,7 @@ def init_db():
                 ("venue_closed_pnl", "REAL"), ("venue_qty", "REAL"), ("venue_entry_value", "REAL"),
                 ("intended_size_usd", "REAL"), ("initial_stop_loss", "REAL"), ("initial_take_profit", "REAL"),
                 ("initial_rr", "REAL"), ("kelly_size_usd", "REAL"), ("clamped_size_usd", "REAL"),
-                ("final_size_usd", "REAL"), ("mae", "REAL"), ("mfe", "REAL")
+                ("final_size_usd", "REAL"), ("mae", "REAL"), ("mfe", "REAL"), ("pnl_source", "TEXT")
             ]:
                 if col_name not in cols:
                     try:
@@ -661,7 +661,8 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
                         initial_rr = ?,
                         kelly_size_usd = ?,
                         clamped_size_usd = ?,
-                        final_size_usd = ?
+                        final_size_usd = ?,
+                        pnl_source = ?
                     WHERE trade_id = ?;
                 """, (
                     round_monetary(trade.get("initial_stop_loss"), 4),
@@ -670,6 +671,7 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
                     round_monetary(trade.get("kelly_size_usd"), 4),
                     round_monetary(trade.get("clamped_size_usd"), 4),
                     round_monetary(trade.get("final_size_usd"), 4),
+                    str(trade.get("pnl_source", "ESTIMATED")),
                     t_id
                 ))
             except Exception as ex_init_cols:
