@@ -319,9 +319,9 @@ def test_signal_evaluator_slot_denylist_abstention():
     """Verify SignalEvaluator safely abstains on denied model slots without invoking rule fallbacks."""
     from ensemble import is_model_slot_denied
     
-    # 30m slot is denied in production governance
-    assert is_model_slot_denied("trending_trend_30") is True
-    assert is_model_slot_denied("trending_price_30") is True
+    # 120m slot is denied in production governance
+    assert is_model_slot_denied("trending_trend_120") is True
+    assert is_model_slot_denied("trending_price_120") is True
 
 
 def test_state_manager_none_default_fallback():
