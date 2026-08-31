@@ -7515,8 +7515,8 @@ def main():
                                         _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
                                         scaled_kelly = risk_engine.compute_conservative_kelly(
                                             calibrated_confidence=calibrated_confidence,
-                                            tp_multiplier=tp_multiplier_adjusted,
-                                            sl_multiplier=sl_multiplier,
+                                            tp_multiplier=effective_tp_m,
+                                            sl_multiplier=resolved_sl_m,
                                             interval=str(iv),
                                             trade_history=bot_state.get("trade_history", []),
                                             mcc_val=_mcc_val
