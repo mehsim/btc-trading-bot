@@ -2077,12 +2077,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 def _wf_sim_fn(_w_test_df):
                                     _t_X = _w_test_df[_wf_feats].fillna(0.0)
                                     _t_preds = _w_m.predict(_t_X)
-                                    _t_prices = _w_test_df["target_price"].fillna(0.0).values if "target_price" in _w_test_df.columns else np.zeros(len(_w_test_df))
+                                    _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
+                                    _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
                                     _w_trades = []
                                     for _p_d, _p_r in zip(_t_preds, _t_prices):
-                                        if _p_d == 2:
+                                        if _p_d == 2:  # Bullish long
                                             _w_trades.append({"net_return": float(_p_r), "sl_frac": 0.01})
-                                        elif _p_d == 0:
+                                        elif _p_d == 0:  # Bearish short
                                             _w_trades.append({"net_return": -float(_p_r), "sl_frac": 0.01})
                                     return {"trades": _w_trades}
                                 return _wf_sim_fn
@@ -2097,13 +2098,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                     train_fn=_wf_train_fn
                                 )
                                 wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= -0.10 and _w_res.get("mean_profit_factor", 0.0) >= 0.90)
-                                if not wf_pass:
-                                    wf_pass = (chal_mcc_min >= -0.05 and holdout_mcc >= 0.0)
                             else:
-                                wf_pass = (chal_mcc_min >= -0.05 and holdout_mcc >= 0.0)
+                                wf_pass = False  # Fail-closed if insufficient walk-forward data
                         except Exception as _wf_ex:
                             log_event("WARNING", f"[Walk-Forward Validation Gate Error] {_wf_ex}")
-                            wf_pass = (chal_mcc_min >= -0.05 and holdout_mcc >= 0.0)
+                            wf_pass = False  # Fail-closed on exception
 
                         stat_eval = stat_validator.evaluate_8_release_gates(
                             walk_forward_pass=wf_pass,
