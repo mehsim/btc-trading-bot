@@ -405,7 +405,12 @@ def add_features(df, symbol=None, interval=None):
 OPTIMIZED_BARRIERS = {}
 
 def add_triple_barrier_labels(df, interval):
-    atr = df["ATR_norm"] * df["close"]
+    if "ATR_norm" in df.columns:
+        atr = df["ATR_norm"] * df["close"]
+    elif "ATR" in df.columns:
+        atr = df["ATR"]
+    else:
+        atr = df["close"] * 0.01
     atr_vals = atr.values
     closes = df["close"].values
     highs = df["high"].values
@@ -1564,6 +1569,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if first_ok > 0:
                     Ys[:first_ok] = Ys[first_ok]
 
+            from config import TIMEFRAME_CONFIG
+            cfg_iv = TIMEFRAME_CONFIG.get(str(interval), {})
             calibrator_data = {
                 "scaling_method": "beta_calibration",
                 "a": float(bc.a),
@@ -1572,7 +1579,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "X": Xs.tolist(),
                 "y": Ys.tolist(),
                 "fitting_sample_size": fit_n,
-                "min_bin_support": MIN_BIN
+                "min_bin_support": MIN_BIN,
+                "barrier_geometry": {
+                    "tp_mult_trending": float(cfg_iv.get("tp_mult_trending", 1.85)),
+                    "tp_mult_ranging": float(cfg_iv.get("tp_mult_ranging", 1.40)),
+                    "sl_mult": float(cfg_iv.get("sl_mult", 0.85)),
+                    "lookahead": int(cfg_iv.get("lookahead", 12))
+                }
             }
             calibrator_filename = f"calibrator_{name}_{interval}_challenger.json"
             with open(calibrator_filename, "w") as f:
@@ -1580,7 +1593,24 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"  [Calibrator] Saved Beta & Clamped calibrator to {calibrator_filename} (N={fit_n}, Beta a={bc.a:.3f}, b={bc.b:.3f}, c={bc.c:.3f})")
         else:
             # Save default identity mapping if no predictions occurred
-            calibrator_data = {"scaling_method": "beta_calibration", "a": 1.0, "b": 1.0, "c": 0.0, "X": [0.0, 1.0], "y": [0.0, 1.0]}
+            from config import TIMEFRAME_CONFIG
+            cfg_iv = TIMEFRAME_CONFIG.get(str(interval), {})
+            calibrator_data = {
+                "scaling_method": "identity",
+                "is_fallback": True,
+                "a": 1.0,
+                "b": 1.0,
+                "c": 0.0,
+                "X": [0.0, 1.0],
+                "y": [0.0, 1.0],
+                "fitting_sample_size": len(calibration_probs),
+                "barrier_geometry": {
+                    "tp_mult_trending": float(cfg_iv.get("tp_mult_trending", 1.85)),
+                    "tp_mult_ranging": float(cfg_iv.get("tp_mult_ranging", 1.40)),
+                    "sl_mult": float(cfg_iv.get("sl_mult", 0.85)),
+                    "lookahead": int(cfg_iv.get("lookahead", 12))
+                }
+            }
             calibrator_filename = f"calibrator_{name}_{interval}_challenger.json"
             with open(calibrator_filename, "w") as f:
                 json.dump(calibrator_data, f)

@@ -2304,12 +2304,39 @@ def load_model_weights(iv):
                 log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['ranging_meta']}: {e}")
 
         # 7. Calibrators (Always isolated and loaded regardless of model load status)
+        def verify_calibrator_barrier_geometry(cal_obj: dict, cal_file: str, regime: str) -> bool:
+            if not isinstance(cal_obj, dict):
+                return False
+            b_geom = cal_obj.get("barrier_geometry")
+            if not b_geom or not isinstance(b_geom, dict):
+                return True  # Legacy format without embedded geometry
+            from config import TIMEFRAME_CONFIG
+            cfg_live = TIMEFRAME_CONFIG.get(str(iv), {})
+            live_tp = float(cfg_live.get(f"tp_mult_{regime}", cfg_live.get("tp_mult_trending", 1.85)))
+            live_sl = float(cfg_live.get("sl_mult", 0.85))
+            live_lh = int(cfg_live.get("lookahead", 12))
+
+            cal_tp = float(b_geom.get(f"tp_mult_{regime}", b_geom.get("tp_mult_trending", live_tp)))
+            cal_sl = float(b_geom.get("sl_mult", live_sl))
+            cal_lh = int(b_geom.get("lookahead", live_lh))
+
+            if abs(cal_tp - live_tp) > 0.50 or abs(cal_sl - live_sl) > 0.30 or abs(cal_lh - live_lh) > 6:
+                msg = f"Calibrator '{cal_file}' barrier geometry (TP={cal_tp:.2f}, SL={cal_sl:.2f}, LH={cal_lh}) diverges from active TIMEFRAME_CONFIG (TP={live_tp:.2f}, SL={live_sl:.2f}, LH={live_lh})."
+                log_event("CRITICAL", f"[Calibrator Barrier Divergence] {msg} Slot set to None (Fail-Closed).")
+                send_telegram_alert(f"🚨 *CALIBRATOR BARRIER DIVERGENCE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
+                return False
+            return True
+
         try:
             trending_cal_file = f"calibrator_trending_{iv}.json"
             if os.path.exists(trending_cal_file):
                 with open(trending_cal_file, "r") as f:
-                    models_by_interval[iv]["trending"]["calibrator"] = json.load(f)
-                print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
+                    cal_data = json.load(f)
+                if verify_calibrator_barrier_geometry(cal_data, trending_cal_file, "trending"):
+                    models_by_interval[iv]["trending"]["calibrator"] = cal_data
+                    print(f"Loaded Isotonic Regression calibrator: {trending_cal_file}")
+                else:
+                    models_by_interval[iv]["trending"]["calibrator"] = None
             else:
                 models_by_interval[iv]["trending"]["calibrator"] = None
                 log_event("CRITICAL", f"[Calibrator Missing] Trending calibrator '{trending_cal_file}' not found. Slot set to None (Fail-Closed).")
@@ -2323,8 +2350,12 @@ def load_model_weights(iv):
             ranging_cal_file = f"calibrator_ranging_{iv}.json"
             if os.path.exists(ranging_cal_file):
                 with open(ranging_cal_file, "r") as f:
-                    models_by_interval[iv]["ranging"]["calibrator"] = json.load(f)
-                print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
+                    cal_data = json.load(f)
+                if verify_calibrator_barrier_geometry(cal_data, ranging_cal_file, "ranging"):
+                    models_by_interval[iv]["ranging"]["calibrator"] = cal_data
+                    print(f"Loaded Isotonic Regression calibrator: {ranging_cal_file}")
+                else:
+                    models_by_interval[iv]["ranging"]["calibrator"] = None
             else:
                 models_by_interval[iv]["ranging"]["calibrator"] = None
                 log_event("CRITICAL", f"[Calibrator Missing] Ranging calibrator '{ranging_cal_file}' not found. Slot set to None (Fail-Closed).")
