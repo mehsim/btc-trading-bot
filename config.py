@@ -306,10 +306,10 @@ def _get_tf_env(key: str, default: float) -> float:
     except Exception:
         return default
 
-# Centralized Single Source of Truth for Timeframe Parameters (Recommendation #3)
-# Allows dynamic overrides via .env (e.g. TF_15M_SL_MULT=1.25) or Optuna tuning
+# Centralized Single Source of Truth for Timeframe Parameters
+# Allows dynamic overrides via .env or optimized_barriers_{tf}.json with strict validation
 TIMEFRAME_CONFIG = {
-    "15": {   # 15M Timeframe - High-Conviction Scalp (Targets ~4-5 trades/day across portfolio)
+    "15": {   # 15M Timeframe - High-Conviction Scalp
         "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.80),
         "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.38),
@@ -319,12 +319,12 @@ TIMEFRAME_CONFIG = {
     },
     "30": {   # 30M Timeframe - Short Swing
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.20),
+        "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.0565524801510242),
         "base_confidence_threshold": _get_tf_env("TF_30M_CONF_THRESH", 0.40),
-        "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.45),
-        "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 1.75)
+        "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.3620801690780144),
+        "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 2.8909683078238504)
     },
-    "60": {   # 1H Timeframe - High-Conviction Swing (Targets ~3-4 trades/day across portfolio)
+    "60": {   # 1H Timeframe - High-Conviction Swing
         "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 10)),
         "sl_mult": _get_tf_env("TF_60M_SL_MULT", 0.6585006543095501),
         "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.42),
@@ -339,17 +339,25 @@ TIMEFRAME_CONFIG = {
         "tp_mult_ranging": _get_tf_env("TF_120M_TP_RANGING", 2.20),
         "tp_mult_trending": _get_tf_env("TF_120M_TP_TRENDING", 2.60)
     },
-    "240": {  # 4H Timeframe - High-Conviction Macro Swing (Targets ~1-2 trades/day across portfolio)
+    "240": {  # 4H Timeframe - High-Conviction Macro Swing
         "lookahead": int(_get_tf_env("TF_240M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_240M_SL_MULT", 0.7693),
+        "sl_mult": _get_tf_env("TF_240M_SL_MULT", 0.7692996169158203),
         "base_confidence_threshold": _get_tf_env("TF_240M_CONF_THRESH", 0.48),
         "min_adx": _get_tf_env("TF_240M_MIN_ADX", 28.0),
-        "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.3370),
-        "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 1.80)
+        "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.783121353301515),
+        "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 2.4005024826625188)
+    },
+    "360": {  # 6H Timeframe - Macro Swing
+        "lookahead": int(_get_tf_env("TF_360M_LOOKAHEAD", 12)),
+        "sl_mult": _get_tf_env("TF_360M_SL_MULT", 1.00),
+        "base_confidence_threshold": _get_tf_env("TF_360M_CONF_THRESH", 0.50),
+        "tp_mult_ranging": _get_tf_env("TF_360M_TP_RANGING", 2.20),
+        "tp_mult_trending": _get_tf_env("TF_360M_TP_TRENDING", 2.50)
     }
 }
 
-# Auto-sync TIMEFRAME_CONFIG with optimized_barriers_{tf}.json if present
+# Auto-sync TIMEFRAME_CONFIG with optimized_barriers_{tf}.json with strict validation and logging
+import sys
 for _tf in list(TIMEFRAME_CONFIG.keys()):
     _opt_path = f"optimized_barriers_{_tf}.json"
     if os.path.exists(_opt_path):
@@ -357,14 +365,32 @@ for _tf in list(TIMEFRAME_CONFIG.keys()):
             with open(_opt_path, "r") as _f:
                 _opt_data = json.load(_f)
             if isinstance(_opt_data, dict):
-                for _k in ["lookahead", "sl_mult", "tp_mult_ranging", "tp_mult_trending"]:
-                    if _k in _opt_data:
-                        if _k == "lookahead":
-                            TIMEFRAME_CONFIG[_tf][_k] = int(_opt_data[_k])
-                        else:
-                            TIMEFRAME_CONFIG[_tf][_k] = float(_opt_data[_k])
-        except Exception:
-            pass
+                _tp_trending = float(_opt_data.get("tp_mult_trending", TIMEFRAME_CONFIG[_tf].get("tp_mult_trending", 1.5)))
+                _tp_ranging = float(_opt_data.get("tp_mult_ranging", TIMEFRAME_CONFIG[_tf].get("tp_mult_ranging", 1.2)))
+                _sl_mult = float(_opt_data.get("sl_mult", TIMEFRAME_CONFIG[_tf].get("sl_mult", 0.8)))
+                _lookahead = int(_opt_data.get("lookahead", TIMEFRAME_CONFIG[_tf].get("lookahead", 12)))
+
+                # Geometric validation: trending target must not be inverted below ranging target
+                if _tp_trending < _tp_ranging:
+                    sys.stderr.write(
+                        f"[TIMEFRAME_CONFIG Warning] Rejecting inverted barrier file {_opt_path}: "
+                        f"tp_mult_trending ({_tp_trending}) < tp_mult_ranging ({_tp_ranging}). Preserving committed config.\n"
+                    )
+                    continue
+
+                if _sl_mult < 0.3 or _tp_ranging < 0.5 or _lookahead < 4:
+                    sys.stderr.write(
+                        f"[TIMEFRAME_CONFIG Warning] Rejecting invalid barrier bounds in {_opt_path}: "
+                        f"sl={_sl_mult}, tp_r={_tp_ranging}, lookahead={_lookahead}. Preserving committed config.\n"
+                    )
+                    continue
+
+                TIMEFRAME_CONFIG[_tf]["tp_mult_trending"] = _tp_trending
+                TIMEFRAME_CONFIG[_tf]["tp_mult_ranging"] = _tp_ranging
+                TIMEFRAME_CONFIG[_tf]["sl_mult"] = _sl_mult
+                TIMEFRAME_CONFIG[_tf]["lookahead"] = _lookahead
+        except Exception as _ex:
+            sys.stderr.write(f"[TIMEFRAME_CONFIG Warning] Failed to parse {_opt_path}: {_ex}\n")
 
 DYNAMIC_CONFIDENCE_THRESHOLDS = {
     _tf: float(_cfg.get("base_confidence_threshold", 0.55))

@@ -69,6 +69,20 @@ def assert_shared_constants_aligned():
         if not sym.endswith("USDT"):
             raise ValueError(f"[Config Verifier] Unsupported symbol format in SUPPORTED_SYMBOLS: {sym}")
 
+    # 4. Verify barrier geometry validity: tp_mult_trending >= tp_mult_ranging for every timeframe
+    cfg_tf = getattr(config, "TIMEFRAME_CONFIG", {})
+    for iv, tf_dict in cfg_tf.items():
+        tp_t = float(tf_dict.get("tp_mult_trending", 0.0))
+        tp_r = float(tf_dict.get("tp_mult_ranging", 0.0))
+        sl_m = float(tf_dict.get("sl_mult", 0.0))
+        lookahead = int(tf_dict.get("lookahead", 0))
+        if tp_t < tp_r:
+            raise ValueError(f"[Config Verifier] Inverted barrier geometry for {iv}m: tp_mult_trending ({tp_t}) < tp_mult_ranging ({tp_r})")
+        if sl_m < 0.3:
+            raise ValueError(f"[Config Verifier] Invalid stop loss multiplier for {iv}m: sl_mult ({sl_m}) < 0.3")
+        if lookahead < 4:
+            raise ValueError(f"[Config Verifier] Invalid lookahead for {iv}m: lookahead ({lookahead}) < 4")
+
     risk_limits.assert_risk_governance_invariants()
     log_event("INFO", "✅ [Config Verifier M-2] All cross-file train.py vs config.py constants strictly verified.")
     return True
