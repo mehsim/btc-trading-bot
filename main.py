@@ -7933,6 +7933,29 @@ def main():
 
                                                 if not wallet_exceeded:
                                                     from execution_validator import ExecutionValidator
+                                                    from bybit_client import get_orderbook_imbalance
+
+                                                    # Fetch live market bid/ask/last to guard against executing when price has already breached the stop loss
+                                                    live_bid, live_ask, live_last = get_bybit_bid_ask(symbol)
+                                                    if live_bid is not None and live_ask is not None and live_bid > 0 and live_ask > 0:
+                                                        live_current_price = (live_bid + live_ask) / 2.0
+                                                    elif live_last is not None and live_last > 0:
+                                                        live_current_price = live_last
+                                                    else:
+                                                        live_current_price = entry_price
+
+                                                    # Fetch real top-of-book depth from orderbook imbalance
+                                                    top_book_depth = 50000.0
+                                                    try:
+                                                        obi_res = get_orderbook_imbalance(symbol, depth=10)
+                                                        if obi_res and obi_res.get("status") == "OK":
+                                                            mid_ref = float(obi_res.get("mid_price", live_current_price) or live_current_price)
+                                                            top_depth_calc = float((obi_res.get("bid_vol", 0.0) + obi_res.get("ask_vol", 0.0)) * mid_ref)
+                                                            if top_depth_calc > 0:
+                                                                top_book_depth = top_depth_calc
+                                                    except Exception:
+                                                        pass
+
                                                     ev_valid, ev_msg = ExecutionValidator().validate_order(
                                                         symbol=symbol,
                                                         direction=ml_trend,
@@ -7940,7 +7963,9 @@ def main():
                                                         stop_loss_price=stop_loss_price,
                                                         take_profit_price=take_profit_price,
                                                         position_size_usd=position_size_usd,
-                                                        live_price=entry_price,
+                                                        live_price=live_current_price,
+                                                        top_book_depth_usd=top_book_depth,
+                                                        portfolio_heat=portfolio_heat,
                                                         atr_norm=float(pred_info.get("atr_norm", 0.01)) if isinstance(pred_info, dict) and pred_info.get("atr_norm") is not None else 0.01
                                                     )
                                                     if not ev_valid:
