@@ -75,9 +75,8 @@ MODEL_SLOT_DENYLIST = {
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
 SPRT_MIN_DETECTABLE_D = 0.20                  # Pre-registered minimum detectable effect size for SPRT sequential testing
 MCC_LEVERAGE_QUALIFICATION_THRESHOLD = 0.15  # F-1: Models with MCC < 0.15 are clamped to conservative leverage
-CONSERVATIVE_LEVERAGE_CAPS = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "default": 3.0}
 MIN_SL_PCT_CONFIG = {"15": 0.006, "30": 0.008, "60": 0.010, "120": 0.012, "240": 0.015, "360": 0.015, "default": 0.008}
-MIN_TARGET_ATR_MULT = {"15": 1.50, "60": 1.50, "default": 1.50}  # Enforces tp_mult >= 1.50 ATR
+MIN_TARGET_ATR_MULT = {"15": 1.15, "30": 1.40, "60": 1.25, "default": 1.20}  # Enforces minimum TP ATR multiplier (1.44:1 R:R on 15m)
 
 def resolve_min_sl_pct(symbol: str = "BTCUSDT", interval: str = "60") -> float:
     iv_clean = str(interval).lower().strip().replace("m", "")
@@ -305,10 +304,10 @@ def _get_tf_env(key: str, default: float) -> float:
 TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe - High-Conviction Scalp (Targets ~4-5 trades/day across portfolio)
         "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.85),
+        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.80),
         "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.38),
         "min_adx": _get_tf_env("TF_15M_MIN_ADX", 16.0),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.40),
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.15),
         "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.85)
     },
     "30": {   # 30M Timeframe - Short Swing

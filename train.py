@@ -414,28 +414,26 @@ def add_triple_barrier_labels(df, interval):
     n_samples = len(df)
     labels = np.ones(n_samples, dtype=int) * 1  # 1: Neutral
     
-    # Always enforce centralized TIMEFRAME_CONFIG for balanced label generation
+    # Enforce centralized TIMEFRAME_CONFIG as absolute single source of truth for label generation
     cfg = TIMEFRAME_CONFIG.get(str(interval), {
         "lookahead": 12,
-        "sl_mult": 0.75,
-        "tp_mult_ranging": 1.2,
-        "tp_mult_trending": 1.3
+        "sl_mult": 0.85,
+        "tp_mult_ranging": 1.40,
+        "tp_mult_trending": 1.85
     })
     
-    lookahead = cfg.get("lookahead", 10)
-    if str(interval) in ["15", "30"]:
-        tp_mult_trending = min(3.0, cfg.get("tp_mult_trending", 2.5))
-        tp_mult_ranging  = min(2.5, cfg.get("tp_mult_ranging", 2.2))
-        sl_mult          = max(0.80, min(1.50, cfg.get("sl_mult", 1.0)))
-    else:
-        sl_mult = cfg.get("sl_mult", 0.8)
-        tp_mult_trending = cfg.get("tp_mult_trending", 2.5)
-        tp_mult_ranging = cfg.get("tp_mult_ranging", 1.5)
-        
-    from config import MIN_TARGET_ATR_MULT
-    min_target = max(MIN_TARGET_ATR_MULT.get(str(interval), 1.5), 1.20 * sl_mult)
-    tp_mult_trending = max(tp_mult_trending, min_target)
-    tp_mult_ranging = max(tp_mult_ranging, min_target)
+    lookahead = int(cfg.get("lookahead", 12))
+    sl_mult = float(cfg.get("sl_mult", 0.85))
+    tp_mult_trending = float(cfg.get("tp_mult_trending", 1.85))
+    tp_mult_ranging = float(cfg.get("tp_mult_ranging", 1.40))
+    
+    global LAST_LABELING_BARRIER_CONFIG
+    LAST_LABELING_BARRIER_CONFIG = {
+        "tp_mult_trending": tp_mult_trending,
+        "tp_mult_ranging": tp_mult_ranging,
+        "sl_mult": sl_mult,
+        "lookahead": lookahead
+    }
         
     is_trending_state = False
     for i in range(n_samples):
@@ -453,24 +451,9 @@ def add_triple_barrier_labels(df, interval):
         elif adx_t <= _exit_thr:
             is_trending_state = False
             
-        if is_trending_state:
-            tp_mult = tp_mult_trending
-            cur_sl_mult = sl_mult
-            effective_lookahead = lookahead
-        else:
-            # Symmetrical mean-reversion configuration for Ranging
-            if str(interval) == "15":
-                tp_mult = 1.25
-                cur_sl_mult = 0.80
-                effective_lookahead = 7
-            elif str(interval) == "240":
-                tp_mult = 1.35
-                cur_sl_mult = 0.85
-                effective_lookahead = 7
-            else:
-                tp_mult = tp_mult_ranging
-                cur_sl_mult = sl_mult
-                effective_lookahead = lookahead
+        tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
+        cur_sl_mult = sl_mult
+        effective_lookahead = lookahead
         
         tp_dist = tp_mult * atr_t
         sl_dist = cur_sl_mult * atr_t
@@ -1193,15 +1176,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
             if name == "ranging" and str(interval) in ["15", "240"]:
                 # Specialized bounded mean-reversion feature candidate pool
                 ranging_priority_candidates = [
-                    "close_to_VWAP", "vwap_deviation", "BB_pct", "BB_width", "RSI_z", "btc_rsi",
-                    "close_to_Kalman", "bid_ask_imbalance_ohlc", "volatility_gk", "roll_spread",
-                    "fear_greed", "day_of_week_cos", "day_of_week_sin", "ATR_norm", "MFI",
-                    "volatility_24h", "hour_sin", "hour_cos", "ROC_24", "MACD_diff", "close_to_EMA200"
+                    "BB_pct", "BB_width", "RSI_z", "btc_rsi", "MFI", "close_to_VWAP", "vwap_deviation",
+                    "close_to_Kalman", "bid_ask_imbalance_ohlc", "lower_wick_volume_ratio", "upper_wick_volume_ratio",
+                    "CVD_norm", "roll_spread", "volatility_gk", "ATR_norm", "volatility_10m", "MACD_diff", "RSI"
                 ]
                 available_candidates = [c for c in ranging_priority_candidates if c in X_rfecv_prelim.columns]
-                prefilter = XGBClassifier(n_estimators=30, max_depth=2, random_state=42, n_jobs=1, reg_lambda=5.0)
+                prefilter = XGBClassifier(n_estimators=30, max_depth=2, random_state=42, n_jobs=1, reg_lambda=10.0)
                 prefilter.fit(X_rfecv_prelim[available_candidates], y_rfecv)
-                n_keep = min(20, len(available_candidates))
+                n_keep = min(16, len(available_candidates))
                 top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
                 top_feats = [str(f) for f in np.array(available_candidates)[top_idx]]
                 print(f"[Regime RANGING {interval}m Stage 1] Specialized mean-reversion filter → {len(top_feats)} candidates.")
@@ -1218,8 +1200,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             estimator = XGBClassifier(
                 n_estimators=60,
                 max_depth=2 if (name == "ranging" and str(interval) in ["15", "240"]) else 3,
-                learning_rate=0.05 if (name == "ranging" and str(interval) in ["15", "240"]) else 0.1,
-                reg_lambda=5.0 if (name == "ranging" and str(interval) in ["15", "240"]) else 1.0,
+                learning_rate=0.03 if (name == "ranging" and str(interval) in ["15", "240"]) else 0.1,
+                reg_lambda=15.0 if (name == "ranging" and str(interval) in ["15", "240"]) else 1.0,
                 random_state=42,
                 tree_method="hist",
                 n_jobs=1
@@ -2322,7 +2304,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["metrics"]["raw_sample_size"] = raw_n_val
                 manifest_data["label_distribution"] = [int(n_bear), int(n_neutral), int(n_bull)]
                 from config import REGIME_ADX_ENTER_BY_INTERVAL, STRONG_TREND_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL, STRONG_TREND_ADX_EXIT
-                _bcfg = TIMEFRAME_CONFIG.get(str(interval), {})
+                _bcfg = LAST_LABELING_BARRIER_CONFIG if ('LAST_LABELING_BARRIER_CONFIG' in globals() and LAST_LABELING_BARRIER_CONFIG) else TIMEFRAME_CONFIG.get(str(interval), {})
                 manifest_data["barrier_config"] = {
                     "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 0.0)),
                     "tp_mult_ranging":  float(_bcfg.get("tp_mult_ranging", 0.0)),

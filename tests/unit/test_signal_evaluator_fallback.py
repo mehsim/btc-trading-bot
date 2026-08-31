@@ -103,8 +103,11 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
         })
 
         import signal_evaluator
+        import ensemble
         orig_get_history = signal_evaluator.get_history
+        orig_denied = ensemble.is_model_slot_denied
         signal_evaluator.get_history = lambda symbol, interval, limit: df
+        ensemble.is_model_slot_denied = lambda slot: False
 
         try:
             self.evaluator.evaluate_interval("BTCUSDT", "15")
@@ -117,6 +120,7 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
             self.assertGreater(pred.get("calibrated_confidence"), 0.70)
         finally:
             signal_evaluator.get_history = orig_get_history
+            ensemble.is_model_slot_denied = orig_denied
 
 if __name__ == "__main__":
     unittest.main()
