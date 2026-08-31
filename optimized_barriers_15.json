@@ -1,6 +1,6 @@
 {
-  "tp_mult_ranging": 1.40,
+  "tp_mult_ranging": 1.15,
   "tp_mult_trending": 1.85,
-  "sl_mult": 0.85,
+  "sl_mult": 0.80,
   "lookahead": 12
 }

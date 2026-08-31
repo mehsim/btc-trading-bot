@@ -22,9 +22,15 @@ _time_offset_lock = threading.Lock()
 _aiohttp_session = None
 _async_loop = None
 _async_thread = None
-_ws_responses = {}
-_ws_responses_lock = threading.Lock()
-_order_exec_lock = threading.Lock()
+_symbol_order_locks = {}
+_symbol_order_locks_mutex = threading.Lock()
+
+def get_symbol_order_lock(symbol: str) -> threading.Lock:
+    sym = str(symbol).upper().strip() if symbol else "GENERIC"
+    with _symbol_order_locks_mutex:
+        if sym not in _symbol_order_locks:
+            _symbol_order_locks[sym] = threading.Lock()
+        return _symbol_order_locks[sym]
 
 _real_balance_cache = None
 _last_real_balance_sync = 0
@@ -254,7 +260,9 @@ def execute_bybit_order_ws_or_rest(endpoint: str, payload: Dict[str, Any]) -> Di
     if endpoint == "/v5/order/create" and "orderLinkId" not in payload:
         payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         
-    with _order_exec_lock:
+    symbol = payload.get("symbol", "GENERIC")
+    sym_lock = get_symbol_order_lock(symbol)
+    with sym_lock:
         return bybit_post_request(endpoint, payload)
 
 

@@ -1179,54 +1179,29 @@ def get_bybit_min_qty_step(symbol):
         _instrument_info_cache[symbol] = (fallback_step, now_t + 300.0)
     return fallback_step
 
-_ws_responses = {}
-_ws_responses_lock = threading.Lock()
+_symbol_order_locks = {}
+_symbol_order_locks_mutex = threading.Lock()
 
-_order_exec_lock = threading.Lock()
+def get_symbol_order_lock(symbol: str) -> threading.Lock:
+    sym = str(symbol).upper().strip() if symbol else "GENERIC"
+    with _symbol_order_locks_mutex:
+        if sym not in _symbol_order_locks:
+            _symbol_order_locks[sym] = threading.Lock()
+        return _symbol_order_locks[sym]
 
 def execute_bybit_order_ws_or_rest(endpoint, payload):
-    global private_ws_connected, active_private_ws
     import uuid
     # C7: Add unique clientOrderId (orderLinkId) for request deduplication
     if endpoint == "/v5/order/create" and "orderLinkId" not in payload:
         payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
         
-    op_map = {
-        "/v5/order/create": "order.create",
-        "/v5/order/cancel": "order.cancel"
-    }
-    op = op_map.get(endpoint)
+    symbol = payload.get("symbol", "GENERIC")
+    sym_lock = get_symbol_order_lock(symbol)
     
-    with _order_exec_lock:
-        if op and private_ws_connected and active_private_ws:
-            req_id = f"req_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:4]}"
-            ws_payload = {
-                "op": op,
-                "reqId": req_id,
-                "args": [payload]
-            }
-            try:
-                print(f"[WebSocket Private Execution] Sending {op} reqId={req_id}")
-                active_private_ws.send(json.dumps(ws_payload))
-                
-                # Wait for response (timeout 2.0s)
-                timeout = 2.0
-                start_t = time.time()
-                while time.time() - start_t < timeout:
-                    with _ws_responses_lock:
-                        if len(_ws_responses) > 500:
-                            _ws_responses.clear()
-                        if req_id in _ws_responses:
-                            resp = _ws_responses.pop(req_id)
-                            print(f"[WebSocket Private Execution] Received response for reqId={req_id} retCode={resp.get('retCode')}")
-                            return resp
-                    time.sleep(0.05)  # Reduced from 0.01 to cut spin rate by 5x
-                print(f"[WebSocket Private Execution Warning] Timeout waiting for reqId={req_id}. Falling back to REST...")
-            except Exception as e:
-                print(f"[WebSocket Private Execution Error] {e}. Falling back to REST...")
-                
-        # C8: Atomic Fallback to standard REST API request
+    with sym_lock:
+        # Direct atomic REST API request (avoids 2.0s stall on private subscription stream)
         return bybit_post_request(endpoint, payload)
+
 
 
 def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False, order_type="Market", order_link_id=None):
@@ -2847,14 +2822,6 @@ def on_private_message(ws, message):
         op = data.get("op")
         topic = data.get("topic")
         
-        # Capture operations responses (e.g. order.create or order.cancel callbacks)
-        req_id = data.get("reqId")
-        if req_id:
-            with _ws_responses_lock:
-                _ws_responses[req_id] = data
-                if len(_ws_responses) > 200:
-                    _ws_responses.clear()
-                
         if op == "auth":
             if data.get("success") is True:
                 print("[WebSocket Private] Authentication successful. Subscribing to topics...")
