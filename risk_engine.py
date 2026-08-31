@@ -348,11 +348,12 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         max_stress = policy.get("max_stress_loss_pct", 25.0)
         max_corr = policy.get("max_correlation", 0.70)
 
-        if not isinstance(bot_state, dict):
+        from collections.abc import Mapping
+        if not isinstance(bot_state, (dict, Mapping)) and not hasattr(bot_state, "get"):
             bot_state = {}
         if not isinstance(active_trades, list):
             active_trades = []
-        if not isinstance(df_dict, dict):
+        if not isinstance(df_dict, (dict, Mapping)) and not hasattr(df_dict, "get"):
             df_dict = {}
 
         if leverage_val > max_lev or leverage_val < min_lev:
@@ -361,13 +362,38 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if bot_state.get("circuit_breaker_active", False):
             return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
 
-        equity = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
-        if equity <= 0:
-            equity = float(bot_state.get("simulated_balance", 80.0))
-        if equity <= 0:
-            return False, "REJECTED: Account equity is zero or negative (Fail-Closed)", 0.0, 0.0
+        # Resolve equity from live state keys (fail-closed if missing, zero or negative)
+        live_bal = bot_state.get("live_balance")
+        wallet_bal = bot_state.get("wallet_balance")
+        sim_bal = bot_state.get("simulated_balance")
+        gen_bal = bot_state.get("balance")
 
-        peak_equity = float(bot_state.get("peak_balance", equity))
+        equity = None
+        for b_cand in [live_bal, wallet_bal, sim_bal, gen_bal]:
+            if b_cand is not None:
+                try:
+                    b_val = float(b_cand)
+                    if b_val > 0:
+                        equity = b_val
+                        break
+                except (ValueError, TypeError):
+                    continue
+
+        if equity is None or equity <= 0:
+            return False, "REJECTED: Account equity is missing, zero or negative (Fail-Closed)", 0.0, 0.0
+
+        peak_equity = None
+        raw_peak = bot_state.get("peak_balance")
+        if raw_peak is not None:
+            try:
+                p_val = float(raw_peak)
+                if p_val > 0:
+                    peak_equity = max(equity, p_val)
+            except (ValueError, TypeError):
+                pass
+
+        if peak_equity is None:
+            peak_equity = equity
         
         # 0. Check interval position cap & total symbol exposure cap on true economic notional
         raw_notional = position_size_usd * max(1.0, leverage_val)

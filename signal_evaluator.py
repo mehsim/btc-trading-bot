@@ -31,7 +31,8 @@ def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
     """
     Resolves the dominant 4-Hour (240m) macro trend direction, strength, and regime posture.
     """
-    if not isinstance(bot_state, dict):
+    from collections.abc import Mapping
+    if not isinstance(bot_state, (dict, Mapping)) and not hasattr(bot_state, "get"):
         return {"direction": "Neutral", "confidence": 0.50, "adx": 25.0, "is_trending": False, "setup_type": "Neutral"}
     
     macro_pred = (

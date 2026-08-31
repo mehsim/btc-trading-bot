@@ -32,10 +32,10 @@ def default_json_serializer(obj):
         return obj.tolist()
     elif hasattr(obj, "isoformat"):
         return obj.isoformat()
-    return str(obj)
+from collections.abc import MutableMapping
 
 
-class StateManager:
+class StateManager(MutableMapping):
     def __init__(self):
         import os
         self._lock = threading.RLock()
@@ -274,6 +274,32 @@ class StateManager:
                 val = ObservedList(val, lambda lst, item: self._on_mutate_prediction(item))
                 self._cache[key] = val
             return val
+
+    def __delitem__(self, key):
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
+            if self._redis:
+                try:
+                    self._redis.delete(f"bot_state:{key}")
+                except Exception as e:
+                    log_event("WARNING", f"[StateManager Redis Error] Failed to delete {key}: {e}")
+
+    def __iter__(self):
+        with self._lock:
+            keys = set(self._cache.keys())
+            if self._redis:
+                try:
+                    r_keys = self._redis.keys("bot_state:*")
+                    for rk in r_keys:
+                        keys.add(rk.replace("bot_state:", ""))
+                except Exception:
+                    pass
+            return iter(list(keys))
+
+    def __len__(self):
+        with self._lock:
+            return len(list(self.__iter__()))
 
     def __contains__(self, key):
         with self._lock:
