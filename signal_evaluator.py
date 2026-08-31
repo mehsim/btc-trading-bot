@@ -101,6 +101,11 @@ class SignalEvaluator:
                     manifest_mcc = cv_m.get("mcc") if isinstance(cv_m.get("mcc"), (int, float)) else (m_m.get("mcc") if isinstance(m_m.get("mcc"), (int, float)) else (cv_m.get("mcc", {}).get("mean") if isinstance(cv_m.get("mcc"), dict) else None))
                     manifest_mcc_min = cv_m.get("mcc", {}).get("min") if isinstance(cv_m.get("mcc"), dict) else m_m.get("mcc_min")
                     manifest_bal_acc = cv_m.get("balanced_accuracy") if isinstance(cv_m.get("balanced_accuracy"), (int, float)) else (m_m.get("balanced_accuracy") if isinstance(m_m.get("balanced_accuracy"), (int, float)) else (cv_m.get("balanced_accuracy", {}).get("mean") if isinstance(cv_m.get("balanced_accuracy"), dict) else None))
+                    holdout_mcc = m_data.get("holdout_mcc") or cv_m.get("holdout_mcc") or m_m.get("holdout_mcc")
+                    holdout_bal_acc = m_data.get("holdout_balanced_accuracy") or cv_m.get("holdout_balanced_accuracy")
+                    _ci = cv_m.get("holdout_mcc_ci95")
+                    holdout_ci95_low = _ci[0] if isinstance(_ci, (list, tuple)) and len(_ci) >= 1 else None
+                    is_promoted = m_data.get("promoted", True)
             except Exception as ex_m:
                 log_event("WARNING", f"[SignalEvaluator Warning] Failed reading manifest {manifest_path}: {ex_m}")
 
@@ -161,7 +166,11 @@ class SignalEvaluator:
                 "calibrator_ece": cal_ece_val,
                 "manifest_mcc": manifest_mcc,
                 "manifest_mcc_min": manifest_mcc_min,
-                "manifest_bal_acc": manifest_bal_acc
+                "manifest_bal_acc": manifest_bal_acc,
+                "holdout_mcc": holdout_mcc,
+                "holdout_bal_acc": holdout_bal_acc,
+                "holdout_ci95_low": holdout_ci95_low,
+                "is_promoted": is_promoted
             }
             with self.state_lock:
                 while len(self.models_by_interval) >= self.max_cache_size:
@@ -374,7 +383,29 @@ class SignalEvaluator:
                     _top_trend, _top_conf = resolve_direction(probs)
                     raw_conf = _top_conf
                     if _top_trend in ["Bullish", "Bearish"] and _top_conf >= eval_threshold:
-                        direction = _top_trend
+                        # Governance Holdout & CV Metric Validation
+                        from config import TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, MODEL_GOVERNANCE
+                        min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+                        min_h_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+                        m_hmcc = models.get("holdout_mcc")
+                        m_hbal = models.get("holdout_bal_acc")
+                        m_hci = models.get("holdout_ci95_low")
+                        m_prom = models.get("is_promoted")
+
+                        if m_hmcc is not None and m_hmcc < min_h_mcc:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout MCC ({m_hmcc:.4f}) < floor ({min_h_mcc:.4f}). Neutral.")
+                            direction = "Neutral"
+                        elif m_hbal is not None and m_hbal < min_h_bal:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout BalAcc ({m_hbal:.4f}) < floor ({min_h_bal:.4f}). Neutral.")
+                            direction = "Neutral"
+                        elif m_hci is not None and m_hci < -0.05:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout CI95 lower bound ({m_hci:.4f}) < -0.05. Neutral.")
+                            direction = "Neutral"
+                        elif m_prom is False:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m manifest promoted=False. Neutral.")
+                            direction = "Neutral"
+                        else:
+                            direction = _top_trend
                     else:
                         direction = "Neutral"
 

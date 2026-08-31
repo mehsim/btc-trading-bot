@@ -2189,6 +2189,42 @@ def load_model_weights(iv):
                     log_event("CRITICAL", f"[Model Manifest Error] {msg}")
                     send_telegram_alert(f"🚨 *MANIFEST SCHEMA MISMATCH* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Schema*: v{schema_v}")
                     return False
+                from config import (
+                    MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+                )
+                min_holdout_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+                min_holdout_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+                
+                h_mcc = m.get("holdout_mcc") or m.get("cv_metrics", {}).get("holdout_mcc") or m.get("metrics", {}).get("holdout_mcc")
+                h_bal = m.get("holdout_balanced_accuracy") or m.get("cv_metrics", {}).get("holdout_balanced_accuracy")
+                _ci = m.get("cv_metrics", {}).get("holdout_mcc_ci95")
+                h_ci_low = _ci[0] if isinstance(_ci, (list, tuple)) and len(_ci) >= 1 else None
+                is_prom = m.get("promoted", True)
+
+                if h_mcc is not None and h_mcc < min_holdout_mcc:
+                    msg = f"Holdout MCC ({h_mcc:.4f}) below governance floor ({min_holdout_mcc:.4f}) for {prefix} ({iv}m)."
+                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
+                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
+                    return False
+
+                if h_bal is not None and h_bal < min_holdout_bal:
+                    msg = f"Holdout BalAcc ({h_bal:.4f}) below governance floor ({min_holdout_bal:.4f}) for {prefix} ({iv}m)."
+                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
+                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
+                    return False
+
+                if h_ci_low is not None and h_ci_low < -0.05:
+                    msg = f"Holdout MCC CI95 lower bound ({h_ci_low:.4f}) < -0.05 for {prefix} ({iv}m)."
+                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
+                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
+                    return False
+
+                if is_prom is False:
+                    msg = f"Manifest explicitly marked promoted=False for {prefix} ({iv}m)."
+                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
+                    send_telegram_alert(f"🚨 *MODEL NOT PROMOTED* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
+                    return False
+
                 from model_governance import model_governance_engine
                 model_governance_engine.log_barrier_manifest_audit("BTCUSDT", str(iv), m)
                 return True
@@ -6540,16 +6576,26 @@ def main():
                             active_meta_model = m_meta
                             regime_name = f"{served_regime} (GMM)" if ENABLE_DYNAMIC_REGIME_ROUTING else served_regime
 
-                            # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
-                            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+                            # C-1 Predictive Floor & Holdout Out-Of-Sample Governance Check
+                            from config import (
+                                MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC,
+                                TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+                            )
                             min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_mcc", 0.05))
                             min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
+                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+                            min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
 
                             mcc_val = getattr(active_model_trend, "manifest_mcc", None) or models_tf.get(regime_key, {}).get("manifest_mcc") or models_tf.get("manifest_mcc")
                             mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
                             bal_acc_val = getattr(active_model_trend, "manifest_bal_acc", None) or models_tf.get(regime_key, {}).get("manifest_bal_acc") or models_tf.get("manifest_bal_acc")
+                            holdout_mcc_val = getattr(active_model_trend, "holdout_mcc", None) or models_tf.get(regime_key, {}).get("holdout_mcc") or models_tf.get("holdout_mcc")
+                            holdout_bal_acc_val = getattr(active_model_trend, "holdout_bal_acc", None) or models_tf.get(regime_key, {}).get("holdout_bal_acc") or models_tf.get("holdout_bal_acc")
+                            holdout_ci95_low = getattr(active_model_trend, "holdout_ci95_low", None) or models_tf.get(regime_key, {}).get("holdout_ci95_low") or models_tf.get("holdout_ci95_low")
+                            is_promoted_flag = getattr(active_model_trend, "promoted", None) if getattr(active_model_trend, "promoted", None) is not None else models_tf.get(regime_key, {}).get("promoted")
 
-                            if mcc_val is None or bal_acc_val is None or mcc_min_val is None:
+                            if (mcc_val is None or bal_acc_val is None or mcc_min_val is None or 
+                                holdout_mcc_val is None or holdout_bal_acc_val is None or is_promoted_flag is None):
                                 man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
                                 if os.path.exists(man_path):
                                     try:
@@ -6561,6 +6607,16 @@ def main():
                                                 mcc_min_val = _mdata.get("manifest_mcc_min") or _mdata.get("cv_metrics", {}).get("mcc", {}).get("min")
                                             if bal_acc_val is None:
                                                 bal_acc_val = _mdata.get("manifest_bal_acc") or _mdata.get("cv_metrics", {}).get("balanced_accuracy", {}).get("mean")
+                                            if holdout_mcc_val is None:
+                                                holdout_mcc_val = _mdata.get("holdout_mcc") or _mdata.get("cv_metrics", {}).get("holdout_mcc") or _mdata.get("metrics", {}).get("holdout_mcc")
+                                            if holdout_bal_acc_val is None:
+                                                holdout_bal_acc_val = _mdata.get("holdout_balanced_accuracy") or _mdata.get("cv_metrics", {}).get("holdout_balanced_accuracy")
+                                            if holdout_ci95_low is None:
+                                                _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95")
+                                                if isinstance(_ci, (list, tuple)) and len(_ci) >= 1:
+                                                    holdout_ci95_low = _ci[0]
+                                            if is_promoted_flag is None:
+                                                is_promoted_flag = _mdata.get("promoted", True)
                                     except Exception as mf_err:
                                         log_event("WARNING", f"Failed to load manifest {man_path}: {mf_err}")
 
@@ -6575,6 +6631,14 @@ def main():
                                 abstain_reason = f"min CV MCC {mcc_min_val:.4f} < -0.05"
                             elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
                                 abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
+                            elif holdout_mcc_val is not None and holdout_mcc_val < min_holdout_mcc_floor:
+                                abstain_reason = f"Holdout MCC {holdout_mcc_val:.4f} < floor {min_holdout_mcc_floor}"
+                            elif holdout_bal_acc_val is not None and holdout_bal_acc_val < min_holdout_bal_acc_floor:
+                                abstain_reason = f"Holdout BalAcc {holdout_bal_acc_val:.4f} < floor {min_holdout_bal_acc_floor}"
+                            elif holdout_ci95_low is not None and holdout_ci95_low < -0.05:
+                                abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
+                            elif is_promoted_flag is False:
+                                abstain_reason = f"{served_regime} model manifest promoted=False"
 
                             if abstain_reason:
                                 log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] {abstain_reason}. Abstaining.")
