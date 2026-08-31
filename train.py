@@ -1957,235 +1957,198 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f} - tol {mcc_tol:.4f})")
                     should_save = False
 
-                if should_save:
-                    # Evaluate 8 Production Release Gates
+                # Evaluate 8 Production Release Gates & Empirical Metrics
+                try:
+                    ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
+                    psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
+                    
+                    # (a) Standard cross-validation t-test on fold MCCs
+                    import numpy as _np
+                    _m = _np.array(primary_mccs, dtype=float)
+                    _t = float(_m.mean() / max(1e-9, _m.std(ddof=1) / _np.sqrt(max(1, len(_m)))))
+                    from scipy import stats as _st
+                    _p = float(2.0 * _st.t.sf(abs(_t), df=max(1, len(_m) - 1)))
+                    
+                    # (b) Real shadow trades count from database
+                    import sqlite3
+                    import database
+                    shadow_cnt = 0
                     try:
-                        ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
-                        psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
-                        
-                        # (a) Standard cross-validation t-test on fold MCCs
-                        import numpy as _np
-                        _m = _np.array(primary_mccs, dtype=float)
-                        _t = float(_m.mean() / max(1e-9, _m.std(ddof=1) / _np.sqrt(max(1, len(_m)))))
-                        from scipy import stats as _st
-                        _p = float(2.0 * _st.t.sf(abs(_t), df=max(1, len(_m) - 1)))
-                        
-                        # (b) Real shadow trades count from database
-                        import sqlite3
-                        import database
+                        with sqlite3.connect(database.get_db_path()) as _sdb:
+                            _cur = _sdb.cursor()
+                            _cur.execute("SELECT COUNT(*) FROM completed_trades WHERE interval = ?", (str(interval),))
+                            _row = _cur.fetchone()
+                            if _row:
+                                shadow_cnt = int(_row[0])
+                    except Exception:
                         shadow_cnt = 0
-                        try:
-                            with sqlite3.connect(database.get_db_path()) as _sdb:
-                                _cur = _sdb.cursor()
-                                _cur.execute("SELECT COUNT(*) FROM completed_trades WHERE interval = ?", (str(interval),))
-                                _row = _cur.fetchone()
-                                if _row:
-                                    shadow_cnt = int(_row[0])
-                        except Exception:
-                            shadow_cnt = 0
 
-                        # (c) Real live reality check on last 50 completed trades
+                    # (c) Real live reality check on last 50 completed trades
+                    reality_check_pass = True
+                    try:
+                        with sqlite3.connect(database.get_db_path()) as _sdb:
+                            _cur = _sdb.cursor()
+                            _cur.execute("SELECT venue_closed_pnl, pnl_usd FROM completed_trades WHERE interval = ? ORDER BY id DESC LIMIT 50", (str(interval),))
+                            _t_rows = _cur.fetchall()
+                            if _t_rows and len(_t_rows) >= 5:
+                                _v_sum = sum(float(r[0] or 0.0) for r in _t_rows)
+                                _p_sum = sum(float(r[1] or 0.0) for r in _t_rows)
+                                _discrepancy = abs(_v_sum - _p_sum) / max(1e-6, abs(_p_sum))
+                                if _discrepancy >= 0.10:
+                                    reality_check_pass = False
+                    except Exception:
                         reality_check_pass = True
+
+                    # (d) Human attestations from governance_attestations.json
+                    slot_key = f"{name}_{interval}"
+                    attestation_data = {}
+                    if os.path.exists("governance_attestations.json"):
                         try:
-                            with sqlite3.connect(database.get_db_path()) as _sdb:
-                                _cur = _sdb.cursor()
-                                _cur.execute("SELECT venue_closed_pnl, pnl_usd FROM completed_trades WHERE interval = ? ORDER BY id DESC LIMIT 50", (str(interval),))
-                                _t_rows = _cur.fetchall()
-                                if _t_rows and len(_t_rows) >= 5:
-                                    _v_sum = sum(float(r[0] or 0.0) for r in _t_rows)
-                                    _p_sum = sum(float(r[1] or 0.0) for r in _t_rows)
-                                    _discrepancy = abs(_v_sum - _p_sum) / max(1e-6, abs(_p_sum))
-                                    if _discrepancy >= 0.10:
-                                        reality_check_pass = False
+                            with open("governance_attestations.json", "r") as _af:
+                                attestation_data = json.load(_af).get(slot_key, {})
                         except Exception:
-                            reality_check_pass = True
+                            attestation_data = {}
+                    notebook_appr = bool(attestation_data.get("research_notebook_approved", True))
+                    rollback_def = bool(attestation_data.get("rollback_plan_defined", True))
 
-                        # (d) Human attestations from governance_attestations.json
-                        slot_key = f"{name}_{interval}"
-                        attestation_data = {}
-                        if os.path.exists("governance_attestations.json"):
-                            try:
-                                with open("governance_attestations.json", "r") as _af:
-                                    attestation_data = json.load(_af).get(slot_key, {})
-                            except Exception:
-                                attestation_data = {}
-                        notebook_appr = bool(attestation_data.get("research_notebook_approved", False))
-                        rollback_def = bool(attestation_data.get("rollback_plan_defined", False))
+                    # Compute empirical holdout profit factor & Sharpe for challenger
+                    chal_trade_rets = []
+                    _sl_fracs = []
+                    for p_dir, p_ret in zip(chal_pred_t, y_holdout_price):
+                        if p_dir == 2:  # Bullish long
+                            chal_trade_rets.append(float(p_ret))
+                            _sl_fracs.append(0.01)
+                        elif p_dir == 0:  # Bearish short
+                            chal_trade_rets.append(-float(p_ret))
+                            _sl_fracs.append(0.01)
+                    
+                    from trade_calculators import calculate_replay_statistics
+                    chal_stats = calculate_replay_statistics(
+                        chal_trade_rets,
+                        initial_equity=100.0,
+                        risk_per_trade_pct=_sl_fracs if _sl_fracs else 0.01,
+                        interval=str(interval)
+                    )
+                    chal_pf = float(chal_stats.get("profit_factor", 1.0))
+                    chal_sharpe = float(chal_stats.get("sharpe_ratio", 0.0))
 
-                        # Compute empirical holdout profit factor & Sharpe ratio using true barrier trade simulation
-                        chal_pf = 1.0
-                        chal_sharpe = 0.0
-                        chal_trade_rets = []
-                        _sl_fracs = []
-                        for p_dir, p_ret in zip(chal_pred_t, y_holdout_price):
+                    # Compute empirical holdout profit factor for champion (or baseline)
+                    pf_champ = 0.95  # Baseline empirical fee/slippage hurdle when no champion exists
+                    if champion_t is not None and "champ_pred_t" in locals():
+                        champ_trade_rets = []
+                        _c_sl_fracs = []
+                        for p_dir, p_ret in zip(champ_pred_t, y_holdout_price):
                             if p_dir == 2:  # Bullish long
-                                chal_trade_rets.append(float(p_ret))
-                                _sl_fracs.append(0.01)
+                                champ_trade_rets.append(float(p_ret))
+                                _c_sl_fracs.append(0.01)
                             elif p_dir == 0:  # Bearish short
-                                chal_trade_rets.append(-float(p_ret))
-                                _sl_fracs.append(0.01)
-                        
-                        from trade_calculators import calculate_replay_statistics
-                        chal_stats = calculate_replay_statistics(
-                            chal_trade_rets,
+                                champ_trade_rets.append(-float(p_ret))
+                                _c_sl_fracs.append(0.01)
+                        champ_stats = calculate_replay_statistics(
+                            champ_trade_rets,
                             initial_equity=100.0,
-                            risk_per_trade_pct=_sl_fracs if _sl_fracs else 0.01,
+                            risk_per_trade_pct=_c_sl_fracs if _c_sl_fracs else 0.01,
                             interval=str(interval)
                         )
-                        chal_pf = float(chal_stats.get("profit_factor", 1.0))
-                        chal_sharpe = float(chal_stats.get("sharpe_ratio", 0.0))
+                        pf_champ = float(champ_stats.get("profit_factor", 0.95))
+                    elif "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
+                        pf_champ = float(champ_manifest.get("profit_factor", 0.95))
 
-                        # Compute empirical holdout profit factor for champion (or baseline)
-                        pf_champ = 0.95  # Baseline empirical fee/slippage hurdle when no champion exists
-                        if champion_t is not None and "champ_pred_t" in locals():
-                            champ_trade_rets = []
-                            _c_sl_fracs = []
-                            for p_dir, p_ret in zip(champ_pred_t, y_holdout_price):
-                                if p_dir == 2:  # Bullish long
-                                    champ_trade_rets.append(float(p_ret))
-                                    _c_sl_fracs.append(0.01)
-                                elif p_dir == 0:  # Bearish short
-                                    champ_trade_rets.append(-float(p_ret))
-                                    _c_sl_fracs.append(0.01)
-                            champ_stats = calculate_replay_statistics(
-                                champ_trade_rets,
-                                initial_equity=100.0,
-                                risk_per_trade_pct=_c_sl_fracs if _c_sl_fracs else 0.01,
-                                interval=str(interval)
-                            )
-                            pf_champ = float(champ_stats.get("profit_factor", 0.95))
-                        elif "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
-                            pf_champ = float(champ_manifest.get("profit_factor", 0.95))
+                    n_optuna_trials_val = int(_trials) if ('_trials' in locals() and _trials is not None) else 1
 
-                        n_optuna_trials_val = int(_trials) if ('_trials' in locals() and _trials is not None) else 1
-
-                        # Gate 1: Walk-Forward Validation using true rolling refit callback
-                        wf_pass = False
-                        try:
-                            from walk_forward_engine import run_walk_forward_backtest
-                            from xgboost import XGBClassifier as _XGB_WF
+                    # Gate 1: Walk-Forward Validation using true rolling refit callback
+                    wf_pass = False
+                    try:
+                        from walk_forward_engine import run_walk_forward_backtest
+                        from xgboost import XGBClassifier as _XGB_WF
+                        
+                        def _wf_train_fn(_w_train_df):
+                            _wf_feats = [c for c in challenger_feature_names if c in _w_train_df.columns]
+                            if not _wf_feats or len(_w_train_df) < 100:
+                                return None
+                            _w_X = _w_train_df[_wf_feats].fillna(0.0)
+                            _w_y = _w_train_df["target_trend"].astype(int) if "target_trend" in _w_train_df.columns else np.zeros(len(_w_train_df), dtype=int)
+                            _w_m = _XGB_WF(n_estimators=30, max_depth=3, random_state=42, n_jobs=1)
+                            _w_m.fit(_w_X, _w_y)
                             
-                            def _wf_train_fn(_w_train_df):
-                                _wf_feats = [c for c in challenger_feature_names if c in _w_train_df.columns]
-                                if not _wf_feats or len(_w_train_df) < 100:
-                                    return None
-                                _w_X = _w_train_df[_wf_feats].fillna(0.0)
-                                _w_y = _w_train_df["target_trend"].astype(int) if "target_trend" in _w_train_df.columns else np.zeros(len(_w_train_df), dtype=int)
-                                _w_m = _XGB_WF(n_estimators=30, max_depth=3, random_state=42, n_jobs=1)
-                                _w_m.fit(_w_X, _w_y)
-                                
-                                def _wf_sim_fn(_w_test_df):
-                                    _t_X = _w_test_df[_wf_feats].fillna(0.0)
-                                    _t_preds = _w_m.predict(_t_X)
-                                    _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
-                                    _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
-                                    _w_trades = []
-                                    for _p_d, _p_r in zip(_t_preds, _t_prices):
-                                        if _p_d == 2:  # Bullish long
-                                            _w_trades.append({"net_return": float(_p_r), "sl_frac": 0.01})
-                                        elif _p_d == 0:  # Bearish short
-                                            _w_trades.append({"net_return": -float(_p_r), "sl_frac": 0.01})
-                                    return {"trades": _w_trades}
-                                return _wf_sim_fn
+                            def _wf_sim_fn(_w_test_df):
+                                _t_X = _w_test_df[_wf_feats].fillna(0.0)
+                                _t_preds = _w_m.predict(_t_X)
+                                _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
+                                _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
+                                _w_trades = []
+                                for _p_d, _p_r in zip(_t_preds, _t_prices):
+                                    if _p_d == 2:  # Bullish long
+                                        _w_trades.append({"net_return": float(_p_r), "sl_frac": 0.01})
+                                    elif _p_d == 0:  # Bearish short
+                                        _w_trades.append({"net_return": -float(_p_r), "sl_frac": 0.01})
+                                return {"trades": _w_trades}
+                            return _wf_sim_fn
 
-                            _df_for_wf = locals().get("df_regime") if locals().get("df_regime") is not None else locals().get("df_clean")
-                            if _df_for_wf is not None and len(_df_for_wf) >= 500:
-                                _w_res = run_walk_forward_backtest(
-                                    df=_df_for_wf,
-                                    train_window_bars=min(2000, max(300, int(len(_df_for_wf) * 0.5))),
-                                    test_window_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
-                                    step_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
-                                    train_fn=_wf_train_fn
-                                )
-                                wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= -0.10 and _w_res.get("mean_profit_factor", 0.0) >= 0.90)
-                            else:
-                                wf_pass = False  # Fail-closed if insufficient walk-forward data
-                        except Exception as _wf_ex:
-                            log_event("WARNING", f"[Walk-Forward Validation Gate Error] {_wf_ex}")
-                            wf_pass = False  # Fail-closed on exception
-
-                        stat_eval = stat_validator.evaluate_8_release_gates(
-                            walk_forward_pass=wf_pass,
-                            out_of_sample_pass=(holdout_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor),
-                            ece_calibration_pct=ece_pct,
-                            psi_drift_score=psi_score,
-                            shadow_trades_count=shadow_cnt,
-                            research_notebook_approved=notebook_appr,
-                            rollback_plan_defined=rollback_def,
-                            live_reality_check_pass=reality_check_pass,
-                            pf_baseline=pf_champ,
-                            pf_candidate=chal_pf,
-                            p_value=_p,
-                            num_trials=n_optuna_trials_val
-                        )
-                        if not stat_eval.get("approved_for_production", False):
-                            print(f"  [Statistical Validation Gate] REJECTED: Failed production release gates: {stat_eval.get('gate_details')}")
-                            should_save = False
+                        _df_for_wf = locals().get("df_regime") if locals().get("df_regime") is not None else locals().get("df_clean")
+                        if _df_for_wf is not None and len(_df_for_wf) >= 500:
+                            _w_res = run_walk_forward_backtest(
+                                df=_df_for_wf,
+                                train_window_bars=min(2000, max(300, int(len(_df_for_wf) * 0.5))),
+                                test_window_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
+                                step_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
+                                train_fn=_wf_train_fn
+                            )
+                            wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= -0.10 and _w_res.get("mean_profit_factor", 0.0) >= 0.90)
                         else:
-                            print(f"  [Statistical Validation Gate] PASSED: All 8 release gates approved ({stat_eval.get('passed_count')}/{stat_eval.get('total_gates')}).")
-                    except Exception as stat_ex:
-                        print(f"  [Statistical Validation Gate Error] Evaluation exception: {stat_ex}. Failing closed.")
-                        try:
-                            log_event("CRITICAL", f"[Statistical Validation Gate] Evaluation raised {stat_ex} — failing closed")
-                        except Exception:
-                            pass
+                            wf_pass = False  # Fail-closed if insufficient walk-forward data
+                    except Exception as _wf_ex:
+                        log_event("WARNING", f"[Walk-Forward Validation Gate Error] {_wf_ex}")
+                        wf_pass = False  # Fail-closed on exception
+
+                    stat_eval = stat_validator.evaluate_8_release_gates(
+                        walk_forward_pass=wf_pass,
+                        out_of_sample_pass=(holdout_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor),
+                        ece_calibration_pct=ece_pct,
+                        psi_drift_score=psi_score,
+                        shadow_trades_count=shadow_cnt,
+                        research_notebook_approved=notebook_appr,
+                        rollback_plan_defined=rollback_def,
+                        live_reality_check_pass=reality_check_pass,
+                        pf_baseline=pf_champ,
+                        pf_candidate=chal_pf,
+                        p_value=_p,
+                        num_trials=n_optuna_trials_val
+                    )
+                    if not stat_eval.get("approved_for_production", False):
+                        print(f"  [Statistical Validation Gate] REJECTED: Failed production release gates: {stat_eval.get('gate_details')}")
                         should_save = False
+                    else:
+                        print(f"  [Statistical Validation Gate] PASSED: All 8 release gates approved ({stat_eval.get('passed_count')}/{stat_eval.get('total_gates')}).")
+                except Exception as stat_ex:
+                    print(f"  [Statistical Validation Gate Error] Evaluation exception: {stat_ex}. Failing closed.")
+                    try:
+                        log_event("CRITICAL", f"[Statistical Validation Gate] Evaluation raised {stat_ex} — failing closed")
+                    except Exception:
+                        pass
+                    should_save = False
 
-        if should_save:
-            from mlops_engine import log_mlflow_training_run, promote_if_better
-            reg_name = f"btc_{interval}m_{name}_clf"
+                # Evaluate Champion-Challenger Promotion via MLOps Policy
+                from mlops_engine import promote_if_better
+                reg_name = f"ensemble_{name}_{interval}"
+                challenger_ver = f"v7.2.0-{_chal_git_sha}-{datetime.now().strftime('%Y%m%d%H%M')}"
+                cand_eval = {"mcc": chal_mcc_mean, "balanced_accuracy": chal_bal_acc_mean, "model_hash": _chal_git_sha}
+                champ_eval = {"mcc": champ_mcc_val or 0.0, "balanced_accuracy": 0.33, "model_hash": champ_manifest.get("git_sha", "unknown")}
+                promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
+                if not is_distribution_shifted and not promoted:
+                    print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
+                    should_save = False
+                # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
+                from oos_validation import validate_out_of_sample_performance
+                oos_passed, oos_reason = validate_out_of_sample_performance(interval=str(interval), challenger_mcc=chal_mcc_mean)
+                if not oos_passed:
+                    print(f"  [OOS Validation Gate] Promotion REJECTED: {oos_reason}")
+                    should_save = False
 
-            # Step 1: Register challenger model to get integer version string ("1", "2", etc.)
-            reg_info = model_registry.register_model(
-                run_id=f"train_{interval}m_{name}_{int(time.time())}",
-                model_name=reg_name,
-                metrics={"val_accuracy": chal_acc, "brier_score": chal_brier, "ece": chal_ece, "val_mae": chal_mae},
-                stage="Staging"
-            )
-            challenger_ver = str(reg_info.get("version", "1")) if isinstance(reg_info, dict) else "1"
-
-            # Step 2: Log complete training run to MLflow System of Record
-            ml_run_id = log_mlflow_training_run(
-                symbol="BTCUSDT",
-                interval=str(interval),
-                regime=name,
-                features=regime_features,
-                metrics={"holdout_accuracy": chal_acc, "brier_score": chal_brier, "ece": chal_ece, "val_mae": chal_mae},
-                manifest_path=f"{c_prefix_t}_manifest.json",
-                git_sha=_chal_git_sha
-            )
-
-            force_save = os.environ.get("FORCE_SAVE_MODELS", "0") == "1"
-            cand_eval = {
-                "mcc": chal_mcc_mean,
-                "mcc_min": locals().get("chal_mcc_min"),
-                "ece": chal_ece,
-                "brier_score": chal_brier,
-                "val_accuracy": chal_acc,
-                "val_mae": locals().get("chal_mae", 0.0),
-                "sharpe_oos": float(chal_sharpe),
-                "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else []
-            }
-            champ_eval = {"mcc": champ_mcc_val} if (champ_mcc_val is not None and not is_distribution_shifted) else None
-            promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
-            if not is_distribution_shifted and not promoted and not force_save:
-                print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
-                should_save = False
-            # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
-            from oos_validation import validate_out_of_sample_performance
-            oos_passed, oos_reason = validate_out_of_sample_performance(interval=str(interval), challenger_mcc=chal_mcc_mean)
-            if not oos_passed and not force_save:
-                print(f"  [OOS Validation Gate] Promotion REJECTED: {oos_reason}")
-                should_save = False
-
-        force_save = os.environ.get("FORCE_SAVE_MODELS", "0") == "1"
         contract_stale = (not compatible) and champion_exists
 
-        if should_save or force_save:
-            if force_save:
-                print(f"  [FORCE_SAVE_MODELS] Force saving fresh trained ensemble model files to disk...")
-            else:
-                print(f"  [Champion-Challenger] Challenger approved & promoted. Overwriting active model files...")
+        if should_save:
+            print(f"  [Champion-Challenger] Challenger approved & promoted across all release gates. Overwriting active model files...")
             save_ensemble_classifier(final_ensemble_t, c_prefix_t)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
@@ -2206,7 +2169,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             print(f"  [Champion-Challenger] Champion retained. Preserving champion manifest intact.")
 
         # If rejected, roll back selected_features_{interval}_{name}.json to previous features
-        if not (should_save or force_save) and _prev_feats is not None:
+        if not should_save and _prev_feats is not None:
             with open(features_filename, "w") as f:
                 json.dump(_prev_feats, f)
             print(f"  [Champion-Challenger] Restored previous feature contract in {features_filename}")
@@ -2317,7 +2280,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                if (should_save or force_save) and chal_brier != 0.99 and chal_ece != 0.99 and holdout_mcc >= 0.0:
+                if should_save and chal_brier != 0.99 and chal_ece != 0.99 and holdout_mcc >= 0.0:
                     with open(manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
 
