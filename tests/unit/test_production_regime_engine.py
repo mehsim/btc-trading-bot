@@ -47,3 +47,31 @@ def test_regime_rsi_guards():
     # Macro guard active -> Blocked
     res5 = engine.evaluate_confluence("Bullish", "TRENDING", rsi=55.0, macro_guard_active=True)
     assert res5["execute"] is False
+
+def test_classify_market_regime_string_normalization():
+    engine = ProductionRegimeEngine()
+
+    # "High Vol, Ranging" maps to CHOPPY -> Blocked unconditionally
+    res_chop = engine.evaluate_confluence("Bullish", "High Vol, Ranging", rsi=50.0)
+    assert res_chop["execute"] is False
+    assert "CHOPPY" in res_chop["reason"]
+
+    # "Low Vol, Ranging" with RSI > 70 -> Blocked (Overbought in Range)
+    res_ob = engine.evaluate_confluence("Bullish", "Low Vol, Ranging", rsi=75.0)
+    assert res_ob["execute"] is False
+    assert "Overbought" in res_ob["reason"]
+
+    # "Low Vol, Ranging" with RSI < 30 on Bearish -> Blocked (Oversold in Range)
+    res_os = engine.evaluate_confluence("Bearish", "Low Vol, Ranging", rsi=25.0)
+    assert res_os["execute"] is False
+    assert "Oversold" in res_os["reason"]
+
+    # "High Vol, Trending" with RSI < 25 on Bullish -> Blocked (Exhaustion)
+    res_exh = engine.evaluate_confluence("Bullish", "High Vol, Trending", rsi=20.0)
+    assert res_exh["execute"] is False
+    assert "Exhaustion" in res_exh["reason"]
+
+    # "Low Vol, Trending" with normal RSI (50.0) -> Approved
+    res_ok = engine.evaluate_confluence("Bullish", "Low Vol, Trending", rsi=50.0)
+    assert res_ok["execute"] is True
+

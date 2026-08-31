@@ -61,6 +61,40 @@ class ProductionRegimeEngine:
         self._regime_state[key] = current
         return current
 
+    def _normalize_regime(self, regime: str) -> str:
+        """
+        Normalizes any regime string representation to canonical tokens:
+        'STRONG_TREND', 'MODERATE_TREND', 'TRENDING', 'RANGING', 'CHOPPY'
+        """
+        if not regime or not isinstance(regime, str):
+            return "RANGING"
+        r_up = regime.upper().strip()
+        
+        # Exact canonical match
+        if r_up in ["STRONG_TREND", "MODERATE_TREND", "TRENDING", "RANGING", "CHOPPY"]:
+            return r_up
+            
+        # classify_market_regime mappings ("High Vol, Ranging" -> CHOPPY, "Low Vol, Ranging" -> RANGING, etc.)
+        if "HIGH VOL" in r_up and "RANGING" in r_up:
+            return "CHOPPY"
+        if "RANGING" in r_up:
+            return "RANGING"
+        if "HIGH VOL" in r_up and "TREND" in r_up:
+            return "STRONG_TREND"
+        if "LOW VOL" in r_up and "TREND" in r_up:
+            return "MODERATE_TREND"
+        if "TREND" in r_up:
+            return "TRENDING"
+        if "CHOP" in r_up:
+            return "CHOPPY"
+            
+        try:
+            from logger import log_event
+            log_event("WARNING", f"[Regime Normalization Warning] Unrecognized regime token '{regime}'. Defaulting to RANGING fail-safe.")
+        except Exception:
+            pass
+        return "RANGING"
+
     def evaluate_confluence(
         self, 
         ml_direction: str, 
@@ -75,19 +109,21 @@ class ProductionRegimeEngine:
         if macro_guard_active:
             return {"execute": False, "reason": "Blocked by Economic Event Guard"}
 
-        if regime == "CHOPPY":
+        norm_regime = self._normalize_regime(regime)
+
+        if norm_regime == "CHOPPY":
             return {"execute": False, "reason": "Blocked: CHOPPY Market Regime (No Edge)"}
 
         if ml_direction == "Bullish":
-            if regime == "RANGING" and rsi > 70.0:
+            if norm_regime == "RANGING" and rsi > 70.0:
                 return {"execute": False, "reason": "Overbought in Ranging Regime (RSI > 70)"}
-            if regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi < 25.0:
+            if norm_regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi < 25.0:
                 return {"execute": False, "reason": "Extreme Counter-Trend Exhaustion (RSI < 25)"}
                 
         elif ml_direction == "Bearish":
-            if regime == "RANGING" and rsi < 30.0:
-                return {"execute": False, "reason": "Oversold in Ranging Regime (RSI < 30)"}
-            if regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi > 75.0:
+            if norm_regime == "RANGING" and rsi < 30.0:
+                return {"execute": False, "reason": "Oversold in Ranging Regime (RSI > 30)"}
+            if norm_regime in ["TRENDING", "STRONG_TREND", "MODERATE_TREND"] and rsi > 75.0:
                 return {"execute": False, "reason": "Extreme Counter-Trend Exhaustion (RSI > 75)"}
 
         return {"execute": True, "reason": "Signal Confluence Confirmed"}
