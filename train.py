@@ -717,7 +717,7 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=8)
     return study.best_params
 
 def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -764,7 +764,7 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=8)
     return study.best_params
 
 def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
@@ -802,7 +802,7 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=8)
     return study.best_params
 
 def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
@@ -862,7 +862,7 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=8)
     return study.best_params
 
 def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
@@ -888,7 +888,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=8)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
@@ -1203,14 +1203,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 prefilter.fit(X_rfecv_prelim[available_candidates], y_rfecv)
                 n_keep = min(20, len(available_candidates))
                 top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
-                top_feats = list(np.array(available_candidates)[top_idx])
+                top_feats = [str(f) for f in np.array(available_candidates)[top_idx]]
                 print(f"[Regime RANGING {interval}m Stage 1] Specialized mean-reversion filter → {len(top_feats)} candidates.")
             else:
                 prefilter = XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1)
                 prefilter.fit(X_rfecv_prelim, y_rfecv)
                 n_keep = min(60, X_rfecv_prelim.shape[1])
                 top_idx = np.argsort(prefilter.feature_importances_)[-n_keep:]
-                top_feats = list(X_rfecv_prelim.columns[top_idx])
+                top_feats = [str(f) for f in X_rfecv_prelim.columns[top_idx]]
                 print(f"[Regime {name.upper()} Stage 1] Prefiltered {X_rfecv_prelim.shape[1]} → {len(top_feats)} candidates.")
             del prefilter
             gc.collect()

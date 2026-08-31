@@ -66,8 +66,9 @@ if os.path.exists("governance_denylist.json"):
         pass
 
 MODEL_SLOT_DENYLIST = {
-    # trending_15 lifted: retrained with 16-page RFECV (+0.0354 CV MCC, +0.0251 Holdout MCC, 34.75% Holdout BalAcc)
+    "ranging_15",     # 15m ranging market microstructure has negative holdout MCC (-0.0113) — fail-closed
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
+    # trending_15 lifted: retrained with 16-page RFECV (+0.0354 CV MCC, +0.0251 Holdout MCC, 34.75% Holdout BalAcc)
     # trending_240 & ranging_240 lifted: retrained with 16-page RFECV (+0.0667 / +0.0567 CV MCC, +0.0253 / +0.0494 Holdout MCC)
 }.union(_persisted_denylist)
 
