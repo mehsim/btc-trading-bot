@@ -101,9 +101,7 @@
     "effective_sample_size": 475.95,
     "raw_sample_size": 51825,
     "mcc_min": -0.0353,
-    "profit_factor": 0.7149,
-    "holdout_mcc": 0.0251,
-    "holdout_sharpe": -18.2592
+    "holdout_mcc": 0.0251
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -218,8 +216,7 @@
   "status": "champion",
   "deployed_stage": "Production",
   "holdout_mcc_promoted": true,
-  "profit_factor": 0.7149,
   "holdout_mcc": 0.0251,
   "holdout_sharpe": -18.2592,
-  "hmac_signature": "9a034b5c2247c6eb35ea6fa88e0f23cb493bfdd93e8a63262aefc32e484b470b"
+  "hmac_signature": "3bf1b365c0b2d6949f42fd6b6fbc387a3c3a6582172cb5c8cca1d0bedbf1c49b"
 }

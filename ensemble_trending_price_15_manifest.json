@@ -101,9 +101,7 @@
     "mcc": 0.0354,
     "balanced_accuracy": 0.3539,
     "mcc_min": -0.0353,
-    "profit_factor": 0.7149,
-    "holdout_mcc": 0.0251,
-    "holdout_sharpe": -18.2592
+    "holdout_mcc": 0.0251
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -218,8 +216,7 @@
   "status": "champion",
   "deployed_stage": "Production",
   "holdout_mcc_promoted": true,
-  "profit_factor": 0.7149,
   "holdout_mcc": 0.0251,
   "holdout_sharpe": -18.2592,
-  "hmac_signature": "5d05b60b045028a1fa93bdad760dae8884cc0ec9abed3946ab1680ee98ee33ff"
+  "hmac_signature": "beb222bab2e65e193fd894e25a273a5971e631dd8c74ef6c67806140972a3473"
 }
