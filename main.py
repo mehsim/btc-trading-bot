@@ -6807,6 +6807,13 @@ def main():
                             dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
                             adjustments_applied = [("economic_base", dynamic_conf_threshold)]
 
+                            # Calibrator Economic Viability Guard
+                            if active_calibrator is not None:
+                                from tools.beta_calibrator import is_calibrator_viable
+                                if not is_calibrator_viable(active_calibrator, min_required_p_star=economic_base_threshold):
+                                    log_event("WARNING", f"[{symbol} {iv}m Calibrator Unviable] Active calibrator achievable ceiling cannot reach fee-inclusive break-even p* ({economic_base_threshold:.4f}). Abstaining.")
+                                    continue
+
                             # ADX Regime Floor Filter (Regime-aware: Ranging models trade 10-24 ADX; Trending requires high momentum)
                             is_ranging_regime = "Ranging" in regime_name
                             if is_ranging_regime:

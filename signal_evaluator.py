@@ -408,8 +408,12 @@ class SignalEvaluator:
 
                     calibrator = models.get("calibrator")
                     if calibrator is not None and isinstance(calibrator, dict) and direction in ["Bullish", "Bearish"]:
-                        from tools.beta_calibrator import calibrate_probability
-                        calibrated_conf = float(calibrate_probability(raw_conf, calibrator))
+                        from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
+                        p_star_req = float(round(p_star + cost_adj, 4))
+                        if not is_calibrator_viable(calibrator, min_required_p_star=p_star_req):
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m calibrator achievable ceiling cannot reach break-even p* ({p_star_req:.4f}). Filtering to Neutral.")
+                            direction = "Neutral"
+                        calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
                     else:
                         calibrated_conf = float(raw_conf)
 

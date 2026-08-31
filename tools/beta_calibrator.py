@@ -60,25 +60,60 @@ class BetaCalibrator:
                 log_odds = (x1 + x2).reshape(-1, 1)
                 lr_platt = LogisticRegression(C=1.0, solver='lbfgs', max_iter=1000)
                 lr_platt.fit(log_odds, y)
-                platt_coef = max(0.01, float(lr_platt.coef_[0][0]))
-                self.a = platt_coef
-                self.b = platt_coef
-                self.c = float(lr_platt.intercept_[0])
+                platt_coef = float(lr_platt.coef_[0][0])
+                if platt_coef <= 0.02:
+                    # Boundary hit / degenerate flat slope -> fit failure
+                    self.a = float(platt_coef)
+                    self.b = float(platt_coef)
+                    self.c = float(lr_platt.intercept_[0])
+                    self.is_fitted = False
+                    self.fit_n = len(s)
+                else:
+                    self.a = platt_coef
+                    self.b = platt_coef
+                    self.c = float(lr_platt.intercept_[0])
+                    self.is_fitted = True
+                    self.fit_n = len(s)
             else:
-                self.a = max(0.01, a_val)
-                self.b = max(0.01, b_val)
-                self.c = c_val
+                if a_val <= 0.02 or b_val <= 0.02:
+                    # Boundary hit / degenerate flat slope -> fit failure
+                    self.a = float(a_val)
+                    self.b = float(b_val)
+                    self.c = c_val
+                    self.is_fitted = False
+                    self.fit_n = len(s)
+                else:
+                    self.a = float(a_val)
+                    self.b = float(b_val)
+                    self.c = c_val
+                    self.is_fitted = True
+                    self.fit_n = len(s)
 
-            self.is_fitted = True
-            self.fit_n = len(s)
         except Exception:
             self.a = 1.0
             self.b = 1.0
             self.c = 0.0
-            self.is_fitted = True
+            self.is_fitted = False
             self.fit_n = len(s)
 
         return self
+
+    def max_achievable_probability(self, max_input_score: float = 0.99) -> float:
+        """Computes the maximum calibrated probability achievable within servable score range."""
+        return float(self.predict_proba(max_input_score))
+
+    def is_viable(self, min_required_p_star: Optional[float] = None) -> bool:
+        """
+        Validates whether the calibrator is non-degenerate and economically viable.
+        Returns False if shape parameters hit boundary floor (<= 0.02) or if max achievable output
+        cannot exceed the minimum required break-even p*.
+        """
+        if not self.is_fitted or self.a <= 0.02 or self.b <= 0.02:
+            return False
+        if min_required_p_star is not None:
+            if self.max_achievable_probability(0.99) < min_required_p_star:
+                return False
+        return True
 
     def predict_proba(self, scores: Union[float, np.ndarray, List[float]]) -> Union[float, np.ndarray]:
         is_scalar = isinstance(scores, (float, int))
@@ -115,7 +150,27 @@ class BetaCalibrator:
         return bc
 
 
-def calibrate_probability(raw_score: float, calibrator_data: Optional[Dict]) -> float:
+def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: Optional[float] = None) -> bool:
+    """
+    Checks if a calibrator dictionary represents a viable, non-degenerate probability map
+    whose achievable ceiling exceeds the fee-inclusive break-even p*.
+    """
+    if not calibrator_data or not isinstance(calibrator_data, dict):
+        return True
+    if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
+        bc = BetaCalibrator.from_dict(calibrator_data)
+        return bc.is_viable(min_required_p_star=min_required_p_star)
+    Ys = calibrator_data.get("y", [])
+    if Ys and len(Ys) > 0:
+        max_y = max(Ys)
+        if max_y <= 0.02:
+            return False
+        if min_required_p_star is not None and max_y < min_required_p_star:
+            return False
+    return True
+
+
+def calibrate_probability(raw_score: float, calibrator_data: Optional[Dict], min_required_p_star: Optional[float] = None) -> float:
     """
     Universal probability calibrator helper supporting both Beta calibration and legacy threshold arrays.
     Returns strictly the empirical calibrated probability from the fitted calibrator.
