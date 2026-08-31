@@ -212,6 +212,23 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
 
     all_data = []
     
+    # Calculate expected step in milliseconds
+    str_iv = str(interval).strip().upper()
+    if str_iv.isdigit():
+        expected_step_ms = int(str_iv) * 60 * 1000
+    elif str_iv in ("D", "1D", "DAY", "DAILY"):
+        expected_step_ms = 86400 * 1000
+    elif str_iv in ("W", "1W", "WEEK", "WEEKLY"):
+        expected_step_ms = 7 * 86400 * 1000
+    elif str_iv.endswith("M") and str_iv[:-1].isdigit():
+        expected_step_ms = int(str_iv[:-1]) * 60 * 1000
+    elif str_iv.endswith("H") and str_iv[:-1].isdigit():
+        expected_step_ms = int(str_iv[:-1]) * 3600 * 1000
+    else:
+        expected_step_ms = 3600 * 1000
+
+    fetch_failed = False
+    
     if df_cache is not None and len(df_cache) > 0:
         # Cache exists. Fetch only new candles (timestamp > cache_max_ts)
         cache_max_ts = float(df_cache["timestamp"].max())
@@ -254,9 +271,11 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                     current_end = oldest_ts - 1
                 else:
                     print(f"Error fetching newer page {page + 1}: Received status code {response.status_code}")
+                    fetch_failed = True
                     break
             except Exception as e:
                 print(f"Error fetching newer page {page + 1}: {e}")
+                fetch_failed = True
                 break
                 
             if pages > 1:
@@ -298,9 +317,11 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                         oldest_ts = int(float(batch[-1][0]))
                         current_end = oldest_ts - 1
                     else:
+                        fetch_failed = True
                         break
                 except Exception as e:
                     print(f"Error fetching older page: {e}")
+                    fetch_failed = True
                     break
                 time.sleep(0.1)
                 
@@ -338,9 +359,11 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                         break
                 else:
                     print(f"Error fetching page {page + 1}: Received status code {response.status_code}")
+                    fetch_failed = True
                     break
             except Exception as e:
                 print(f"Error fetching page {page + 1}: {e}")
+                fetch_failed = True
                 break
                 
             if pages > 1:
@@ -353,14 +376,19 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
         else:
             df_history = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
 
-    # If Bybit fetches failed/returned nothing, try fallback endpoints (Binance/Kraken)
-    if len(df_history) == 0:
-        print(f"Bybit klines returned no data. Attempting Binance API fallback for {symbol}...")
+    # Freshness check on df_history
+    now_ms = time.time() * 1000.0
+    latest_ts = float(df_history["timestamp"].max()) if not df_history.empty else 0.0
+    is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms)) if latest_ts > 0 else True
+
+    # If Bybit fetch failed, or df_history is empty, or data is stale: Trigger Binance API fallback!
+    if len(df_history) == 0 or fetch_failed or is_stale:
+        log_event("WARNING", f"Bybit klines unavailable/failed/stale for {symbol} {interval}m (age={(now_ms-latest_ts)/1000:.1f}s). Attempting Binance API fallback...")
         try:
             binance_interval = "1h"
             if str(interval) == "5":
                 binance_interval = "5m"
-            if str(interval) == "15":
+            elif str(interval) == "15":
                 binance_interval = "15m"
             elif str(interval) == "30":
                 binance_interval = "30m"
@@ -396,17 +424,23 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                         float(item[5]), # volume
                         float(item[7])  # turnover
                     ])
-                df_history = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
-                df_history = df_history.astype(float)
-                df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-                print(f"Successfully loaded {len(df_history)} candles from Binance API fallback.")
+                df_binance = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
+                if not df_binance.empty:
+                    df_history = pd.concat([df_history, df_binance], ignore_index=True) if not df_history.empty else df_binance
+                    df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                    latest_ts = float(df_history["timestamp"].max())
+                    is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms))
+                    if not is_stale:
+                        fetch_failed = False
+                        print(f"Successfully loaded {len(df_binance)} fresh candles from Binance API fallback.")
             else:
                 print(f"Binance fallback failed with HTTP {resp.status_code}")
         except Exception as ex:
             print(f"Error fetching Binance fallback klines: {ex}")
 
-    if len(df_history) == 0:
-        print(f"Bybit & Binance failed. Attempting Kraken API fallback for {symbol}...")
+    # If still empty or stale after Binance fallback, try Kraken API fallback!
+    if len(df_history) == 0 or fetch_failed or is_stale:
+        log_event("WARNING", f"Bybit & Binance failed/stale for {symbol} {interval}m. Attempting Kraken API fallback...")
         try:
             kraken_interval = 60
             if str(interval) == "5":
@@ -444,10 +478,6 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             kraken_pair = KRAKEN_SYMBOL_MAP.get(symbol_upper, symbol_upper)
             if kraken_pair is None:
                 print(f"[Kraken] {symbol_upper} not supported on Kraken. Skipping fallback.")
-                kraken_pair = None  # Will be caught below
-
-            if kraken_pair is None:
-                pass  # Already logged above, skip request
             else:
                 kraken_url = "https://api.kraken.com/0/public/OHLC"
                 kraken_params = {
@@ -473,10 +503,15 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
                                 float(item[6]),
                                 float(item[6]) * float(item[4])
                             ])
-                        df_history = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
-                        df_history = df_history.astype(float)
-                        df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-                        print(f"Successfully loaded {len(df_history)} candles from Kraken API fallback.")
+                        df_kraken = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
+                        if not df_kraken.empty:
+                            df_history = pd.concat([df_history, df_kraken], ignore_index=True) if not df_history.empty else df_kraken
+                            df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                            latest_ts = float(df_history["timestamp"].max())
+                            is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms))
+                            if not is_stale:
+                                fetch_failed = False
+                                print(f"Successfully loaded {len(df_kraken)} fresh candles from Kraken API fallback.")
                     else:
                         print(f"Kraken returned empty results or error: {res.get('error')}")
                 else:
@@ -486,7 +521,11 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
 
 
     if len(df_history) == 0:
-        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+        empty_res = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+        empty_res.attrs["fetch_ok"] = False
+        empty_res.attrs["last_bar_age_sec"] = 999999.0
+        empty_res.attrs["latest_ts"] = 0.0
+        return empty_res
 
     # Save/update cache
     if len(df_history) > 0:
@@ -599,6 +638,15 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
             final_df.attrs["gap_exceeded"] = False
             final_df.attrs["synthetic_bar_count"] = 0
             final_df.attrs["max_consecutive_synthetic_bars"] = 0
+
+    now_ms = time.time() * 1000.0
+    latest_ts = float(final_df["timestamp"].iloc[-1]) if not final_df.empty else 0.0
+    last_bar_age_sec = max(0.0, (now_ms - latest_ts) / 1000.0) if latest_ts > 0 else 999999.0
+    is_fresh = (last_bar_age_sec <= (2.5 * expected_step_ms / 1000.0)) and not fetch_failed
+
+    final_df.attrs["fetch_ok"] = bool(is_fresh)
+    final_df.attrs["last_bar_age_sec"] = float(last_bar_age_sec)
+    final_df.attrs["latest_ts"] = float(latest_ts)
 
     return final_df
 

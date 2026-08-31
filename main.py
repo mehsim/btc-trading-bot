@@ -6171,19 +6171,30 @@ def main():
                 if df_raw_val is None or len(df_raw_val) < 2:
                     return sym, interval_val, None, None
                 
+                now_ms = time.time() * 1000.0
+                interval_ms_val = int(interval_val) * 60 * 1000
+                is_forced_val = interval_val in forced_intervals
+
+                # Check fetch_ok attribute
+                if not df_raw_val.attrs.get("fetch_ok", True) and not is_forced_val:
+                    log_event("WARNING", f"[{sym} {interval_val}m] Candle fetch marked unsuccessful/stale (age={df_raw_val.attrs.get('last_bar_age_sec', 0):.1f}s). Skipping evaluation.")
+                    return sym, interval_val, df_raw_val, None
+
                 df_completed_val = df_raw_val.iloc[:-1].copy()
                 latest_completed_ts_val = int(df_completed_val.iloc[-1]["timestamp"])
                 
-                is_forced_val = interval_val in forced_intervals
+                # Hard freshness assertion: Completed bar timestamp must be within 2.5 * interval_ms
+                if (now_ms - latest_completed_ts_val) > (2.5 * interval_ms_val) and not is_forced_val:
+                    log_event("WARNING", f"[{sym} {interval_val}m] Stale candle rejected: completed bar age {(now_ms - latest_completed_ts_val)/1000:.1f}s exceeds threshold ({2.5*interval_ms_val/1000:.1f}s). Skipping evaluation.")
+                    return sym, interval_val, df_raw_val, None
+
                 last_ts_key_val = f"last_processed_{sym}_{interval_val}_ts"
                 if not is_forced_val and last_processed_timestamps.get(last_ts_key_val) is not None:
                     if latest_completed_ts_val == last_processed_timestamps[last_ts_key_val]:
                         return sym, interval_val, df_raw_val, None
                 
                 # Fast check if candle is up to date before running heavy feature calculation
-                interval_ms_val = int(interval_val) * 60 * 1000
                 expected_start_ms_val = current_hour_ts - interval_ms_val
-                is_forced_val = interval_val in forced_intervals
                 is_up_to_date_val = (latest_completed_ts_val >= expected_start_ms_val) or is_forced_val
                 if not is_up_to_date_val:
                     return sym, interval_val, df_raw_val, None
@@ -6305,10 +6316,16 @@ def main():
                     last_processed_timestamps[last_ts_key] = 0
                     print(f"Initialized completed candle timestamp tracking for {symbol} on {iv}m: {get_local_time_str(latest_completed_ts/1000)}")
  
-                # Validate if candle is up to date based on expected window boundary
+                # Hard freshness assertion: (now_ms - latest_completed_ts) <= 2.5 * interval_ms
+                now_ms = time.time() * 1000.0
                 interval_ms = int(iv) * 60 * 1000
-                expected_start_ms = current_hour_ts - interval_ms
                 is_forced = iv in forced_intervals
+                if (now_ms - latest_completed_ts) > (2.5 * interval_ms) and not is_forced:
+                    log_event("WARNING", f"[{symbol} {iv}m] Stale candle rejected in main evaluation: completed bar age {(now_ms - latest_completed_ts)/1000:.1f}s exceeds threshold ({2.5*interval_ms/1000:.1f}s). Skipping.")
+                    continue
+
+                # Validate if candle is up to date based on expected window boundary
+                expected_start_ms = current_hour_ts - interval_ms
                 is_up_to_date = (latest_completed_ts >= expected_start_ms) or is_forced
                 
                 if not is_up_to_date:
