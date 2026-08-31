@@ -1692,6 +1692,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 champ_manifest = {}
                 compatible, reason = False, "No manifest — champion predates governance system"
 
+            contract_stale = (not compatible) and champion_exists
+
             if not compatible:
                 import hashlib as _hl
                 champ_count = champ_manifest.get("feature_count", "?")
@@ -2051,7 +2053,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             interval=str(interval)
                         )
                         pf_champ = float(champ_stats.get("profit_factor", 0.95))
-                    elif "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
+                    elif champion_exists and not contract_stale and "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
                         pf_champ = float(champ_manifest.get("profit_factor", 0.95))
 
                     n_optuna_trials_val = int(_trials) if ('_trials' in locals() and _trials is not None) else 1
@@ -2132,8 +2134,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 from mlops_engine import promote_if_better
                 reg_name = f"ensemble_{name}_{interval}"
                 challenger_ver = f"v7.2.0-{_chal_git_sha}-{datetime.now().strftime('%Y%m%d%H%M')}"
-                cand_eval = {"mcc": chal_mcc_mean, "balanced_accuracy": chal_bal_acc_mean, "model_hash": _chal_git_sha}
-                champ_eval = {"mcc": champ_mcc_val or 0.0, "balanced_accuracy": 0.33, "model_hash": champ_manifest.get("git_sha", "unknown")}
+                cand_eval = {
+                    "mcc": chal_mcc_mean,
+                    "mcc_min": locals().get("chal_mcc_min"),
+                    "ece": chal_ece,
+                    "brier_score": chal_brier,
+                    "val_accuracy": chal_acc,
+                    "val_mae": locals().get("chal_mae", 0.0),
+                    "sharpe_oos": float(chal_sharpe),
+                    "probs": final_ensemble_t.predict_proba(X_holdout).tolist() if (final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba")) else [],
+                    "model_hash": _chal_git_sha
+                }
+                champ_eval = {"mcc": champ_mcc_val or 0.0, "balanced_accuracy": 0.33, "model_hash": champ_manifest.get("git_sha", "unknown")} if (champion_exists and not contract_stale) else None
                 promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
                 if not is_distribution_shifted and not promoted:
                     print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
