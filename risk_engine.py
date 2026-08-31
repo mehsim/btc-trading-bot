@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple, Union
 import config
+from risk_limits import HARD_MAX_DRAWDOWN_HALT_PCT, HARD_MAX_RISK_PER_TRADE_PCT
 from kelly_tracker import global_kelly_tracker
 from portfolio_risk import portfolio_risk_engine
 from pain_feedback import pain_feedback
@@ -160,12 +161,12 @@ def compute_conservative_kelly(
 
 
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:
-    """Continuous Sigmoid & Exponential Drawdown Penalty: dd_penalty = exp(-5 * DD). Hard halt at 20% DD."""
+    """Continuous Sigmoid & Exponential Drawdown Penalty: dd_penalty = exp(-5 * DD). Hard halt at HARD_MAX_DRAWDOWN_HALT_PCT DD."""
     if peak_equity <= 0 or current_equity <= 0:
         return 1.0
     dd_fraction = max(0.0, (peak_equity - current_equity) / max(1e-9, peak_equity))
-    if dd_fraction >= 0.20:
-        return 0.0  # Hard halt at 20% drawdown
+    if dd_fraction >= HARD_MAX_DRAWDOWN_HALT_PCT:
+        return 0.0  # Hard halt at maximum drawdown limit
     penalty = float(np.exp(-5.0 * dd_fraction))
     return float(np.clip(penalty, 0.05, 1.0))
 
@@ -615,8 +616,13 @@ class JointRiskBudgetAllocator:
         position_size_usd = min(uncapped_size_usd, max_depth_cap)
         liquidity_cap_applied = position_size_usd < uncapped_size_usd - 1e-2
 
-        # Final Capital at Risk (USD)
-        capital_at_risk = position_size_usd * (stop_distance / entry_price)
+        # Final Capital at Risk (USD) bounded by HARD_MAX_RISK_PER_TRADE_PCT
+        max_hard_risk_usd = total_equity * HARD_MAX_RISK_PER_TRADE_PCT
+        stop_pct = max(1e-6, stop_distance / entry_price)
+        capital_at_risk = position_size_usd * stop_pct
+        if capital_at_risk > max_hard_risk_usd:
+            position_size_usd = max_hard_risk_usd / stop_pct
+            capital_at_risk = position_size_usd * stop_pct
 
         # 6. Expected Edge & Expected Utility Calculation
         roundtrip_fee_pct = 0.0010

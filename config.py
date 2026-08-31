@@ -6,13 +6,20 @@ Consolidates strategy thresholds, leverage caps, risk parameters, and memory bou
 import os
 import json
 
-# F-09 Isolated Governance Risk Limits
-from risk_limits import (
-    HARD_TIMEFRAME_MAX_LEVERAGE_CAPS as TIMEFRAME_MAX_LEVERAGE_CAPS,
-    HARD_MAX_WALLET_MARGIN_UTILIZATION_PCT as MAX_WALLET_MARGIN_UTILIZATION_PCT,
-    HARD_MAX_SYMBOL_EXPOSURE_PCT as MAX_SYMBOL_EXPOSURE_PCT,
-    assert_risk_governance_invariants
-)
+# Active Operator Risk & Leverage Parameters (Tunable runtime configuration bounded by risk_limits.py)
+TIMEFRAME_MAX_LEVERAGE_CAPS = {
+    "5": 10.0,
+    "15": 10.0,
+    "30": 10.0,
+    "60": 5.0,
+    "120": 5.0,
+    "240": 3.0,
+    "360": 3.0
+}
+MAX_WALLET_MARGIN_UTILIZATION_PCT: float = 0.90  # 90% hard limit on balance margin utilization
+MAX_SYMBOL_EXPOSURE_PCT: float = 0.20           # 20% max account balance in one symbol
+MAX_DRAWDOWN_HALT_PCT: float = 0.20             # 20% max drawdown halt threshold
+MAX_RISK_PER_TRADE_PCT: float = 0.03            # 3.0% absolute max risk per trade
 
 # System & Memory Bounds
 MAX_TRADE_HISTORY_MEMORY = 1000

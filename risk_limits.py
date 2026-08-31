@@ -37,9 +37,20 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
         if config_module is None:
             return True
 
+    # 0. Anti-aliasing Identity Guard
+    cfg_leverage = getattr(config_module, "TIMEFRAME_MAX_LEVERAGE_CAPS", None)
+    if cfg_leverage is HARD_TIMEFRAME_MAX_LEVERAGE_CAPS:
+        raise PermissionError(
+            "[Governance Violation] TIMEFRAME_MAX_LEVERAGE_CAPS must be an independent config dictionary, "
+            "not an alias to HARD_TIMEFRAME_MAX_LEVERAGE_CAPS object."
+        )
+
     # 1. Validate Timeframe Leverage Caps
-    cfg_leverage = getattr(config_module, "TIMEFRAME_MAX_LEVERAGE_CAPS", {})
+    if not isinstance(cfg_leverage, dict):
+        raise PermissionError("[Governance Violation] TIMEFRAME_MAX_LEVERAGE_CAPS must be a dictionary.")
     for tf, hard_cap in HARD_TIMEFRAME_MAX_LEVERAGE_CAPS.items():
+        if tf not in cfg_leverage and int(tf) not in cfg_leverage:
+            raise PermissionError(f"[Governance Violation] Missing timeframe '{tf}' in TIMEFRAME_MAX_LEVERAGE_CAPS.")
         active_lev = cfg_leverage.get(str(tf), cfg_leverage.get(int(tf), hard_cap))
         if active_lev > hard_cap:
             raise PermissionError(
@@ -61,6 +72,22 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
         raise PermissionError(
             f"[Governance Violation] Symbol exposure limit ({active_symbol_cap*100:.1f}%) "
             f"exceeds hard safety cap ({HARD_MAX_SYMBOL_EXPOSURE_PCT*100:.1f}%)."
+        )
+
+    # 4. Validate Max Drawdown Halt Cap
+    active_dd_halt = getattr(config_module, "MAX_DRAWDOWN_HALT_PCT", HARD_MAX_DRAWDOWN_HALT_PCT)
+    if active_dd_halt > HARD_MAX_DRAWDOWN_HALT_PCT:
+        raise PermissionError(
+            f"[Governance Violation] Drawdown halt threshold ({active_dd_halt*100:.1f}%) "
+            f"exceeds hard safety cap ({HARD_MAX_DRAWDOWN_HALT_PCT*100:.1f}%)."
+        )
+
+    # 5. Validate Max Risk Per Trade Cap
+    active_risk_cap = getattr(config_module, "MAX_RISK_PER_TRADE_PCT", HARD_MAX_RISK_PER_TRADE_PCT)
+    if active_risk_cap > HARD_MAX_RISK_PER_TRADE_PCT:
+        raise PermissionError(
+            f"[Governance Violation] Max per-trade risk limit ({active_risk_cap*100:.1f}%) "
+            f"exceeds hard safety cap ({HARD_MAX_RISK_PER_TRADE_PCT*100:.1f}%)."
         )
 
     # M-2 Startup Assertion: Verify shared constants between train.py and config.py match
