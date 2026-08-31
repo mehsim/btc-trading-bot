@@ -987,15 +987,28 @@ def train_models(interval=INTERVAL, pages=PAGES):
             # Ensure all needed columns exist
             for col in ["target_price_change", "target_trend"]:
                 if col not in live_df.columns:
-                    live_df[col] = 0
+                    live_df[col] = 1 if col == "target_trend" else 0.0
+
+            # Validate target_trend is strictly within 3-class space {0, 1, 2}
+            invalid_labels = set(live_df["target_trend"].dropna().unique()) - {0, 1, 2}
+            if invalid_labels:
+                raise ValueError(f"[Live Feedback Error] Degenerate target_trend labels in live_df: {invalid_labels}")
+
             # Fix duplicate columns before concat
             df = df.loc[:, ~df.columns.duplicated()]
             live_df = live_df.loc[:, ~live_df.columns.duplicated()]
             # Align columns — only keep columns present in main df
             shared_cols = [c for c in df.columns if c in live_df.columns]
             live_df = live_df[shared_cols]
+
+            live_class_breakdown = live_df["target_trend"].value_counts().to_dict()
+            print(f"[Live Feedback] Injected {len(live_df)} feedback rows. Class breakdown: {live_class_breakdown}")
+            
             df = pd.concat([df, live_df], ignore_index=True)
             print(f"[Live Feedback] Training dataset expanded to {len(df)} rows.")
+
+            # Hard invariant: ensure final combined dataset has valid 3-class labels
+            assert set(df["target_trend"].dropna().unique()) <= {0, 1, 2}, f"Corrupted target_trend in df: {df['target_trend'].unique()}"
 
     # ==========================================
     # AUTOML FEATURE SELECTION (RFECV NOISE REDUCTION)
@@ -2520,8 +2533,41 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
                 if len(df_c) == 0:
                     continue
                 row = df_c.iloc[[-1]].copy()
-                row["target_trend"] = 1 if pnl > 0 else 0
-                row["target_price_change"] = 0.0
+                
+                entry_price = float(t.get("entry_price", 0.0))
+                exit_price = float(t.get("exit_price", 0.0))
+                direction_str = str(t.get("direction", "Bullish")).capitalize()
+                is_long = direction_str in ["Bullish", "Long", "Buy"]
+                is_short = direction_str in ["Bearish", "Short", "Sell"]
+
+                if entry_price > 0 and exit_price > 0:
+                    realized_price_ret = (exit_price - entry_price) / entry_price
+                elif "pnl_pct" in t and float(t.get("pnl_pct", 0.0)) != 0.0:
+                    pct_val = float(t.get("pnl_pct", 0.0)) / 100.0
+                    realized_price_ret = pct_val if is_long else -pct_val
+                else:
+                    realized_price_ret = 0.005 if (pnl > 0 and is_long) or (pnl < 0 and is_short) else (-0.005 if (pnl < 0 and is_long) or (pnl > 0 and is_short) else 0.0)
+
+                # Map to 3-class label space: 0=Bearish, 1=Neutral, 2=Bullish
+                if is_long:
+                    if pnl > 0 or realized_price_ret > 0.001:
+                        target_class = 2  # Bullish
+                    elif pnl < 0 or realized_price_ret < -0.001:
+                        target_class = 0  # Bearish (stopped out long)
+                    else:
+                        target_class = 1  # Neutral
+                elif is_short:
+                    if pnl > 0 or realized_price_ret < -0.001:
+                        target_class = 0  # Bearish (profitable short)
+                    elif pnl < 0 or realized_price_ret > 0.001:
+                        target_class = 2  # Bullish (stopped out short)
+                    else:
+                        target_class = 1  # Neutral
+                else:
+                    target_class = 1
+
+                row["target_trend"] = int(target_class)
+                row["target_price_change"] = float(realized_price_ret)
                 row["sample_weight"] = weight
                 sample_dfs.append(row)
 
@@ -2599,8 +2645,36 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
                     if len(df_c_before) == 0:
                         continue
                     row = df_c_before.iloc[[-1]].copy()
-                    row["target_trend"] = 1 if pnl > 0 else 0
-                    row["target_price_change"] = 0.0
+                    
+                    is_sim_long = direction in ["Bullish", "Long", "Buy"]
+                    is_sim_short = direction in ["Bearish", "Short", "Sell"]
+
+                    if is_sim_long:
+                        if pnl > 0:
+                            sim_target_class = 2
+                            sim_price_ret = abs(pnl)
+                        elif pnl < 0:
+                            sim_target_class = 0
+                            sim_price_ret = -abs(pnl)
+                        else:
+                            sim_target_class = 1
+                            sim_price_ret = 0.0
+                    elif is_sim_short:
+                        if pnl > 0:
+                            sim_target_class = 0
+                            sim_price_ret = -abs(pnl)
+                        elif pnl < 0:
+                            sim_target_class = 2
+                            sim_price_ret = abs(pnl)
+                        else:
+                            sim_target_class = 1
+                            sim_price_ret = 0.0
+                    else:
+                        sim_target_class = 1
+                        sim_price_ret = 0.0
+
+                    row["target_trend"] = int(sim_target_class)
+                    row["target_price_change"] = float(sim_price_ret)
                     row["sample_weight"] = 1.0  # Skipped trades have baseline weight
                     sample_dfs.append(row)
         except Exception as e_db:
