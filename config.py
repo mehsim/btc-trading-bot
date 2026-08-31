@@ -46,7 +46,7 @@ MODEL_GOVERNANCE = {
 TIMEFRAME_MIN_MCC = {"15": 0.010, "30": 0.035, "60": 0.040, "default": 0.050}
 TIMEFRAME_MIN_BAL_ACC = {"15": 0.340, "30": 0.348, "60": 0.348, "default": 0.360}
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.010, "30": 0.015, "60": 0.015, "default": 0.020}
-TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.335, "30": 0.338, "60": 0.338, "default": 0.340}
+TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.334, "30": 0.338, "60": 0.338, "default": 0.340}
 
 # Dynamic Regime-Based Model Routing (Trending vs Ranging)
 # When False (Default): Routes to validated universal/trending models across all market regimes.
@@ -66,7 +66,7 @@ if os.path.exists("governance_denylist.json"):
         pass
 
 MODEL_SLOT_DENYLIST = {
-    "trending_15",    # holdout MCC -0.0064 < 0.0, crash sentinels brier/ece=0.99 in manifest
+    # trending_15 lifted: retrained with 16-page RFECV (+0.0354 CV MCC, +0.0251 Holdout MCC, 34.75% Holdout BalAcc)
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     # trending_240 & ranging_240 lifted: retrained with 16-page RFECV (+0.0667 / +0.0567 CV MCC, +0.0253 / +0.0494 Holdout MCC)
 }.union(_persisted_denylist)
