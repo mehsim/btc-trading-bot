@@ -6773,23 +6773,83 @@ def main():
 
                             # Determine dynamic confidence threshold based on trade economics (p* break-even payoff) + bounded modifiers
                             atr_norm_val = latest_candle["ATR_norm"]
-                        
-                            # 1. Economic Base Threshold (p* break-even payoff threshold + transaction costs)
-                            from config import TIMEFRAME_CONFIG
+                            entry_close = float(latest_candle["close"])
+                            atr_dollars = float(latest_candle.get("ATR", entry_close * atr_norm_val))
+                            is_ranging_regime = "Ranging" in str(regime_name)
+
+                            # 1. Resolve exact order execution geometry (TP and SL) before economic gate
                             from config import TIMEFRAME_CONFIG
                             from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, REALIZED_RR_HAIRCUT, get_realized_rr_haircut
                             cfg = TIMEFRAME_CONFIG.get(str(iv), {})
-                            if "Ranging" in str(regime_name):
-                                base_tp_m = float(cfg.get("tp_mult_ranging", 1.40))
+                            sl_multiplier = float(cfg.get("sl_mult", 0.85))
+
+                            vol_factor = 1.0
+                            if atr_norm_val > 0:
+                                vol_factor = max(0.75, min(1.5, 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75))
+
+                            min_target = max(getattr(config, "MIN_TARGET_ATR_MULT", {}).get(str(iv), 1.5), 1.20 * sl_multiplier)
+                            base_tp_target = max(cfg.get("tp_mult_ranging", 1.40) if is_ranging_regime else cfg.get("tp_mult_trending", 1.85), min_target)
+                            tp_multiplier_adjusted = round(base_tp_target * vol_factor, 3)
+
+                            # Volatility (ATR Percentile) Adjustment (±5%)
+                            atr_series = pd.to_numeric(df_completed["ATR"], errors="coerce").tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
+                            vol_adj = 1.00
+                            if atr_series is not None and len(atr_series.dropna()) > 10:
+                                curr_atr = float(latest_candle.get("ATR", atr_dollars))
+                                clean_atr = atr_series.dropna()
+                                atr_percentile = float((clean_atr < curr_atr).mean() * 100.0) if len(clean_atr) > 0 else 50.0
+                                if atr_percentile > 90.0:
+                                    vol_adj = 0.95
+                                elif atr_percentile < 20.0:
+                                    vol_adj = 1.05
+                            tp_multiplier_adjusted *= vol_adj
+
+                            # Session Liquidity Adjustment
+                            curr_utc_hour = datetime.now(timezone.utc).hour
+                            if 6 <= curr_utc_hour < 8:
+                                session_factor = 0.95
+                            elif 12 <= curr_utc_hour < 16:
+                                session_factor = 1.00
                             else:
-                                base_tp_m = float(cfg.get("tp_mult_trending", 1.85))
-                            base_sl_m = float(cfg.get("sl_mult", 0.85))
-                            atr_dollars = float(latest_candle.get("ATR", latest_candle["close"] * 0.01))
-                            entry_close = float(latest_candle["close"])
-                            actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+                                session_factor = 0.98
+                            tp_multiplier_adjusted *= session_factor
+
+                            resolved_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
                                 interval=str(iv), entry_price=entry_close,
-                                atr_dollars=atr_dollars, base_tp_m=base_tp_m
+                                atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
                             )
+                            tp_change = resolved_tp_m * atr_dollars
+
+                            # Stop Loss Resolution
+                            scaled_lev = None
+                            struct_sl_dist_pct = None
+                            struct_meta = None
+                            if str(iv) in ["15", "30", "60"]:
+                                struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
+                                    df_recent=df_completed,
+                                    entry_price=entry_close,
+                                    direction=ml_trend,
+                                    atr_val=atr_dollars,
+                                    regime=regime_name,
+                                    volatility=atr_norm_val
+                                )
+                                stop_loss_price = struct_sl
+                                resolved_sl_dist = abs(entry_close - stop_loss_price)
+                            else:
+                                tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv)
+                                sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
+                                resolved_sl_dist = risk_engine.calculate_final_stop_distance(
+                                    entry_close, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
+                                )
+                                if ml_trend == "Bullish":
+                                    stop_loss_price = entry_close - resolved_sl_dist
+                                else:
+                                    stop_loss_price = entry_close + resolved_sl_dist
+
+                            resolved_sl_m = resolved_sl_dist / max(1e-6, atr_dollars)
+                            take_profit_price = (entry_close + tp_change) if ml_trend == "Bullish" else (entry_close - tp_change)
+
+                            # Economic Break-Even Threshold (p*) based on exact resolved order geometry
                             _bars_per_day = max(1, round(1440 / max(1, int(iv))))
                             _adv_usd = float(df_completed["volume"].tail(_bars_per_day).sum() * entry_close) if ("volume" in df_completed.columns and len(df_completed) >= _bars_per_day) else 50_000_000.0
                             _order_usd = float(bot_state.get("position_size_usd", 1000.0))
@@ -6799,11 +6859,11 @@ def main():
                                 is_maker=True,
                             )
                             cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
-                            nominal_rr = actual_tp_m / max(1e-6, base_sl_m)
+                            nominal_rr = (resolved_tp_m * atr_dollars) / max(1e-6, resolved_sl_dist)
                             realized_haircut = get_realized_rr_haircut(interval=str(iv), regime=str(regime_name), nominal_rr=nominal_rr)
-                            effective_tp_m = actual_tp_m * realized_haircut
-                            p_star = base_sl_m / (effective_tp_m + base_sl_m)
-                            cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + base_sl_m) * max(1e-4, atr_norm_val))
+                            effective_tp_m = resolved_tp_m * realized_haircut
+                            p_star = resolved_sl_m / max(1e-6, (effective_tp_m + resolved_sl_m))
+                            cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + resolved_sl_m) * max(1e-4, atr_norm_val))
                             economic_base_threshold = float(round(p_star + cost_adj, 4))
                             base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
                             dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
@@ -7403,116 +7463,28 @@ def main():
                                         print("--------------------------------------------------")
                                         print(f"CONFLUENCE RESULT: APPROVED ({confluence_results.get('_Score_Summary', {}).get('detail', 'Score check passed')})")
                                         print("==================================================\n")
-                                    
-                                        atr_norm_val = latest_candle["ATR_norm"]
-                                        atr_dollars = atr_norm_val * latest_candle["close"]
-                                    
-                                        # Align stop loss and take profit multipliers dynamically from baseline TIMEFRAME_CONFIG or release-gate approved walk-forward state
-                                        optimized_cfg = bot_state.get("optimized_timeframe_config", {}).get(str(iv), {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
-                                        baseline_cfg = TIMEFRAME_CONFIG.get(str(iv), {
-                                            "lookahead": 10,
-                                            "sl_mult": 0.8,
-                                            "tp_mult_ranging": 1.45,
-                                            "tp_mult_trending": 1.75
-                                        })
-                                        # Merge approved optimizations over baseline defaults
-                                        cfg = {**baseline_cfg, **optimized_cfg}
-                                        adx_val = latest_candle.get("ADX", 0.0)
-                                        sl_multiplier = cfg.get("sl_mult", 1.0)
-                                        vol_factor = 1.0
-                                        if atr_norm_val > 0:
-                                            vol_factor = 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75
-                                            vol_factor = max(0.75, min(1.5, vol_factor))
 
-                                        min_target = max(getattr(config, "MIN_TARGET_ATR_MULT", {}).get(str(iv), 1.5), 1.20 * sl_multiplier)
-                                        base_tp_target = max(cfg.get("tp_mult_trending", 2.0) if adx_val >= 20.0 else cfg.get("tp_mult_ranging", 1.5), min_target)
-                                        tp_multiplier_adjusted = round(base_tp_target * vol_factor, 3)
-                                        print(f"[{iv}m Target Config] ADX: {adx_val:.1f} | Base TP Mult: {base_tp_target:.2f}x (Vol Factor: {vol_factor:.2f}x) -> Effective TP Mult: {tp_multiplier_adjusted:.2f}x | SL Mult: {sl_multiplier:.2f}x")
-
-                                        # 1. Volatility (ATR Percentile) Adjustment (±5%)
-                                        atr_series = pd.to_numeric(df_completed["ATR"], errors="coerce").tail(100) if (df_completed is not None and "ATR" in df_completed.columns) else None
-                                        vol_adj = 1.00
-                                        if atr_series is not None and len(atr_series.dropna()) > 10:
-                                            curr_atr = float(latest_candle.get("ATR", atr_dollars))
-                                            clean_atr = atr_series.dropna()
-                                            atr_percentile = float((clean_atr < curr_atr).mean() * 100.0) if len(clean_atr) > 0 else 50.0
-                                            if atr_percentile > 90.0:
-                                                vol_adj = 0.95  # Extreme volatility: tighten target before exhaustion reversal
-                                            elif atr_percentile < 20.0:
-                                                vol_adj = 1.05  # Quiet market: expand target for breakout extension
-                                        tp_multiplier_adjusted *= vol_adj
-
-                                        # 2. Session Liquidity Adjustment
-                                        curr_utc_hour = datetime.now(timezone.utc).hour
-                                        if 6 <= curr_utc_hour < 8:
-                                            session_factor = 0.95  # Late Asian session: lower liquidity
-                                        elif 12 <= curr_utc_hour < 16:
-                                            session_factor = 1.00  # London / NY overlap: prime liquidity
-                                        else:
-                                            session_factor = 0.98
-                                        tp_multiplier_adjusted *= session_factor
-
-                                        # 3. Walk-Forward Optimal Rounding (0.05 precision)
-                                        from trade_calculators import UnifiedTargetGenerator
-                                        tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
-                                            interval=str(iv), entry_price=float(latest_candle["close"]),
-                                            atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
-                                        )
-                                        tp_change = tp_m * atr_dollars
-
-                                        print(f"[{iv}m Target Alignment] ADX: {adx_val:.1f} | Dynamic multipliers: SL = {sl_multiplier}x, TP = {tp_multiplier_adjusted:.2f}x (Vol: {vol_adj:.2f}x, Session: {session_factor:.2f}x)")
-                                    
-                                        # Maker execution: zero entry slippage for limit orders
-                                        slippage_pct = 0.0
-                                        raw_entry_price = float(latest_candle["close"])
+                                        # Use exact resolved order execution geometry (aligned with economic gate p*)
+                                        raw_entry_price = entry_close
                                         entry_price = raw_entry_price
+                                        raw_sl_dist = resolved_sl_dist
 
-                                        # Take-Profit distance tp_change resolved via UnifiedTargetGenerator above
-                                    
-                                        # Stop Loss multiplier maintained at statistical optimum without shrinking into Brownian noise
-                                        sl_multiplier_adjusted = sl_multiplier
-                                        
                                         # Adaptive Structural Swing Stop & Recency Guard for intraday timeframes (15m, 30m, 60m)
-                                        scaled_lev = None
                                         if str(iv) in ["15", "30", "60"]:
-                                            struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
-                                                df_recent=df_completed,
-                                                entry_price=entry_price,
-                                                direction=ml_trend,
-                                                atr_val=atr_dollars,
-                                                regime=regime_name,
-                                                volatility=atr_norm_val
-                                            )
-                                            stop_loss_price = struct_sl
-                                            raw_sl_dist = abs(entry_price - stop_loss_price)
-                                        
-                                            # Refinements 5 & 6: Dynamic Leverage Scaling & Floor
                                             base_sl_pct = max(0.6, (atr_dollars * 1.0 / entry_price) * 100.0)
                                             scaled_lev, is_valid_lev = trade_calculators.scale_leverage_for_fixed_risk(
                                                 base_leverage=5.0,
                                                 base_sl_pct=base_sl_pct,
-                                                structural_sl_pct=struct_sl_dist_pct
+                                                structural_sl_pct=struct_sl_dist_pct if struct_sl_dist_pct is not None else ((raw_sl_dist / entry_price) * 100.0)
                                             )
                                             if not is_valid_lev:
                                                 print(f"[{symbol} {iv}m Filter] Trade skipped: Scaled leverage ({scaled_lev}x) below 1.5x floor limit.")
                                                 status_msg = "Skipped (Leverage Floor < 1.5x)"
                                                 all_pass = False
-
-                                            take_profit_price = (entry_price + tp_change) if ml_trend == "Bullish" else (entry_price - tp_change)
-                                            print(f"[{iv}m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
-                                        else:
-                                            tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv)
-                                            sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
-                                            raw_sl_dist = risk_engine.calculate_final_stop_distance(
-                                                entry_price, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
-                                            )
-                                            if ml_trend == "Bullish":
-                                                stop_loss_price = entry_price - raw_sl_dist
-                                                take_profit_price = entry_price + tp_change
                                             else:
-                                                stop_loss_price = entry_price + raw_sl_dist
-                                                take_profit_price = entry_price - tp_change
-                                            log_event("INFO", f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (Mult: {sl_multiplier_adjusted:.2f}x, TFStopMult: {tf_sl_mult:.2f}x) | Regressor TP: {take_profit_price:.2f}")
+                                                print(f"[{iv}m Structural Stop] Entry: {entry_price:.4f} | Structural SL: {stop_loss_price:.4f} (Dist: {struct_sl_dist_pct:.2f}%, Window: {struct_meta['window']}b, Quality: {struct_meta['quality_score']}/100) -> Scaled Leverage: {scaled_lev:.2f}x")
+                                        else:
+                                            log_event("INFO", f"[{iv}m ML Targets] Entry: {entry_price:.2f} | Dynamic SL: {stop_loss_price:.2f} (SL Dist: {raw_sl_dist:.2f}) | Regressor TP: {take_profit_price:.2f}")
 
 
                                         # Calibrated Position Sizing based on Isotonic Probability (Kelly scaling)
