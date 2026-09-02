@@ -1593,6 +1593,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "y": Ys.tolist(),
                 "fitting_sample_size": fit_n,
                 "min_bin_support": MIN_BIN,
+                "is_fitted": bool(bc.is_fitted),
+                "is_fallback": bool(not bc.is_fitted),
                 "barrier_geometry": {
                     "tp_mult_trending": float(cfg_iv.get("tp_mult_trending", 1.85)),
                     "tp_mult_ranging": float(cfg_iv.get("tp_mult_ranging", 1.40)),
@@ -1611,6 +1613,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             calibrator_data = {
                 "scaling_method": "identity",
                 "is_fallback": True,
+                "is_fitted": False,
                 "a": 1.0,
                 "b": 1.0,
                 "c": 0.0,

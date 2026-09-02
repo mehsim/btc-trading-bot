@@ -33,7 +33,7 @@ class BetaCalibrator:
             self.a = 1.0
             self.b = 1.0
             self.c = 0.0
-            self.is_fitted = True
+            self.is_fitted = False
             self.fit_n = len(s)
             return self
 
@@ -110,6 +110,8 @@ class BetaCalibrator:
         """
         if not self.is_fitted or self.a <= 0.02 or self.b <= 0.02:
             return False
+        if self.a == 1.0 and self.b == 1.0 and self.c == 0.0 and self.fit_n < 20:
+            return False
         if min_required_p_star is not None:
             if self.max_achievable_probability(0.99) < min_required_p_star:
                 return False
@@ -136,7 +138,8 @@ class BetaCalibrator:
             "b": float(self.b),
             "c": float(self.c),
             "fitting_sample_size": int(self.fit_n),
-            "is_fitted": bool(self.is_fitted)
+            "is_fitted": bool(self.is_fitted),
+            "is_fallback": bool(not self.is_fitted)
         }
 
     @classmethod
@@ -146,7 +149,14 @@ class BetaCalibrator:
         bc.b = float(data.get("b", 1.0))
         bc.c = float(data.get("c", 0.0))
         bc.fit_n = int(data.get("fitting_sample_size", 0))
-        bc.is_fitted = bool(data.get("is_fitted", True))
+        if "is_fitted" in data:
+            bc.is_fitted = bool(data["is_fitted"])
+        elif data.get("is_fallback", False) is True:
+            bc.is_fitted = False
+        elif bc.a == 1.0 and bc.b == 1.0 and bc.c == 0.0:
+            bc.is_fitted = False
+        else:
+            bc.is_fitted = True
         return bc
 
 
@@ -159,6 +169,8 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
         return False
     if calibrator_data.get("is_fallback", False) is True:
         return False
+    if calibrator_data.get("is_fitted") is False:
+        return False
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
         bc = BetaCalibrator.from_dict(calibrator_data)
         return bc.is_viable(min_required_p_star=min_required_p_star)
@@ -169,7 +181,8 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
             return False
         if min_required_p_star is not None and max_y < min_required_p_star:
             return False
-    return True
+        return True
+    return False
 
 
 def calibrate_probability(raw_score: float, calibrator_data: Optional[Dict], min_required_p_star: Optional[float] = None) -> float:

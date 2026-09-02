@@ -150,6 +150,8 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
         "y": Ys.tolist(),
         "fitting_sample_size": int(len(calibration_probs)),
         "min_bin_support": MIN_BIN,
+        "is_fitted": bool(bc.is_fitted),
+        "is_fallback": bool(not bc.is_fitted),
         "champion_sha": manifest.get("git_sha", "unknown")
     }
     
