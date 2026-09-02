@@ -6936,6 +6936,7 @@ def main():
                                 )
                                 stop_loss_price = struct_sl
                                 resolved_sl_dist = abs(entry_close - stop_loss_price)
+                                sl_multiplier_adjusted = resolved_sl_dist / max(1e-6, atr_dollars)
                             else:
                                 tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv)
                                 sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
@@ -6948,6 +6949,7 @@ def main():
                                     stop_loss_price = entry_close + resolved_sl_dist
 
                             resolved_sl_m = resolved_sl_dist / max(1e-6, atr_dollars)
+                            sl_multiplier_adjusted = resolved_sl_m
                             take_profit_price = (entry_close + tp_change) if ml_trend == "Bullish" else (entry_close - tp_change)
 
                             # Economic Break-Even Threshold (p*) based on exact resolved order geometry
