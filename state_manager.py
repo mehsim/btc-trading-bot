@@ -30,8 +30,11 @@ def default_json_serializer(obj):
         return float(obj)
     elif isinstance(obj, (np.ndarray,)):
         return obj.tolist()
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
     elif hasattr(obj, "isoformat"):
         return obj.isoformat()
+    return str(obj)
 from collections.abc import MutableMapping
 
 
@@ -297,9 +300,12 @@ class StateManager(MutableMapping):
                     pass
             return iter(list(keys))
 
+    def __bool__(self):
+        return True
+
     def __len__(self):
         with self._lock:
-            return len(list(self.__iter__()))
+            return len(self._cache)
 
     def __contains__(self, key):
         with self._lock:

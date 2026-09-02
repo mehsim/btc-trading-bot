@@ -68,3 +68,66 @@ class ModelGovernanceEngine:
         return barrier_cfg
 
 model_governance_engine = ModelGovernanceEngine()
+
+
+def extract_metric(data: dict, *key_paths):
+    """Safely extracts numeric metric value across multiple alternative dictionary paths without falsy 0.0 bugs."""
+    if not isinstance(data, dict):
+        return None
+    for path in key_paths:
+        curr = data
+        found = True
+        for key in path:
+            if isinstance(curr, dict) and key in curr:
+                curr = curr[key]
+            else:
+                found = False
+                break
+        if found and curr is not None:
+            try:
+                return float(curr)
+            except (ValueError, TypeError):
+                continue
+    return None
+
+
+def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str) -> "tuple[bool, str]":
+    """
+    Validates manifest against strict governance floors.
+    Returns (True, '') if passed, or (False, rejection_reason).
+    """
+    from config import (
+        SUPPORTED_MANIFEST_SCHEMA_VERSION,
+        MODEL_GOVERNANCE,
+        TIMEFRAME_MIN_HOLDOUT_MCC,
+        TIMEFRAME_MIN_HOLDOUT_BAL_ACC,
+    )
+    if not isinstance(manifest, dict):
+        return False, "Invalid manifest structure (not a dict)"
+
+    schema_v = manifest.get("manifest_schema_version", 1)
+    if schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION or schema_v < 1:
+        return False, f"Manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION})"
+
+    min_holdout_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+    min_holdout_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+
+    h_mcc = extract_metric(manifest, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
+    h_bal = extract_metric(manifest, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
+    _ci = manifest.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(manifest.get("cv_metrics"), dict) else None
+    h_ci_low = _ci[0] if isinstance(_ci, (list, tuple)) and len(_ci) >= 1 else None
+    is_prom = manifest.get("promoted", True)
+
+    if h_mcc is None or h_mcc < min_holdout_mcc:
+        return False, f"Holdout MCC ({h_mcc}) below governance floor ({min_holdout_mcc:.4f}) or missing"
+
+    if h_bal is None or h_bal < min_holdout_bal:
+        return False, f"Holdout BalAcc ({h_bal}) below governance floor ({min_holdout_bal:.4f}) or missing"
+
+    if h_ci_low is not None and h_ci_low < -0.05:
+        return False, f"Holdout MCC CI95 lower bound ({h_ci_low:.4f}) < -0.05"
+
+    if is_prom is False:
+        return False, "Manifest explicitly marked promoted=False"
+
+    return True, ""

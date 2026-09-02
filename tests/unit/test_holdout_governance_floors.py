@@ -1,46 +1,96 @@
 import pytest
-from config import TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, MODEL_GOVERNANCE
+from model_governance import extract_metric, validate_manifest_governance_floors
 
 
-def test_holdout_mcc_floor_rejection():
-    """Verify models with holdout MCC below floor are rejected."""
-    min_holdout_mcc_15m = TIMEFRAME_MIN_HOLDOUT_MCC.get("15", 0.010)
-    failed_holdout_mcc = -0.0064
+def test_extract_metric_safe_from_falsy_zero():
+    """Verify extract_metric returns 0.0 as valid float, not evaluating as falsy or falling through."""
+    data = {"holdout_mcc": 0.0, "metrics": {"holdout_mcc": 0.05}}
+    val = extract_metric(data, ["holdout_mcc"])
+    assert val == 0.0
+    assert val is not None
 
-    assert failed_holdout_mcc < min_holdout_mcc_15m
+    nested_data = {"cv_metrics": {"holdout_mcc": 0.0}}
+    val_nested = extract_metric(nested_data, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"])
+    assert val_nested == 0.0
 
-
-def test_holdout_bal_acc_floor_rejection():
-    """Verify models with holdout balanced accuracy below floor are rejected."""
-    min_holdout_bal_acc_15m = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("15", 0.334)
-    failed_holdout_bal_acc = 0.0
-
-    assert failed_holdout_bal_acc < min_holdout_bal_acc_15m
-
-
-def test_holdout_ci95_lower_bound_rejection():
-    """Verify models with holdout CI95 lower bound < -0.05 are rejected."""
-    failed_ci_low = -0.08
-    assert failed_ci_low < -0.05
+    missing_data = {"other": 123}
+    assert extract_metric(missing_data, ["holdout_mcc"]) is None
 
 
-def test_promoted_flag_rejection():
-    """Verify unpromoted manifests (promoted: False) are rejected."""
-    is_promoted = False
-    assert is_promoted is False
+def test_holdout_mcc_zero_rejection():
+    """Verify that a manifest with holdout_mcc = 0.0 is rejected by governance floor (0.0 < 0.02)."""
+    manifest = {
+        "manifest_schema_version": 2,
+        "holdout_mcc": 0.0,
+        "holdout_balanced_accuracy": 0.38,
+        "promoted": True
+    }
+    ok, reason = validate_manifest_governance_floors(manifest, "15")
+    assert ok is False
+    assert "Holdout MCC" in reason
 
 
-def test_healthy_holdout_manifest_passes():
-    """Verify healthy holdout metrics pass governance floors."""
-    holdout_mcc = 0.025
-    holdout_bal_acc = 0.355
-    holdout_ci_low = -0.01
-    is_promoted = True
+def test_holdout_mcc_missing_rejection():
+    """Verify that a manifest missing holdout_mcc is rejected (fail closed)."""
+    manifest = {
+        "manifest_schema_version": 2,
+        "holdout_balanced_accuracy": 0.38,
+        "promoted": True
+    }
+    ok, reason = validate_manifest_governance_floors(manifest, "15")
+    assert ok is False
+    assert "Holdout MCC" in reason
 
-    min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get("15", 0.010)
-    min_h_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("15", 0.334)
 
-    assert holdout_mcc >= min_h_mcc
-    assert holdout_bal_acc >= min_h_bal
-    assert holdout_ci_low >= -0.05
-    assert is_promoted is True
+def test_holdout_bal_acc_subfloor_rejection():
+    """Verify that a manifest with holdout_balanced_accuracy < floor is rejected."""
+    manifest = {
+        "manifest_schema_version": 2,
+        "holdout_mcc": 0.05,
+        "holdout_balanced_accuracy": 0.30,  # Below floor 0.334 / 0.34
+        "promoted": True
+    }
+    ok, reason = validate_manifest_governance_floors(manifest, "15")
+    assert ok is False
+    assert "Holdout BalAcc" in reason
+
+
+def test_holdout_ci95_low_rejection():
+    """Verify that holdout CI95 lower bound < -0.05 triggers rejection."""
+    manifest = {
+        "manifest_schema_version": 2,
+        "holdout_mcc": 0.05,
+        "holdout_balanced_accuracy": 0.38,
+        "cv_metrics": {"holdout_mcc_ci95": [-0.08, 0.12]},
+        "promoted": True
+    }
+    ok, reason = validate_manifest_governance_floors(manifest, "15")
+    assert ok is False
+    assert "lower bound" in reason
+
+
+def test_unpromoted_manifest_rejection():
+    """Verify that manifest with promoted=False triggers rejection."""
+    manifest = {
+        "manifest_schema_version": 2,
+        "holdout_mcc": 0.05,
+        "holdout_balanced_accuracy": 0.38,
+        "promoted": False
+    }
+    ok, reason = validate_manifest_governance_floors(manifest, "15")
+    assert ok is False
+    assert "promoted=False" in reason
+
+
+def test_healthy_manifest_passes_governance():
+    """Verify that a complete manifest with metrics meeting all floors passes."""
+    manifest = {
+        "manifest_schema_version": 2,
+        "holdout_mcc": 0.045,
+        "holdout_balanced_accuracy": 0.375,
+        "cv_metrics": {"holdout_mcc_ci95": [0.01, 0.08]},
+        "promoted": True
+    }
+    ok, reason = validate_manifest_governance_floors(manifest, "15")
+    assert ok is True
+    assert reason == ""

@@ -74,9 +74,9 @@ class ProductionRegimeEngine:
         if r_up in ["STRONG_TREND", "MODERATE_TREND", "TRENDING", "RANGING", "CHOPPY"]:
             return r_up
             
-        # classify_market_regime mappings ("High Vol, Ranging" -> CHOPPY, "Low Vol, Ranging" -> RANGING, etc.)
+        # classify_market_regime mappings ("High Vol, Ranging" -> RANGING, "Low Vol, Ranging" -> RANGING, etc.)
         if "HIGH VOL" in r_up and "RANGING" in r_up:
-            return "CHOPPY"
+            return "RANGING"
         if "RANGING" in r_up:
             return "RANGING"
         if "HIGH VOL" in r_up and "TREND" in r_up:

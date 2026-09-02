@@ -1,8 +1,7 @@
 import os
 import json
-import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
+from backtest import export_backtest_trades
 
 
 def test_zero_trades_refuses_to_overwrite_backtest_trades_jsonl(tmp_path, monkeypatch):
@@ -17,40 +16,26 @@ def test_zero_trades_refuses_to_overwrite_backtest_trades_jsonl(tmp_path, monkey
 
     all_scenario_trades = []
 
-    # Emulate the guarded logic from backtest.py
-    if all_scenario_trades and len(all_scenario_trades) > 0:
-        with open(trades_file, "w") as f:
-            for tr in all_scenario_trades:
-                f.write(json.dumps(tr) + "\n")
+    # Call the actual backtest export function
+    res = export_backtest_trades(all_scenario_trades, output_file=str(trades_file))
+    assert res is False
 
     # File must retain its original contents and size
     assert os.path.getsize(trades_file) == initial_size
     assert "test_1" in trades_file.read_text()
 
 
-def test_zero_trades_raises_runtime_error_and_preserves_results(tmp_path, monkeypatch):
-    """Verify that total_trades == 0 raises RuntimeError and prevents overwriting backtest_results.json."""
+def test_valid_trades_atomic_export(tmp_path, monkeypatch):
+    """Verify that valid trades are exported atomically to output file and archive."""
     monkeypatch.chdir(tmp_path)
+    trades_file = tmp_path / "backtest_trades.jsonl"
+    archive_dir = tmp_path / "backtest_runs"
 
-    results_file = tmp_path / "backtest_results.json"
-    results_file.write_text(json.dumps({"timestamp": "historical", "scenarios": [{"Scenario": "A", "Trades": 41}]}))
-
-    results = [
-        {"Scenario": "A", "Trades": 0},
-        {"Scenario": "B", "Trades": 0},
-        {"Scenario": "C", "Trades": 0},
-        {"Scenario": "D", "Trades": 0},
-        {"Scenario": "E", "Trades": 0},
-    ]
-
-    total_trades_count = sum(int(r.get("Trades", 0)) for r in results)
-    with pytest.raises(RuntimeError, match="Zero-trade backtest generated across all scenarios"):
-        if total_trades_count == 0:
-            raise RuntimeError("Zero-trade backtest generated across all scenarios. Backtest failed to produce valid trading signals.")
-        with open(results_file, "w") as f:
-            json.dump({"new": "data"}, f)
-
-    # Verify original file was not overwritten
-    saved = json.loads(results_file.read_text())
-    assert saved["timestamp"] == "historical"
-    assert saved["scenarios"][0]["Trades"] == 41
+    trades = [{"trade_id": "trade_1", "pnl": 50.0}, {"trade_id": "trade_2", "pnl": -20.0}]
+    res = export_backtest_trades(trades, output_file=str(trades_file), archive_dir=str(archive_dir))
+    assert res is True
+    assert trades_file.exists()
+    content = trades_file.read_text()
+    assert "trade_1" in content
+    assert "trade_2" in content
+    assert len(list(archive_dir.glob("*.jsonl"))) == 1

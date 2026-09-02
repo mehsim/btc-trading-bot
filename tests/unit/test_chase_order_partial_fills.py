@@ -18,8 +18,8 @@ def test_chase_loop_deducts_partial_fills():
     stop_loss_price = 49500.0
     take_profit_price = 51000.0
     position_size_usd = 500.0
-    calibrated_confidence = 0.65
-    ml_confidence = 0.65
+    calibrated_confidence = 0.85
+    ml_confidence = 0.85
     dynamic_conf_threshold = 0.55
     latest_completed_ts = int(time.time() * 1000)
     latest_candle = {"ATR_norm": 0.01}

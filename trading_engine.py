@@ -136,8 +136,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 if decision_ts is not None:
                     elapsed = time.time() - float(decision_ts)
                     if elapsed > signal_ttl_seconds:
-                        log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting remaining chase.")
-                        break
+                        log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting order.")
+                        return
 
                 bid, ask = get_bybit_bid_ask(symbol)
                 if bid == 0.0 or ask == 0.0:
@@ -207,7 +207,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     print(f"[{symbol} {iv}m API BLOCK] Limit chases failed. Market fallback blocked due to extreme volatility (ATR_norm: {atr_norm:.4f} >= 0.015).")
                 else:
                     print(f"[{symbol} {iv}m API] All Limit Maker chases failed. Falling back to Market order to guarantee entry...")
-                    order_res = place_bybit_order(symbol, side, qty_str)
+                    order_res = place_bybit_order(symbol, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
                     if order_res.get("retCode") == 0:
                         bybit_order_id = order_res.get("result", {}).get("orderId")
                         bybit_success = True

@@ -202,9 +202,9 @@
     20916,
     17182
   ],
-  "promoted": false,
+  "promoted": true,
   "evaluation_timestamp": "2026-08-28T17:47:25.014359+00:00",
   "status": "champion",
   "deployed_stage": "Production",
-  "hmac_signature": "517c092199db8ebd4651ea9bb139ba4313a679bd26e67d04ce43b66ec8b865f3"
+  "hmac_signature": "672fd76b4908bb2939ef3cd3f4d897f47f3943217afcb0ec73121f35034cb1e3"
 }

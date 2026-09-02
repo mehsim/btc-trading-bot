@@ -48,6 +48,7 @@ from decision_outcome_db import decision_outcome_db
 from meta_learning_engine import meta_learning_engine
 from causal_attribution_engine import causal_attribution_engine
 from counterfactual_replay_engine import counterfactual_replay_engine
+from model_governance import extract_metric, validate_manifest_governance_floors
 from probabilistic_policy_selector import probabilistic_policy_selector
 from hierarchical_bayesian_engine import hierarchical_bayesian_engine
 from drift_attribution_engine import drift_attribution_engine
@@ -1809,6 +1810,24 @@ def log_trade_journal(trade: dict):
     """Append a closed trade to trade_journal.csv."""
     import csv
     write_header = not os.path.exists(JOURNAL_PATH)
+    if os.path.exists(JOURNAL_PATH):
+        try:
+            with open(JOURNAL_PATH, "r") as f_r:
+                first_line = f_r.readline().strip().split(",")
+            if "pnl_source" not in first_line:
+                with open(JOURNAL_PATH, "r") as f_r:
+                    lines = f_r.readlines()
+                if lines:
+                    lines[0] = ",".join(JOURNAL_HEADER) + "\n"
+                    for idx in range(1, len(lines)):
+                        line_parts = lines[idx].strip().split(",")
+                        if len(line_parts) == 13:
+                            lines[idx] = lines[idx].strip() + ",ESTIMATED\n"
+                    with open(JOURNAL_PATH, "w") as f_w:
+                        f_w.writelines(lines)
+                write_header = False
+        except Exception as e_mig:
+            print(f"[Journal Migration] Warning: {e_mig}")
     try:
         with open(JOURNAL_PATH, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=JOURNAL_HEADER, extrasaction="ignore")
@@ -2171,7 +2190,7 @@ def load_model_weights(iv):
         n_features_ranging = len(feat_ranging)
         print(f"Loaded feature counts - Trending: {n_features_trending}, Ranging: {n_features_ranging} for interval {iv}")
         
-        from config import SUPPORTED_MANIFEST_SCHEMA_VERSION
+        from model_governance import extract_metric, validate_manifest_governance_floors
 
         def check_startup_manifest_health(prefix: str) -> bool:
             manifest_path = f"{prefix}_manifest.json"
@@ -2183,46 +2202,10 @@ def load_model_weights(iv):
             try:
                 with open(manifest_path, "r") as f:
                     m = json.load(f)
-                schema_v = m.get("manifest_schema_version", 1)
-                if schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION or schema_v < 1:
-                    msg = f"Model manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION}) for {prefix} ({iv}m)."
-                    log_event("CRITICAL", f"[Model Manifest Error] {msg}")
-                    send_telegram_alert(f"🚨 *MANIFEST SCHEMA MISMATCH* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Schema*: v{schema_v}")
-                    return False
-                from config import (
-                    MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
-                )
-                min_holdout_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
-                min_holdout_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
-                
-                h_mcc = m.get("holdout_mcc") or m.get("cv_metrics", {}).get("holdout_mcc") or m.get("metrics", {}).get("holdout_mcc")
-                h_bal = m.get("holdout_balanced_accuracy") or m.get("cv_metrics", {}).get("holdout_balanced_accuracy")
-                _ci = m.get("cv_metrics", {}).get("holdout_mcc_ci95")
-                h_ci_low = _ci[0] if isinstance(_ci, (list, tuple)) and len(_ci) >= 1 else None
-                is_prom = m.get("promoted", True)
-
-                if h_mcc is not None and h_mcc < min_holdout_mcc:
-                    msg = f"Holdout MCC ({h_mcc:.4f}) below governance floor ({min_holdout_mcc:.4f}) for {prefix} ({iv}m)."
-                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
-                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
-                    return False
-
-                if h_bal is not None and h_bal < min_holdout_bal:
-                    msg = f"Holdout BalAcc ({h_bal:.4f}) below governance floor ({min_holdout_bal:.4f}) for {prefix} ({iv}m)."
-                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
-                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
-                    return False
-
-                if h_ci_low is not None and h_ci_low < -0.05:
-                    msg = f"Holdout MCC CI95 lower bound ({h_ci_low:.4f}) < -0.05 for {prefix} ({iv}m)."
-                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
-                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
-                    return False
-
-                if is_prom is False:
-                    msg = f"Manifest explicitly marked promoted=False for {prefix} ({iv}m)."
-                    log_event("CRITICAL", f"[Model Governance Rejection] {msg}")
-                    send_telegram_alert(f"🚨 *MODEL NOT PROMOTED* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {msg}")
+                ok, reason = validate_manifest_governance_floors(m, str(iv))
+                if not ok:
+                    log_event("CRITICAL", f"[Model Governance Rejection] {reason} for {prefix} ({iv}m).")
+                    send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {reason}")
                     return False
 
                 from model_governance import model_governance_engine
@@ -2244,8 +2227,11 @@ def load_model_weights(iv):
             try:
                 reg_model_trending, ver_trending = load_production_model_from_registry(interval=str(iv), regime="trending", live_features=feat_trending)
                 if reg_model_trending is not None:
-                    models_by_interval[iv]["trending"]["trend"] = reg_model_trending
-                    models_by_interval[iv]["trending"]["model_version"] = ver_trending
+                    if check_startup_manifest_health(prefixes['trending_trend']):
+                        models_by_interval[iv]["trending"]["trend"] = reg_model_trending
+                        models_by_interval[iv]["trending"]["model_version"] = ver_trending
+                    else:
+                        log_event("CRITICAL", f"[Model Governance Rejection] MLflow production model {ver_trending} failed startup manifest health check.")
                 elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
                     models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
                     models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
@@ -2277,8 +2263,11 @@ def load_model_weights(iv):
             try:
                 reg_model_ranging, ver_ranging = load_production_model_from_registry(interval=str(iv), regime="ranging", live_features=feat_ranging)
                 if reg_model_ranging is not None:
-                    models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
-                    models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
+                    if check_startup_manifest_health(prefixes['ranging_trend']):
+                        models_by_interval[iv]["ranging"]["trend"] = reg_model_ranging
+                        models_by_interval[iv]["ranging"]["model_version"] = ver_ranging
+                    else:
+                        log_event("CRITICAL", f"[Model Governance Rejection] MLflow production model {ver_ranging} failed startup manifest health check.")
                 elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
                     models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
                     models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
@@ -2309,7 +2298,16 @@ def load_model_weights(iv):
                 return False
             b_geom = cal_obj.get("barrier_geometry")
             if not b_geom or not isinstance(b_geom, dict):
-                return True  # Legacy format without embedded geometry
+                man_path = f"{prefixes.get(f'{regime}_trend', '')}_manifest.json"
+                if os.path.exists(man_path):
+                    try:
+                        with open(man_path, "r") as mf:
+                            m_data = json.load(mf)
+                        b_geom = m_data.get("barrier_config")
+                    except Exception:
+                        b_geom = None
+            if not b_geom or not isinstance(b_geom, dict):
+                return True
             from config import TIMEFRAME_CONFIG
             cfg_live = TIMEFRAME_CONFIG.get(str(iv), {})
             live_tp = float(cfg_live.get(f"tp_mult_{regime}", cfg_live.get("tp_mult_trending", 1.85)))
@@ -4545,7 +4543,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
     # 4. Pre-Flight Adverse Price-Drift Check (Live Mid vs Stale Candle Close Entry)
     live_bid, live_ask, live_last = get_bybit_bid_ask(symbol)
-    live_mid = (live_bid + live_ask) / 2.0 if (live_bid is not None and live_ask is not None and live_bid > 0 and live_ask > 0) else (live_last or pre_entry_price)
+    live_mid = (live_bid + live_ask) / 2.0 if (live_bid is not None and live_ask is not None and live_bid > 0 and live_ask > 0) else (live_last if live_last and live_last > 0 else None)
+    if live_mid is None or live_mid <= 0:
+        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Cannot retrieve live market price. Aborting order (Fail-Closed).")
+        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Market price unavailable for pre-flight drift check.")
+        return
     max_adverse_drift = max(0.25 * atr_dollars, pre_entry_price * 0.0025)
 
     if ml_trend == "Bullish" and (pre_entry_price - live_mid) > max_adverse_drift:
@@ -4593,6 +4595,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             # Normal Volatility: Place Limit Maker entry order with dynamic price chasing
             filled_so_far = 0.0
             weighted_sum_px = 0.0
+            chase_order_ids = set()
+            recorded_chase_exec_ids = set()
             
             for chase in range(5):
                 if decision_ts is not None:
@@ -4601,21 +4605,26 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         print(f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting remaining chase iterations.")
                         if filled_so_far > 0:
                             bybit_success = True
-                        break
+                            break
+                        else:
+                            log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase with 0 fills. Aborting order placement completely.")
+                            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired during chase.")
+                            return
 
                 remaining_qty = max(0.0, raw_qty - filled_so_far)
                 if remaining_qty <= 0:
                     bybit_success = True
                     break
                     
-                chase_qty_str = format_bybit_qty(symbol, remaining_qty)
-                try:
-                    if float(chase_qty_str) <= 0:
-                        if filled_so_far > 0:
-                            bybit_success = True
-                        break
-                except (ValueError, TypeError):
+                import math
+                _step_res = get_bybit_min_qty_step(symbol)
+                min_q, step_q = _step_res if isinstance(_step_res, (tuple, list)) else (float(_step_res), float(_step_res))
+                floored_remaining = math.floor(remaining_qty / step_q + 1e-9) * step_q if step_q > 0 else remaining_qty
+                if floored_remaining < min_q:
+                    if filled_so_far > 0:
+                        bybit_success = True
                     break
+                chase_qty_str = format_bybit_qty(symbol, floored_remaining)
 
                 limit_entry_price = get_chase_limit_price(symbol, side, chase, entry_price)
                 print(f"[{symbol} {iv}m API] Chase {chase+1}/5: Placing Limit Maker order for {chase_qty_str} (remaining of {raw_qty}) at {limit_entry_price:.2f}...")
@@ -4623,20 +4632,20 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
+                    if bybit_order_id:
+                        chase_order_ids.add(bybit_order_id)
                     filled = wait_for_order_fill(symbol, bybit_order_id, timeout_sec=2.0)
                     if filled:
                         bybit_success = True
-                        # Cancel any remaining working residual on partial fill to avoid oversized position
                         cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.3)
                         order_details = get_bybit_order_details(symbol, bybit_order_id)
-                        if order_details:
+                        if order_details and float(order_details.get("cumExecQty", 0.0)) > 0:
                             fill_px = float(order_details.get("avgPrice", limit_entry_price))
-                            fill_q = float(order_details.get("cumExecQty", remaining_qty))
+                            fill_q = float(order_details.get("cumExecQty", floored_remaining))
                         else:
-                            fill_exec = get_bybit_last_execution(symbol)
-                            fill_px = float(fill_exec.get("execPrice", limit_entry_price)) if fill_exec else limit_entry_price
-                            fill_q = float(fill_exec.get("execQty", remaining_qty)) if fill_exec else remaining_qty
+                            fill_px = limit_entry_price
+                            fill_q = floored_remaining
                         
                         filled_so_far += fill_q
                         weighted_sum_px += (fill_q * fill_px)
@@ -4645,14 +4654,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s. Cancelling and recalculating price...")
                         cancel_res = cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.3)
-                        # Re-verify order status after cancel to catch fills that occurred in-flight or partial fills
                         post_cancel_details = get_bybit_order_details(symbol, bybit_order_id)
                         if post_cancel_details:
                             status = post_cancel_details.get("orderStatus")
                             cum_qty = float(post_cancel_details.get("cumExecQty", 0.0))
                             avg_px = float(post_cancel_details.get("avgPrice", limit_entry_price))
                             
-                            # Track any partial fill executed before/during cancellation
                             if cum_qty > 0:
                                 filled_so_far += cum_qty
                                 weighted_sum_px += (cum_qty * avg_px)
@@ -4683,9 +4690,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             # Fallback to Taker IOC if Limit Maker chase attempts did not reach completion
             if not bybit_success:
                 remaining_qty = max(0.0, raw_qty - filled_so_far)
-                ioc_qty_str = format_bybit_qty(symbol, remaining_qty)
+                _step_res = get_bybit_min_qty_step(symbol)
+                min_q, step_q = _step_res if isinstance(_step_res, (tuple, list)) else (float(_step_res), float(_step_res))
+                floored_ioc = math.floor(remaining_qty / step_q + 1e-9) * step_q if step_q > 0 else remaining_qty
+                ioc_qty_str = format_bybit_qty(symbol, floored_ioc)
                 try:
-                    ioc_valid = float(ioc_qty_str) > 0
+                    ioc_valid = float(ioc_qty_str) >= min_q
                 except (ValueError, TypeError):
                     ioc_valid = False
 
@@ -4697,14 +4707,24 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     last_exec = get_bybit_last_execution(symbol)
                     now_ts_sec = time.time()
                     if last_exec and (now_ts_sec - (float(last_exec.get("execTime", 0))/1000.0)) < 5.0 and last_exec.get("side") == side:
-                        print(f"[{symbol} {iv}m API] Recent fill detected right before IOC fallback. Skipping duplicate IOC.")
-                        bybit_success = True
-                        fill_px = float(last_exec.get("execPrice", entry_price))
-                        fill_q = float(last_exec.get("execQty", remaining_qty))
-                        filled_so_far += fill_q
-                        weighted_sum_px += (fill_q * fill_px)
-                        actual_qty = filled_so_far
-                        entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                        exec_id = last_exec.get("execId")
+                        exec_order_id = last_exec.get("orderId")
+                        if (exec_order_id and exec_order_id in chase_order_ids) or (exec_id and exec_id in recorded_chase_exec_ids):
+                            print(f"[{symbol} {iv}m API] Recent fill ({exec_id}) belongs to chase order already recorded. Skipping duplicate accumulation.")
+                            bybit_success = True
+                        else:
+                            print(f"[{symbol} {iv}m API] Unrecorded recent fill ({exec_id}) detected right before IOC fallback. Skipping duplicate IOC.")
+                            bybit_success = True
+                            fill_px = float(last_exec.get("execPrice", entry_price))
+                            raw_fill_q = float(last_exec.get("execQty", remaining_qty))
+                            fill_q = min(raw_fill_q, max(0.0, raw_qty - filled_so_far))
+                            if fill_q > 0:
+                                filled_so_far += fill_q
+                                weighted_sum_px += (fill_q * fill_px)
+                                if exec_id:
+                                    recorded_chase_exec_ids.add(exec_id)
+                            actual_qty = filled_so_far
+                            entry_price = weighted_sum_px / max(1e-9, filled_so_far)
                     else:
                         print(f"[{symbol} {iv}m API] Limit Maker chasing exhausted. Executing fallback Taker IOC for remaining {ioc_qty_str}...")
                         order_res = place_bybit_taker_ioc_order(symbol, side, ioc_qty_str, sl=stop_loss_price, tp=take_profit_price)
@@ -4715,11 +4735,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             order_details = get_bybit_order_details(symbol, bybit_order_id)
                             if order_details:
                                 fill_px = float(order_details.get("avgPrice", entry_price))
-                                fill_q = float(order_details.get("cumExecQty", remaining_qty))
+                                fill_q = float(order_details.get("cumExecQty", floored_ioc))
                             else:
                                 fill_exec = get_bybit_last_execution(symbol)
                                 fill_px = float(fill_exec.get("execPrice", entry_price)) if fill_exec else entry_price
-                                fill_q = float(fill_exec.get("execQty", remaining_qty)) if fill_exec else remaining_qty
+                                fill_q = float(fill_exec.get("execQty", floored_ioc)) if fill_exec else floored_ioc
                             
                             filled_so_far += fill_q
                             weighted_sum_px += (fill_q * fill_px)
@@ -5445,9 +5465,6 @@ def main():
                                     print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
                             else:
                                 active_trade["break_even_triggered"] = True
-                                active_trade["break_even_triggered"] = True
-                                active_trades_updated = True
-                                print(f"[{active_symbol} {iv}m Scale-Out] {int(scale_out_portion*100)}% Profit Locked! Closed: ${closed_size:.2f} at {current_price:.2f} (PnL: {pnl_usd:+.2f}). Remaining size: ${remaining_size:.2f}. SL moved to fee-adjusted entry: {stop_loss:.2f}")
                     
                     # Tier-2 Runner Profit Ratchet: When half-closed runner reaches >= +1.5x ATR, lock in +0.5x ATR guaranteed profit
                     if half_closed and atr_dollars > 0:
@@ -6481,10 +6498,11 @@ def main():
                 interval_ms = int(iv) * 60 * 1000
                 candle_close_ms = latest_completed_ts + interval_ms
                 candle_age_sec = (now_ms - candle_close_ms) / 1000.0
-                max_allowed_age_sec = min(300.0, max(180.0, int(iv) * 60 * 0.15))
+                max_allowed_age_sec = min(900.0, max(300.0, int(iv) * 60 * 0.25))
 
                 if candle_age_sec > max_allowed_age_sec or candle_age_sec < -30.0:
                     log_event("INFO", f"[{symbol} {iv}m] Stale candle skipped: completed bar closed {candle_age_sec:.1f}s ago (max allowed: {max_allowed_age_sec:.1f}s). Skipping.")
+                    completed_this_hour.add((symbol, iv))
                     continue
 
                 completed_this_hour.add((symbol, iv))
@@ -6628,31 +6646,35 @@ def main():
                             if (mcc_val is None or bal_acc_val is None or mcc_min_val is None or 
                                 holdout_mcc_val is None or holdout_bal_acc_val is None or is_promoted_flag is None):
                                 man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
+                                manifest_load_error = None
                                 if os.path.exists(man_path):
                                     try:
                                         with open(man_path, "r") as mf:
                                             _mdata = json.load(mf)
                                             if mcc_val is None:
-                                                mcc_val = _mdata.get("manifest_mcc") or _mdata.get("cv_metrics", {}).get("mcc", {}).get("mean")
+                                                mcc_val = extract_metric(_mdata, ["manifest_mcc"], ["cv_metrics", "mcc", "mean"], ["metrics", "mcc"])
                                             if mcc_min_val is None:
-                                                mcc_min_val = _mdata.get("manifest_mcc_min") or _mdata.get("cv_metrics", {}).get("mcc", {}).get("min")
+                                                mcc_min_val = extract_metric(_mdata, ["manifest_mcc_min"], ["cv_metrics", "mcc", "min"], ["metrics", "mcc_min"])
                                             if bal_acc_val is None:
-                                                bal_acc_val = _mdata.get("manifest_bal_acc") or _mdata.get("cv_metrics", {}).get("balanced_accuracy", {}).get("mean")
+                                                bal_acc_val = extract_metric(_mdata, ["manifest_bal_acc"], ["cv_metrics", "balanced_accuracy", "mean"], ["metrics", "balanced_accuracy"])
                                             if holdout_mcc_val is None:
-                                                holdout_mcc_val = _mdata.get("holdout_mcc") or _mdata.get("cv_metrics", {}).get("holdout_mcc") or _mdata.get("metrics", {}).get("holdout_mcc")
+                                                holdout_mcc_val = extract_metric(_mdata, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
                                             if holdout_bal_acc_val is None:
-                                                holdout_bal_acc_val = _mdata.get("holdout_balanced_accuracy") or _mdata.get("cv_metrics", {}).get("holdout_balanced_accuracy")
+                                                holdout_bal_acc_val = extract_metric(_mdata, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
                                             if holdout_ci95_low is None:
-                                                _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95")
+                                                _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(_mdata.get("cv_metrics"), dict) else None
                                                 if isinstance(_ci, (list, tuple)) and len(_ci) >= 1:
                                                     holdout_ci95_low = _ci[0]
                                             if is_promoted_flag is None:
                                                 is_promoted_flag = _mdata.get("promoted", True)
                                     except Exception as mf_err:
-                                        log_event("WARNING", f"Failed to load manifest {man_path}: {mf_err}")
+                                        log_event("CRITICAL", f"Failed to load manifest {man_path}: {mf_err}")
+                                        manifest_load_error = str(mf_err)
 
                             abstain_reason = None
-                            if m_price is None or m_trend is None or not feat_list:
+                            if "manifest_load_error" in locals() and manifest_load_error:
+                                abstain_reason = f"Corrupted or unreadable manifest {man_path}: {manifest_load_error}"
+                            elif m_price is None or m_trend is None or not feat_list:
                                 abstain_reason = f"{served_regime} model offline"
                             elif active_calibrator is None or (isinstance(active_calibrator, dict) and active_calibrator.get("is_fallback", False)):
                                 abstain_reason = f"{served_regime} calibrator missing or fallback (Fail-Closed)"
@@ -6662,10 +6684,10 @@ def main():
                                 abstain_reason = f"min CV MCC {mcc_min_val:.4f} < -0.05"
                             elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
                                 abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
-                            elif holdout_mcc_val is not None and holdout_mcc_val < min_holdout_mcc_floor:
-                                abstain_reason = f"Holdout MCC {holdout_mcc_val:.4f} < floor {min_holdout_mcc_floor}"
-                            elif holdout_bal_acc_val is not None and holdout_bal_acc_val < min_holdout_bal_acc_floor:
-                                abstain_reason = f"Holdout BalAcc {holdout_bal_acc_val:.4f} < floor {min_holdout_bal_acc_floor}"
+                            elif holdout_mcc_val is None or holdout_mcc_val < min_holdout_mcc_floor:
+                                abstain_reason = f"Holdout MCC ({holdout_mcc_val}) < floor {min_holdout_mcc_floor} or missing"
+                            elif holdout_bal_acc_val is None or holdout_bal_acc_val < min_holdout_bal_acc_floor:
+                                abstain_reason = f"Holdout BalAcc ({holdout_bal_acc_val}) < floor {min_holdout_bal_acc_floor} or missing"
                             elif holdout_ci95_low is not None and holdout_ci95_low < -0.05:
                                 abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
                             elif is_promoted_flag is False:
@@ -6799,11 +6821,19 @@ def main():
                             # 1. Calibrate the directional confidence (matching economic 2-class break-even scale)
                             calibrated_confidence = ml_confidence if ml_trend in ["Bullish", "Bearish"] else raw_class_prob
                             calibrator = active_calibrator
+                            is_fallback_signal = False
+                            signal_source_type = "ML_ENSEMBLE"
                             if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
-                                from tools.beta_calibrator import calibrate_probability
-                                calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
-                                method_name = calibrator.get("scaling_method", "calibration")
-                                print(f"[{symbol} {iv}m {method_name}] Dir Mass: {ml_confidence*100:.2f}% (Raw Class: {raw_class_prob*100:.2f}%) -> Calibrated: {calibrated_confidence*100:.2f}%")
+                                from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
+                                if not is_calibrator_viable(calibrator):
+                                    log_event("WARNING", f"[{symbol} {iv}m] Calibrator failed viability check (Fail-Closed). Marking signal as fallback.")
+                                    is_fallback_signal = True
+                                    signal_source_type = "UNVIABLE_CALIBRATOR"
+                                    calibrated_confidence = 0.50
+                                else:
+                                    calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
+                                    method_name = calibrator.get("scaling_method", "calibration")
+                                    print(f"[{symbol} {iv}m {method_name}] Dir Mass: {ml_confidence*100:.2f}% (Raw Class: {raw_class_prob*100:.2f}%) -> Calibrated: {calibrated_confidence*100:.2f}%")
 
                             # 2. Decision-layer neutral discount (default 0.0 to prevent double penalty)
                             neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
@@ -6837,8 +6867,8 @@ def main():
                                 "raw_confidence": ml_confidence,
                                 "calibrated_confidence": calibrated_confidence,
                                 "manifest_mcc": _manifest_mcc_val,
-                                "signal_source": "ML_ENSEMBLE",
-                                "is_fallback": False
+                                "signal_source": signal_source_type,
+                                "is_fallback": is_fallback_signal
                             }
                             for k_suffix in [str(tf), str(iv)]:
                                 bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
@@ -7898,13 +7928,16 @@ def main():
 
                                             # Apply P4 Anti-Martingale scaling to candidate sizing before risk gates
                                             from risk_engine import calculate_anti_martingale_risk_multiplier
+                                            peak_eq = bot_state.get("peak_balance") or bot_state.get("peak_wallet_balance") or current_bal
                                             am_res = calculate_anti_martingale_risk_multiplier(
                                                 current_bal,
-                                                bot_state.get("peak_wallet_balance", current_bal),
+                                                peak_eq,
                                                 bot_state.get("trade_history", [])
                                             )
                                             am_mult = float(am_res.get("multiplier", 1.0))
                                             position_size_usd = max(0.0, float(position_size_usd * am_mult))
+                                            # Re-clamp candidate position size to available free margin to avoid exceeding allocation limit
+                                            position_size_usd = min(available_margin * 0.95, position_size_usd)
                                             if am_mult != 1.0:
                                                 print(f"[{symbol} {iv}m Anti-Martingale] Applied streak multiplier {am_mult:.2f}x to candidate size -> ${position_size_usd:.2f}")
 
@@ -8081,22 +8114,27 @@ def main():
                                                     elif live_last is not None and live_last > 0:
                                                         live_current_price = live_last
                                                     else:
-                                                        live_current_price = entry_price
+                                                        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Cannot retrieve live market price. Skipping entry (Fail-Closed).")
+                                                        status_msg = "Skipped (Market Price Unavailable)"
+                                                        wallet_exceeded = True
+                                                        bybit_success = False
+                                                        live_current_price = None
 
-                                                    # Adverse Price-Drift Check (comparing live mid to stale candle close entry)
-                                                    max_adverse_drift = max(0.25 * atr_dollars, entry_price * 0.0025)
-                                                    if str(ml_trend).upper() in ("BUY", "LONG", "BULLISH") and (entry_price - live_current_price) > max_adverse_drift:
-                                                        adverse_pts = entry_price - live_current_price
-                                                        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_current_price:.2f}) drifted {adverse_pts:.2f} below entry ({entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Skipping.")
-                                                        status_msg = "Skipped (Adverse Price Drift)"
-                                                        wallet_exceeded = True
-                                                        bybit_success = False
-                                                    elif str(ml_trend).upper() in ("SELL", "SHORT", "BEARISH") and (live_current_price - entry_price) > max_adverse_drift:
-                                                        adverse_pts = live_current_price - entry_price
-                                                        log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_current_price:.2f}) drifted {adverse_pts:.2f} above entry ({entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Skipping.")
-                                                        status_msg = "Skipped (Adverse Price Drift)"
-                                                        wallet_exceeded = True
-                                                        bybit_success = False
+                                                    if live_current_price is not None:
+                                                        # Adverse Price-Drift Check (comparing live mid to stale candle close entry)
+                                                        max_adverse_drift = max(0.25 * atr_dollars, entry_price * 0.0025)
+                                                        if str(ml_trend).upper() in ("BUY", "LONG", "BULLISH") and (entry_price - live_current_price) > max_adverse_drift:
+                                                            adverse_pts = entry_price - live_current_price
+                                                            log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_current_price:.2f}) drifted {adverse_pts:.2f} below entry ({entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Skipping.")
+                                                            status_msg = "Skipped (Adverse Price Drift)"
+                                                            wallet_exceeded = True
+                                                            bybit_success = False
+                                                        elif str(ml_trend).upper() in ("SELL", "SHORT", "BEARISH") and (live_current_price - entry_price) > max_adverse_drift:
+                                                            adverse_pts = live_current_price - entry_price
+                                                            log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_current_price:.2f}) drifted {adverse_pts:.2f} above entry ({entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Skipping.")
+                                                            status_msg = "Skipped (Adverse Price Drift)"
+                                                            wallet_exceeded = True
+                                                            bybit_success = False
 
                                                     # Fetch real top-of-book depth from orderbook imbalance
                                                     top_book_depth = 50000.0

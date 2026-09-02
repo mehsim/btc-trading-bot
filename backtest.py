@@ -65,6 +65,35 @@ def calculate_backtest_slippage(interval: str, atr_norm: float = 0.0) -> float:
     return base + volatility_premium
 
 
+def export_backtest_trades(all_scenario_trades: list, output_file: str = "backtest_trades.jsonl", archive_dir: str = "backtest_runs") -> bool:
+    """Safely and atomically exports per-trade backtest context records."""
+    if not all_scenario_trades or len(all_scenario_trades) == 0:
+        log_event("WARNING", f"[Backtest Warning] Zero scenario trades generated across all scenarios. Refusing to overwrite {output_file}.")
+        return False
+    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(archive_dir, exist_ok=True)
+    archive_path = os.path.join(archive_dir, f"backtest_trades_{ts_str}.jsonl")
+    temp_path = f"{output_file}_{ts_str}.tmp"
+    import shutil
+    import json
+    try:
+        with open(temp_path, "w") as f_tmp:
+            for tr in all_scenario_trades:
+                f_tmp.write(json.dumps(tr) + "\n")
+        shutil.copyfile(temp_path, archive_path)
+        os.replace(temp_path, output_file)
+        print(f"[Backtest] Emitted {len(all_scenario_trades)} rich per-trade context records to {output_file} and {archive_path}.")
+        return True
+    except Exception as e_export:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        log_event("WARNING", f"[Backtest Warning] Failed to export JSONL trades: {e_export}")
+        return False
+
+
 PARTITION_FEATURES = [
     "ADX", "ATR_norm", "CHOP", "BB_width", "RSI_z", "volatility_vts",
     "htf_4h_trend_dir", "hour_sin", "hour_cos", "volume_ratio",
@@ -760,27 +789,8 @@ def run_backtest():
             "Pessimistic WinRate": f"{win_rate_p:.2f}%" if t_count_p > 0 else "N/A"
         })
 
-    # Export per-trade granular backtest context to JSONL
-    if all_scenario_trades and len(all_scenario_trades) > 0:
-        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        os.makedirs("backtest_runs", exist_ok=True)
-        archive_path = f"backtest_runs/backtest_trades_{ts_str}.jsonl"
-        try:
-            import jsonlines
-            with jsonlines.open(archive_path, mode="w") as writer:
-                writer.write_all(all_scenario_trades)
-            with jsonlines.open("backtest_trades.jsonl", mode="w") as writer:
-                writer.write_all(all_scenario_trades)
-        except Exception:
-            with open(archive_path, "w") as f_trades:
-                for tr in all_scenario_trades:
-                    f_trades.write(json.dumps(tr) + "\n")
-            with open("backtest_trades.jsonl", "w") as f_trades:
-                for tr in all_scenario_trades:
-                    f_trades.write(json.dumps(tr) + "\n")
-        print(f"[Backtest] Emitted {len(all_scenario_trades)} rich per-trade context records to backtest_trades.jsonl and {archive_path}.")
-    else:
-        log_event("WARNING", "[Backtest Warning] Zero scenario trades generated across all scenarios. Refusing to overwrite backtest_trades.jsonl.")
+        # Export per-trade granular backtest context to JSONL
+        export_backtest_trades(all_scenario_trades)
 
     # Print Comparison Table
     results_df = pd.DataFrame(results)

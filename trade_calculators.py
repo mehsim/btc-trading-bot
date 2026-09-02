@@ -79,8 +79,11 @@ def estimate_empirical_realized_rr(
             if tr_iv and tr_iv != str(interval):
                 continue
         if regime is not None:
+            r_str = str(regime).lower()
             tr_reg = str(tr.get("regime", "")).lower()
-            if tr_reg and str(regime).lower() not in tr_reg:
+            reg_token = "trending" if "trend" in r_str else ("ranging" if "rang" in r_str else r_str)
+            tr_token = "trending" if "trend" in tr_reg else ("ranging" if "rang" in tr_reg else tr_reg)
+            if tr_reg and reg_token != tr_token:
                 continue
         filtered.append(tr)
 
@@ -90,7 +93,7 @@ def estimate_empirical_realized_rr(
     wins = []
     losses = []
     for tr in filtered:
-        pnl = float(tr.get("pnl", tr.get("realized_pnl", 0.0)) or 0.0)
+        pnl = float(tr.get("pnl_usd", tr.get("pnl", tr.get("realized_pnl", 0.0))) or 0.0)
         if pnl > 0:
             wins.append(pnl)
         elif pnl < 0:
@@ -117,13 +120,13 @@ def get_realized_rr_haircut(
     """
     Computes empirical realized R:R haircut factor.
     If sufficient closed trades exist to estimate realized R:R and nominal_rr is provided,
-    calculates empirical_haircut = min(1.0, max(0.10, empirical_rr / nominal_rr)).
+    calculates empirical_haircut = min(0.60, max(0.10, empirical_rr / nominal_rr)).
     Otherwise, falls back to conservative default_haircut (0.28).
     """
     if nominal_rr is not None and nominal_rr > 0:
         emp_rr = estimate_empirical_realized_rr(closed_trades=closed_trades, interval=interval, regime=regime)
         if emp_rr is not None and emp_rr > 0:
-            return float(np.clip(emp_rr / nominal_rr, 0.10, 1.0))
+            return float(np.clip(emp_rr / nominal_rr, 0.10, 0.60))
 
     return float(default_haircut)
 

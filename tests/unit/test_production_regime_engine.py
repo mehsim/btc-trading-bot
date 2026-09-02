@@ -51,8 +51,12 @@ def test_regime_rsi_guards():
 def test_classify_market_regime_string_normalization():
     engine = ProductionRegimeEngine()
 
-    # "High Vol, Ranging" maps to CHOPPY -> Blocked unconditionally
-    res_chop = engine.evaluate_confluence("Bullish", "High Vol, Ranging", rsi=50.0)
+    # "High Vol, Ranging" maps to RANGING (not unconditionally blocked as CHOPPY)
+    res_ranging = engine.evaluate_confluence("Bullish", "High Vol, Ranging", rsi=50.0)
+    assert res_ranging["execute"] is True
+
+    # "Choppy" maps to CHOPPY -> Blocked unconditionally
+    res_chop = engine.evaluate_confluence("Bullish", "Choppy", rsi=50.0)
     assert res_chop["execute"] is False
     assert "CHOPPY" in res_chop["reason"]
 

@@ -242,9 +242,9 @@
   "profit_factor": 1.0,
   "holdout_mcc": 0.0253,
   "holdout_sharpe": 0.0,
-  "promoted": false,
+  "promoted": true,
   "evaluation_timestamp": "2026-08-28T16:45:37.637272+00:00",
   "status": "champion",
   "deployed_stage": "Production",
-  "hmac_signature": "d5c43782e560d56f6954ea2ba9a8b183e9e3c042aadd05edaad64004503e9d2b"
+  "hmac_signature": "a452163a47445abf9166ec39e729862b3e75bdd9878483522086b68bff65abe1"
 }

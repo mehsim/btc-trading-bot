@@ -2092,13 +2092,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             elif p_dir == 0:  # Bearish short
                                 champ_trade_rets.append(-float(p_ret))
                                 _c_sl_fracs.append(0.01)
-                        champ_stats = calculate_replay_statistics(
-                            champ_trade_rets,
-                            initial_equity=100.0,
-                            risk_per_trade_pct=_c_sl_fracs if _c_sl_fracs else 0.01,
-                            interval=str(interval)
-                        )
-                        pf_champ = float(champ_stats.get("profit_factor", 0.95))
+                        if len(champ_trade_rets) < 10:
+                            pf_champ = float(champ_manifest.get("profit_factor", 1.05)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest) else 1.05
+                        else:
+                            champ_stats = calculate_replay_statistics(
+                                champ_trade_rets,
+                                initial_equity=100.0,
+                                risk_per_trade_pct=_c_sl_fracs if _c_sl_fracs else 0.01,
+                                interval=str(interval)
+                            )
+                            pf_champ = float(champ_stats.get("profit_factor", 0.95))
+                            pf_champ = float(np.clip(pf_champ, 0.80, 2.50))
                     elif champion_exists and not contract_stale and "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
                         pf_champ = float(champ_manifest.get("profit_factor", 0.95))
 
@@ -2207,8 +2211,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         if should_save:
             print(f"  [Champion-Challenger] Challenger approved & promoted across all release gates. Overwriting active model files...")
-            save_ensemble_classifier(final_ensemble_t, c_prefix_t)
-            save_ensemble_regressor(final_ensemble_p, c_prefix_p)
+            save_ensemble_classifier(final_ensemble_t, c_prefix_t, write_manifest=False)
+            save_ensemble_regressor(final_ensemble_p, c_prefix_p, write_manifest=False)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
             import shutil
             chal_cal_file = f"calibrator_{name}_{interval}_challenger.json"
@@ -2511,12 +2515,14 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
             for t in trades:
                 symbol = t.get("symbol")
                 exit_ts = float(t.get("exit_time", 0))
+                entry_ts = float(t.get("entry_time", t.get("timestamp", 0)))
                 pnl = float(t.get("pnl_usd", 0.0))
                 direction = t.get("direction", "Bullish")
                 df_c = get_history(symbol=symbol, interval=interval, limit=350, pages=1)
                 if df_c is None or len(df_c) < 20:
                     continue
-                df_c = df_c[df_c["timestamp"] <= exit_ts * 1000].copy()
+                entry_time_ms = entry_ts * 1000 if entry_ts < 1e11 else entry_ts
+                df_c = df_c[df_c["timestamp"] <= entry_time_ms].copy()
                 if len(df_c) < 10:
                     continue
                 
@@ -2622,17 +2628,17 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
                         low = row_fut["low"]
                         if direction == "Bullish":
                             if low <= sl:
-                                pnl = -0.01
+                                pnl = (sl - entry_price) / max(1e-9, entry_price)
                                 break
                             if high >= tp:
-                                pnl = 0.015
+                                pnl = (tp - entry_price) / max(1e-9, entry_price)
                                 break
                         else:
                             if high >= sl:
-                                pnl = -0.01
+                                pnl = (entry_price - sl) / max(1e-9, entry_price)
                                 break
                             if low <= tp:
-                                pnl = 0.015
+                                pnl = (entry_price - tp) / max(1e-9, entry_price)
                                 break
                     else:
                         if len(df_future) > 0:
