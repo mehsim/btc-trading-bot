@@ -383,12 +383,10 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
         )
 
-        # (d) Dynamic Stop Loss Multiplier based on prediction confidence
-        sl_multiplier_adjusted = sl_multiplier
-        if calibrated_confidence > effective_min_conf:
-            confidence_ratio = (calibrated_confidence - effective_min_conf) / max(1e-9, 1.0 - effective_min_conf)
-            sl_multiplier_adjusted = sl_multiplier * (1.0 - 0.3 * confidence_ratio)
-
+        # (d) Timeframe-Adaptive Stop Loss Multiplier (aligned with live risk_engine.py:221) (Finding #138)
+        import risk_engine
+        tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(str(interval))
+        sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
         sl_dist = sl_multiplier_adjusted * atr_dollars
         tp_dist = tp_m * atr_dollars
 

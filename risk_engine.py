@@ -14,8 +14,8 @@ class AutoStopFloor:
         self.min_sample_size = min_sample_size
         self.floor_cache = {}
 
-    def compute_optimal_floor(self, symbol, database_module=None):
-        pain_adjusted = pain_feedback.get_effective_floor(symbol)
+    def compute_optimal_floor(self, symbol, database_module=None, interval=None):
+        pain_adjusted = pain_feedback.get_effective_floor(symbol, interval=interval)
         if pain_adjusted is not None:
             return pain_adjusted
 
@@ -23,6 +23,10 @@ class AutoStopFloor:
             try:
                 trades = database_module.get_trade_history(limit=self.lookback_trades)
                 pain_trades = [t for t in trades if isinstance(t, dict) and t.get('symbol') == symbol and t.get('reason') and ('STOP LOSS' in t['reason'] or 'BREAK-EVEN' in t['reason'])]
+                if interval:
+                    iv_trades = [t for t in pain_trades if str(t.get('interval')) == str(interval)]
+                    if len(iv_trades) >= self.min_sample_size:
+                        pain_trades = iv_trades
                 if len(pain_trades) >= self.min_sample_size:
                     required_floors = []
                     for t in pain_trades:
@@ -39,13 +43,13 @@ class AutoStopFloor:
                         return max(0.005, min(opt_floor, 0.020))
             except Exception as e:
                 print(f"[risk_engine] Warning computing floor for {symbol}: {e}")
-        return 0.008
+        return config.MIN_SL_PCT_CONFIG.get(str(interval), 0.005)
 
-    def get_floor(self, symbol, database_module=None):
-        pain_adjusted = pain_feedback.get_effective_floor(symbol)
+    def get_floor(self, symbol, database_module=None, interval=None):
+        pain_adjusted = pain_feedback.get_effective_floor(symbol, interval=interval)
         if pain_adjusted is not None:
             return pain_adjusted
-        return self.compute_optimal_floor(symbol, database_module=database_module)
+        return self.compute_optimal_floor(symbol, database_module=database_module, interval=interval)
 
 class WickBufferCalculator:
     def __init__(self, lookback_bars=50):

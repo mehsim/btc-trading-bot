@@ -28,6 +28,7 @@ from shap_store import save_shap_record
 from learning_report import generate_trade_learning_report
 from audit_logger import log_learning_action
 from schema_validator import schema_validator
+from logger import log_event
 
 from trade_calculators import safe_float
 from feature_availability import record_feature_sample
@@ -175,6 +176,14 @@ class ContinuousLearningEngine:
             # 13. Learning Report Generation
             report = generate_trade_learning_report(exp_record)
             log_learning_action("LEARNING_REPORT_GENERATED", "learning_report", trade_id=trade_id, details={"score": learning_score})
+
+            # 14. Evaluate Live Model & Calibration Drift (Finding #125)
+            try:
+                drift_metrics = drift_monitor.evaluate_drift()
+                log_learning_action("DRIFT_EVALUATED", "drift_monitor", trade_id=trade_id, details=drift_metrics)
+            except Exception as ex_drift:
+                log_event("WARNING", f"[LearningEngine] Drift evaluation notice: {ex_drift}")
+
             print(f"[LearningEngine] Processed trade {trade_id} (Score: {learning_score:.0f}/100 | Ver: {LEARNING_ENGINE_VERSION})")
             
         except Exception as e:

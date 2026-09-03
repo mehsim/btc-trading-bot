@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
+from logger import log_event
 
 # MLflow Integration with Fallback
 try:
@@ -111,7 +112,7 @@ class ModelRegistry:
             try:
                 with open(self.registry_file, "r") as f:
                     return json.load(f)
-            except Exception:
+            except (OSError, IOError, json.JSONDecodeError):
                 pass
         return {"Production": None, "Staging": None, "Archived": []}
 
@@ -128,10 +129,16 @@ class ModelRegistry:
             "registered_at_utc": datetime.now(timezone.utc).isoformat()
         }
 
+        if not isinstance(self.models.get("Production"), dict) or "model_name" in self.models.get("Production", {}):
+            old_prod = self.models.get("Production")
+            self.models["Production"] = {}
+            if old_prod and isinstance(old_prod, dict) and "model_name" in old_prod:
+                self.models["Production"][old_prod["model_name"]] = old_prod
+
         if stage == STAGE_PRODUCTION:
-            if self.models["Production"]:
-                self.models["Archived"].append(self.models["Production"])
-            self.models["Production"] = record
+            if model_name in self.models["Production"]:
+                self.models["Archived"].append(self.models["Production"][model_name])
+            self.models["Production"][model_name] = record
         elif stage == STAGE_STAGING:
             self.models["Staging"] = record
         else:
@@ -152,6 +159,12 @@ class ModelRegistry:
                     print(f"[MLflow Registry Sync] Synced model '{model_name}' metrics and stage '{stage}' to run {active_run.info.run_id}")
             except Exception as ml_err:
                 print(f"[MLflow Registry Warning] Could not sync model to MLflow: {ml_err}")
+
+    def get_production_model(self, model_name: str) -> Optional[dict]:
+        prod = self.models.get("Production")
+        if isinstance(prod, dict):
+            return prod.get(model_name)
+        return None
 
 def log_mlflow_training_run(
     symbol: str,
@@ -339,6 +352,10 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         return False, f"REJECTED: promotion gate could not be evaluated: {e}"
 
 
+class FeatureContractMismatchError(RuntimeError):
+    """Raised when feature schema/contract in registry does not match served features."""
+    pass
+
 _mlflow_unreachable = False
 
 def load_production_model_from_registry(interval: str, regime: str, live_features: Optional[List[str]] = None) -> Tuple[Any, str]:
@@ -368,11 +385,16 @@ def load_production_model_from_registry(interval: str, regime: str, live_feature
                     import hashlib
                     live_hash = hashlib.sha256(",".join(live_features).encode("utf-8")).hexdigest()[:12]
                     if served_hash != live_hash:
-                        raise RuntimeError(f"[Model Governance] Feature contract mismatch ({served_hash} != {live_hash}) — refusing to serve")
+                        err_msg = f"[Model Governance] Feature contract mismatch for {name} ({served_hash} != {live_hash}) — refusing to serve"
+                        log_event("CRITICAL", err_msg)
+                        raise FeatureContractMismatchError(err_msg)
 
                 model = mlflow.xgboost.load_model(f"models:/{name}/Production")
                 version_str = f"{name}:{mv.version}"
                 return model, version_str
+        except FeatureContractMismatchError:
+            # Re-raise to fail closed; do not latch unreachable and do not silently fall back
+            raise
         except Exception as e:
             _mlflow_unreachable = True
             print(f"[Model Governance Warning] Could not load from MLflow registry ({e}) — caching MLflow unreachable")

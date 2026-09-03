@@ -5,6 +5,7 @@ Consolidates strategy thresholds, leverage caps, risk parameters, and memory bou
 
 import os
 import json
+from typing import Tuple, Dict, Any, Optional, List
 
 # Active Operator Risk & Leverage Parameters (Tunable runtime configuration bounded by risk_limits.py)
 TIMEFRAME_MAX_LEVERAGE_CAPS = {
@@ -69,16 +70,69 @@ if os.path.exists("governance_denylist.json"):
                 _persisted_denylist = set(_pdata)
             elif isinstance(_pdata, dict):
                 _persisted_denylist = set(_pdata.keys())
-    except Exception:
+    except (IOError, OSError, json.JSONDecodeError):
         pass
 
 MODEL_SLOT_DENYLIST = {
     "trending_15",    # Demoted pending clean re-evaluation under 8-gate release protocol
     "ranging_15",     # 15m ranging market microstructure has negative holdout MCC (-0.0113) — fail-closed
+    "trending_30",    # Finding #122: holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
     # trending_240 & ranging_240 lifted: retrained with 16-page RFECV (+0.0667 / +0.0567 CV MCC, +0.0253 / +0.0494 Holdout MCC)
 }.union(_persisted_denylist)
+
+def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
+    """
+    Evaluates out-of-sample manifest quality rules (Finding #122 & #127):
+    Abstains when:
+    1. holdout_balanced_accuracy <= 1/n_classes (~0.3334)
+    2. holdout_mcc <= 0.0
+    3. holdout_brier >= 0.99 or holdout_ece >= 0.99 (crash sentinels)
+    4. |holdout_mcc| < holdout_mcc_mde_80pct (when MDE is recorded)
+    """
+    if not manifest or not isinstance(manifest, dict):
+        return True, "Manifest missing or invalid"
+    
+    def _extract(keys, default=None):
+        for k in keys:
+            if k in manifest and manifest[k] is not None:
+                return manifest[k]
+        for block in ["cv_metrics", "metrics", "holdout_metrics"]:
+            sub = manifest.get(block)
+            if isinstance(sub, dict):
+                for k in keys:
+                    if k in sub and sub[k] is not None:
+                        return sub[k]
+        return default
+
+    h_mcc = _extract(["holdout_mcc"])
+    h_bal_acc = _extract(["holdout_balanced_accuracy", "manifest_bal_acc"])
+    h_brier = _extract(["holdout_brier", "brier_score"])
+    h_ece = _extract(["holdout_ece", "ece"])
+    h_mde = _extract(["holdout_mcc_mde_80pct"])
+
+    try:
+        if h_brier is not None and float(h_brier) >= 0.99:
+            return True, f"Holdout Brier score is a crash sentinel ({h_brier})"
+        if h_ece is not None and float(h_ece) >= 0.99:
+            return True, f"Holdout ECE is a crash sentinel ({h_ece})"
+        if h_bal_acc is not None and float(h_bal_acc) <= 0.3334:
+            return True, f"Holdout balanced accuracy ({float(h_bal_acc):.4f}) <= chance (0.3333)"
+        if h_mcc is not None and float(h_mcc) <= 0.0:
+            return True, f"Holdout MCC ({float(h_mcc):.4f}) <= 0.0 (sub-random)"
+        if h_mcc is not None and h_mde is not None and abs(float(h_mcc)) < float(h_mde):
+            return True, f"|Holdout MCC| ({abs(float(h_mcc)):.4f}) < 80% MDE ({float(h_mde):.4f})"
+    except Exception as ex_deg:
+        return True, f"Manifest metric parsing error: {ex_deg}"
+
+    return False, "OK"
+
+def is_model_slot_holdout_valid(slot_name: str, holdout_metrics: dict) -> bool:
+    """Evaluates whether a model slot's holdout metrics satisfy serve-time quality criteria (Finding #122)."""
+    manifest = {"metrics": holdout_metrics, "holdout_metrics": holdout_metrics}
+    is_bad, _ = is_manifest_degenerate(manifest)
+    return not is_bad
 
 # Architectural Remediation Configurations (F-1, F-2, F-7, B-1, B-9)
 SPRT_MIN_DETECTABLE_D = 0.20                  # Pre-registered minimum detectable effect size for SPRT sequential testing

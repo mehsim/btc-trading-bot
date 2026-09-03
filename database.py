@@ -535,23 +535,31 @@ def save_completed_trade(trade) -> bool:
             sym = trade.get("symbol")
             
             # Deduplication Guard: Check if matching trade already exists in DB
-            c1 = conn.execute("SELECT trade_id FROM completed_trades WHERE trade_id = ?;", (t_id,))
-            if c1.fetchone():
-                t_id = f"tr_{sym}_{exit_ts}_{trade_uuid}"
-                trade["trade_id"] = t_id
+            c1 = conn.execute("SELECT trade_id, venue_closed_pnl FROM completed_trades WHERE trade_id = ?;", (t_id,))
+            existing_row = c1.fetchone()
+            if existing_row:
+                if trade.get("venue_closed_pnl") is not None and existing_row[1] is None:
+                    conn.execute("""
+                        UPDATE completed_trades SET venue_closed_pnl = ?, venue_qty = ?, venue_entry_value = ? WHERE trade_id = ?;
+                    """, (round_monetary(trade.get("venue_closed_pnl"), 4), round_monetary(trade.get("venue_qty"), 4), round_monetary(trade.get("venue_entry_value"), 4), t_id))
+                    conn.commit()
+                conn.close()
+                return True
 
-            if entry_p is not None and exit_p is not None:
+            if entry_p is not None and exit_p is not None and exit_ts:
                 c2 = conn.execute("""
                     SELECT trade_id FROM completed_trades 
-                    WHERE symbol = ? AND abs(exit_time - ?) < 60.0 AND abs(entry_price - ?) < 0.0005 AND abs(exit_price - ?) < 0.0005 AND reason = ?;
-                """, (sym, exit_ts, entry_p, exit_p, str(trade.get("reason"))))
+                    WHERE symbol = ? AND abs(exit_time - ?) < 60.0 
+                      AND abs(entry_price - ?) / max(1.0, entry_price) < 0.005 
+                      AND abs(exit_price - ?) / max(1.0, exit_price) < 0.005;
+                """, (sym, exit_ts, entry_p, exit_p))
                 if c2.fetchone():
                     conn.close()
                     return True
 
             try:
-                conn.execute("""
-                    INSERT OR IGNORE INTO completed_trades (
+                cur = conn.execute("""
+                    INSERT INTO completed_trades (
                         trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
                         change_pct, success, reason, position_size_usd, intended_size_usd, original_size, pnl_usd,
                         balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct,
@@ -574,7 +582,7 @@ def save_completed_trade(trade) -> bool:
                     json.dumps(trade)
                 ))
                 conn.commit()
-                success = True
+                success = bool(cur.rowcount == 1)
             except sqlite3.IntegrityError:
                 success = True
         except Exception as e:

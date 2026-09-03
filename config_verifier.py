@@ -28,16 +28,29 @@ def assert_shared_constants_aligned():
                 if cfg_adx[iv_str] != train_adx[iv_str]:
                     raise ValueError(f"[Config Verifier M-2 Error] ADX enter threshold mismatch for {iv_str}m: config ({cfg_adx[iv_str]}) vs train ({train_adx[iv_str]})")
 
-        # Check TIMEFRAME_CONFIG alignment
+        # Check on-disk model manifests' recorded barrier geometry against live config
+        import glob
+        import json
         cfg_tf = getattr(config, "TIMEFRAME_CONFIG", {})
-        train_tf = getattr(train, "TIMEFRAME_CONFIG", {})
-        for iv in ["15", "30", "60", "120", "240", "360"]:
-            if iv in cfg_tf and iv in train_tf:
-                c_item = cfg_tf[iv]
-                t_item = train_tf[iv]
-                for key in ["lookahead", "sl_mult", "tp_mult_trending", "tp_mult_ranging"]:
-                    if key in c_item and key in t_item and c_item[key] != t_item[key]:
-                        raise ValueError(f"[Config Verifier M-2 Error] {key} mismatch for {iv}m: config ({c_item[key]}) vs train ({t_item[key]})")
+        manifest_paths = glob.glob("ensemble_*_manifest.json")
+        for m_path in manifest_paths:
+            try:
+                with open(m_path, "r", encoding="utf-8") as mf:
+                    m_data = json.load(mf)
+                b_cfg = m_data.get("barrier_config")
+                if b_cfg and isinstance(b_cfg, dict):
+                    # extract interval suffix from filename (e.g. ensemble_trending_trend_15_manifest.json)
+                    base_parts = os.path.basename(m_path).replace("_manifest.json", "").split("_")
+                    if len(base_parts) >= 4:
+                        iv_key = base_parts[-1]
+                        if iv_key in cfg_tf:
+                            live_c = cfg_tf[iv_key]
+                            for b_key in ["lookahead", "sl_mult"]:
+                                if b_key in b_cfg and b_key in live_c:
+                                    if abs(float(b_cfg[b_key]) - float(live_c[b_key])) > 0.05:
+                                        log_event("WARNING", f"[Config Verifier] Manifest {m_path} {b_key} ({b_cfg[b_key]}) differs from live config ({live_c[b_key]})")
+            except Exception as ex_m:
+                log_event("WARNING", f"[Config Verifier] Skipping manifest check for {m_path}: {ex_m}")
     except ImportError as imp_err:
         log_event("WARNING", f"[Config Verifier] Skipping train.py import comparison: {imp_err}")
 

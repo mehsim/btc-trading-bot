@@ -17,12 +17,14 @@ Currently unused — all live callers import from trade_calculators. Migrate the
 
 import numpy as np
 from typing import Dict, Any, Optional
+import config
 
 class TransactionCostModel:
-    def __init__(self, default_taker_fee_bp: float = 6.0, default_maker_fee_bp: float = 1.0,
+    def __init__(self, default_taker_fee_bp: Optional[float] = None, default_maker_fee_bp: Optional[float] = None,
                  gamma: float = 0.42, max_acceptable_cost_bp: float = 25.0):
-        self.taker_fee_bp = default_taker_fee_bp
-        self.maker_fee_bp = default_maker_fee_bp
+        # Read institutional fee schedule directly from config (Finding #136)
+        self.taker_fee_bp = default_taker_fee_bp if default_taker_fee_bp is not None else float(getattr(config, "TAKER_FEE_PCT", 0.00055)) * 10000.0
+        self.maker_fee_bp = default_maker_fee_bp if default_maker_fee_bp is not None else float(getattr(config, "MAKER_FEE_PCT", 0.00020)) * 10000.0
         self.gamma = gamma
         self.max_acceptable_cost_bp = max_acceptable_cost_bp
 
@@ -34,6 +36,7 @@ class TransactionCostModel:
         bid_ask_spread_bp: float = 1.5,
         garch_sigma: float = 0.015,  # Almgren-Chriss: live realized vol from garch_monitor
         is_maker: bool = False,
+        round_trip: bool = False,
         max_acceptable_cost_bp: Optional[float] = None,
         orderbook_depth_usd: Optional[float] = None
     ) -> Dict[str, Any]:
@@ -41,16 +44,23 @@ class TransactionCostModel:
         Almgren-Chriss extended market impact against instantaneous orderbook depth:
         Slippage_bps = Half_Spread + gamma * sigma * sqrt(Order_Size / Orderbook_Depth) * 100
         """
-        fee_bp = self.maker_fee_bp if is_maker else self.taker_fee_bp
-        half_spread_bp = float(bid_ask_spread_bp) / 2.0
+        if round_trip:
+            # Entry leg (maker or taker) + Exit leg (typically taker for stop-loss/market exit)
+            fee_bp = (self.maker_fee_bp if is_maker else self.taker_fee_bp) + self.taker_fee_bp
+            spread_cost_bp = float(bid_ask_spread_bp) # Full spread across round trip
+        else:
+            fee_bp = self.maker_fee_bp if is_maker else self.taker_fee_bp
+            spread_cost_bp = float(bid_ask_spread_bp) / 2.0
 
         depth_usd = float(orderbook_depth_usd) if orderbook_depth_usd is not None and orderbook_depth_usd > 0 else max(10_000.0, float(volume_24h_usd) / 200.0)
         liquidity_ratio = max(1e-8, float(order_size_usd) / depth_usd)
         # Almgren-Chriss: volatility-adjusted impact relative to orderbook depth (fraction → bps requires ×10000)
         sigma = max(0.001, float(garch_sigma))
         market_impact_bp = self.gamma * sigma * np.sqrt(liquidity_ratio) * 10000.0
+        if round_trip:
+            market_impact_bp *= 1.5  # 2 legs with reduced impact on exit
 
-        total_cost_bp = round(fee_bp + half_spread_bp + market_impact_bp, 2)
+        total_cost_bp = round(fee_bp + spread_cost_bp + market_impact_bp, 2)
         total_cost_usd = round((total_cost_bp / 10000.0) * float(order_size_usd), 4)
         cutoff = max_acceptable_cost_bp if max_acceptable_cost_bp is not None else self.max_acceptable_cost_bp
         is_acceptable = total_cost_bp <= cutoff
@@ -60,11 +70,12 @@ class TransactionCostModel:
             "order_size_usd": order_size_usd,
             "garch_sigma_input": round(sigma, 4),
             "fee_bp": fee_bp,
-            "half_spread_bp": half_spread_bp,
+            "half_spread_bp": round(spread_cost_bp, 2),
             "market_impact_bp": round(market_impact_bp, 4),
             "total_cost_bp": total_cost_bp,
             "total_cost_usd": total_cost_usd,
             "is_acceptable": is_acceptable,
+            "round_trip": round_trip,
             "model": "Almgren-Chriss"
         }
 

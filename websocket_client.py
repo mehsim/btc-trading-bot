@@ -51,12 +51,12 @@ def get_ws_status() -> Dict[str, Any]:
 
 def init_bybit_websocket_listeners(symbols: list, callback_on_kline=None):
     """Initializes background WebSocket connections for Bybit market streams."""
-    print(f"[WebSocket Engine] Initializing WebSocket listeners for symbols: {symbols}...")
+    print(f"[WebSocket Engine] WebSocket listeners stub called for symbols: {symbols}. Live production runs on REST.")
     global public_ws_connected, last_ws_update_time
     with order_flow_lock:
-        public_ws_connected = True
+        # Finding #137: Accurately reflect WS status without false-positive connection flag
+        public_ws_connected = False
         last_ws_update_time = time.time()
-    print("[WebSocket Engine] Active keep-alive thread started.")
 
 
 def parse_proxy_url(proxy_url):

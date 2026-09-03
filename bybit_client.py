@@ -379,7 +379,12 @@ def place_bybit_taker_ioc_order(symbol: str, side: str, qty: float, sl: Optional
 
 
 def get_bybit_order_details(symbol: str, order_id: str) -> Dict[str, Any]:
-    return bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
+    res = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
+    if isinstance(res, dict) and res.get("retCode") == 0:
+        orders = res.get("result", {}).get("list", [])
+        if orders:
+            return orders[0]
+    return {}
 
 
 def cancel_bybit_order(symbol: str, order_id: str) -> Dict[str, Any]:

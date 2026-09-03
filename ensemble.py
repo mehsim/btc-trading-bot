@@ -258,6 +258,12 @@ def _slice_model_input(model, X):
             return X_arr.astype(np.float32)
         return X
 
+def compute_effective_sample_size(n_samples: int, lookahead: int, n_symbols: int, convention: str = "lookahead_x_nsymbols_v2") -> int:
+    """Computes effective sample size under pinned lookahead convention (Finding #126)."""
+    if convention != "lookahead_x_nsymbols_v2":
+        raise ValueError(f"Unknown lookahead sample convention: {convention}")
+    return max(1, int(n_samples / max(1, lookahead * n_symbols)))
+
 class PurgedEmbargoTimeSeriesSplit:
     """
     Implements Purged and Embargoed Time-Series Cross-Validation.
@@ -519,6 +525,21 @@ class EnsembleClassifier:
         is_uncertain = bool((disagreement > disag_cut) or (margin < margin_cut))
         
         return probs, heuristic_uncertainty_score, is_uncertain
+
+    def predict_individual_proba(self, X):
+        """Returns individual base model predicted probabilities for uncertainty decomposition (Finding #129)."""
+        res = {}
+        for name, m in [("xgb", getattr(self, "xgb_model", None)),
+                        ("lgb", getattr(self, "lgb_model", None)),
+                        ("cat", getattr(self, "cat_model", None))]:
+            if m is not None:
+                try:
+                    p = m.predict_proba(_slice_model_input(m, X))
+                    if len(p) > 0:
+                        res[name] = p[0]
+                except Exception:
+                    pass
+        return res
 
 class EnsembleRegressor:
     """

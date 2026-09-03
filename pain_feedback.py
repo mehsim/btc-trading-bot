@@ -32,8 +32,8 @@ class PainFeedbackLoop:
             except Exception as e:
                 print(f"[PainFeedbackLoop] Error saving state file: {e}")
 
-    def register_pain_trade(self, symbol, entry_price, exit_price, take_profit, current_floor):
-        """Raise min floor for this symbol due to a pain trade."""
+    def register_pain_trade(self, symbol, entry_price, exit_price, take_profit, current_floor, interval=None):
+        """Raise min floor for this (symbol, interval) pair due to a pain trade."""
         if not entry_price or entry_price == 0:
             return
             
@@ -43,38 +43,44 @@ class PainFeedbackLoop:
         new_floor = max(current_floor * 1.15, needed_floor)
         new_floor = max(0.005, min(new_floor, 0.020))  # Hard cap at 2.0%, min 0.5%
         
+        key = f"{symbol}_{interval}" if interval else symbol
         with pain_lock:
-            self.adjustments[symbol] = {
+            self.adjustments[key] = {
+                'symbol': symbol,
+                'interval': interval,
                 'base_floor': current_floor,
                 'adjusted_floor': new_floor,
                 'applied_at': datetime.now(timezone.utc).isoformat(),
-                'decay_days': 30,
-                'reason': f"Pain trade: stopped at {adverse_move:.2%}, reversed to TP"
+                'decay_days': 7,
+                'reason': f"Pain trade ({interval}m): stopped at {adverse_move:.2%}, reversed to TP"
             }
             self.save_state()
-        print(f"[PainFeedbackLoop ALERT] Raised {symbol} min floor from {current_floor:.2%} to {new_floor:.2%} (Decay: 30 days)")
+        print(f"[PainFeedbackLoop ALERT] Raised {key} min floor from {current_floor:.2%} to {new_floor:.2%} (Decay: 7 days)")
 
-    def get_effective_floor(self, symbol):
+    def get_effective_floor(self, symbol, interval=None):
         """Get floor with pain adjustment applied, decayed over time."""
+        key = f"{symbol}_{interval}" if interval else symbol
         with pain_lock:
-            if symbol not in self.adjustments:
+            if key not in self.adjustments and symbol in self.adjustments:
+                key = symbol
+            if key not in self.adjustments:
                 return None
             
-            adj = self.adjustments[symbol]
+            adj = self.adjustments[key]
 
             try:
                 applied_at = datetime.fromisoformat(adj['applied_at'])
                 if applied_at.tzinfo is None:
                     applied_at = applied_at.replace(tzinfo=timezone.utc)
-            except Exception:
+            except (ValueError, TypeError, KeyError):
                 return None
                 
             days_since = (datetime.now(timezone.utc) - applied_at).total_seconds() / 86400.0
-            decay_days = adj.get('decay_days', 30)
+            decay_days = adj.get('decay_days', 7)
             
             if days_since >= decay_days:
                 # Expired, remove adjustment safely
-                del self.adjustments[symbol]
+                del self.adjustments[key]
                 try:
                     self.save_state()
                 except Exception as e:
@@ -83,7 +89,7 @@ class PainFeedbackLoop:
             
             # Linear decay back to base
             decay_progress = days_since / float(decay_days)
-            base = adj.get('base_floor', 0.008)
+            base = adj.get('base_floor', 0.005)
             adjusted = adj.get('adjusted_floor', 0.015)
             
             effective = adjusted - (adjusted - base) * decay_progress
@@ -119,7 +125,7 @@ class PainFeedbackLoop:
                         try:
                             try:
                                 df_klines = fetch_kline_func(symbol=symbol, interval="15", limit=1000, pages=2)
-                            except Exception:
+                            except (TypeError, ValueError, RuntimeError):
                                 df_klines = fetch_kline_func(symbol, start_ts=int(exit_time*1000), end_ts=int((exit_time + 86400)*1000))
 
                             if df_klines is not None and not df_klines.empty and 'high' in df_klines.columns and 'low' in df_klines.columns:
@@ -143,8 +149,10 @@ class PainFeedbackLoop:
 
 
                     if hit_tp_after_exit:
-                        current_floor = 0.008
-                        self.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor)
+                        import config
+                        interval_str = str(p.get('interval') or '15')
+                        current_floor = config.MIN_SL_PCT_CONFIG.get(interval_str, 0.005)
+                        self.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor, interval=interval_str)
                         
                     database_module.delete_pending_pain_check(trade_id)
         except Exception as e:
@@ -156,10 +164,10 @@ pain_feedback = PainFeedbackLoop()
 def verify_pending_pain_trades(database_module=None, fetch_kline_func=None):
     return pain_feedback.verify_pending_pain_trades(database_module=database_module, fetch_kline_func=fetch_kline_func)
 
-def register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor):
-    return pain_feedback.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor)
+def register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor, interval=None):
+    return pain_feedback.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor, interval=interval)
 
-def get_effective_floor(symbol):
-    return pain_feedback.get_effective_floor(symbol)
+def get_effective_floor(symbol, interval=None):
+    return pain_feedback.get_effective_floor(symbol, interval=interval)
 
 

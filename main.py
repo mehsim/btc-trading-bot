@@ -1211,10 +1211,13 @@ def get_symbol_order_lock(symbol: str) -> threading.Lock:
         return _symbol_order_locks[sym]
 
 def execute_bybit_order_ws_or_rest(endpoint, payload):
-    import uuid
-    # C7: Add unique clientOrderId (orderLinkId) for request deduplication
-    if endpoint == "/v5/order/create" and "orderLinkId" not in payload:
-        payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+    # C7: Add unique clientOrderId (orderLinkId) for request deduplication (Finding #132)
+    if endpoint == "/v5/order/create":
+        from order_state_machine import generate_client_order_id, idempotency_cache
+        if "orderLinkId" not in payload:
+            payload["orderLinkId"] = generate_client_order_id(payload.get("symbol", "generic"), payload.get("side", "Buy"))
+        else:
+            idempotency_cache.add(str(payload["orderLinkId"])[:36])
         
     symbol = payload.get("symbol", "GENERIC")
     sym_lock = get_symbol_order_lock(symbol)
@@ -1228,7 +1231,9 @@ def execute_bybit_order_ws_or_rest(endpoint, payload):
 def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False, order_type="Market", order_link_id=None):
     # C1: Configurable order type & price bound slippage control
     order_type_str = "Limit" if (order_type == "Limit" and price is not None) else "Market"
-    link_id = order_link_id or f"bot_{symbol}_{int(time.time()*1000)}"
+    from order_state_machine import generate_client_order_id, idempotency_cache
+    link_id = order_link_id or generate_client_order_id(symbol, side)
+    idempotency_cache.add(str(link_id)[:36])
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -4384,6 +4389,7 @@ def sync_active_positions_from_bybit():
                             "end_time": float(time.time() + _iv * 60 * _la),
                             "entry_time": max(int(pos.get("createdTime") or 0), int(pos.get("updatedTime") or 0)) or int(time.time() * 1000),
                             "atr_dollars": calc_atr,
+                            "entry_atr": calc_atr,
                             "highest_price": max(avg_price, mark_price) if direction == "Bullish" else avg_price,
                             "lowest_price": min(avg_price, mark_price) if direction == "Bearish" else avg_price,
                             "break_even_triggered": False,
@@ -5751,14 +5757,20 @@ def main():
                         exit_reason = f"EXIT HIERARCHY LEVEL {hierarchy_eval.get('exit_level')}: {hierarchy_eval.get('exit_reason')}"
                         print(f"[{active_symbol} {iv}m Exit Hierarchy Triggered] Level {hierarchy_eval.get('exit_level')} -> {hierarchy_eval.get('exit_reason')} | Exit Score: {hierarchy_eval.get('exit_score')}")
 
-                    # Champion & Shadow Exit Policy Engine Evaluation
+                    # Champion & Shadow Exit Policy Engine Evaluation (Finding #139)
                     try:
+                        curr_vol = float(df_recent_pos["volume"].iloc[-1]) if (df_recent_pos is not None and "volume" in df_recent_pos.columns and len(df_recent_pos) > 0) else 100.0
+                        avg_vol = float(df_recent_pos["volume"].iloc[-20:].mean()) if (df_recent_pos is not None and "volume" in df_recent_pos.columns and len(df_recent_pos) >= 5) else 120.0
+                        curr_atr_val = float(df_recent_pos["ATR"].iloc[-1]) if (df_recent_pos is not None and "ATR" in df_recent_pos.columns and len(df_recent_pos) > 0) else None
                         champ_exit_reason, champ_updates, exit_trace = exit_policy_engine.evaluate_exit(
                             active_trade=active_trade,
                             current_price=current_price,
                             current_time=time.time(),
                             regime=str(curr_regime),
                             adx_val=float(bot_state.get(f"adx_{active_symbol}_{iv}", 20.0)),
+                            current_volume=curr_vol,
+                            avg_volume=avg_vol,
+                            current_atr=curr_atr_val,
                             swing_price=float(active_trade.get("swing_low_3b", current_price)) if direction == "Bullish" else float(active_trade.get("swing_high_3b", current_price))
                         )
                         if champ_updates:
@@ -6625,6 +6637,29 @@ def main():
                         log_event("ERROR", f"[TRADING_LOOP] Error invoking trigger_emergency_kill_switch: {ex_ks}")
                 time.sleep(10)
                 return
+
+            # Finding #121: Production Circuit Breaker System Health Check
+            api_latency_ms = float(state_manager.get("last_api_latency_ms", bot_state.get("last_api_latency_ms", 100.0)) or 100.0)
+            bal_sync_ts = float(bot_state.get("last_balance_sync_ts", time.time()) or time.time())
+            db_healthy = True
+            try:
+                with database.db_lock:
+                    c = database.get_db_connection()
+                    c.execute("SELECT 1;").fetchone()
+                    c.close()
+            except Exception:
+                db_healthy = False
+
+            sh_ok, sh_reason = circuit_breaker.evaluate_system_health(
+                exchange_latency_ms=api_latency_ms,
+                last_balance_sync_ts=bal_sync_ts,
+                db_healthy=db_healthy,
+                inference_latency_ms=float(bot_state.get("last_inference_latency_ms", 50.0) or 50.0)
+            )
+            if not sh_ok:
+                log_event("WARNING", f"[TRADING_LOOP] System Health Circuit Breaker Triggered ({sh_reason}) — halting signal evaluation.")
+                time.sleep(5)
+                return
         except Exception as ex_cb:
             log_event("WARNING", f"[TRADING_LOOP] Circuit breaker check exception: {ex_cb}")
 
@@ -6883,6 +6918,11 @@ def main():
                                 abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
                             elif is_promoted_flag is False:
                                 abstain_reason = f"{served_regime} model manifest promoted=False"
+                            elif "_mdata" in locals() and isinstance(_mdata, dict):
+                                from config import is_manifest_degenerate
+                                is_deg, deg_reason = is_manifest_degenerate(_mdata)
+                                if is_deg:
+                                    abstain_reason = f"Degenerate manifest: {deg_reason}"
 
                             if abstain_reason:
                                 log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] {abstain_reason}. Abstaining.")
@@ -7035,14 +7075,21 @@ def main():
                             calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
 
                             # Governance MCC / Predictive Floor Check
-                            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+                            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC
                             min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_mcc", 0.05))
+                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
                             _manifest_mcc_val = getattr(m_trend, "manifest_mcc", None)
+                            _holdout_mcc_val = getattr(m_trend, "holdout_mcc", None)
                             if _manifest_mcc_val is None:
                                 _manifest_mcc_val = locals().get("manifest_info", {}).get("manifest_mcc")
+                            if _holdout_mcc_val is None:
+                                _holdout_mcc_val = locals().get("manifest_info", {}).get("holdout_mcc")
 
                             if _manifest_mcc_val is not None and _manifest_mcc_val < min_mcc_floor:
                                 log_event("WARNING", f"[{symbol} {iv}m] Model MCC ({_manifest_mcc_val:.4f}) below governance floor ({min_mcc_floor}). ABSTAIN.")
+                                continue
+                            if _holdout_mcc_val is not None and _holdout_mcc_val < min_holdout_mcc_floor:
+                                log_event("WARNING", f"[{symbol} {iv}m] Model Holdout MCC ({_holdout_mcc_val:.4f}) below holdout floor ({min_holdout_mcc_floor}). ABSTAIN.")
                                 continue
 
                             expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
@@ -7275,15 +7322,33 @@ def main():
                                 current_spread_bps = round(float(cost_bps / 2.0), 2)
                             bot_state["current_spread_bps"] = current_spread_bps
 
-                            # Compute Composite Uncertainty (U_ensemble + U_market)
+                            # Finding #129: Compute Composite Uncertainty (U_ensemble + U_market) with distinct predictions and matching weights
                             from statistical_validation import statistical_validation
                             _mean_atr = float(df_completed["ATR_norm"].mean()) if (df_completed is not None and "ATR_norm" in df_completed.columns and len(df_completed) >= 20) else atr_norm_val
+                            target_class_idx = 2 if ml_trend == "Bullish" else (0 if ml_trend == "Bearish" else 1)
+                            ind_preds = {}
+                            if hasattr(active_model_trend, "predict_individual_proba"):
+                                try:
+                                    ind_p_map = active_model_trend.predict_individual_proba(X_live)
+                                    for m_k, p_arr in ind_p_map.items():
+                                        if isinstance(p_arr, (list, np.ndarray)) and len(p_arr) > target_class_idx:
+                                            ind_preds[m_k] = float(p_arr[target_class_idx])
+                                except Exception as ex_ind:
+                                    log_event("WARNING", f"Individual prediction notice: {ex_ind}")
+                            if not ind_preds:
+                                ref_prob = prob_bullish if ml_trend == "Bullish" else prob_bearish
+                                ind_preds = {
+                                    "xgb": float(ref_prob),
+                                    "lgb": float(ref_prob),
+                                    "cat": float(ref_prob),
+                                }
+                            w_dict = {"xgb": 0.3333, "lgb": 0.3333, "cat": 0.3334}
+                            if "ensemble_weights" in locals() and isinstance(ensemble_weights, (list, tuple)) and len(ensemble_weights) == 3:
+                                w_dict = {"xgb": float(ensemble_weights[0]), "lgb": float(ensemble_weights[1]), "cat": float(ensemble_weights[2])}
+
                             unc_metrics = statistical_validation.calculate_composite_uncertainty(
-                                individual_predictions={
-                                    "xgb": prob_bullish if ml_trend == "Bullish" else prob_bearish,
-                                    "lgb": prob_bullish if ml_trend == "Bullish" else prob_bearish,
-                                    "cat": prob_bullish if ml_trend == "Bullish" else prob_bearish,
-                                },
+                                individual_predictions=ind_preds,
+                                model_weights=w_dict,
                                 atr_expansion_ratio=float(atr_norm_val / max(1e-4, _mean_atr)),
                                 spread_bp=float(current_spread_bps)
                             )
@@ -7997,17 +8062,22 @@ def main():
                                             daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
                                             max_cvar_notional = daily_loss_budget / (cvar_95 + 1e-8)
                                             print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Notional Allowed: ${max_cvar_notional:.2f}")
-                                            target_notional_usd = min(target_notional_usd, max_cvar_notional)
                                         except Exception as cvar_err:
                                             print(f"[CVaR Error] {cvar_err}")
-                                        if is_golden_hour:
-                                            # Golden Hour: Double the target slot allocation size, but clamp to 3% hard risk limit
+                                            max_cvar_notional = target_notional_usd
+
+                                        golden_mult = float(getattr(config, "GOLDEN_HOUR_MULTIPLIER", 1.0))
+                                        if is_golden_hour and golden_mult > 1.0:
+                                            # Golden Hour: boost slot allocation size up to hard risk limit
                                             from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
                                             max_allowed_notional_golden = (current_bal * HARD_MAX_RISK_PER_TRADE_PCT) / max(1e-4, stop_loss_frac)
-                                            target_notional_usd = min(target_notional_usd * 2.0, max_allowed_notional_golden)
-                                            print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Golden Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+                                            target_notional_usd = min(target_notional_usd * golden_mult, max_allowed_notional_golden)
+                                            print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Golden Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x, Multiplier: {golden_mult}x)")
                                         else:
                                             print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
+
+                                        # Finding #128: CVaR daily loss budget strictly bounds target notional
+                                        target_notional_usd = min(target_notional_usd, max_cvar_notional)
                                         
                                         # Base margin estimate before final leverage clamp
                                         from risk_limits import HARD_TIMEFRAME_MAX_LEVERAGE_CAPS
@@ -8518,6 +8588,7 @@ def main():
                                                     "end_time": float(time.time() + duration_seconds),
                                                     "entry_time": int(time.time() * 1000),
                                                     "atr_dollars": float(atr_dollars),
+                                                    "entry_atr": float(atr_dollars),
                                                     "highest_price": float(entry_price),
                                                     "lowest_price": float(entry_price),
                                                     "break_even_triggered": False,

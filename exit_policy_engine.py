@@ -206,7 +206,8 @@ class ExitPolicyEngine:
         adx_val: float = 15.0,
         current_volume: float = 100.0,
         avg_volume: float = 120.0,
-        swing_price: Optional[float] = None
+        swing_price: Optional[float] = None,
+        current_atr: Optional[float] = None
     ) -> Tuple[Optional[str], Dict[str, Any], Dict[str, Any]]:
         """
         Evaluates the active Champion exit policy for live execution,
@@ -227,7 +228,8 @@ class ExitPolicyEngine:
         half_closed = active_trade.get("half_closed", False)
         position_size_usd = float(active_trade.get("position_size_usd", 15.0))
         leverage = float(active_trade.get("leverage", 10.0))
-        atr_dollars = float(active_trade.get("atr_dollars") or (entry_price * 0.01))
+        entry_atr = float(active_trade.get("entry_atr") or active_trade.get("atr_dollars") or (entry_price * 0.01))
+        atr_dollars = float(current_atr) if current_atr is not None else float(active_trade.get("current_atr") or entry_atr)
         
         updates = {}
         exit_reason = None
@@ -283,12 +285,14 @@ class ExitPolicyEngine:
             elif current_price >= stop_loss:
                 exit_reason = "TRAILING STOP HIT [SUCCESS]" if (half_closed or active_trade.get("break_even_triggered")) else "STOP LOSS HIT [FAIL]"
 
-        # 4. Check Stagnation Gate
+        # 4. Check Stagnation Gate (Finding #139)
         if not exit_reason and params.get("enable_stagnation_gate", True):
             entry_time_ms = active_trade.get("entry_time")
             if entry_time_ms:
                 trade_age_hours = (time.time() - (entry_time_ms / 1000.0)) / 3600.0
-                stagnation_age_hours = 6.0 # default 6 hours
+                trade_iv = str(active_trade.get("interval", "15")).replace("m", "").replace("h", "")
+                iv_min = int(trade_iv) if trade_iv.isdigit() else 15
+                stagnation_age_hours = max(1.5, (iv_min * 12) / 60.0) # 12 candles scaled by interval
                 price_dev = abs(current_price - entry_price)
                 
                 # Approximate current PnL
@@ -298,7 +302,7 @@ class ExitPolicyEngine:
                 is_stagnant, stag_reason = self.evaluate_stagnation_gate(
                     pnl_usd=est_pnl,
                     current_atr=atr_dollars,
-                    entry_atr=active_trade.get("entry_atr", atr_dollars),
+                    entry_atr=entry_atr,
                     current_volume=current_volume,
                     avg_volume=avg_volume,
                     trade_age_hours=trade_age_hours,
@@ -523,13 +527,12 @@ class ExitPolicyEngine:
           10. Conditional Hard Timeout Safety Net
         """
         tf_clean = str(interval).replace("m", "")
-        # Timeframe Timeout Config (Soft, Hard)
-        timeout_config = {
-            "15": (15, 24), "30": (15, 24),
-            "60": (12, 20), "120": (10, 16),
-            "240": (8, 12), "360": (6, 10)
-        }
-        base_soft, hard_limit = timeout_config.get(tf_clean, (10, 18))
+        # Finding #140: Derive soft and hard limits directly from TIMEFRAME_CONFIG lookahead horizon
+        import config
+        tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(tf_clean, {})
+        lookahead = int(tf_cfg.get("lookahead", 12))
+        base_soft = max(6, int(lookahead))
+        hard_limit = max(base_soft + 2, int(lookahead * 1.5))
 
         import config
         # H-2: Continuous ATR Expansion/Compression Soft Timeout Adjustment

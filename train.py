@@ -213,7 +213,7 @@ def create_model(model_class, params):
 economic_calendar_cache = None
 economic_calendar_lock = threading.Lock()
 
-from config import TIMEFRAME_CONFIG
+from config import TIMEFRAME_CONFIG, REGIME_ADX_ENTER_BY_INTERVAL, REGIME_ADX_EXIT_BY_INTERVAL
 
 # =========================
 # CONFIGURATION
@@ -895,6 +895,23 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
     study.optimize(objective, n_trials=8)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
+
+def build_regressor_governance_manifest(model_name: str, mae: float, rmse: Optional[float] = None, r2: Optional[float] = None) -> dict:
+    """Builds an isolated governance manifest for regression models (Finding #135)."""
+    return {
+        "model_name": model_name,
+        "model_type": "regressor",
+        "metrics": {
+            "mae": mae,
+            "rmse": rmse,
+            "r2": r2
+        },
+        "regression_metrics": {
+            "mae": mae,
+            "rmse": rmse,
+            "r2": r2
+        }
+    }
 
 def train_models(interval=INTERVAL, pages=PAGES):
     global OPTIMIZED_BARRIERS
@@ -2039,6 +2056,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 is_distribution_shifted = is_label_schema_diff or is_population_shift
                 mcc_tol = float(champ_manifest.get("governance_policy", {}).get("mcc_regression_tolerance", 0.010)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.010
 
+                # Finding #126: Check effective-sample convention alignment
+                champ_convention = champ_manifest.get("effective_n_convention") if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else None
+                if champ_convention and champ_convention != "lookahead_x_nsymbols_v2":
+                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Requiring absolute quality floors.")
+                    is_distribution_shifted = True
+
+                # Finding #134: MDE 80% Power Gate
+                chal_mde = round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead)))), 4)
+                if abs(holdout_mcc) < chal_mde:
+                    print(f"  [Predictive Floor Gate] REJECTED: Challenger holdout MCC ({holdout_mcc:.4f}) below 80% MDE ({chal_mde:.4f}) — underpowered.")
+                    should_save = False
+
                 if is_distribution_shifted:
                     shift_reason = f"neutral shift ({champ_neutral_pct:.1f}% -> {chal_neutral_pct:.1f}%)" if is_label_schema_diff else f"regime sample population shift ({champ_n_train} -> {chal_n_train} samples, {sample_count_ratio:.2f}x)"
                     print(f"  [Predictive Floor Gate] Regime/population shift detected ({shift_reason}). Enforcing absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}, Holdout MCC={holdout_mcc:.4f} >= {min_holdout_mcc_floor}, Holdout BalAcc={chal_acc:.4f} >= {min_holdout_bal_acc_floor}).")
@@ -2323,6 +2352,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_ece": round(chal_ece, 4),
             "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
             "training_pipeline_version": "v7.2.0",
+            "effective_n_convention": "lookahead_x_nsymbols_v2",
             "git_sha": _pipeline_git_sha
         }
 
@@ -2349,31 +2379,48 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     with open(manifest_path, "r") as mf:
                         manifest_data = json.load(mf)
                 from features import FEATURE_PIPELINE_VERSION
+                manifest_data["effective_n_convention"] = "lookahead_x_nsymbols_v2"
                 manifest_data["feature_names"] = challenger_feature_names
                 manifest_data["feature_count"] = len(challenger_feature_names)
                 manifest_data["surviving_features"] = challenger_feature_names
                 manifest_data["feature_contract_hash"] = hashlib.sha256(",".join(challenger_feature_names).encode("utf-8")).hexdigest()[:12]
                 manifest_data["feature_pipeline_hash"] = hashlib.sha256(f"{FEATURE_PIPELINE_VERSION}:{','.join(challenger_feature_names)}".encode("utf-8")).hexdigest()[:12]
-                manifest_data["cv_metrics"] = cv_metrics_block
                 manifest_data["git_sha"] = _pipeline_git_sha
                 manifest_data["timestamp"] = now_iso
-                manifest_data["manifest_mcc"] = round(float(chal_mcc_mean), 4)
-                manifest_data["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
-                manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
-                manifest_data["profit_factor"] = round(float(chal_pf), 4)
-                manifest_data["holdout_mcc"] = round(float(holdout_mcc), 4)
-                manifest_data["holdout_sharpe"] = round(float(chal_sharpe), 4)
-                if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
-                    manifest_data["metrics"] = {}
-                manifest_data["metrics"]["mcc"] = manifest_data["manifest_mcc"]
-                manifest_data["metrics"]["balanced_accuracy"] = manifest_data["manifest_bal_acc"]
-                manifest_data["metrics"]["profit_factor"] = manifest_data["profit_factor"]
-                manifest_data["metrics"]["holdout_mcc"] = manifest_data["holdout_mcc"]
-                manifest_data["metrics"]["holdout_sharpe"] = manifest_data["holdout_sharpe"]
-                manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
-                manifest_data["metrics"]["effective_sample_size"] = eff_n_val
-                manifest_data["metrics"]["raw_sample_size"] = raw_n_val
-                manifest_data["label_distribution"] = [int(n_bear), int(n_neutral), int(n_bull)]
+
+                if m_prefix == c_prefix_p:
+                    # Finding #135: Dedicated regressor manifest metrics
+                    manifest_data["model_type"] = "regressor"
+                    manifest_data["regression_metrics"] = {
+                        "mae": round(float(chal_pf), 4) if 'chal_pf' in locals() else None,
+                        "uniqueness_ratio": uniq_ratio_val,
+                        "effective_sample_size": eff_n_val,
+                        "raw_sample_size": raw_n_val
+                    }
+                    manifest_data.pop("label_distribution", None)
+                    manifest_data.pop("manifest_bal_acc", None)
+                else:
+                    # Trend classifier manifest metrics
+                    manifest_data["model_type"] = "classifier"
+                    manifest_data["cv_metrics"] = cv_metrics_block
+                    manifest_data["manifest_mcc"] = round(float(chal_mcc_mean), 4)
+                    manifest_data["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
+                    manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
+                    manifest_data["profit_factor"] = round(float(chal_pf), 4)
+                    manifest_data["holdout_mcc"] = round(float(holdout_mcc), 4)
+                    manifest_data["holdout_sharpe"] = round(float(chal_sharpe), 4)
+                    if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
+                        manifest_data["metrics"] = {}
+                    manifest_data["metrics"]["mcc"] = manifest_data["manifest_mcc"]
+                    manifest_data["metrics"]["balanced_accuracy"] = manifest_data["manifest_bal_acc"]
+                    manifest_data["metrics"]["profit_factor"] = manifest_data["profit_factor"]
+                    manifest_data["metrics"]["holdout_mcc"] = manifest_data["holdout_mcc"]
+                    manifest_data["metrics"]["holdout_sharpe"] = manifest_data["holdout_sharpe"]
+                    manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
+                    manifest_data["metrics"]["effective_sample_size"] = eff_n_val
+                    manifest_data["metrics"]["raw_sample_size"] = raw_n_val
+                    manifest_data["label_distribution"] = [int(n_bear), int(n_neutral), int(n_bull)]
+
                 from config import REGIME_ADX_ENTER_BY_INTERVAL, STRONG_TREND_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL, STRONG_TREND_ADX_EXIT
                 _bcfg = LAST_LABELING_BARRIER_CONFIG if ('LAST_LABELING_BARRIER_CONFIG' in globals() and LAST_LABELING_BARRIER_CONFIG) else TIMEFRAME_CONFIG.get(str(interval), {})
                 manifest_data["barrier_config"] = {
