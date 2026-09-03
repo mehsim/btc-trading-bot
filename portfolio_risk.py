@@ -24,15 +24,17 @@ class PortfolioRiskEngine:
             self.z_score = _z_table.get(round(var_confidence, 2), 1.64485 if var_confidence == 0.95 else 2.32635)
         self.max_var_pct = max_var_pct  # Max 5% equity VaR limit
 
-    def calculate_parametric_var(self, open_positions: List[Dict], returns_df: pd.DataFrame, total_equity: float) -> Tuple[float, float, bool]:
+    def calculate_parametric_var(self, open_positions: List[Dict], returns_df: pd.DataFrame, total_equity: float, interval_minutes: int = 1440) -> Tuple[float, float, bool]:
         """
         Calculates 1-day Parametric Value at Risk (VaR) for active portfolio positions.
+        Scales intraday return variance to a 1-day (1440 minute) horizon (Finding #85).
 
         Contract & Method Signature:
         - Inputs:
             - open_positions: List[Dict] — List of position dicts with keys 'symbol' (str) and 'position_size_usd' (float).
             - returns_df: pd.DataFrame — Historical log returns per asset.
             - total_equity: float — Total account equity in USD (must be > 0).
+            - interval_minutes: int — Candle bar timeframe in minutes (default: 1440 = 1 day).
         - Outputs:
             - Tuple[float, float, bool]:
                 1. var_dollars (float): 1-day VaR exposure in USD.
@@ -66,6 +68,9 @@ class PortfolioRiskEngine:
         portfolio_val = float(np.sum(list(symbol_sizes.values())))
         if portfolio_val <= 0:
             return 0.0, 0.0, True
+
+        # Scale factor for intraday returns to 1-day (1440m) horizon
+        horizon_factor = np.sqrt(1440.0 / max(1.0, float(interval_minutes)))
 
         # Conservative Volatility Prior (3.0% daily volatility assumption) if return data is missing or insufficient
         if returns_df is None or returns_df.empty:
@@ -101,9 +106,10 @@ class PortfolioRiskEngine:
             cov_matrix = sub_returns.cov().values
 
         port_variance = float(np.dot(weight_vector.T, np.dot(cov_matrix, weight_vector)))
-        port_std_dev = float(np.sqrt(max(1e-8, port_variance)))
+        bar_std_dev = float(np.sqrt(max(1e-8, port_variance)))
+        daily_std_dev = bar_std_dev * horizon_factor
 
-        var_dollars = float(self.z_score * port_std_dev * portfolio_val)
+        var_dollars = float(self.z_score * daily_std_dev * portfolio_val)
         var_pct_equity = float(var_dollars / max(1e-9, total_equity))
         is_within_limit = var_pct_equity <= self.max_var_pct
 

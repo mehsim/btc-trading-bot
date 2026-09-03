@@ -240,9 +240,9 @@ def calculate_replay_statistics(
 
     # Sharpe & Sortino Ratios (Annualized by elapsed time if provided, or trade frequency)
     pct_mean = float(np.mean(pct_returns))
-    pct_std = float(np.std(pct_returns)) if len(pct_returns) > 1 else 0.0
+    pct_std = float(np.std(pct_returns, ddof=1)) if len(pct_returns) > 1 else 0.0
     downside_pct = pct_returns[pct_returns < 0]
-    pct_downside_std = float(np.std(downside_pct)) if len(downside_pct) > 1 else (pct_std if len(pct_returns) > 1 else 0.0)
+    pct_downside_std = float(np.std(downside_pct, ddof=1)) if len(downside_pct) > 1 else (pct_std if len(pct_returns) > 1 else 0.0)
 
     # Equity Curve & Drawdown
     peak = np.maximum.accumulate(full_equity)
@@ -264,13 +264,13 @@ def calculate_replay_statistics(
         try:
             mins = float(str(interval).lower().replace("m", "").replace("h", "")) * (60.0 if "h" in str(interval).lower() else 1.0)
             candles_per_year = (365.25 * 24.0 * 60.0) / max(1.0, mins)
-            ann_factor = float(np.sqrt(min(candles_per_year, max(1.0, float(total_trades) * (candles_per_year / 1000.0)))))
+            ann_factor = float(np.sqrt(candles_per_year))
             annualized_return = ending_return * min(52.0, (candles_per_year / max(1.0, float(total_trades))))
         except Exception:
-            ann_factor = float(np.sqrt(min(float(total_trades), 252.0)))
+            ann_factor = float(np.sqrt(252.0))
             annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
     else:
-        ann_factor = float(np.sqrt(min(float(total_trades), 252.0)))
+        ann_factor = float(np.sqrt(252.0))
         annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
 
     sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * ann_factor if pct_std > 0 else 0.0
@@ -832,26 +832,53 @@ def calculate_covariance_multiplier(new_symbol, new_direction, bot_state=None):
         ("BNBUSDT", "BNBUSDT"): 1.0,
         ("ADAUSDT", "ADAUSDT"): 1.0,
         ("XRPUSDT", "XRPUSDT"): 1.0,
+        ("AVAXUSDT", "AVAXUSDT"): 1.0,
+        ("LTCUSDT", "LTCUSDT"): 1.0,
+        ("DOTUSDT", "DOTUSDT"): 1.0,
         
         ("BTCUSDT", "ETHUSDT"): 0.85,
         ("BTCUSDT", "SOLUSDT"): 0.75,
         ("BTCUSDT", "BNBUSDT"): 0.70,
         ("BTCUSDT", "ADAUSDT"): 0.70,
         ("BTCUSDT", "XRPUSDT"): 0.65,
+        ("BTCUSDT", "AVAXUSDT"): 0.72,
+        ("BTCUSDT", "LTCUSDT"): 0.75,
+        ("BTCUSDT", "DOTUSDT"): 0.70,
         
         ("ETHUSDT", "SOLUSDT"): 0.80,
         ("ETHUSDT", "BNBUSDT"): 0.75,
         ("ETHUSDT", "ADAUSDT"): 0.75,
         ("ETHUSDT", "XRPUSDT"): 0.65,
+        ("ETHUSDT", "AVAXUSDT"): 0.78,
+        ("ETHUSDT", "LTCUSDT"): 0.70,
+        ("ETHUSDT", "DOTUSDT"): 0.75,
         
         ("SOLUSDT", "BNBUSDT"): 0.70,
         ("SOLUSDT", "ADAUSDT"): 0.70,
         ("SOLUSDT", "XRPUSDT"): 0.60,
+        ("SOLUSDT", "AVAXUSDT"): 0.75,
+        ("SOLUSDT", "LTCUSDT"): 0.65,
+        ("SOLUSDT", "DOTUSDT"): 0.70,
         
         ("BNBUSDT", "ADAUSDT"): 0.70,
         ("BNBUSDT", "XRPUSDT"): 0.60,
+        ("BNBUSDT", "AVAXUSDT"): 0.68,
+        ("BNBUSDT", "LTCUSDT"): 0.65,
+        ("BNBUSDT", "DOTUSDT"): 0.68,
         
-        ("ADAUSDT", "XRPUSDT"): 0.65
+        ("ADAUSDT", "XRPUSDT"): 0.65,
+        ("ADAUSDT", "AVAXUSDT"): 0.70,
+        ("ADAUSDT", "LTCUSDT"): 0.65,
+        ("ADAUSDT", "DOTUSDT"): 0.72,
+
+        ("XRPUSDT", "AVAXUSDT"): 0.60,
+        ("XRPUSDT", "LTCUSDT"): 0.65,
+        ("XRPUSDT", "DOTUSDT"): 0.62,
+
+        ("AVAXUSDT", "LTCUSDT"): 0.65,
+        ("AVAXUSDT", "DOTUSDT"): 0.72,
+
+        ("LTCUSDT", "DOTUSDT"): 0.68
     }
 
     is_stressed = False
@@ -947,13 +974,13 @@ def calculate_recent_performance_leverage_multiplier(bot_state=None, days=7):
             return 1.0
             
         pnls = [float(t.get("pnl_usd", 0.0)) for t in recent_trades]
-        mean_pnl = np.mean(pnls)
-        std_pnl = np.std(pnls)
+        mean_pnl = float(np.mean(pnls))
+        std_pnl = float(np.std(pnls, ddof=1))
         
         if std_pnl < 1e-4:
             return 1.0
             
-        sharpe = (mean_pnl / max(1e-9, std_pnl)) * np.sqrt(len(recent_trades))
+        sharpe = mean_pnl / max(1e-9, std_pnl)
         if sharpe < 0:
             multiplier = max(0.5, 1.0 + sharpe * 0.2)
         elif sharpe > 1.5:
@@ -968,17 +995,17 @@ def calculate_recent_performance_leverage_multiplier(bot_state=None, days=7):
 
 def calculate_rolling_sharpe(pnls: list) -> float:
     """
-    Calculates rolling Sharpe ratio from a list of recent trade PnLs.
+    Calculates rolling per-trade Sharpe ratio from a list of recent trade PnLs.
     Returns 1.2 default if insufficient history.
     """
     if not pnls or len(pnls) < 3:
         return 1.2
     try:
         arr = np.array(pnls, dtype=float)
-        std = float(np.std(arr))
+        std = float(np.std(arr, ddof=1))
         if std < 1e-4:
             return 1.2
-        return float(np.mean(arr) / std * np.sqrt(len(arr)))
+        return float(np.mean(arr) / std)
     except Exception:
         return 1.2
 

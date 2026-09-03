@@ -124,17 +124,18 @@ class KellyTracker:
             n_boot = getattr(config, "KELLY_BOOTSTRAP_SAMPLES", 1000)
             boot_r = []
             rng = np.random.RandomState(42)
+            slippage_pct_scaled = avg_slippage * 100.0  # Scale fraction (e.g. 0.0005) to percentage points (0.05%)
             for _ in range(n_boot):
                 b_wins = rng.choice(wins, size=len(wins), replace=True)
                 b_loss = rng.choice(losses, size=len(losses), replace=True)
-                b_win_m = max(0.0001, float(np.mean(b_wins)) - avg_slippage)
-                b_loss_m = max(0.001, float(np.mean(b_loss)) + avg_slippage)
+                b_win_m = max(0.0001, float(np.mean(b_wins)) - slippage_pct_scaled)
+                b_loss_m = max(0.001, float(np.mean(b_loss)) + slippage_pct_scaled)
                 boot_r.append(b_win_m / b_loss_m)
             r_ratio_lower = float(np.percentile(boot_r, 5)) if boot_r else 1.0
 
             # Realized execution payoff ratio using bootstrap 95% lower bound
-            net_win = max(0.0001, avg_win - avg_slippage)
-            net_loss = avg_loss + avg_slippage
+            net_win = max(0.0001, avg_win - slippage_pct_scaled)
+            net_loss = avg_loss + slippage_pct_scaled
             point_r = net_win / max(1e-9, net_loss)
             r_ratio = max(0.1, min(point_r, r_ratio_lower))
             if r_ratio <= 0:

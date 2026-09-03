@@ -287,7 +287,7 @@ def extract_or_build_returns_df(df_dict: dict) -> pd.DataFrame:
         return None
     return returns_df if not returns_df.empty else None
 
-def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: Optional[pd.DataFrame] = None) -> tuple:
+def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candidate_lev: float, total_equity: float, returns_df: Optional[pd.DataFrame] = None, interval_minutes: int = 1440) -> tuple:
     """Rule 14: Parametric VaR Heat Cap & Portfolio Notional Heat Cap."""
     if total_equity <= 0:
         return False, 0.0
@@ -301,7 +301,7 @@ def check_portfolio_heat(open_positions: list, candidate_size_usd: float, candid
 
     # Always execute Parametric VaR check for active positions + candidate
     eval_positions = list(open_positions) + [{"symbol": "CANDIDATE", "position_size_usd": candidate_size_usd, "leverage": candidate_lev}]
-    var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, total_equity)
+    var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, total_equity, interval_minutes=interval_minutes)
     if not var_ok:
         return False, var_pct * 100.0
     
@@ -409,17 +409,23 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if dd_mult == 0.0:
             return False, "REJECTED: Circuit breaker active (>=20% Drawdown)", 0.0, 0.0
         
-        # 2. Portfolio heat & Parametric VaR check
+        # 2. Portfolio heat & Parametric VaR check (scaled to 1-day horizon, Finding #85)
+        try:
+            int_str = str(interval).lower().replace("m", "").replace("h", "")
+            interval_mins = int(float(int_str) * (60 if "h" in str(interval).lower() else 1))
+        except Exception:
+            interval_mins = 60
+
         returns_df = extract_or_build_returns_df(df_dict)
         eval_positions = list(active_trades) + [{"symbol": symbol, "position_size_usd": capped_size, "leverage": leverage_val}]
-        var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, equity)
+        var_usd, var_pct, var_ok = portfolio_risk_engine.calculate_parametric_var(eval_positions, returns_df, equity, interval_minutes=interval_mins)
         if journal:
             journal.gate("var", (var_pct * 100.0) if var_pct is not None else None, var_ok)
 
         if not var_ok or (var_pct is not None and (var_pct * 100.0) > max_var):
             return False, f"REJECTED: Parametric VaR ({(var_pct*100.0) if var_pct else 0:.2f}%) exceeds maximum {max_var}% capital cap", dd_mult, 0.0
 
-        heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df)
+        heat_safe, heat_pct = check_portfolio_heat(active_trades, capped_size, leverage_val, equity, returns_df=returns_df, interval_minutes=interval_mins)
         if journal:
             journal.gate("heat", heat_pct, heat_safe)
 

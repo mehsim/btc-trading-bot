@@ -1235,18 +1235,27 @@ def get_bybit_order_details(symbol, order_id):
     return None
 
 def wait_for_order_fill(symbol, order_id, timeout_sec=2.0):
-    """Polls Bybit order status until filled, partially filled, or timeout expires."""
+    """
+    Polls Bybit order status until filled, rejected/cancelled, or timeout expires.
+    Treats PartiallyFilled as working (keeps waiting until Filled or timeout).
+    Returns (is_filled, status, cum_exec_qty, avg_price).
+    """
     start_t = time.time()
+    last_status = "Unknown"
+    cum_qty = 0.0
+    avg_price = 0.0
     while time.time() - start_t < timeout_sec:
         details = get_bybit_order_details(symbol, order_id)
         if details:
-            status = details.get("orderStatus")
-            if status in ["Filled", "PartiallyFilled"]:
-                return True
-            elif status in ["Cancelled", "Rejected"]:
-                return False
+            last_status = details.get("orderStatus", "Unknown")
+            cum_qty = float(details.get("cumExecQty", 0.0))
+            avg_price = float(details.get("avgPrice", 0.0))
+            if last_status == "Filled":
+                return True, "Filled", cum_qty, avg_price
+            elif last_status in ["Cancelled", "Rejected"]:
+                return False, last_status, cum_qty, avg_price
         time.sleep(0.2)
-    return False
+    return False, last_status, cum_qty, avg_price
 
 def cancel_bybit_order(symbol, order_id):
     cancel_payload = {
@@ -1499,14 +1508,6 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         if side == "Buy" or side == "Long":  # Long position: Take Profit must be > current price
             if tp_price <= live_price:
                 log_event("WARNING", f"[{symbol}] TP {tp_price} <= price {live_price} on a long — skipped")
-                print(f"[Bybit API] Take Profit update skipped for Long {symbol}: Proposed TP {tp_price:.4f} is <= current price {live_price:.4f}.")
-                return False
-        else:  # Short position: Take Profit must be < current price
-            if tp_price >= live_price:
-                log_event("WARNING", f"[{symbol}] TP {tp_price} >= price {live_price} on a short — skipped")
-                print(f"[Bybit API] Take Profit update skipped for Short {symbol}: Proposed TP {tp_price:.4f} is >= current price {live_price:.4f}.")
-                return False
-
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -1515,7 +1516,7 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
     }
     res = bybit_post_request("/v5/position/trading-stop", payload)
     if res.get("retCode") == 0:
-        print(f"[Bybit API] Successfully updated Take Profit on Bybit to {tp_price:.4f} for {symbol}.")
+        print(f"[Bybit API] Take Profit for {symbol} updated to {tp_price:.4f} successfully.")
         return True
     elif "not modified" in str(res.get("retMsg", "")).lower() or res.get("retCode") == 130089:
         print(f"[Bybit API] Take Profit for {symbol} is already set to {tp_price:.4f} (not modified).")
@@ -1535,6 +1536,8 @@ def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_o
         "timeInForce": "PostOnly" if post_only else "GTC",
         "positionIdx": 0
     }
+    if "order_link_id" in kwargs and kwargs["order_link_id"]:
+        payload["orderLinkId"] = str(kwargs["order_link_id"])[:36]
     if reduce_only:
         payload["reduceOnly"] = True
     if sl:
@@ -1554,6 +1557,8 @@ def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only
         "timeInForce": "IOC",
         "positionIdx": 0
     }
+    if "order_link_id" in kwargs and kwargs["order_link_id"]:
+        payload["orderLinkId"] = str(kwargs["order_link_id"])[:36]
     if reduce_only:
         payload["reduceOnly"] = True
     if sl:
@@ -1563,37 +1568,30 @@ def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only
     res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
     return res
 
-def emergency_flatten_position(symbol, opp_side, qty_str, max_retries=2):
+def emergency_flatten_position(symbol, opp_side, qty_str, max_retries=3):
     """
     Executes a verified emergency flatten order with reduce_only=True and retries.
+    Strictly verifies that live position size is zero before returning True.
     """
     for attempt in range(1, max_retries + 1):
         try:
-            res = place_bybit_taker_ioc_order(symbol, opp_side, qty_str, reduce_only=True)
+            pos = get_bybit_position(symbol)
+            live_sz = float(pos.get("size", 0.0)) if pos else 0.0
+            if live_sz == 0.0:
+                log_event("INFO", f"[{symbol} Emergency Flatten] Position already confirmed flat on Bybit (size == 0.0).")
+                return True
+
+            submit_qty = format_bybit_qty(symbol, live_sz) if live_sz > 0 else qty_str
+            res = place_bybit_taker_ioc_order(symbol, opp_side, submit_qty, reduce_only=True)
             ret_code = res.get("retCode", -1) if isinstance(res, dict) else -1
-            if ret_code == 0:
-                order_id = res.get("result", {}).get("orderId") if isinstance(res, dict) else None
-                if order_id:
-                    time.sleep(0.3)
-                    details = get_bybit_order_details(symbol, order_id)
-                    status = details.get("orderStatus") if isinstance(details, dict) else None
-                    if status == "Filled":
-                        log_event("INFO", f"[{symbol} Emergency Flatten] Successfully executed {opp_side} IOC (Qty: {qty_str}, Attempt {attempt}, Status: Filled).")
-                        return True
-                    else:
-                        # Recheck live position on Bybit to verify if residual size is 0
-                        pos = get_bybit_position(symbol)
-                        if pos and float(pos.get("size", 0.0)) == 0.0:
-                            log_event("INFO", f"[{symbol} Emergency Flatten] Position confirmed flat on Bybit (Attempt {attempt}).")
-                            return True
-                        log_event("WARNING", f"[{symbol} Emergency Flatten] Order {order_id} not completely filled (Status: {status}, Pos size: {pos.get('size') if pos else 'none'}).")
-                else:
-                    pos = get_bybit_position(symbol)
-                    if pos and float(pos.get("size", 0.0)) == 0.0:
-                        log_event("INFO", f"[{symbol} Emergency Flatten] Successfully submitted IOC and position confirmed flat.")
-                        return True
+            time.sleep(0.4)
+            pos_after = get_bybit_position(symbol)
+            if pos_after and float(pos_after.get("size", 0.0)) == 0.0:
+                log_event("INFO", f"[{symbol} Emergency Flatten] Position strictly confirmed flat on Bybit (Attempt {attempt}, status code: {ret_code}).")
+                return True
             else:
-                log_event("WARNING", f"[{symbol} Emergency Flatten] Attempt {attempt} returned {res.get('retMsg', res)}")
+                rem = float(pos_after.get("size", 0.0)) if pos_after else live_sz
+                log_event("WARNING", f"[{symbol} Emergency Flatten] Order execution left residual size {rem} (Attempt {attempt}).")
         except Exception as ex:
             log_event("ERROR", f"[{symbol} Emergency Flatten] Exception on attempt {attempt}: {ex}")
         time.sleep(0.5)
@@ -4569,6 +4567,17 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Cannot retrieve live market price. Aborting order (Fail-Closed).")
         send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Market price unavailable for pre-flight drift check.")
         return
+    # 4. Immediate Trigger Invariant: Abort if live price has already breached Stop Loss
+    if stop_loss_price is not None:
+        if ml_trend == "Bullish" and live_mid <= stop_loss_price:
+            log_event("WARNING", f"[{symbol} {iv}m Immediate Trigger Guard] Live mid (${live_mid:.4f}) already breached Long Stop Loss (${stop_loss_price:.4f}). Aborting order placement.")
+            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Live price (${live_mid:.4f}) already breached Stop Loss (${stop_loss_price:.4f}).")
+            return
+        elif ml_trend == "Bearish" and live_mid >= stop_loss_price:
+            log_event("WARNING", f"[{symbol} {iv}m Immediate Trigger Guard] Live mid (${live_mid:.4f}) already breached Short Stop Loss (${stop_loss_price:.4f}). Aborting order placement.")
+            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Live price (${live_mid:.4f}) already breached Stop Loss (${stop_loss_price:.4f}).")
+            return
+
     max_adverse_drift = max(0.25 * atr_dollars, pre_entry_price * 0.0025)
 
     if ml_trend == "Bullish" and (pre_entry_price - live_mid) > max_adverse_drift:
@@ -4649,30 +4658,36 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
                 limit_entry_price = get_chase_limit_price(symbol, side, chase, entry_price)
                 print(f"[{symbol} {iv}m API] Chase {chase+1}/5: Placing Limit Maker order for {chase_qty_str} (remaining of {raw_qty}) at {limit_entry_price:.2f}...")
-                order_res = place_bybit_limit_order(symbol, side, chase_qty_str, limit_entry_price, sl=stop_loss_price, tp=take_profit_price, post_only=True)
+                chase_order_link_id = f"c_{symbol[:5]}_{iv}_{int(latest_completed_ts//1000)}_{chase}"[:36]
+                order_res = place_bybit_limit_order(
+                    symbol, side, chase_qty_str, limit_entry_price,
+                    sl=stop_loss_price, tp=take_profit_price, post_only=True,
+                    order_link_id=chase_order_link_id
+                )
                 
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
                     if bybit_order_id:
                         chase_order_ids.add(bybit_order_id)
-                    filled = wait_for_order_fill(symbol, bybit_order_id, timeout_sec=2.0)
-                    if filled:
+                    _w_res = wait_for_order_fill(symbol, bybit_order_id, timeout_sec=2.0)
+                    if isinstance(_w_res, (tuple, list)) and len(_w_res) >= 4:
+                        is_filled, f_status, f_cum, f_px = _w_res[:4]
+                    else:
+                        is_filled = bool(_w_res)
+                        f_status = "Filled" if is_filled else "Unknown"
+                        f_cum = floored_remaining if is_filled else 0.0
+                        f_px = limit_entry_price
+                    if is_filled or (raw_qty > 0 and f_cum >= (0.95 * raw_qty)):
                         bybit_success = True
                         cancel_bybit_order(symbol, bybit_order_id)
-                        time.sleep(0.3)
-                        order_details = get_bybit_order_details(symbol, bybit_order_id)
-                        if order_details and float(order_details.get("cumExecQty", 0.0)) > 0:
-                            fill_px = float(order_details.get("avgPrice", limit_entry_price))
-                            fill_q = float(order_details.get("cumExecQty", floored_remaining))
-                        else:
-                            fill_px = limit_entry_price
-                            fill_q = floored_remaining
-                        
+                        time.sleep(0.2)
+                        fill_px = f_px if f_px > 0 else limit_entry_price
+                        fill_q = f_cum if f_cum > 0 else floored_remaining
                         filled_so_far += fill_q
                         weighted_sum_px += (fill_q * fill_px)
                         break
                     else:
-                        print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s. Cancelling and recalculating price...")
+                        print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s (Status: {f_status}, Fill: {f_cum}). Cancelling and recalculating price...")
                         cancel_res = cancel_bybit_order(symbol, bybit_order_id)
                         time.sleep(0.3)
                         post_cancel_details = get_bybit_order_details(symbol, bybit_order_id)
@@ -4732,6 +4747,18 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     print(f"[{symbol} {iv}m API] Maker PostOnly would cross spread. Retrying next chase tick...")
                 else:
                     print(f"[{symbol} {iv}m API ERROR] Limit order placement failed: {order_res.get('retMsg')}")
+                    # Reconcile: Query Bybit realtime orders by orderLinkId in case request was executed on exchange
+                    try:
+                        chk = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderLinkId": chase_order_link_id})
+                        if chk.get("retCode") == 0 and chk.get("result", {}).get("list"):
+                            o_item = chk["result"]["list"][0]
+                            o_id = o_item.get("orderId")
+                            if o_id:
+                                chase_order_ids.add(o_id)
+                                cancel_bybit_order(symbol, o_id)
+                                time.sleep(0.3)
+                    except Exception as chk_ex:
+                        log_event("WARNING", f"[{symbol} {iv}m] orderLinkId reconciliation error: {chk_ex}")
                     break
                     
             if filled_so_far > 0:
@@ -5758,8 +5785,23 @@ def main():
                                     print(f"[Bybit API] Placing Market close order for {qty_str} {active_symbol} due to programmatic exit...")
                                     close_res = place_bybit_order(symbol=active_symbol, side=close_side, qty=qty_str, reduce_only=True)
                                     if close_res.get("retCode") == 0:
-                                        bybit_closed = True
-                                        time.sleep(0.5)
+                                        # Strict verification: Confirm exchange position size is 0.0 before marking closed
+                                        is_flat = False
+                                        for v_att in range(5):
+                                            time.sleep(0.4)
+                                            v_pos = get_bybit_position(active_symbol)
+                                            if v_pos and float(v_pos.get("size", 0.0)) == 0.0:
+                                                is_flat = True
+                                                break
+                                            elif v_pos and float(v_pos.get("size", 0.0)) > 0.0:
+                                                rem_sz = float(v_pos.get("size", 0.0))
+                                                print(f"[{active_symbol} {iv}m] Programmatic exit residual: {rem_sz} remaining (attempt {v_att+1}). Resubmitting...")
+                                                place_bybit_order(symbol=active_symbol, side=close_side, qty=format_bybit_qty(active_symbol, rem_sz), reduce_only=True)
+                                        if is_flat:
+                                            bybit_closed = True
+                                        else:
+                                            log_event("CRITICAL", f"[{active_symbol} {iv}m] Programmatic exit unconfirmed: Position size not 0.0 on Bybit!")
+                                            active_trade["close_failed"] = True
                                     else:
                                         log_event("ERROR", f"[{active_symbol} {iv}m] Market close order failed: {close_res.get('retMsg')}")
                                         active_trade["close_failed"] = True
@@ -5846,7 +5888,13 @@ def main():
                         exit_fee_rate = 0.0002 if not is_stop_loss else 0.00055  # Limit exit vs Stop Loss market close
                         roundtrip_fee_rate = entry_fee_rate + exit_fee_rate
                         fee_cost = position_size_usd * leverage * roundtrip_fee_rate
-                        realized_pnl = gross_pnl - fee_cost
+                        
+                        # Deduct accrued funding settlement cost (Finding #78)
+                        funding_rate = get_funding_rate(active_symbol)
+                        funding_intervals = max(0.0, float(candles_elapsed) * float(iv) / 480.0)
+                        funding_dir_mult = 1.0 if direction == "Bullish" else -1.0
+                        funding_cost = position_size_usd * leverage * funding_rate * funding_dir_mult * funding_intervals
+                        realized_pnl = gross_pnl - fee_cost - funding_cost
                         net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
                         
                         if realized_pnl < -position_size_usd:
@@ -5866,8 +5914,8 @@ def main():
                             total_pnl = round(realized_pnl + scaled_out_pnl, 2)
                             total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
                         
-                        # Log trade into KellyTracker with authoritative reconciled PnL for dynamic Quarter-Kelly sizing
-                        global_kelly_tracker.log_trade(active_symbol, str(iv), realized_pnl, net_return_pct)
+                        # Log total trade outcome (including scale-outs) into KellyTracker (Finding #79)
+                        global_kelly_tracker.log_trade(active_symbol, str(iv), total_pnl, total_net_return_pct)
                         
                         # Update simulated balance (only in simulation)
                         if TRADE_MODE == "simulation":
@@ -6522,6 +6570,12 @@ def main():
                 database.set_setting("bot_running", "False")
                 database.set_setting("bot_stopped", "True")
                 log_event("WARNING", f"[TRADING_LOOP] Hard Circuit Breaker Triggered ({cb_reason}, Micro Trades: {closed_trade_count}/{max_trades_cap}, Micro Loss: ${cumulative_loss:.2f}/${max_loss_cap:.2f}, Persisted Stopped: {is_persisted_stopped}) — bot halted.")
+                if not cb_ok:
+                    try:
+                        kill_reason = f"Hard Circuit Breaker ({cb_reason})"
+                        trigger_emergency_kill_switch(kill_reason)
+                    except Exception as ex_ks:
+                        log_event("ERROR", f"[TRADING_LOOP] Error invoking trigger_emergency_kill_switch: {ex_ks}")
                 time.sleep(10)
                 return
         except Exception as ex_cb:
@@ -7578,6 +7632,9 @@ def main():
                             elif funding_blocked:
                                 status_msg = "Skipped (Funding Block)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
+                            elif confluence_blocked:
+                                status_msg = "Skipped (HTF Opposition)"
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: HTF macro trend opposes trade direction ({htf_trend}).")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
@@ -7721,7 +7778,7 @@ def main():
                                             real_bal = get_real_bybit_balance_cached(force=True)
                                             if isinstance(real_bal, (int, float)) and real_bal > 0:
                                                 current_bal = real_bal
-                                        cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend)
+                                        cov_multiplier, net_risk = calculate_covariance_multiplier(symbol, ml_trend, bot_state=bot_state)
                                     
                                         # Base size dynamic calculation using Risk Engine Conservative Kelly (Wilson CI / Bootstrap)
                                         from config import (
@@ -8030,13 +8087,16 @@ def main():
 
                                             # Apply P4 Anti-Martingale scaling to candidate sizing before risk gates
                                             from risk_engine import calculate_anti_martingale_risk_multiplier
-                                            peak_eq = bot_state.get("peak_balance") or bot_state.get("peak_wallet_balance") or current_bal
+                                            peak_eq = float(bot_state.get("peak_balance", current_bal) or current_bal)
                                             am_res = calculate_anti_martingale_risk_multiplier(
                                                 current_bal,
                                                 peak_eq,
                                                 bot_state.get("trade_history", [])
                                             )
                                             am_mult = float(am_res.get("multiplier", 1.0))
+                                            # Invariant: Never inflate sizing above 1.0x if currently in a drawdown (Finding #81)
+                                            if current_bal < peak_eq * 0.985:
+                                                am_mult = min(1.0, am_mult)
                                             position_size_usd = max(0.0, float(position_size_usd * am_mult))
                                             # Re-clamp candidate position size to available free margin to avoid exceeding allocation limit
                                             position_size_usd = min(available_margin * 0.95, position_size_usd)
