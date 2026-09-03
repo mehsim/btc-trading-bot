@@ -34,8 +34,8 @@ def resolve_direction(probs, interval=None, min_dir_mass=0.15):
         prob_bullish = val if val >= 0.5 else 0.0
 
     dir_total = prob_bearish + prob_bullish
-    # When 3-class model has substantial directional mass (>= 15%), evaluate normalized directional split
-    if len(probs) >= 3 and dir_total >= min_dir_mass:
+    # When 3-class model has substantial directional mass (>= 15%) and directional conviction meets or exceeds neutral probability
+    if len(probs) >= 3 and dir_total >= min_dir_mass and dir_total >= prob_neutral:
         norm_bear = prob_bearish / max(1e-9, dir_total)
         norm_bull = prob_bullish / max(1e-9, dir_total)
         if norm_bull > norm_bear and norm_bull >= 0.50:

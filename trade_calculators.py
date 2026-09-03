@@ -858,14 +858,24 @@ def calculate_covariance_multiplier(new_symbol, new_direction, bot_state=None):
     try:
         from data import get_history
         df_vol = get_history(symbol=new_symbol, interval="60", limit=30)
-        if df_vol is not None and not df_vol.empty and "ATR_norm" in df_vol.columns:
-            rolling_atr = df_vol["ATR_norm"].tail(30)
-            atr_mean = rolling_atr.mean()
-            atr_std = rolling_atr.std()
-            vol_z_score = (df_vol["ATR_norm"].iloc[-1] - atr_mean) / (atr_std + 1e-8) if atr_std > 0 else 0.0
-            is_stressed = vol_z_score > 2.0
-            if is_stressed:
-                print(f"[Stress Covariance] Volatility Z-score: {vol_z_score:.2f} > 2.0. Stressed correlation mode active.")
+        if df_vol is not None and not df_vol.empty and len(df_vol) >= 15:
+            if "ATR_norm" not in df_vol.columns:
+                high_s = df_vol["high"].astype(float)
+                low_s = df_vol["low"].astype(float)
+                close_s = df_vol["close"].astype(float)
+                prev_close_s = close_s.shift(1)
+                tr_s = pd.concat([high_s - low_s, (high_s - prev_close_s).abs(), (low_s - prev_close_s).abs()], axis=1).max(axis=1)
+                atr_s = tr_s.rolling(14).mean()
+                df_vol["ATR_norm"] = atr_s / close_s.replace(0, np.nan)
+            df_norm_clean = df_vol["ATR_norm"].dropna()
+            if len(df_norm_clean) > 0:
+                rolling_atr = df_norm_clean.tail(30)
+                atr_mean = rolling_atr.mean()
+                atr_std = rolling_atr.std()
+                vol_z_score = (df_norm_clean.iloc[-1] - atr_mean) / (atr_std + 1e-8) if atr_std > 0 else 0.0
+                is_stressed = vol_z_score > 2.0
+                if is_stressed:
+                    print(f"[Stress Covariance] Volatility Z-score: {vol_z_score:.2f} > 2.0. Stressed correlation mode active.")
     except Exception as e:
         print(f"[Stress Covariance Warning] Could not calculate volatility z-score: {e}")
 

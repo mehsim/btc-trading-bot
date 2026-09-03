@@ -660,23 +660,26 @@ def tune_triple_barrier_multipliers(df_coin, interval, n_trials=30):
         print(f"Warning: Could not write governance_state.json: {ex_gov}")
     return best
 
-def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
+_EXECUTED_OPTUNA_TRIALS = 0
+
+def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15):
+    global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        iv_str = str(globals().get("interval", "15"))
+        iv_str = str(interval)
         if regime == "ranging" and iv_str in ["15", "240"]:
             max_depth_min, max_depth_max = 2, 3
             lr_min, lr_max = 0.02, 0.05
             reg_lambda_param = trial.suggest_float('reg_lambda', 2.0, 20.0, log=True)
             min_child_param = trial.suggest_int('min_child_weight', 15, 40)
+        elif regime == "trending" and iv_str not in ["15", "30"]:
+            max_depth_min, max_depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_weight', 1, 10)
         elif iv_str in ["15", "30"]:
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.02, 0.08
-            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
-            min_child_param = trial.suggest_int('min_child_weight', 1, 10)
-        elif regime == "trending":
-            max_depth_min, max_depth_max = 5, 8
-            lr_min, lr_max = 0.01, 0.04
             reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
             min_child_param = trial.suggest_int('min_child_weight', 1, 10)
         else:
@@ -706,25 +709,27 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=8)
+    _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
+def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15):
+    global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        iv_str = str(globals().get("interval", "15"))
+        iv_str = str(interval)
         if regime == "ranging" and iv_str in ["15", "240"]:
             max_depth_min, max_depth_max = 2, 3
             lr_min, lr_max = 0.02, 0.05
             reg_lambda_param = trial.suggest_float('reg_lambda', 2.0, 20.0, log=True)
             min_child_param = trial.suggest_int('min_child_samples', 20, 50)
+        elif regime == "trending" and iv_str not in ["15", "30"]:
+            max_depth_min, max_depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
+            min_child_param = trial.suggest_int('min_child_samples', 5, 100)
         elif iv_str in ["15", "30"]:
             max_depth_min, max_depth_max = 3, 4
             lr_min, lr_max = 0.02, 0.08
-            reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
-            min_child_param = trial.suggest_int('min_child_samples', 5, 100)
-        elif regime == "trending":
-            max_depth_min, max_depth_max = 5, 8
-            lr_min, lr_max = 0.01, 0.04
             reg_lambda_param = trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True)
             min_child_param = trial.suggest_int('min_child_samples', 5, 100)
         else:
@@ -753,23 +758,25 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=8)
+    _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime):
+def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15):
+    global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        iv_str = str(globals().get("interval", "15"))
+        iv_str = str(interval)
         if regime == "ranging" and iv_str in ["15", "240"]:
             depth_min, depth_max = 2, 3
             lr_min, lr_max = 0.02, 0.05
             l2_reg_param = trial.suggest_float('l2_leaf_reg', 2.0, 20.0, log=True)
+        elif regime == "trending" and iv_str not in ["15", "30"]:
+            depth_min, depth_max = 5, 8
+            lr_min, lr_max = 0.01, 0.04
+            l2_reg_param = trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True)
         elif iv_str in ["15", "30"]:
             depth_min, depth_max = 3, 4
             lr_min, lr_max = 0.02, 0.08
-            l2_reg_param = trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True)
-        elif regime == "trending":
-            depth_min, depth_max = 5, 8
-            lr_min, lr_max = 0.01, 0.04
             l2_reg_param = trial.suggest_float('l2_leaf_reg', 1e-3, 10.0, log=True)
         else:
             depth_min, depth_max = 3, 4
@@ -791,12 +798,15 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         return balanced_accuracy_score(y_val, preds)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=8)
+    _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
+def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
+    global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if regime == "trending":
+        iv_str = str(interval)
+        if regime == "trending" and iv_str not in ["15", "30"]:
             max_depth_min, max_depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
         else:
@@ -820,13 +830,16 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime):
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=8)
+    _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
+def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
+    global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if regime == "trending":
+        iv_str = str(interval)
+        if regime == "trending" and iv_str not in ["15", "30"]:
             max_depth_min, max_depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
         else:
@@ -851,12 +864,15 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime):
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=8)
+    _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
+def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
+    global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
-        if regime == "trending":
+        iv_str = str(interval)
+        if regime == "trending" and iv_str not in ["15", "30"]:
             depth_min, depth_max = 5, 8
             lr_min, lr_max = 0.01, 0.04
         else:
@@ -877,6 +893,7 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime):
         return mean_absolute_error(y_val, preds)
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=8)
+    _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
 def train_models(interval=INTERVAL, pages=PAGES):
@@ -1378,13 +1395,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             
             if first_fold:
                 print("  Optimizing hyperparameters on first fold...")
-                best_params_xgb_t = optimize_xgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name)
-                best_params_lgb_t = optimize_lgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name)
-                best_params_cat_t = optimize_cat_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name)
+                best_params_xgb_t = optimize_xgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name, interval=interval)
+                best_params_lgb_t = optimize_lgb_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name, interval=interval)
+                best_params_cat_t = optimize_cat_classifier(X_train, y_train_t, X_val, y_val_t, sample_weight_train, regime=name, interval=interval)
                 
-                best_params_xgb_p = optimize_xgb_regressor(X_train, y_train_p, X_val, y_val_p, regime=name)
-                best_params_lgb_p = optimize_lgb_regressor(X_train, y_train_p, X_val, y_val_p, regime=name)
-                best_params_cat_p = optimize_cat_regressor(X_train, y_train_p, X_val, y_val_p, regime=name)
+                best_params_xgb_p = optimize_xgb_regressor(X_train, y_train_p, X_val, y_val_p, regime=name, interval=interval)
+                best_params_lgb_p = optimize_lgb_regressor(X_train, y_train_p, X_val, y_val_p, regime=name, interval=interval)
+                best_params_cat_p = optimize_cat_regressor(X_train, y_train_p, X_val, y_val_p, regime=name, interval=interval)
                 first_fold = False
             
             # Instantiate models with best parameters
@@ -1398,8 +1415,22 @@ def train_models(interval=INTERVAL, pages=PAGES):
             cat_p = create_model(CatBoostRegressor, best_params_cat_p)
             ensemble_p = EnsembleRegressor(xgb_p, lgb_p, cat_p)
             
-            # Train on this fold
-            ensemble_t.fit(X_train, y_train_t, sample_weight=sample_weight_train)
+            # Train on this fold (with inner validation split to calibrate stacking meta-classifier)
+            if len(X_train) >= 50:
+                inner_split = int(len(X_train) * 0.8)
+                X_tr_inner = X_train.iloc[:inner_split]
+                y_tr_inner = y_train_t.iloc[:inner_split]
+                w_tr_inner = sample_weight_train[:inner_split] if sample_weight_train is not None else None
+                X_val_inner = X_train.iloc[inner_split:]
+                y_val_inner = y_train_t.iloc[inner_split:]
+                ensemble_t.fit(
+                    X_train, y_train_t, sample_weight=sample_weight_train,
+                    X_val=X_val_inner, y_val=y_val_inner,
+                    X_train=X_tr_inner, y_train=y_tr_inner,
+                    sample_weight_train=w_tr_inner
+                )
+            else:
+                ensemble_t.fit(X_train, y_train_t, sample_weight=sample_weight_train)
             ensemble_p.fit(X_train, y_train_p)
             
             # Out of sample validation predictions
@@ -1449,15 +1480,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
             all_y_val_agg.extend(y_val_arr.tolist())
             all_pred_agg.extend(pred_val_t.tolist())
             
-            # Out of sample prediction probabilities for calibration (directional conditional scale)
+            # Out of sample prediction probabilities for calibration (aligned with live resolve_direction serving)
+            from ensemble import resolve_direction
             probs_val = ensemble_t.predict_proba(X_val)
             for j in range(len(X_val)):
-                w_class = int(np.argmax(probs_val[j]))
-                if w_class in [0, 2]: # Bearish or Bullish only
-                    dir_denom = float(probs_val[j][0] + probs_val[j][2])
-                    dir_prob = float(probs_val[j][w_class] / max(1e-6, dir_denom))
-                    calibration_probs.append(dir_prob)
-                    calibration_labels.append(1 if w_class == y_val_t.values[j] else 0)
+                dir_label, dir_conf = resolve_direction(probs_val[j])
+                if dir_label in ["Bearish", "Bullish"]:
+                    dir_class = 2 if dir_label == "Bullish" else 0
+                    calibration_probs.append(float(dir_conf))
+                    calibration_labels.append(1 if dir_class == y_val_t.values[j] else 0)
             
             # Generate Meta-labels for this validation fold
             actual_val_t = y_val_t.values
@@ -1684,17 +1715,27 @@ def train_models(interval=INTERVAL, pages=PAGES):
         uniqueness_last = compute_sample_uniqueness(t1_last, y_train_t.index).values
         sample_weight_train_last = compute_balanced_uniqueness_weights(y_train_t, uniqueness=uniqueness_last, decay=decay_train_last)
         
-        final_ensemble_t.fit(
-            X, y_trend, sample_weight=sample_weight_full, 
-            X_val=X_val, y_val=y_val_t, 
-            X_train=X_train, y_train=y_train_t, 
-            sample_weight_train=sample_weight_train_last
-        )
-        final_ensemble_p.fit(
-            X, y_price, 
-            X_val=X_val, y_val=y_val_p, 
-            X_train=X_train, y_train=y_train_p
-        )
+        if len(X) >= 50:
+            inner_split_f = int(len(X) * 0.8)
+            X_tr_f = X.iloc[:inner_split_f]
+            y_tr_f = y_trend.iloc[:inner_split_f]
+            w_tr_f = sample_weight_full[:inner_split_f] if sample_weight_full is not None else None
+            X_val_f = X.iloc[inner_split_f:]
+            y_val_f = y_trend.iloc[inner_split_f:]
+            final_ensemble_t.fit(
+                X, y_trend, sample_weight=sample_weight_full, 
+                X_val=X_val_f, y_val=y_val_f, 
+                X_train=X_tr_f, y_train=y_tr_f, 
+                sample_weight_train=w_tr_f
+            )
+            final_ensemble_p.fit(
+                X, y_price, 
+                X_val=X_val_f, y_val=y_price.iloc[inner_split_f:], 
+                X_train=X_tr_f, y_train=y_price.iloc[:inner_split_f:]
+            )
+        else:
+            final_ensemble_t.fit(X, y_trend, sample_weight=sample_weight_full)
+            final_ensemble_p.fit(X, y_price)
         
         from ensemble import save_ensemble_classifier, save_ensemble_regressor, load_ensemble_classifier, load_ensemble_regressor, is_feature_contract_compatible
 
@@ -1884,7 +1925,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         print(f"  ℹ️ [Champion Retention Notice] Evaluation was on sub-population {SUPPORTED_SYMBOLS}. Skipping auto-denial for full-population champion '{name}_{interval}'.")
                         log_event("INFO", f"[Champion Retention Notice] Sub-population test for {name}_{interval}, auto-denial skipped.")
 
-                if chal_acc > champ_acc:
+                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                    should_save = False
+                elif chal_acc > champ_acc:
                     should_save = True
                 elif chal_acc == champ_acc and chal_mae < champ_mae:
                     should_save = True
@@ -1961,10 +2005,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif holdout_mcc < min_holdout_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
                 should_save = False
-            elif holdout_mcc_ci_low < -0.10:
+            elif holdout_mcc_ci_low < -0.05 or (holdout_mcc_ci_low < 0.0 and round(2.8 / np.sqrt(max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))), 4) > min_holdout_mcc_floor * 5.0):
                 _eff_n = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
                 _mde_val = round(2.8 / np.sqrt(_eff_n), 4)
-                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) < -0.10 (severe negative tail risk). MDE(80%) was {_mde_val:.4f}.")
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) fails zero-floor or MDE(80%) was {_mde_val:.4f} > 5x floor ({min_holdout_mcc_floor}).")
                 should_save = False
             elif holdout_mcc_ci_high < 0.0:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI upper bound ({holdout_mcc_ci_high:.4f}) < 0 — clear negative correlation out of sample")
@@ -2474,8 +2518,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"[Regime Filter] Skipping RANGING regime training (target_regime='{target_regime}')")
 
     # M-3: persist total Optuna trial count so governance gate uses real search breadth.
-    # Barrier study: 5 trials; 2 regimes × 6 optimizer functions × 3 trials = 36; total = 41.
-    _TOTAL_OPTUNA_TRIALS = 5 + 2 * 6 * 3
+    _TOTAL_OPTUNA_TRIALS = _EXECUTED_OPTUNA_TRIALS if _EXECUTED_OPTUNA_TRIALS > 0 else (5 + 2 * 6 * 8)
     try:
         _gov_path = "governance_state.json"
         _gov = {}

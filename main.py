@@ -197,7 +197,7 @@ last_private_ws_update_time = 0.0
 # ==========================================
 # TIMING & API/PROXY HIT INTERVALS
 # ==========================================
-CANDLE_CHECK_WINDOW_MINS = int(os.environ.get("CANDLE_CHECK_WINDOW_MINS", "15"))
+CANDLE_CHECK_WINDOW_MINS = int(os.environ.get("CANDLE_CHECK_WINDOW_MINS", "4"))
 CANDLE_CHECK_INTERVAL_SECS = int(os.environ.get("CANDLE_CHECK_INTERVAL_SECS", "20"))
 BALANCE_UPDATE_INTERVAL_SECS = int(os.environ.get("BALANCE_UPDATE_INTERVAL_SECS", "120"))
 POSITION_SYNC_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_INTERVAL_SECS", "30.0"))
@@ -1423,7 +1423,8 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None, current_sl_snaps
         return False
         
     live_price = bot_state.get(f"live_price_{symbol}")
-    if live_price is None:
+    price_ts = bot_state.get(f"live_price_ts_{symbol}", 0.0)
+    if live_price is None or (time.time() - price_ts > 30.0):
         live_price = get_fallback_price(symbol)
         
     if active_trade:
@@ -1490,7 +1491,8 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         return False
         
     live_price = bot_state.get(f"live_price_{symbol}")
-    if live_price is None:
+    price_ts = bot_state.get(f"live_price_ts_{symbol}", 0.0)
+    if live_price is None or (time.time() - price_ts > 30.0):
         live_price = get_fallback_price(symbol)
         
     if live_price is not None:
@@ -2480,13 +2482,13 @@ def run_fallback_price_updater():
                             if val_str:
                                 val = float(val_str)
                                 bot_state[f"live_price_{sym}"] = val
+                                bot_state[f"live_price_ts_{sym}"] = now
                                 found_symbols.add(sym)
                                 if sym == "BTCUSDT":
                                     live_price = val
                                     bot_state["live_price"] = val
-                                    bot_state["last_update"] = time.time()
-                                    if not ws_active:
-                                        last_ws_update_time = time.time()
+                                    bot_state["last_update"] = now
+                                bot_state["last_rest_price_time"] = now
 
                 # Try Bulk Bybit Live API fallback for missing symbols first (such as AVAX and LTC on testnet)
                 missing = [s for s in SUPPORTED_SYMBOLS if s not in found_symbols]
@@ -2504,7 +2506,9 @@ def run_fallback_price_updater():
                                 if sym in missing:
                                     val_str = ticker.get("lastPrice")
                                     if val_str:
-                                        bot_state[f"live_price_{sym}"] = float(val_str)
+                                        val = float(val_str)
+                                        bot_state[f"live_price_{sym}"] = val
+                                        bot_state[f"live_price_ts_{sym}"] = now
                                         found_symbols.add(sym)
                     except Exception as ble:
                         print(f"[Price Fallback] Bybit Live bulk fetch error: {ble}")
@@ -2520,12 +2524,12 @@ def run_fallback_price_updater():
                             for sym in missing:
                                 if sym in binance_prices:
                                     bot_state[f"live_price_{sym}"] = binance_prices[sym]
+                                    bot_state[f"live_price_ts_{sym}"] = now
                                     if sym == "BTCUSDT":
                                         live_price = binance_prices[sym]
                                         bot_state["live_price"] = binance_prices[sym]
-                                        bot_state["last_update"] = time.time()
-                                        if not ws_active:
-                                            last_ws_update_time = time.time()
+                                        bot_state["last_update"] = now
+                                    bot_state["last_rest_price_time"] = now
                     except Exception as be:
                         print(f"[Price Fallback] Binance bulk fetch error: {be}")
         except Exception as e:
@@ -2618,6 +2622,7 @@ def on_message(ws, message):
             if price_str and sym:
                 val = float(price_str)
                 bot_state[f"live_price_{sym}"] = val
+                bot_state[f"live_price_ts_{sym}"] = last_ws_update_time
                 if sym == "BTCUSDT":
                     live_price = val
                     bot_state["live_price"] = val
@@ -4260,8 +4265,15 @@ def sync_active_positions_from_bybit():
                         calc_atr = None
                         try:
                             _df_r = get_history(symbol=symbol, interval="60", limit=50)
-                            if _df_r is not None and "ATR" in _df_r.columns and len(_df_r) > 0:
-                                _a = float(_df_r["ATR"].iloc[-1])
+                            if _df_r is not None and len(_df_r) >= 15:
+                                if "ATR" in _df_r.columns:
+                                    _a = float(_df_r["ATR"].iloc[-1])
+                                else:
+                                    _high = _df_r["high"].astype(float)
+                                    _low = _df_r["low"].astype(float)
+                                    _cp = _df_r["close"].astype(float).shift(1)
+                                    _tr = pd.concat([_high - _low, (_high - _cp).abs(), (_low - _cp).abs()], axis=1).max(axis=1)
+                                    _a = float(_tr.rolling(14).mean().dropna().iloc[-1])
                                 if _a > 0:
                                     calc_atr = _a
                         except Exception as _e:
@@ -5167,8 +5179,13 @@ def main():
                 for active_trade in active_trades_list:
                     active_symbol = active_trade.get("symbol", "BTCUSDT")
                     symbol_price = bot_state.get(f"live_price_{active_symbol}")
-                    if symbol_price is None:
-                        symbol_price = get_fallback_price(active_symbol)
+                    symbol_price_ts = bot_state.get(f"live_price_ts_{active_symbol}", 0.0)
+                    if symbol_price is None or (time.time() - symbol_price_ts > 30.0):
+                        fresh_price = get_fallback_price(active_symbol)
+                        if fresh_price is not None:
+                            symbol_price = fresh_price
+                            bot_state[f"live_price_{active_symbol}"] = fresh_price
+                            bot_state[f"live_price_ts_{active_symbol}"] = time.time()
                     if symbol_price is None:
                         updated_trades.append(active_trade)
                         continue
@@ -5601,10 +5618,20 @@ def main():
                     rolling_vol_20th = float(garch_vol_val * 0.70)
                     atr_ratio_val = 1.0
                     df_recent_pos = get_history(symbol=active_symbol, interval=str(iv), limit=100)
-                    if df_recent_pos is not None and not df_recent_pos.empty and "ATR_norm" in df_recent_pos.columns and len(df_recent_pos) >= 20:
-                        rolling_vol_20th = float(df_recent_pos["ATR_norm"].tail(96).quantile(0.20))
-                        mean_atr = float(df_recent_pos["ATR_norm"].tail(96).mean())
-                        atr_ratio_val = float(df_recent_pos["ATR_norm"].iloc[-1] / max(1e-4, mean_atr))
+                    if df_recent_pos is not None and not df_recent_pos.empty and len(df_recent_pos) >= 20:
+                        if "ATR_norm" not in df_recent_pos.columns:
+                            high_s = df_recent_pos["high"].astype(float)
+                            low_s = df_recent_pos["low"].astype(float)
+                            close_s = df_recent_pos["close"].astype(float)
+                            prev_close_s = close_s.shift(1)
+                            tr_s = pd.concat([high_s - low_s, (high_s - prev_close_s).abs(), (low_s - prev_close_s).abs()], axis=1).max(axis=1)
+                            atr_s = tr_s.rolling(14).mean()
+                            df_recent_pos["ATR_norm"] = atr_s / close_s.replace(0, np.nan)
+                        df_norm_clean = df_recent_pos["ATR_norm"].dropna()
+                        if len(df_norm_clean) >= 20:
+                            rolling_vol_20th = float(df_norm_clean.tail(96).quantile(0.20))
+                            mean_atr = float(df_norm_clean.tail(96).mean())
+                            atr_ratio_val = float(df_norm_clean.iloc[-1] / max(1e-4, mean_atr))
                     
                     # Incoming signal opportunity cost & portfolio heat
                     total_active_val = sum(t.get("position_size_usd", 0.0) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_k}", []))
@@ -6402,7 +6429,7 @@ def main():
                 latest_completed_ts_val = int(df_completed_val.iloc[-1]["timestamp"])
                 
                 # Hard freshness assertion: Completed bar timestamp must be within 2.5 * interval_ms
-                if (now_ms - latest_completed_ts_val) > (2.5 * interval_ms_val) and not is_forced_val:
+                if (now_ms - latest_completed_ts_val) > (2.5 * interval_ms_val):
                     log_event("WARNING", f"[{sym} {interval_val}m] Stale candle rejected: completed bar age {(now_ms - latest_completed_ts_val)/1000:.1f}s exceeds threshold ({2.5*interval_ms_val/1000:.1f}s). Skipping evaluation.")
                     return sym, interval_val, df_raw_val, None
 
@@ -6412,7 +6439,8 @@ def main():
                         return sym, interval_val, df_raw_val, None
                 
                 # Fast check if candle is up to date before running heavy feature calculation
-                expected_start_ms_val = current_hour_ts - interval_ms_val
+                expected_bar_open_val = (now_ms // interval_ms_val) * interval_ms_val
+                expected_start_ms_val = expected_bar_open_val - interval_ms_val
                 is_up_to_date_val = (latest_completed_ts_val >= expected_start_ms_val) or is_forced_val
                 if not is_up_to_date_val:
                     return sym, interval_val, df_raw_val, None
@@ -6581,12 +6609,31 @@ def main():
                             continue
                     
                         from data_quality_engine import DataQualityEngine
+                        from market_data_quality import MarketDataQualityMonitor
+
+                        max_diff_val = float(df["timestamp"].diff().dropna().max()) if (len(df) > 1 and "timestamp" in df.columns) else float(int(iv) * 60 * 1000)
                         dq_res = DataQualityEngine().evaluate_data_quality(
-                            missing_candles_count=max_g if gap_exceeded else 0,
+                            missing_candles_count=int(max_g),
+                            timestamp_gap_seconds=float(max_diff_val / 1000.0),
+                            stale_feed_seconds=max(0.0, float(candle_age_sec)),
                             zero_price_detected=bool(float(latest_candle.get("close", 0.0)) <= 0.0)
                         )
-                        if dq_res.get("severity") == "CRITICAL":
-                            log_event("CRITICAL", f"[{symbol} {iv}m DataQualityEngine] {dq_res.get('detail')}")
+                        if dq_res.get("severity") in ["CRITICAL", "HIGH"]:
+                            log_event(dq_res.get("severity"), f"[{symbol} {iv}m DataQualityEngine] {dq_res.get('detail')} — Action: {dq_res.get('action')}. Abstaining.")
+                            continue
+
+                        if "_mdq_monitor" not in bot_state:
+                            bot_state["_mdq_monitor"] = MarketDataQualityMonitor()
+                        mdq = bot_state["_mdq_monitor"]
+                        mdq_res = mdq.evaluate_feed_health(
+                            last_candle_timestamp=float(latest_completed_ts / 1000.0),
+                            server_time_ms=float(now_ms),
+                            client_time_ms=float(now_ms),
+                            ws_connected=bool(ws_connected),
+                            interval_sec=float(int(iv) * 60)
+                        )
+                        if mdq_res.get("tier") == "RED":
+                            log_event("WARNING", f"[{symbol} {iv}m MDQ] Feed health RED: {mdq_res.get('reasons')}. Abstaining.")
                             continue
                     
                         # Dynamic Regime Routing based on GMM Unsupervised Classifier

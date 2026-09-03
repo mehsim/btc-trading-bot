@@ -188,6 +188,15 @@ class ExitPolicyEngine:
             candidate_sl = max(candidate_sl, current_price + min_sl_dist)
             return min(stop_loss, candidate_sl)
 
+    @staticmethod
+    def _resolve_regime_key(regime: str, adx_val: float = 15.0) -> str:
+        r = str(regime).upper()
+        if "STRONG" in r or (("TREND" in r) and float(adx_val) >= 30.0):
+            return "STRONG_TREND"
+        if "TREND" in r or "MODERATE" in r or float(adx_val) >= 25.0:
+            return "MODERATE_TREND"
+        return "RANGING"
+
     def evaluate_exit(
         self,
         active_trade: Dict[str, Any],
@@ -204,7 +213,10 @@ class ExitPolicyEngine:
         runs parallel Shadow policy simulations, and generates an Exit Decision Trace.
         Returns: (exit_reason, active_trade_updates, exit_decision_trace)
         """
-        params = self.champion_config.get("parameters", {}).get(regime.upper(), {})
+        regime_key = self._resolve_regime_key(regime, adx_val)
+        params = self.champion_config.get("parameters", {}).get(regime_key, {})
+        if not params:
+            params = self.champion_config.get("parameters", {}).get(regime.upper(), {})
         if not params:
             params = self.champion_config.get("parameters", {}).get("RANGING", {})
 
@@ -351,9 +363,12 @@ class ExitPolicyEngine:
         swing_price: Optional[float]
     ):
         """Runs shadow candidate policies in parallel without sending real exchange orders."""
+        regime_key = self._resolve_regime_key(regime, adx_val)
         for p_id, shadow_cfg in self.shadow_configs.items():
             try:
-                shadow_params = shadow_cfg.get("parameters", {}).get(regime.upper(), {})
+                shadow_params = shadow_cfg.get("parameters", {}).get(regime_key, {})
+                if not shadow_params:
+                    shadow_params = shadow_cfg.get("parameters", {}).get(regime.upper(), {})
                 if not shadow_params:
                     shadow_params = shadow_cfg.get("parameters", {}).get("RANGING", {})
 
