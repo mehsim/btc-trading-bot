@@ -55,13 +55,16 @@ class KellyTracker:
             except Exception as e:
                 print(f"[KellyTracker Error] Failed to save trade history: {e}")
 
-    def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25) -> float:
+    def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25, insufficient_as_none: bool = False) -> Optional[float]:
         """
         Computes dynamic Quarter-Kelly fraction per timeframe.
         H-1: Rolling window is calendar-time based (lookback_days) with a per-timeframe
              max-trade cap, so slow timeframes see regime-appropriate history.
         H-3: Minimum trade gate scales per timeframe so sizing isn't blocked for months
              on slow intervals; falls back to MIN_KELLY_SAMPLE_SIZE floor.
+        Finding #163: When insufficient_as_none=True, returns None for insufficient sample size
+             so risk_engine can distinguish 'no data' (fallback to prior) from a measured
+             negative empirical edge (return 0.0 -> fail closed).
         """
         import datetime as _dt
         with self.lock:
@@ -93,7 +96,7 @@ class KellyTracker:
             windowed = windowed[-max_trades:]
 
             if len(windowed) < effective_min_trades:
-                return 0.0
+                return None if insufficient_as_none else 0.0
 
             returns = [t["return_pct"] for t in windowed]
             slippages = [abs(t.get("slippage_pct", 0.0005)) for t in windowed]
@@ -102,7 +105,7 @@ class KellyTracker:
 
             # Require minimum sample of both wins and losses to prevent distortion
             if len(wins) < 1 or len(losses) < min_losses:
-                return 0.0
+                return None if insufficient_as_none else 0.0
 
             n = len(returns)
             p_hat = len(wins) / float(n)

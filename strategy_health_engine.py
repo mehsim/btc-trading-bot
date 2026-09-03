@@ -156,7 +156,11 @@ class StrategyHealthEngine:
         persistent_degraded = (pf_val < 0.90 and trades_count >= 30)
         persistent_full = (pf_val >= 1.15 and trades_count >= 50)
 
-        if mhi_score >= 80.0 and persistent_full:
+        if mhi_score < 45.0:
+            state = "CRITICAL"
+            action = "SHADOW-ONLY MODE (0% Real Capital, Retraining Triggered)"
+            sizing_multiplier = 0.00
+        elif mhi_score >= 80.0 and persistent_full:
             state = "HEALTHY"
             action = "FULL CAPITAL DEPLOYMENT (100% Size)"
             sizing_multiplier = 1.00

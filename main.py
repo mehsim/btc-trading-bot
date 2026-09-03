@@ -6848,7 +6848,12 @@ def main():
                 active_trades_list = bot_state.get(active_trade_key, [])
                 if not isinstance(active_trades_list, list):
                     active_trades_list = [] if active_trades_list is None else [active_trades_list]
-                active_trades_list = [t for t in active_trades_list if isinstance(t, dict) and not t.get("bybit_closed") and not t.get("closed")]
+                active_trades_list = [
+                    t for t in active_trades_list
+                    if isinstance(t, dict)
+                    and not (t.get("bybit_closed") and t.get("exit_processed", False))
+                    and not (t.get("closed") and t.get("exit_processed", False))
+                ]
                 bot_state[active_trade_key] = active_trades_list
                 
             if (symbol, iv) not in fetched_data:
@@ -7134,9 +7139,22 @@ def main():
                             if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
                                 _features_to_use = _exp_names
                                 if isinstance(latest_candle_weighted, pd.Series):
-                                    X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=_exp_names, fill_value=0.0)
+                                    X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=_exp_names)
                                 else:
-                                    X_live_full = latest_candle_weighted.reindex(columns=_exp_names, fill_value=0.0)
+                                    X_live_full = latest_candle_weighted.reindex(columns=_exp_names)
+
+                                # Finding #162: Disallow blind 0.0 zero-filling of missing model features
+                                missing_model_features = [col for col in _exp_names if col not in latest_candle_weighted.index or pd.isna(X_live_full[col].iloc[0])]
+                                if missing_model_features:
+                                    log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
+                                    write_decision(
+                                        symbol=symbol,
+                                        interval=iv,
+                                        action="ABSTAIN",
+                                        reason_code=ReasonCode.PREDICTION_ERROR,
+                                        notes=f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
+                                    )
+                                    continue
                             elif feat_list is not None:
                                 _features_to_use = feat_list
                                 _avail = [f for f in _features_to_use if f in latest_candle_weighted.index]
@@ -7148,10 +7166,6 @@ def main():
                                 X_live_full = latest_candle_weighted[_avail].to_frame().T if isinstance(latest_candle_weighted[_avail], pd.Series) else latest_candle_weighted[_avail]
 
                             # Coerce all columns to float64 before inference.
-                            # Live API data can return object-typed columns (e.g. JSON strings,
-                            # None values) that survive .to_frame().T and .reindex(). XGBoost
-                            # hard-rejects any non-numeric dtype with the
-                            # "DataFrame.dtypes for data must be int, float, bool" error.
                             X_live_full = X_live_full.apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
                             X_live = _slice_model_input(active_model_trend, X_live_full)

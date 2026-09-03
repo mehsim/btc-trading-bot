@@ -962,7 +962,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 df_tune["close_btc"] = df_tune["close"]
                 df_tune = merge_derivatives_sentiment_features(df_tune, symbol="BTCUSDT", interval=interval)
                 df_tune = add_features(df_tune)
-                best_barriers = tune_triple_barrier_multipliers(df_tune, interval, n_trials=_trials)
+                
+                # Finding #165: Strictly isolate triple barrier multiplier tuning to pre-holdout slice
+                import config
+                from config import HOLDOUT_FRACTION, TIMEFRAME_CONFIG
+                _h_frac = getattr(config, "HOLDOUT_FRACTION", 0.15)
+                _p_len = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12))
+                _split = int(len(df_tune) * (1.0 - _h_frac))
+                df_tune_train = df_tune.iloc[:max(50, _split - _p_len)].copy().reset_index(drop=True)
+                best_barriers = tune_triple_barrier_multipliers(df_tune_train, interval, n_trials=_trials)
                 if best_barriers:
                     OPTIMIZED_BARRIERS = best_barriers
                     with open(_barriers_cache, "w") as f:
@@ -1926,13 +1934,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
         else:
             print(f"  [Champion-Challenger] No existing champion for {name.upper()}. Evaluating challenger against absolute governance floors.")
 
-        # Always compute challenger predictions on frozen holdout dataset
         chal_pred_t = final_ensemble_t.predict(X_holdout)
         chal_pred_p = final_ensemble_p.predict(X_holdout)
         chal_acc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_t))
         chal_mae = float(mean_absolute_error(y_holdout_price, chal_pred_p))
         holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
         holdout_mcc = float(matthews_corrcoef(y_holdout_trend, chal_pred_t))
+
+        # Finding #168: Evaluate holdout using resolve_direction (live directional-mass renormalisation)
+        from ensemble import resolve_direction
+        _dir_map = {"Bearish": 0, "Neutral": 1, "Bullish": 2}
+        _chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
+        chal_pred_resolved = np.array([_dir_map[resolve_direction(p, interval=str(interval))[0]] for p in _chal_prob_raw])
+        holdout_resolved_mcc = float(matthews_corrcoef(y_holdout_trend, chal_pred_resolved))
+        holdout_resolved_balacc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_resolved))
 
         from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
         try:
@@ -1949,8 +1964,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
             chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_cal))
         except Exception as ex_brier:
             log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
-            chal_brier = 0.99
-            chal_ece = 0.99
+            chal_brier = None
+            chal_ece = None
+            holdout_metrics_status = "exception"
             should_save = False
 
         from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
@@ -2351,8 +2367,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         if should_save:
             print(f"  [Champion-Challenger] Challenger approved & promoted across all release gates. Overwriting active model files...")
-            save_ensemble_classifier(final_ensemble_t, c_prefix_t, write_manifest=False)
-            save_ensemble_regressor(final_ensemble_p, c_prefix_p, write_manifest=False)
+            save_ensemble_classifier(final_ensemble_t, c_prefix_t, feature_names=features, write_manifest=False)
+            save_ensemble_regressor(final_ensemble_p, c_prefix_p, feature_names=features, write_manifest=False)
             meta_model.save_model(f"meta_{name}_trend_{interval}.json")
             import shutil
             chal_cal_file = f"calibrator_{name}_{interval}_challenger.json"
@@ -2407,13 +2423,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_accuracy_ci95": [round(float(holdout_acc_ci_low), 4), round(float(holdout_acc_ci_high), 4)],
             "holdout_balanced_accuracy": round(chal_acc, 4),
             "holdout_mcc": round(holdout_mcc, 4),
+            "holdout_resolved_mcc": round(holdout_resolved_mcc, 4) if 'holdout_resolved_mcc' in locals() else None,
+            "holdout_resolved_balacc": round(holdout_resolved_balacc, 4) if 'holdout_resolved_balacc' in locals() else None,
             "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, cv.lookahead)), 2),
             "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead)))), 4),
             "holdout_mcc_ci95": [round(float(holdout_mcc_ci_low), 4), round(float(holdout_mcc_ci_high), 4)],
             "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
-            "champion_holdout_balanced_accuracy": round(champ_acc, 4) if ('champ_acc' in locals() and champ_acc is not None) else None,
-            "holdout_brier": round(chal_brier, 4),
-            "holdout_ece": round(chal_ece, 4),
+            "holdout_brier": round(chal_brier, 4) if (chal_brier is not None and chal_brier != 0.99) else None,
+            "holdout_ece": round(chal_ece, 4) if (chal_ece is not None and chal_ece != 0.99) else None,
+            "holdout_metrics_status": locals().get("holdout_metrics_status", "measured"),
             "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
             "training_pipeline_version": "v7.2.0",
             "effective_n_convention": "lookahead_x_nsymbols_v2",
@@ -2504,7 +2522,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                if should_save and chal_brier != 0.99 and chal_ece != 0.99 and holdout_mcc >= 0.0:
+                if should_save and chal_brier is not None and chal_ece is not None and holdout_mcc >= 0.0:
                     with open(manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
 

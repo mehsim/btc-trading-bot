@@ -13,6 +13,8 @@ from features import sanitize_feature_matrix as _canon_sanitize
 
 from xgboost import XGBClassifier, XGBRegressor
 
+EMPTY_HASH = "e3b0c44298fc"
+
 def resolve_direction(probs, interval=None, min_dir_mass=0.15):
     """
     Resolves directional class ("Bullish", "Bearish", "Neutral") and raw confidence score.
@@ -820,9 +822,10 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         m_hash = m_data.get("feature_contract_hash")
         m_cnt = m_data.get("feature_count", 0)
         if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
-            write_model_manifest(prefix, feature_names=feature_names)
-            with open(manifest_path, "r") as mf:
-                m_data = json.load(mf)
+            raise RuntimeError(
+                f"[Model Governance Contract Error] Model manifest '{manifest_path}' has empty/invalid feature contract "
+                f"(hash='{m_hash}', count={m_cnt}). Model refused loading (Fail-Closed)."
+            )
 
     model_ver = m_data.get("model_version", "v7.2.0")
     feat_ver = m_data.get("feature_version", "v3.1.0")
@@ -1257,9 +1260,10 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
         m_hash = m_data.get("feature_contract_hash")
         m_cnt = m_data.get("feature_count", 0)
         if m_hash == EMPTY_HASH or m_cnt == 0 or not m_data.get("feature_names"):
-            write_model_manifest(prefix, feature_names=feature_names)
-            with open(manifest_path, "r") as mf:
-                m_data = json.load(mf)
+            raise RuntimeError(
+                f"[Model Governance Contract Error] Model manifest '{manifest_path}' has empty/invalid feature contract "
+                f"(hash='{m_hash}', count={m_cnt}). Model refused loading (Fail-Closed)."
+            )
 
     model_ver = m_data.get("model_version", "v7.2.0")
     feat_ver = m_data.get("feature_version", "v3.1.0")

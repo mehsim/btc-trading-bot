@@ -135,9 +135,14 @@ def compute_conservative_kelly(
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
             timeframe=str(interval),
             min_trades=10,
-            max_kelly_cap=0.20
+            max_kelly_cap=0.20,
+            insufficient_as_none=True
         )
-        if emp_kelly > 0:
+        if emp_kelly is not None:
+            if emp_kelly <= 0.0:
+                # Finding #163: Measured negative or zero empirical edge -> Fail-closed! Abstain (0.0)
+                # instead of falling through to confidence-based prior.
+                return 0.0
             kelly_val = float(emp_kelly)
             if QUALITY_SIZING.get("enabled", True) and mcc_val is not None:
                 ref_mcc = float(QUALITY_SIZING.get("reference_mcc", 0.15))
@@ -173,6 +178,9 @@ def compute_conservative_kelly(
         scaled_kelly *= quality_mult
 
     return float(scaled_kelly)
+
+
+calculate_conservative_kelly = compute_conservative_kelly
 
 
 def calculate_drawdown_multiplier(current_equity: float, peak_equity: float) -> float:
