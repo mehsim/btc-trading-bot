@@ -19,7 +19,7 @@ def test_get_history_freshness_attributes():
     mock_resp.json.return_value = {"result": {"list": mock_candles}}
     
     with patch("data.bybit_public_get", return_value=mock_resp):
-        df = get_history(symbol="BTCUSDT", interval="15", limit=10, pages=1)
+        df = get_history(symbol="TEST_FRESHNESS", interval="15", limit=10, pages=1)
         assert df is not None
         assert len(df) > 0
         assert "fetch_ok" in df.attrs

@@ -2177,6 +2177,12 @@ def load_model_weights(iv):
             from core import features as master_features
             feat_ranging = master_features
                 
+        from train import NON_STATIONARY_EXCLUDE
+        if feat_trending:
+            feat_trending = [f for f in feat_trending if f not in NON_STATIONARY_EXCLUDE]
+        if feat_ranging:
+            feat_ranging = [f for f in feat_ranging if f not in NON_STATIONARY_EXCLUDE]
+
         if feat_trending is None or feat_ranging is None:
             print(f"[Model Load Warning] selected_features for interval {iv} missing! Disabling model loading.")
             models_by_interval[iv]["selected_features"] = None

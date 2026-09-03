@@ -1678,11 +1678,12 @@ def _get_walk_forward_folds():
             if windows and isinstance(windows, list) and len(windows) > 0:
                 extracted = []
                 for idx, w in enumerate(windows[:10]):
-                    wr = float(w.get("win_rate", 50.0))
+                    wr = float(w.get("win_rate", 0.0))
                     dd = float(w.get("max_drawdown", 0.0))
                     ret = float(w.get("cum_return", 0.0))
-                    pf = float(w.get("profit_factor", round(max(0.5, 1.0 + (ret / 20.0)), 2)))
-                    sharpe = float(w.get("sharpe", round(max(0.1, (ret / max(1.0, dd)) * 1.5 + 1.0), 2)))
+                    pf = float(w.get("profit_factor", 0.0))
+                    raw_sharpe = w.get("sharpe_ratio", w.get("sharpe"))
+                    sharpe = round(float(raw_sharpe), 2) if raw_sharpe is not None else "N/A"
                     status = "PASS" if ret >= 0 and dd < 15 else ("WARNING" if ret > -10 and dd < 25 else "FAIL")
                     extracted.append({
                         "fold": f"Fold {idx+1}",
@@ -1694,57 +1695,6 @@ def _get_walk_forward_folds():
                     })
                 if extracted:
                     return extracted
-    except Exception as ex_dashboard_routes:
-        log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
-
-    try:
-        history = state_manager.get("trade_history", [])
-        if not history or not isinstance(history, list) or len(history) < 5:
-            try:
-                history = database.get_trade_history(limit=500)
-            except Exception as ex_dashboard_routes:
-                log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
-                history = []
-
-        valid_trades = [t for t in history if isinstance(t, dict)]
-        if len(valid_trades) >= 5:
-            num_folds = min(10, max(1, len(valid_trades) // 3))
-            chunk_size = max(1, len(valid_trades) // num_folds)
-            dynamic_folds = []
-            for i in range(num_folds):
-                seg = valid_trades[i * chunk_size : (i + 1) * chunk_size if i < num_folds - 1 else len(valid_trades)]
-                if not seg:
-                    continue
-                pnls = [float(t.get("pnl_usd", 0.0)) for t in seg]
-                wins = [p for p in pnls if p > 0]
-                losses = [abs(p) for p in pnls if p < 0]
-                wr = (len(wins) / max(1, len(pnls))) * 100.0
-                gg = sum(wins)
-                gl = sum(losses)
-                pf = round(gg / gl, 2) if gl > 0 else (2.0 if gg > 0 else 1.0)
-
-                cum = 0.0
-                peak = 0.0
-                max_dd = 0.0
-                for p in pnls:
-                    cum += p
-                    if cum > peak:
-                        peak = cum
-                    dd = (peak - cum)
-                    if dd > max_dd:
-                        max_dd = dd
-
-                status = "PASS" if pf >= 1.1 else ("WARNING" if pf >= 0.85 else "FAIL")
-                dynamic_folds.append({
-                    "fold": f"Fold {i+1}",
-                    "pf": pf,
-                    "win_rate": f"{wr:.1f}%",
-                    "drawdown": f"{max_dd:.1f}%",
-                    "sharpe": round(pf * 1.1, 2),
-                    "status": status
-                })
-            if dynamic_folds:
-                return dynamic_folds
     except Exception as ex_dashboard_routes:
         log_event("WARNING", f"dashboard_routes notice: {ex_dashboard_routes}")
 

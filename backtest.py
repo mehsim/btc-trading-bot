@@ -25,7 +25,7 @@ import argparse
 parser = argparse.ArgumentParser(description="BTC Trading Bot Backtester")
 parser.add_argument("--interval", default="60", choices=["15", "30", "60", "120", "240", "360"], help="Trading interval in minutes")
 parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol")
-parser.add_argument("--fee-rate", type=float, default=0.002, help="Trading fee rate")
+parser.add_argument("--fee-rate", type=float, default=getattr(config, "TAKER_FEE_PCT", 0.00055), help="Trading fee rate (default: Bybit VIP0 taker)")
 parser.add_argument("--min-confidence", type=float, default=None, help="Minimum confidence threshold (default: None for production dynamic economic p*)")
 parser.add_argument("--pages", type=int, default=40, help="History pages count")
 parser.add_argument("--pessimistic", action="store_true", default=True, help="Use pessimistic fill model (next-bar open + spread/slippage)")
@@ -152,17 +152,32 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
     X_matrix_trending = df[feat_trending].values if all(c in df.columns for c in feat_trending) else df[[c for c in feat_trending if c in df.columns]].values
     X_matrix_ranging = df[feat_ranging].values if all(c in df.columns for c in feat_ranging) else df[[c for c in feat_ranging if c in df.columns]].values
 
+    def _safe_predict_proba(model, X_matrix, weights=None):
+        if model is None:
+            return None
+        if weights is not None:
+            try:
+                return model.predict_proba(X_matrix, weights=weights)
+            except (TypeError, ValueError):
+                pass
+        return model.predict_proba(X_matrix)
+
+    def _safe_predict(model, X_matrix):
+        if model is None:
+            return None
+        return model.predict(X_matrix)
+
     probs_tr_all = None
     pred_pct_tr_all = None
-    if models_trending is not None:
-        probs_tr_all = models_trending["trend"].predict_proba(X_matrix_trending, weights=models_trending.get("weights"))
-        pred_pct_tr_all = models_trending["price"].predict(X_matrix_trending)
+    if models_trending is not None and models_trending.get("trend") is not None:
+        probs_tr_all = _safe_predict_proba(models_trending["trend"], X_matrix_trending, weights=models_trending.get("weights"))
+        pred_pct_tr_all = _safe_predict(models_trending.get("price"), X_matrix_trending)
 
     probs_rn_all = None
     pred_pct_rn_all = None
-    if models_ranging is not None:
-        probs_rn_all = models_ranging["trend"].predict_proba(X_matrix_ranging, weights=models_ranging.get("weights"))
-        pred_pct_rn_all = models_ranging["price"].predict(X_matrix_ranging)
+    if models_ranging is not None and models_ranging.get("trend") is not None:
+        probs_rn_all = _safe_predict_proba(models_ranging["trend"], X_matrix_ranging, weights=models_ranging.get("weights"))
+        pred_pct_rn_all = _safe_predict(models_ranging.get("price"), X_matrix_ranging)
 
     adx_enter_map = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
     adx_exit_map = getattr(config, "REGIME_ADX_EXIT_BY_INTERVAL", {})
@@ -256,9 +271,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
         dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
 
-        # Production additive adjustments (Ranging, High Volatility, Session)
+        # Production additive adjustments (Ranging, High Volatility, Session) - mirrors main.py:7058-7112
         if not is_trending_state:
-            regime_delta = 0.03 if str(interval) in ["15", "30"] else 0.05
+            regime_delta = 0.02 if str(interval) in ["15", "30"] else 0.04
             dynamic_conf_threshold += regime_delta
         
         if atr_norm > 0.015:
@@ -273,6 +288,10 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if 0 <= candle_hour < 8:
             dynamic_conf_threshold += 0.02
 
+        # Cap additive penalties so 3-class models are not pushed to unreachable thresholds (mirrors main.py:7111)
+        max_conf_cap = 0.50 if str(interval) in ["15", "30", "60"] else 0.55
+        dynamic_conf_threshold = min(max_conf_cap, dynamic_conf_threshold)
+
         if min_confidence == "dynamic_plus_3":
             effective_min_conf = dynamic_conf_threshold + 0.03
         elif isinstance(min_confidence, (int, float)):
@@ -284,8 +303,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             i += 1
             continue
 
-        # 2. ADX Regime Floor Filter (mirrors live production main.py)
-        min_adx_thresh = float(cfg.get("min_adx", 20.0))
+        # 2. ADX Regime Floor Filter (mirrors live production main.py:7050-7056)
+        if is_trending_state:
+            min_adx_thresh = float(cfg.get("min_adx", 16.0 if str(interval) in ["15", "30"] else 24.0))
+        else:
+            min_adx_thresh = float(cfg.get("min_adx_ranging", 10.0 if str(interval) in ["15", "30"] else 12.0))
         adx_val = float(df.loc[i, "ADX"]) if "ADX" in df.columns else 25.0
         if adx_val < min_adx_thresh:
             i += 1
@@ -401,6 +423,11 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         exit_reason = "Timer Elapsed"
         candles_elapsed = lookahead
 
+        # Trailing Stop & Break-Even Tracking (mirrors live exit_manager.py)
+        curr_sl = stop_loss
+        be_activated = False
+        trail_hurdle = sl_dist * 1.0  # 1R profit hurdle to activate break-even / trailing
+
         for step in range(start_step, lookahead + 1):
             if i + step >= total_candles:
                 break
@@ -408,9 +435,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             low = df.iloc[i + step]["low"]
 
             if ml_trend == "Bullish":
-                if low <= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "Stop Loss"
+                if low <= curr_sl:
+                    exit_price = curr_sl
+                    exit_reason = "Trailing Stop" if be_activated else "Stop Loss"
                     candles_elapsed = step
                     break
                 elif high >= take_profit:
@@ -418,10 +445,16 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                     exit_reason = "Take Profit"
                     candles_elapsed = step
                     break
+                # Ratchet break-even and trailing stop forward
+                if high >= entry_price + trail_hurdle:
+                    be_activated = True
+                    new_trail_sl = max(entry_price + (fee_rate * 2.0 * entry_price), high - sl_dist)
+                    if new_trail_sl > curr_sl:
+                        curr_sl = new_trail_sl
             else:
-                if high >= stop_loss:
-                    exit_price = stop_loss
-                    exit_reason = "Stop Loss"
+                if high >= curr_sl:
+                    exit_price = curr_sl
+                    exit_reason = "Trailing Stop" if be_activated else "Stop Loss"
                     candles_elapsed = step
                     break
                 elif low <= take_profit:
@@ -429,6 +462,12 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                     exit_reason = "Take Profit"
                     candles_elapsed = step
                     break
+                # Ratchet break-even and trailing stop forward
+                if low <= entry_price - trail_hurdle:
+                    be_activated = True
+                    new_trail_sl = min(entry_price - (fee_rate * 2.0 * entry_price), low + sl_dist)
+                    if new_trail_sl < curr_sl:
+                        curr_sl = new_trail_sl
 
         if ml_trend == "Bullish":
             gross_return = (exit_price - entry_price) / entry_price
@@ -436,8 +475,8 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             gross_return = (entry_price - exit_price) / entry_price
             
         if pessimistic_mode:
-            # Full round-trip taker fee (entry + exit) + half spread
-            total_trading_cost = (2.0 * fee_rate) + (fee_rate / 4.0)
+            # Full round-trip fee (entry + exit). Spread was already charged at fill time on entry_price
+            total_trading_cost = 2.0 * fee_rate
             net_return = gross_return - total_trading_cost
         else:
             vol_slippage = (atr_norm * 0.05) if atr_norm is not None else 0.0005
@@ -802,10 +841,11 @@ def run_backtest():
 
     # 7. Fee Sensitivity Analysis on Scenario D (Active trade population)
     print("\n[Step 5] Simulating fee sensitivity analysis on Scenario D (Pure Model Signals)...")
+    from config import TAKER_FEE_PCT, MAKER_FEE_PCT
     fee_structures = {
-        "1. Spot Taker Fee (0.20% roundtrip)": 0.0020,
-        "2. Futures Taker Fee (0.10% roundtrip)": 0.0010,
-        "3. Futures Limit/Maker Fee (0.04% roundtrip)": 0.0004
+        "1. Spot Taker Fee (0.20% roundtrip)": 0.0010,
+        "2. Futures Taker Fee (0.11% roundtrip)": TAKER_FEE_PCT,
+        "3. Futures Limit/Maker Fee (0.04% roundtrip)": MAKER_FEE_PCT
     }
     
     fee_results = []
@@ -862,7 +902,12 @@ def run_backtest():
 
         def train_window_models(train_df):
             try:
-                feat_cols = [c for c in train_df.columns if c not in ["timestamp", "open", "high", "low", "close", "volume", "target_trend", "target_price", "target_direction", "future_ret"]]
+                numeric_cols = train_df.select_dtypes(include=[np.number]).columns
+                feat_cols = [c for c in numeric_cols if c not in [
+                    "timestamp", "open", "high", "low", "close", "volume",
+                    "target_trend", "target_price", "target_price_change", "target_direction", "future_ret",
+                    "sample_weight"
+                ]]
                 if not feat_cols or len(train_df) < 100:
                     return None
                 
@@ -872,18 +917,21 @@ def run_backtest():
                     df_t["target_trend"] = np.where(ret > 0.005, 2, np.where(ret < -0.005, 0, 1))
                     df_t["target_price"] = ret * df_t["close"]
                     
-                X_tr = df_t[feat_cols].fillna(0.0)
-                y_tr_t = df_t["target_trend"].astype(int)
-                y_tr_p = df_t["target_price"].astype(float)
+                X_tr = df_t[feat_cols].fillna(0.0).values
+                y_tr_t = df_t["target_trend"].astype(int).values
+                y_tr_p = df_t["target_price"].astype(float).values
                 
                 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
                 m_t = HistGradientBoostingClassifier(max_iter=30, random_state=42).fit(X_tr, y_tr_t)
                 m_p = HistGradientBoostingRegressor(max_iter=30, random_state=42).fit(X_tr, y_tr_p)
                 
+                m_t.feature_names = feat_cols
+                m_p.feature_names = feat_cols
+                
                 return partial(
                     run_single_backtest,
-                    models_trending={"trend": m_t, "price": m_p},
-                    models_ranging={"trend": m_t, "price": m_p},
+                    models_trending={"trend": m_t, "price": m_p, "feature_names": feat_cols},
+                    models_ranging={"trend": m_t, "price": m_p, "feature_names": feat_cols},
                     p95=p95,
                     max_conf=max_conf,
                     min_confidence=MIN_CONFIDENCE,
@@ -900,14 +948,18 @@ def run_backtest():
         wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn, train_fn=train_window_models)
         if wf_summary.get("status") == "success":
             print("=" * 90)
-            print("ROLLING WINDOW WALK-FORWARD VALIDATION SUMMARY")
+            print(f"{'ROLLING WINDOW WALK-FORWARD VALIDATION' if wf_summary.get('all_windows_refitted') else 'ROLLING WINDOW REPLAY'} SUMMARY")
             print("=" * 90)
             print(f"Total Windows Evaluated        : {wf_summary.get('window_count')}")
+            print(f"Evaluation Mode                : {wf_summary.get('evaluation_mode')}")
             print(f"Mean Window Win Rate           : {wf_summary.get('mean_win_rate'):.2f}%")
             print(f"Mean Window Return             : {wf_summary.get('mean_return'):+.2f}%")
             print(f"Worst Window Drawdown          : {wf_summary.get('max_drawdown'):.2f}%")
             print("=" * 90 + "\n")
-            export_data["walk_forward_validation"] = wf_summary
+            if wf_summary.get("all_windows_refitted", False):
+                export_data["walk_forward_validation"] = wf_summary
+            else:
+                export_data["rolling_window_replay"] = wf_summary
     except Exception as wf_err:
         print(f"[Walk-Forward Engine] Info: {wf_err}")
 

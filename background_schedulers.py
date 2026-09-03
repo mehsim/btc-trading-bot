@@ -264,7 +264,7 @@ def run_statistical_governance_scheduler():
                             num_trials=1
                         )
                         decision = matrix_res.get("governance", {}).get("decision")
-                        stat_power = matrix_res.get("governance", {}).get("power", 0.0)
+                        stat_power = matrix_res.get("governance", {}).get("power", matrix_res.get("statistics", {}).get("statistical_power", 0.0))
                         if decision == "REJECT" and stat_power >= 0.50:
                             reasons_str = "; ".join(matrix_res.get("governance", {}).get("reasons", ["Statistical rejection"]))
                             log_event("WARNING", f"[Statistical Governance Live Gate] Denylisting trending_{iv} and ranging_{iv} due to statistical rejection: {reasons_str}")

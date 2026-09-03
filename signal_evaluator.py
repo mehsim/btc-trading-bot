@@ -120,6 +120,10 @@ class SignalEvaluator:
                 except (ValueError, TypeError, KeyError, OSError) as ex_f:
                     log_event("WARNING", f"[SignalEvaluator Info] Feature file notice: {ex_f}")
 
+        if feat_list:
+            from train import NON_STATIONARY_EXCLUDE
+            feat_list = [f for f in feat_list if f not in NON_STATIONARY_EXCLUDE]
+
         if not feat_list:
             log_event("ERROR", f"[SignalEvaluator ERROR] No feature contract list found for {interval}m ({regime_key}). Failing closed.")
             return None

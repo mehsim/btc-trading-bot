@@ -684,12 +684,14 @@ class StatisticalValidation:
         result = {
             "governance": {
                 "decision": decision,
+                "power": power_val,
                 "module_uuid": module_uuid,
                 "reasons": reasons,
                 "promotion_triggers": promotion_triggers
             },
             "statistics": {
                 "p_value": p_val,
+                "statistical_power": power_val,
                 "bayes_factor_bf10": bf10,
                 "bayes_factor_bf01": bf01,
                 "bayes_interpretation": bf_interp,

@@ -76,6 +76,7 @@ MODEL_SLOT_DENYLIST = {
     "trending_15",    # Demoted pending clean re-evaluation under 8-gate release protocol
     "ranging_15",     # 15m ranging market microstructure has negative holdout MCC (-0.0113) — fail-closed
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
+    "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
     # trending_240 & ranging_240 lifted: retrained with 16-page RFECV (+0.0667 / +0.0567 CV MCC, +0.0253 / +0.0494 Holdout MCC)
 }.union(_persisted_denylist)
 

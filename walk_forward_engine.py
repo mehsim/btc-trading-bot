@@ -240,8 +240,11 @@ def run_walk_forward_backtest(
     calmars = [w["calmar_ratio"] for w in active_windows]
     recoveries = [w["recovery_factor"] for w in active_windows]
     
+    all_refitted = bool(window_results and all(w.get("is_refitted", False) for w in window_results))
     summary = {
         "status": "success",
+        "evaluation_mode": "refitted_walk_forward" if all_refitted else "rolling_window_replay",
+        "all_windows_refitted": all_refitted,
         "window_count": len(window_results),
         "total_trades": total_trades,
         "mean_win_rate": float(np.mean(win_rates)) if win_rates else 0.0,

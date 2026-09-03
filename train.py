@@ -1254,6 +1254,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         chal_pf = 1.0
         chal_sharpe = 0.0
+        regime_features = [f for f in regime_features if f not in NON_STATIONARY_EXCLUDE]
         X_full = df_regime[regime_features]
         y_trend_full = df_regime["target_trend"]
         y_price_full = df_regime["target_price_change"]
@@ -1709,6 +1710,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
         should_save = True
         champion_t = None
         champion_p = None
+        compatible = True
+        contract_stale = False
+        reason = "no existing champion"
 
         try:
             import subprocess as _sp
@@ -1827,7 +1831,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
             chal_ece = 0.99
             should_save = False
 
-        if champion_t is not None:
+        from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+        _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+        _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+
+        if champion_t is not None and compatible:
             try:
                 # Construct champion holdout feature slice matching its exact feature names
                 champ_features = getattr(champion_t, "feature_names", None) or champ_manifest.get("feature_names", list(X_holdout.columns))
@@ -1835,8 +1843,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 for f_name in champ_features:
                     if f_name in X_holdout.columns:
                         X_holdout_champ[f_name] = X_holdout[f_name]
-                    elif "df" in locals() and f_name in df.columns:
-                        X_holdout_champ[f_name] = df.iloc[split_idx + embargo_len:][f_name]
                     else:
                         X_holdout_champ[f_name] = 0.0
 
@@ -1867,9 +1873,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 })
 
                 # Step 3: Evaluate Champion Health against Institutional Governance Floors (Population Guarded)
-                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
-                _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
-                _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
                 is_full_population = len(SUPPORTED_SYMBOLS) > 1 or list(SUPPORTED_SYMBOLS) == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRPUSDT", "AVAXUSDT", "LTCUSDT", "DOTUSDT"]
 
                 if champ_mcc < _min_h_mcc or champ_acc < _min_h_balacc:
@@ -1889,9 +1892,6 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     should_save = False
             except Exception as eval_err:
                 print(f"  [Champion-Challenger Warning] Error during champion hold-out evaluation: {eval_err}. Evaluating challenger against absolute governance floors.")
-                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
-                _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
-                _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
                 if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc:
                     print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
                     should_save = False
@@ -2197,9 +2197,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 }
                 champ_eval = {"mcc": champ_mcc_val or 0.0, "balanced_accuracy": 0.33, "model_hash": champ_manifest.get("git_sha", "unknown")} if (champion_exists and not contract_stale) else None
                 promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
-                if not is_distribution_shifted and not promoted:
-                    print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
-                    should_save = False
+                if not promoted:
+                    if is_distribution_shifted and "MCC regression" in str(p_reason):
+                        print(f"  [MLOps Promotion Gate] Champion MCC regression forgiven under distribution shift: {p_reason}")
+                    else:
+                        print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")
+                        should_save = False
                 # Step 4 (M-4): Evaluate Formal Out-Of-Sample (OOS) Validation Protocol
                 from oos_validation import validate_out_of_sample_performance
                 oos_passed, oos_reason = validate_out_of_sample_performance(interval=str(interval), challenger_mcc=chal_mcc_mean)
