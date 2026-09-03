@@ -777,6 +777,7 @@ def save_active_trades(tf, trades) -> bool:
                 placeholders = ",".join("?" for _ in current_ids)
                 conn.execute(f"DELETE FROM active_trades WHERE tf = ? AND trade_id NOT IN ({placeholders});", (tf, *current_ids))  # nosec B608
             else:
+                log_event("INFO", f"[Database] save_active_trades for {tf} received empty list. Clearing active trades for {tf}.")
                 conn.execute("DELETE FROM active_trades WHERE tf = ?;", (tf,))
             conn.commit()
             return True

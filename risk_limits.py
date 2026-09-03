@@ -44,6 +44,17 @@ def assert_risk_governance_invariants(config_module: Any = None) -> bool:
             "[Governance Violation] TIMEFRAME_MAX_LEVERAGE_CAPS must be an independent config dictionary, "
             "not an alias to HARD_TIMEFRAME_MAX_LEVERAGE_CAPS object."
         )
+    for hard_sym in [
+        "HARD_TIMEFRAME_MAX_LEVERAGE_CAPS",
+        "HARD_MAX_WALLET_MARGIN_UTILIZATION_PCT",
+        "HARD_MAX_SYMBOL_EXPOSURE_PCT",
+        "HARD_MAX_DRAWDOWN_HALT_PCT",
+        "HARD_MAX_RISK_PER_TRADE_PCT"
+    ]:
+        if hard_sym in getattr(config_module, "__dict__", {}):
+            raise PermissionError(
+                f"[Governance Violation] config.py must not import or alias '{hard_sym}' from risk_limits."
+            )
 
     # 1. Validate Timeframe Leverage Caps
     if not isinstance(cfg_leverage, dict):

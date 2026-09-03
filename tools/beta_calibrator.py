@@ -105,12 +105,12 @@ class BetaCalibrator:
     def is_viable(self, min_required_p_star: Optional[float] = None) -> bool:
         """
         Validates whether the calibrator is non-degenerate and economically viable.
-        Returns False if shape parameters hit boundary floor (<= 0.02) or if max achievable output
-        cannot exceed the minimum required break-even p*.
+        Returns False if shape parameters hit boundary floor (<= 0.02), if identity fallback
+        (a=1, b=1, c=0) was installed, or if max achievable output cannot exceed min_required_p_star.
         """
         if not self.is_fitted or self.a <= 0.02 or self.b <= 0.02:
             return False
-        if self.a == 1.0 and self.b == 1.0 and self.c == 0.0 and self.fit_n < 20:
+        if self.a == 1.0 and self.b == 1.0 and abs(self.c) < 1e-6:
             return False
         if min_required_p_star is not None:
             if self.max_achievable_probability(0.99) < min_required_p_star:
@@ -139,7 +139,7 @@ class BetaCalibrator:
             "c": float(self.c),
             "fitting_sample_size": int(self.fit_n),
             "is_fitted": bool(self.is_fitted),
-            "is_fallback": bool(not self.is_fitted)
+            "is_fallback": bool(not self.is_fitted or (self.a == 1.0 and self.b == 1.0 and abs(self.c) < 1e-6))
         }
 
     @classmethod
@@ -153,7 +153,7 @@ class BetaCalibrator:
             bc.is_fitted = bool(data["is_fitted"])
         elif data.get("is_fallback", False) is True:
             bc.is_fitted = False
-        elif bc.a == 1.0 and bc.b == 1.0 and bc.c == 0.0:
+        elif (bc.a == 1.0 and bc.b == 1.0 and abs(bc.c) < 1e-6) or (bc.a <= 0.02 or bc.b <= 0.02):
             bc.is_fitted = False
         else:
             bc.is_fitted = True
@@ -172,12 +172,18 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
     if calibrator_data.get("is_fitted") is False:
         return False
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
+        a_val = float(calibrator_data.get("a", 1.0))
+        b_val = float(calibrator_data.get("b", 1.0))
+        c_val = float(calibrator_data.get("c", 0.0))
+        if a_val == 1.0 and b_val == 1.0 and abs(c_val) < 1e-6:
+            return False
         bc = BetaCalibrator.from_dict(calibrator_data)
         return bc.is_viable(min_required_p_star=min_required_p_star)
     Ys = calibrator_data.get("y", [])
     if Ys and len(Ys) > 0:
         max_y = max(Ys)
-        if max_y <= 0.02:
+        min_y = min(Ys)
+        if max_y <= 0.02 or (max_y - min_y) < 0.02:
             return False
         if min_required_p_star is not None and max_y < min_required_p_star:
             return False

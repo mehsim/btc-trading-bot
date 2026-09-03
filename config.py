@@ -385,10 +385,23 @@ for _tf in list(TIMEFRAME_CONFIG.keys()):
                     )
                     continue
 
+                _old_tp_t = TIMEFRAME_CONFIG[_tf].get("tp_mult_trending")
+                _old_tp_r = TIMEFRAME_CONFIG[_tf].get("tp_mult_ranging")
+                _old_sl = TIMEFRAME_CONFIG[_tf].get("sl_mult")
+                _old_lh = TIMEFRAME_CONFIG[_tf].get("lookahead")
+
                 TIMEFRAME_CONFIG[_tf]["tp_mult_trending"] = _tp_trending
                 TIMEFRAME_CONFIG[_tf]["tp_mult_ranging"] = _tp_ranging
                 TIMEFRAME_CONFIG[_tf]["sl_mult"] = _sl_mult
                 TIMEFRAME_CONFIG[_tf]["lookahead"] = _lookahead
+
+                sys.stderr.write(
+                    f"[TIMEFRAME_CONFIG] Applied barrier override for {_tf}m from {_opt_path}: "
+                    f"tp_trending={_tp_trending:.4f} (was {_old_tp_t}), "
+                    f"tp_ranging={_tp_ranging:.4f} (was {_old_tp_r}), "
+                    f"sl={_sl_mult:.4f} (was {_old_sl}), "
+                    f"lookahead={_lookahead} (was {_old_lh})\n"
+                )
         except Exception as _ex:
             sys.stderr.write(f"[TIMEFRAME_CONFIG Warning] Failed to parse {_opt_path}: {_ex}\n")
 

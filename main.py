@@ -2307,7 +2307,10 @@ def load_model_weights(iv):
                     except Exception:
                         b_geom = None
             if not b_geom or not isinstance(b_geom, dict):
-                return True
+                msg = f"Calibrator '{cal_file}' and manifest missing barrier geometry."
+                log_event("CRITICAL", f"[Calibrator Barrier Error] {msg} Slot set to None (Fail-Closed).")
+                send_telegram_alert(f"🚨 *CALIBRATOR BARRIER MISSING* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
+                return False
             from config import TIMEFRAME_CONFIG
             cfg_live = TIMEFRAME_CONFIG.get(str(iv), {})
             live_tp = float(cfg_live.get(f"tp_mult_{regime}", cfg_live.get("tp_mult_trending", 1.85)))
@@ -2318,7 +2321,7 @@ def load_model_weights(iv):
             cal_sl = float(b_geom.get("sl_mult", live_sl))
             cal_lh = int(b_geom.get("lookahead", live_lh))
 
-            if abs(cal_tp - live_tp) > 0.50 or abs(cal_sl - live_sl) > 0.30 or abs(cal_lh - live_lh) > 6:
+            if abs(cal_tp - live_tp) > 0.35 or abs(cal_sl - live_sl) > 0.20 or abs(cal_lh - live_lh) > 3:
                 msg = f"Calibrator '{cal_file}' barrier geometry (TP={cal_tp:.2f}, SL={cal_sl:.2f}, LH={cal_lh}) diverges from active TIMEFRAME_CONFIG (TP={live_tp:.2f}, SL={live_sl:.2f}, LH={live_lh})."
                 log_event("CRITICAL", f"[Calibrator Barrier Divergence] {msg} Slot set to None (Fail-Closed).")
                 send_telegram_alert(f"🚨 *CALIBRATOR BARRIER DIVERGENCE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
@@ -4354,7 +4357,7 @@ def sync_active_positions_from_bybit():
                         bot_state[f"active_trade_{tf_key}"] = active_trades_list
                         try:
                             import database
-                            database.save_active_trades(tf_key, [recovered_trade])
+                            database.save_active_trades(tf_key, active_trades_list)
                         except Exception as ex_db_save:
                             print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
                         recovered += 1
@@ -4673,8 +4676,40 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                 print(f"[{symbol} {iv}m API WARNING] Order {bybit_order_id} still {status} after cancel. Retrying cancellation...")
                                 cancel_bybit_order(symbol, bybit_order_id)
                                 time.sleep(0.3)
-                        elif cancel_res and isinstance(cancel_res, dict) and cancel_res.get("retCode") != 0 and "Order not exists" not in str(cancel_res.get("retMsg")):
-                            print(f"[{symbol} {iv}m API WARNING] Order {bybit_order_id} cancellation returned: {cancel_res.get('retMsg')}")
+                                recheck_details = get_bybit_order_details(symbol, bybit_order_id)
+                                if recheck_details:
+                                    r_status = recheck_details.get("orderStatus")
+                                    r_cum = float(recheck_details.get("cumExecQty", 0.0))
+                                    delta_cum = max(0.0, r_cum - cum_qty)
+                                    if delta_cum > 0:
+                                        filled_so_far += delta_cum
+                                        weighted_sum_px += (delta_cum * float(recheck_details.get("avgPrice", limit_entry_price)))
+                                    if r_status in ["New", "PartiallyFilled"]:
+                                        log_event("CRITICAL", f"[{symbol} {iv}m API] Order {bybit_order_id} remains active ({r_status}) after cancel retry! Aborting chase loop to prevent double-order position stacking.")
+                                        send_telegram_alert(f"🚨 *CHASE ABORT: UNCONFIRMED CANCEL* 🚨\n• Symbol: `{symbol}`\n• Order: `{bybit_order_id}`\n• Status: `{r_status}`\n• Action: Aborted chase loop (Fail-Closed).")
+                                        break
+                                elif cancel_res and isinstance(cancel_res, dict) and cancel_res.get("retCode") != 0 and "Order not exists" not in str(cancel_res.get("retMsg")):
+                                    log_event("CRITICAL", f"[{symbol} {iv}m API] Order {bybit_order_id} cancel confirmation failed! Aborting chase loop to prevent double-order position stacking.")
+                                    break
+                        else:
+                            # Fallback: check execution history if order details returned None (rate limit / indexing lag)
+                            try:
+                                exec_res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "orderId": bybit_order_id, "limit": 5})
+                                if exec_res and exec_res.get("retCode") == 0:
+                                    e_list = exec_res.get("result", {}).get("list", [])
+                                    if e_list:
+                                        e_qty = sum(float(x.get("execQty", 0.0)) for x in e_list)
+                                        e_px = sum(float(x.get("execQty", 0.0)) * float(x.get("execPrice", limit_entry_price)) for x in e_list) / max(1e-9, e_qty)
+                                        if e_qty > 0:
+                                            filled_so_far += e_qty
+                                            weighted_sum_px += (e_qty * e_px)
+                                            print(f"[{symbol} {iv}m API Fallback] Recovered execution fill {e_qty} for {bybit_order_id}.")
+                            except Exception as ex_e_hist:
+                                log_event("WARNING", f"[{symbol} {iv}m API Fallback] Execution history check error: {ex_e_hist}")
+
+                            if cancel_res and isinstance(cancel_res, dict) and cancel_res.get("retCode") != 0 and "Order not exists" not in str(cancel_res.get("retMsg")):
+                                log_event("CRITICAL", f"[{symbol} {iv}m API] Order {bybit_order_id} cancellation returned unconfirmed error ({cancel_res.get('retMsg')}) and details unavailable! Aborting chase to prevent stacking.")
+                                break
                 elif order_res.get("retCode") == 10006 or "PostOnly" in str(order_res.get("retMsg")):
                     print(f"[{symbol} {iv}m API] Maker PostOnly would cross spread. Retrying next chase tick...")
                 else:
@@ -6670,6 +6705,8 @@ def main():
                                     except Exception as mf_err:
                                         log_event("CRITICAL", f"Failed to load manifest {man_path}: {mf_err}")
                                         manifest_load_error = str(mf_err)
+                                else:
+                                    manifest_load_error = f"Manifest {man_path} missing on disk"
 
                             abstain_reason = None
                             if "manifest_load_error" in locals() and manifest_load_error:
@@ -7740,8 +7777,10 @@ def main():
                                         except Exception as cvar_err:
                                             print(f"[CVaR Error] {cvar_err}")
                                         if is_golden_hour:
-                                            # Golden Hour: Double the target slot allocation size
-                                            target_notional_usd = target_notional_usd * 2.0
+                                            # Golden Hour: Double the target slot allocation size, but clamp to 3% hard risk limit
+                                            from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
+                                            max_allowed_notional_golden = (current_bal * HARD_MAX_RISK_PER_TRADE_PCT) / max(1e-4, stop_loss_frac)
+                                            target_notional_usd = min(target_notional_usd * 2.0, max_allowed_notional_golden)
                                             print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Golden Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
                                         else:
                                             print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
@@ -7881,6 +7920,16 @@ def main():
                                             new_stop_price = adjusted_struct["stop_price"]
                                             take_profit_price = adjusted_struct["tp_price"]
                                             leverage_val = adjusted_struct["leverage"]
+
+                                            # Reconcile geometry: If validate_trade_structure widened stop or capped TP, verify economic gate still passes
+                                            if abs(new_stop_price - stop_loss_price) > 1e-6 or abs(take_profit_price - adjusted_struct["tp_price"]) > 1e-6:
+                                                from trade_calculators import passes_economic_gate, calculate_required_p
+                                                if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=new_stop_price, conf=calibrated_confidence):
+                                                    _req_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=new_stop_price)
+                                                    print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Adjusted trade structure fails economic gate (requires {_req_p:.3f} > conf {calibrated_confidence:.3f}). Aborting entry.")
+                                                    status_msg = "Skipped (Adjusted Structure Fails Economic Gate)"
+                                                    continue
+                                                p_star = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=new_stop_price)
 
                                             # Proportional stop-adjustment to preserve all upstream risk budgets (Joint Allocator, Covariance, Vol Regime, Learning Engine, CVaR)
                                             new_stop_loss_frac = max(0.002, abs(entry_price - new_stop_price) / max(1e-9, entry_price))
@@ -8103,6 +8152,26 @@ def main():
                                             
                                                 if not post_floor_pass or not all_pass:
                                                     wallet_exceeded = True
+
+                                                if not wallet_exceeded:
+                                                    # Terminal Risk-at-Stop Hard Boundary Assertion
+                                                    from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
+                                                    final_stop_dist = abs(entry_price - stop_loss_price)
+                                                    terminal_risk_usd = (raw_qty * final_stop_dist)
+                                                    max_terminal_risk_usd = current_bal * HARD_MAX_RISK_PER_TRADE_PCT
+                                                    if terminal_risk_usd > max_terminal_risk_usd + 1e-6:
+                                                        max_allowed_q = max_terminal_risk_usd / max(1e-8, final_stop_dist)
+                                                        c_qty_str = format_bybit_qty(symbol, max_allowed_q)
+                                                        c_qty_val = float(c_qty_str) if c_qty_str else 0.0
+                                                        if c_qty_val * entry_price < min_order_value:
+                                                            log_event("WARNING", f"[{symbol} {iv}m Terminal Risk Guard] Clamping risk (${terminal_risk_usd:.2f} -> ${max_terminal_risk_usd:.2f}) reduces order below min notional (${min_order_value:.2f}). Aborting entry.")
+                                                            status_msg = "Skipped (Risk Cap Exceeds Min Notional)"
+                                                            wallet_exceeded = True
+                                                        else:
+                                                            log_event("INFO", f"[{symbol} {iv}m Terminal Risk Guard] Clamped risk from ${terminal_risk_usd:.2f} to ${max_terminal_risk_usd:.2f} (3% hard cap). Qty: {qty_str} -> {c_qty_str}")
+                                                            raw_qty = c_qty_val
+                                                            qty_str = c_qty_str
+                                                            position_size_usd = (raw_qty * entry_price) / max(1.0, leverage_val)
 
                                                 if not wallet_exceeded:
                                                     from execution_validator import ExecutionValidator
