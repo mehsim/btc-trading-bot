@@ -77,7 +77,42 @@ from websocket_client import init_bybit_websocket_listeners, get_ws_status
 from dashboard_routes import dashboard_bp
 from risk_limits import assert_risk_governance_invariants
 from config_verifier import assert_shared_constants_aligned
-from decision_journal import DecisionRecord, write_decision
+from decision_journal import DecisionRecord, write_decision, ReasonCode
+
+def map_status_to_reason_code(msg: str) -> Optional[str]:
+    """Maps human-readable skip/reject status string to canonical ReasonCode enum."""
+    if not msg:
+        return None
+    m = msg.upper()
+    if "TCM NET EDGE" in m: return ReasonCode.TCM_NET_EDGE_NEGATIVE
+    if "EXPECTED R" in m or "MIN R:R" in m or "ECON FAIL" in m: return ReasonCode.RR_BELOW_FLOOR
+    if "HISTORICAL EV" in m or "EXPECTANCY" in m: return ReasonCode.EXPECTANCY_NEGATIVE
+    if "MACRO OPPOSITION" in m or "HTF OPPOSITION" in m: return ReasonCode.MACRO_OPPOSITION
+    if "FLASH CRASH" in m: return ReasonCode.FLASH_CRASH_ACTIVE
+    if "LOW LIQUIDITY" in m: return ReasonCode.LOW_LIQUIDITY
+    if "SPREAD WIDENING" in m: return ReasonCode.SPREAD_WIDENING
+    if "KELLY EDGE" in m: return ReasonCode.KELLY_EDGE_NON_POSITIVE
+    if "RISK CHECKLIST" in m: return ReasonCode.RISK_CHECKLIST_BLOCKED
+    if "PREDICTION ERROR" in m: return ReasonCode.PREDICTION_ERROR
+    if "LOW CONFIDENCE" in m: return ReasonCode.CONFIDENCE_BELOW_DYNAMIC_THRESHOLD
+    if "CIRCUIT BREAKER" in m: return ReasonCode.CIRCUIT_BREAKER_ACTIVE
+    if "BOT STOPPED" in m: return ReasonCode.BOT_STOPPED
+    if "MARGIN" in m or "EXCEEDS WALLET" in m or "FREE MARGIN" in m or "EXCEEDS RISK CAP" in m or "BELOW RISK ALLOCATION FLOOR" in m: return ReasonCode.MARGIN_GUARD_EXCEEDED
+    if "GEOMETRY" in m: return ReasonCode.GEOMETRY_INVALID
+    if "CONCURRENT POSITIONS" in m: return ReasonCode.MAX_CONCURRENT_POSITIONS
+    if "COOL-OFF" in m: return ReasonCode.COOL_OFF_ACTIVE
+    if "FUNDING BLOCK" in m: return ReasonCode.FUNDING_BLOCK
+    if "CONFORMAL UNCERTAINTY" in m or "UNCERTAINTY U" in m: return ReasonCode.HIGH_CONFORMAL_UNCERTAINTY
+    if "VOLUME" in m: return ReasonCode.VOLUME_COMPRESSION
+    if "ATR SPIKE" in m: return ReasonCode.ATR_SPIKE
+    if "NEWS BLOCK" in m: return ReasonCode.NEWS_BLOCK
+    if "CONTRADICTION" in m: return ReasonCode.CONTRADICTION
+    if "NEUTRAL" in m: return ReasonCode.NEUTRAL
+    if "CLUSTER LIMIT" in m: return ReasonCode.CLUSTER_LIMIT
+    if "ALREADY ACTIVE" in m: return ReasonCode.ALREADY_ACTIVE
+    if "CALIBRATOR" in m: return ReasonCode.CALIBRATOR_NON_VIABLE
+    if "ADX" in m: return ReasonCode.ADX_BELOW_FLOOR
+    return None
 
 # F-09 Governance Startup Lock: Assert hard safety bounds before trading initialization
 assert_risk_governance_invariants()
@@ -3991,13 +4026,15 @@ def sync_active_positions_from_bybit():
         return True
     
     try:
-        # Acquire unified lock hierarchy before fetching live exchange snapshot
+        # Fetch live exchange snapshot outside lock to avoid holding lock across network I/O
+        pos_list = get_all_bybit_positions()
+        if pos_list is None:
+            print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
+            return False
+
+        # Acquire unified lock hierarchy to safely mutate active trades state
         with active_execution_lock:
             with active_trades_lock:
-                pos_list = get_all_bybit_positions()
-                if pos_list is None:
-                    print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
-                    return False
                 
                 # Filter for positions with non-zero size
                 open_positions = {}
@@ -4518,7 +4555,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
 
     sl_source = "STRUCTURAL_SWING" if str(iv) in ["15", "30", "60"] else "ATR_DYNAMIC"
     sl_override_reason = "Dynamic Pivot Envelope" if str(iv) in ["15", "30", "60"] else f"{sl_multiplier_adjusted:.2f}x ATR Target"
-    min_sl_pct = 0.008 if str(iv) in ["15", "30"] else 0.006
+    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+    min_sl_pct = float(min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)))
     atr_sl_dist = atr_dollars * sl_multiplier_adjusted
     min_sl_dist = max(atr_dollars * 1.0, entry_price * min_sl_pct)
     raw_sl_dist = abs(entry_price - stop_loss_price) if stop_loss_price is not None else atr_sl_dist
@@ -7138,7 +7176,8 @@ def main():
                             # Economic Break-Even Threshold (p*) based on exact resolved order geometry
                             _bars_per_day = max(1, round(1440 / max(1, int(iv))))
                             _adv_usd = float(df_completed["volume"].tail(_bars_per_day).sum() * entry_close) if ("volume" in df_completed.columns and len(df_completed) >= _bars_per_day) else 50_000_000.0
-                            _order_usd = float(bot_state.get("position_size_usd", 1000.0))
+                            _current_bal = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
+                            _order_usd = float(bot_state.get("position_size_usd") or max(10.0, _current_bal * 0.05 * 5.0))
                             _tcm = transaction_cost_model.estimate_transaction_cost(
                                 order_size_usd=_order_usd,
                                 volume_24h_usd=_adv_usd,
@@ -7389,7 +7428,7 @@ def main():
                                 learned_threshold = get_learned_confidence_threshold(symbol, macro_iv, regime)
 
                                 if macro_tf:
-                                    macro_pred = bot_state.get(f"latest_prediction_{symbol}_{macro_tf}") or bot_state.get(f"latest_prediction_{macro_tf}")
+                                    macro_pred = bot_state.get(f"latest_prediction_{symbol}_{macro_tf}")
                                     ml_trend_dir = "Neutral"
                                     ml_prob = 0.0
                                     model_age_days = 0
@@ -7599,9 +7638,31 @@ def main():
                             utc_hour = datetime.now(timezone.utc).hour
                             in_session = True
 
-                            flash_crash_active = check_flash_crash(symbol, max_drop_pct=3.0, window_minutes=5) if str(iv) in ["15", "30"] else False
+                            flash_crash_active = check_flash_crash(symbol, max_drop_pct=3.0, window_minutes=5)
                             liq_score = get_liquidity_score(symbol)
-                            low_liquidity = (str(iv) in ["15", "30"] and liq_score < 0.3)
+                            low_liquidity = (liq_score < 0.3)
+                            rec.liquidity_score = float(liq_score)
+
+                            # Component 9: Realized Closed-Trade Expectancy Gate (Finding #105)
+                            exp_gate_blocked = False
+                            exp_gate_msg = ""
+                            try:
+                                recent_closed = database.get_completed_trades(symbol=symbol, limit=50)
+                                interval_closed = [t for t in recent_closed if str(t.get("interval", "")).replace("m", "") == str(iv).replace("m", "")]
+                                if len(interval_closed) >= 15:
+                                    wins = [float(t.get("change_pct", 0.0)) for t in interval_closed if float(t.get("pnl_usd", 0.0)) > 0]
+                                    losses = [abs(float(t.get("change_pct", 0.0))) for t in interval_closed if float(t.get("pnl_usd", 0.0)) < 0]
+                                    if len(wins) > 0 and len(losses) > 0:
+                                        hist_wr = len(wins) / len(interval_closed)
+                                        avg_win_p = sum(wins) / len(wins)
+                                        avg_loss_p = sum(losses) / len(losses)
+                                        from confluence_engine import evaluate_expectancy_gate
+                                        exp_pass, hist_ev = evaluate_expectancy_gate(hist_wr, avg_win_p, avg_loss_p)
+                                        if not exp_pass:
+                                            exp_gate_blocked = True
+                                            exp_gate_msg = f"Negative Historical EV ({hist_ev*100:+.2f}%) over last {len(interval_closed)} trades"
+                            except Exception as ex_exp:
+                                log_event("DEBUG", f"Expectancy gate check notice for {symbol} {iv}m: {ex_exp}")
 
                             # P3: Correlated Portfolio Cluster Exposure Guard
                             cluster_blocked = False
@@ -7617,70 +7678,92 @@ def main():
 
                             if not bot_state.get("bot_running", True):
                                 status_msg = "Skipped (Bot Stopped)"
+                                rec.reason_code = ReasonCode.BOT_STOPPED
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Bot is currently stopped by the user.")
                             elif bot_state.get("circuit_breaker_active", False):
                                 status_msg = "Skipped (Circuit Breaker)"
+                                rec.reason_code = ReasonCode.CIRCUIT_BREAKER_ACTIVE
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Daily Drawdown Circuit Breaker is active.")
                             elif flash_crash_active:
                                 status_msg = "Skipped (Flash Crash Block)"
+                                rec.reason_code = ReasonCode.FLASH_CRASH_ACTIVE
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Flash crash detected (>3.0% drop in last 5 minutes).")
                             elif low_liquidity:
                                 status_msg = "Skipped (Low Liquidity)"
+                                rec.reason_code = ReasonCode.LOW_LIQUIDITY
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Insufficient L2 orderbook liquidity (Score: {liq_score:.2f} < 0.30).")
                             elif already_active:
                                 status_msg = "Skipped (Already Active)"
+                                rec.reason_code = ReasonCode.ALREADY_ACTIVE
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: A trade is already active for this symbol on the {active_on_tf} timeframe.")
                             elif cluster_blocked:
                                 status_msg = "Skipped (Cluster Limit)"
+                                rec.reason_code = ReasonCode.CLUSTER_LIMIT
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: {cluster_block_reason}")
+                            elif exp_gate_blocked:
+                                status_msg = f"Skipped ({exp_gate_msg})"
+                                rec.reason_code = ReasonCode.EXPECTANCY_NEGATIVE
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: {exp_gate_msg}")
                             elif not in_session:
                                 status_msg = "Skipped (Off-Session)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
                             elif is_cooling:
                                 status_msg = "Skipped (Cool-Off)"
+                                rec.reason_code = ReasonCode.COOL_OFF_ACTIVE
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Interval is in a 6-hour cool-off period after consecutive losses ({remaining_mins} mins remaining).")
                             elif funding_blocked:
                                 status_msg = "Skipped (Funding Block)"
+                                rec.reason_code = ReasonCode.FUNDING_BLOCK
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
                             elif confluence_blocked:
-                                status_msg = "Skipped (HTF Opposition)"
+                                status_msg = "Skipped (Macro Opposition)"
+                                rec.reason_code = ReasonCode.MACRO_OPPOSITION
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: HTF macro trend opposes trade direction ({htf_trend}).")
                             elif ml_trend == "Neutral":
                                 status_msg = "Skipped (Neutral)"
+                                rec.reason_code = ReasonCode.NEUTRAL
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Model output is Neutral/Hold.")
                             elif strong_conflict:
                                 status_msg = "Skipped (Contradiction)"
+                                rec.reason_code = ReasonCode.CONTRADICTION
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Strong directional contradiction (Trend: {ml_trend}, Regressor: {pred_change:+.3f} [{pred_pct:.3f}%]).")
                             elif calibrated_confidence < dynamic_conf_threshold:
                                 status_msg = "Skipped (Low Confidence)"
+                                rec.reason_code = ReasonCode.CONFIDENCE_BELOW_DYNAMIC_THRESHOLD
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped (calibrated confidence {calibrated_confidence*100:.2f}% < {dynamic_conf_threshold*100:.2f}%).")
                             elif conformal_is_uncertain and ml_trend in ["Bullish", "Bearish"]:
                                 status_msg = "Skipped (High Conformal Uncertainty)"
+                                rec.reason_code = ReasonCode.HIGH_CONFORMAL_UNCERTAINTY
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
 
                             if status_msg == "Pending":
-                                # Refinements 2, 8, 9, 10: 15m Institutional Hardening Filters
                                 if str(iv) == "15":
-                                    # Refinement 2: Liquidity & Volatility Compression Filter
-                                    vol_series = pd.to_numeric(df["volume"], errors="coerce") if (df is not None and "volume" in df.columns) else None
+                                    vol_series = df["volume"] if (df is not None and "volume" in df.columns) else None
                                     vol_20th = float(vol_series.quantile(0.20)) if (vol_series is not None and len(vol_series.dropna()) >= 20) else 0.0
                                     curr_vol = float(latest_candle.get("volume", 0.0))
                                     mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
                                     current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
                                     u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
+                                    rec.spread_bp = current_spread_bps
                                     
                                     # Expected R:R of the target setup relative to minimum floor
                                     _15m_cfg = bot_state.get("optimized_timeframe_config", {}).get("15", {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
                                     _15m_base = TIMEFRAME_CONFIG.get("15", {"sl_mult": 0.9, "tp_mult_ranging": 1.4, "tp_mult_trending": 1.8})
                                     _15m_sl = float(_15m_cfg.get("sl_mult", _15m_base.get("sl_mult", 0.9)))
-                                    _15m_tp = float(_15m_cfg.get("tp_mult_trending" if latest_candle.get("ADX", 0.0) >= 20.0 else "tp_mult_ranging", 1.4))
+                                    adx_regime_threshold = float(getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {}).get("15", 28.0))
+                                    _15m_tp = float(_15m_cfg.get("tp_mult_trending" if latest_candle.get("ADX", 0.0) >= adx_regime_threshold else "tp_mult_ranging", 1.4))
                                     exp_r_val = float(_15m_tp / max(1e-6, _15m_sl))
+                                    rec.expected_rr = exp_r_val
 
                                     # C-2: estimate per-symbol 24h ADV from candle volume * price
                                     _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
-                                    _order_usd = float(bot_state.get("position_size_usd", 1000.0)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1000.0
+                                    _current_bal_15m = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and isinstance(bot_state, dict) else 80.0
+                                    _order_usd = float(bot_state.get("position_size_usd") or max(10.0, _current_bal_15m * 0.05 * 5.0)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1000.0
                                     tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
+                                    rec.round_trip_cost_bp = float(tcm_cost_bps)
                                     exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
+                                    rec.expected_value = float(exp_edge_bps)
+                                    rec.gate("cost", value=float(tcm_cost_bps), passed=bool(exp_edge_bps > 0))
 
                                     # Adaptive spread limit: 5.0 bps for BTC/ETH, 8.0 for major alts, 15.0 for others
                                     if symbol in ["BTCUSDT", "ETHUSDT"]:
@@ -7692,18 +7775,23 @@ def main():
 
                                     if curr_vol < vol_20th and vol_20th > 0:
                                         status_msg = "Skipped (Volume Compression <20th Pct)"
+                                        rec.reason_code = ReasonCode.VOLUME_COMPRESSION
                                         print(f"[{symbol} 15m Filter] Trade skipped: Volume ({curr_vol:.1f}) < 20th percentile ({vol_20th:.1f}).")
                                     elif atr_norm_val > (1.5 * mean_atr_24h):
                                         status_msg = "Skipped (ATR Spike >1.5x Mean)"
+                                        rec.reason_code = ReasonCode.ATR_SPIKE
                                         print(f"[{symbol} 15m Filter] Trade skipped: ATR spike ({atr_norm_val*100:.2f}%) > 1.5x 24h mean ({mean_atr_24h*100:.2f}%).")
                                     elif current_spread_bps > max_spread_bps:
                                         status_msg = f"Skipped (Spread Widening >{max_spread_bps:.1f} bps)"
+                                        rec.reason_code = ReasonCode.SPREAD_WIDENING
                                         print(f"[{symbol} 15m Filter] Trade skipped: Spread ({current_spread_bps:.1f} bps) exceeds {max_spread_bps:.1f} bps limit.")
                                     elif exp_r_val < 1.0:
                                         status_msg = "Skipped (Expected R < 1.0R)"
+                                        rec.reason_code = ReasonCode.RR_BELOW_FLOOR
                                         print(f"[{symbol} 15m Filter] Trade skipped: Expected R ({exp_r_val:.2f}R) < 1.00R floor.")
                                     elif exp_edge_bps <= 0:
                                         status_msg = "Skipped (TCM Net Edge <= 0)"
+                                        rec.reason_code = ReasonCode.TCM_NET_EDGE_NEGATIVE
                                         print(f"[{symbol} 15m Filter] Trade skipped: TCM Expected Net Edge ({exp_edge_bps:.1f} bps) is non-positive.")
                                     elif u_tot_live >= 0.20:
                                         status_msg = "Skipped (Uncertainty U >= 0.20)"
@@ -7797,24 +7885,43 @@ def main():
                                         )
                                         _latest_pred = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{tf}") or bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{tf}", {})
                                         _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
+
+                                        executed_sl_dist = abs(entry_price - stop_loss_price)
+                                        executed_tp_dist = abs(take_profit_price - entry_price)
+                                        realized_sl_m = executed_sl_dist / max(1e-6, atr_dollars)
+                                        realized_tp_m = executed_tp_dist / max(1e-6, atr_dollars)
+
+                                        # Record labelled vs executed geometry for auditability (Finding #118)
+                                        rec.snapshot(
+                                            labelled_sl_mult=float(resolved_sl_m),
+                                            labelled_tp_mult=float(effective_tp_m),
+                                            executed_sl_mult=float(realized_sl_m),
+                                            executed_tp_mult=float(realized_tp_m),
+                                            executed_sl_dist=float(executed_sl_dist),
+                                            executed_tp_dist=float(executed_tp_dist)
+                                        )
+
                                         scaled_kelly = risk_engine.compute_conservative_kelly(
                                             calibrated_confidence=calibrated_confidence,
-                                            tp_multiplier=effective_tp_m,
-                                            sl_multiplier=resolved_sl_m,
+                                            tp_multiplier=realized_tp_m,
+                                            sl_multiplier=realized_sl_m,
                                             interval=str(iv),
                                             trade_history=bot_state.get("trade_history", []),
                                             mcc_val=_mcc_val
                                         )
+                                        rec.kelly_effective = float(scaled_kelly)
                                     
                                         if scaled_kelly <= 0.0:
                                             print(f"[{symbol} {iv}m Kelly Sizing] Scaled Kelly is non-positive ({scaled_kelly:.4f}) — abstaining from trade entry (Fail-Closed).")
                                             log_event("INFO", f"[{symbol} {iv}m] Scaled Kelly non-positive ({scaled_kelly:.4f}) — abstaining from entry.")
                                             status_msg = "Skipped (Kelly Edge <= 0)"
+                                            rec.reason_code = ReasonCode.KELLY_EDGE_NON_POSITIVE
                                             continue
 
                                         # Joint Risk Budget Allocation (MHI-governed fractional Kelly + Portfolio Heat + Liquidity Capping)
                                         portfolio_heat = min(1.0, total_active_size / max(1.0, current_bal))
                                         mhi_val = float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 90.0)))
+                                        rec.mhi_score = float(mhi_val)
                                         budget_res = risk_engine.joint_risk_budget_allocator.allocate_risk_budget(
                                             symbol=symbol,
                                             entry_price=entry_price,
@@ -7830,18 +7937,15 @@ def main():
                                             stop_distance=abs(entry_price - stop_loss_price),
                                             target_distance=abs(entry_price - take_profit_price)
                                         )
+                                        rec.mhi_cap = float(budget_res.get("mhi_cap", 1.0)) if isinstance(budget_res, dict) else 1.0
+                                        rec.kelly_raw = float(budget_res.get("raw_kelly", scaled_kelly)) if isinstance(budget_res, dict) else scaled_kelly
+
                                         if not budget_res.get("execution_permitted", True):
                                             rej_reason = budget_res.get("reason", "Halted by Risk Budget Allocator")
                                             print(f"[{symbol} {iv}m Joint Risk Budget Guard] Trade rejected: {rej_reason}")
                                             log_event("INFO", f"[{symbol} {iv}m] Trade rejected by JointRiskBudgetAllocator: {rej_reason}")
                                             status_msg = f"Skipped ({rej_reason})"
-                                            continue
-
-                                        # Enforce bounds on balance fraction (Min 2%, Max 5% per trade from config)
-                                        if scaled_kelly <= 0.0:
-                                            print(f"[{symbol} {iv}m Kelly Sizing] Scaled Kelly is non-positive ({scaled_kelly:.4f}) — abstaining from trade entry (Fail-Closed).")
-                                            log_event("INFO", f"[{symbol} {iv}m] Scaled Kelly non-positive ({scaled_kelly:.4f}) — abstaining from entry.")
-                                            status_msg = "Skipped (Kelly Edge <= 0)"
+                                            rec.reason_code = ReasonCode.RISK_CHECKLIST_BLOCKED
                                             continue
 
                                         f_clamped = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
@@ -8141,21 +8245,25 @@ def main():
                                                 open_positions_count=len(active_trades_list),
                                                 wallet_exceeded=wallet_exceeded
                                             )
-                                            rec.signal_source      = str(pred_info.get("signal_source") or "UNSET")
-                                            rec.is_fallback        = int(pred_info.get("is_fallback", False))
-                                            rec.direction          = ml_trend
-                                            rec.raw_confidence     = pred_info.get("raw_confidence")
-                                            rec.calibrated_conf    = pred_info.get("calibrated_confidence")
-                                            rec.calibrator_version = pred_info.get("calibrator_version")
-                                            rec.calibrator_ece     = pred_info.get("calibrator_ece")
-                                            rec.model_version      = pred_info.get("model_version")
-                                            rec.feature_hash       = pred_info.get("feature_contract_hash") or pred_info.get("feature_hash")
-                                            rec.manifest_schema    = pred_info.get("manifest_schema_version")
-                                            rec.git_sha            = pred_info.get("git_sha")
-                                            rec.regime             = pred_info.get("regime_mode") or pred_info.get("regime")
-                                            rec.adx                = pred_info.get("adx")
-                                            rec.atr_norm           = pred_info.get("atr_norm")
-                                            rec.liquidity_score    = bot_state.get("liquidity_score", 1.0)
+                                            rec.signal_source      = str(pred_info.get("signal_source") or rec.signal_source or "UNSET")
+                                            rec.is_fallback        = int(pred_info.get("is_fallback") if pred_info.get("is_fallback") is not None else (rec.is_fallback or 0))
+                                            rec.direction          = ml_trend or rec.direction
+                                            rec.raw_confidence     = pred_info.get("raw_confidence") if pred_info.get("raw_confidence") is not None else rec.raw_confidence
+                                            rec.calibrated_conf    = pred_info.get("calibrated_confidence") if pred_info.get("calibrated_confidence") is not None else rec.calibrated_conf
+                                            rec.calibrator_version = pred_info.get("calibrator_version") or rec.calibrator_version
+                                            rec.calibrator_ece     = pred_info.get("calibrator_ece") if pred_info.get("calibrator_ece") is not None else rec.calibrator_ece
+                                            rec.model_version      = pred_info.get("model_version") or rec.model_version
+                                            rec.feature_hash       = pred_info.get("feature_contract_hash") or pred_info.get("feature_hash") or rec.feature_hash
+                                            rec.manifest_schema    = pred_info.get("manifest_schema_version") if pred_info.get("manifest_schema_version") is not None else rec.manifest_schema
+                                            rec.git_sha            = pred_info.get("git_sha") or rec.git_sha
+                                            rec.regime             = pred_info.get("regime_mode") or pred_info.get("regime") or rec.regime or str(regime_name)
+                                            rec.adx                = pred_info.get("adx") if pred_info.get("adx") is not None else (rec.adx or adx_regime)
+                                            rec.atr_norm           = pred_info.get("atr_norm") if pred_info.get("atr_norm") is not None else (rec.atr_norm or atr_norm_val)
+                                            rec.liquidity_score    = float(liq_score) if 'liq_score' in locals() else bot_state.get("liquidity_score", 1.0)
+                                            rec.spread_bp          = float(current_spread_bps) if 'current_spread_bps' in locals() else rec.spread_bp
+                                            rec.expected_value     = float(exp_edge_bps) if 'exp_edge_bps' in locals() else rec.expected_value
+                                            rec.expected_rr        = float(exp_r_val) if 'exp_r_val' in locals() else rec.expected_rr
+                                            rec.round_trip_cost_bp = float(cost_bps) if 'cost_bps' in locals() else rec.round_trip_cost_bp
                                             rec.position_size_usd  = position_size_usd
                                             rec.leverage           = leverage_val
 
@@ -8164,7 +8272,9 @@ def main():
                                                     symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=rec
                                                 )
                                                 rec.outcome = "APPROVED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
-                                                rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else checklist_msg
+                                                rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else (checklist_msg if not passed_checklist else "Wallet allocation exceeded")
+                                                if not (passed_checklist and not wallet_exceeded):
+                                                    rec.reason_code = ReasonCode.MARGIN_GUARD_EXCEEDED if wallet_exceeded else ReasonCode.RISK_CHECKLIST_BLOCKED
                                                 if passed_checklist and not wallet_exceeded:
                                                     rec.position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
                                                     rec.trade_id = f"{symbol}_{trade_uuid}"
@@ -8217,7 +8327,8 @@ def main():
                                                 
                                                     # Priority 1: Maintain structural stop width & Brownian noise clearance envelope
                                                     min_atr_mult = 1.25 if float(leverage_val) > 10.0 else 1.0
-                                                    min_sl_pct = 0.008 if str(iv) in ["15", "30"] else 0.006
+                                                    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+                                                    min_sl_pct = float(min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)))
                                                     min_allowed_sl_dist = max(atr_dollars * min_atr_mult, entry_price * min_sl_pct)
                                                     
                                                     # Keep structural stop distance; only compress if stop is excessively wide
@@ -8380,6 +8491,8 @@ def main():
                                                             args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size, decision_ts),
                                                             daemon=True
                                                         ).start()
+                                                        placed = True
+                                                        status_msg = "Traded"
                                                         bybit_success = False # Skip the simulation path for this trade
 
                                             if bybit_success:
@@ -8454,6 +8567,8 @@ def main():
                                                 # Deduct size from wallet balance immediately (only in simulation)
                                                 if TRADE_MODE == "simulation":
                                                     bot_state["simulated_balance"] = round(bot_state["simulated_balance"] - position_size_usd, 2)
+                                                placed = True
+                                                status_msg = "Traded"
                                             
                                                 print(f"[{symbol} {iv}m] Trade Opened: {ml_trend} at price {entry_price:.2f} (SL: {stop_loss_price:.2f}, TP: {take_profit_price:.2f}, Slippage: {slippage_pct:.3f}%)")
                                     else:
@@ -8543,12 +8658,37 @@ def main():
                         
                     finally:
                         rec.status_msg = status_msg
-                        if not getattr(rec, "reject_reason", None) and status_msg not in ("Pending", ""):
+                        if not getattr(rec, "reject_reason", None) and status_msg not in ("Pending", "Traded", ""):
                             rec.reject_reason = status_msg
+                        if not getattr(rec, "reason_code", None) and status_msg not in ("Pending", "Traded", ""):
+                            rec.reason_code = map_status_to_reason_code(status_msg)
+                        
+                        # Populate and snapshot remaining economic and sizing metrics if available
+                        if 'exp_edge_bps' in locals() and rec.expected_value is None:
+                            rec.expected_value = float(exp_edge_bps)
+                        if 'exp_r_val' in locals() and rec.expected_rr is None:
+                            rec.expected_rr = float(exp_r_val)
+                        if 'cost_bps' in locals() and rec.round_trip_cost_bp is None:
+                            rec.round_trip_cost_bp = float(cost_bps)
+                        if 'position_size_usd' in locals() and rec.position_size_usd is None:
+                            rec.position_size_usd = float(position_size_usd)
+                        if 'leverage_val' in locals() and rec.leverage is None:
+                            rec.leverage = float(leverage_val)
+                        rec.snapshot(
+                            status_msg=status_msg,
+                            expected_value=rec.expected_value,
+                            expected_rr=rec.expected_rr,
+                            round_trip_cost_bp=rec.round_trip_cost_bp,
+                            position_size_usd=rec.position_size_usd,
+                            leverage=rec.leverage
+                        )
+
                         if placed:
                             rec.outcome = "EXECUTED"
                         elif status_msg.startswith("REJECTED"):
                             rec.outcome = "REJECTED"
+                        elif rec.outcome == "ERROR":
+                            pass  # Preserve genuine runtime exception outcome
                         else:
                             rec.outcome = "SKIPPED"
                         write_decision(rec)
@@ -8709,7 +8849,7 @@ if __name__ == "__main__":
     print("[SYSTEM] Launching safe_main bot loop thread...", flush=True)
     threading.Thread(target=safe_main, name="main-bot-loop", daemon=True).start()
     # Start background Telegram command listener thread
-    threading.Thread(target=start_telegram_command_listener, args=(bot_state, bot_state_lock), name="telegram-listener", daemon=True).start()
+    threading.Thread(target=start_telegram_command_listener, args=(bot_state, bot_state_lock, active_trades_lock), name="telegram-listener", daemon=True).start()
     
     try:
         send_telegram_alert(f"🤖 *BTC Trading Bot Started successfully on {TRADE_MODE.upper()} mode.*")

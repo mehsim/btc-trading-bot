@@ -489,7 +489,10 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
     logs = []
     
     # 1. Enforce Brownian Noise Clearance minimum stop width for ALL trades
-    min_pct_floor = 0.008 if str(interval) in ["15", "30", "15m", "30m"] else 0.006
+    import config
+    iv_clean = str(interval).lower().strip().replace("m", "").replace("h", "")
+    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+    min_pct_floor = float(min_sl_cfg.get(iv_clean, min_sl_cfg.get("default", 0.008)))
     noise_floor_dist = entry_price * min_pct_floor
     atr_min_stop = atr_dollars * 1.5 if leverage > 10.0 else atr_dollars * 1.0
     min_stop = max(atr_min_stop, noise_floor_dist)

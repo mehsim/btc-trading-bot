@@ -205,14 +205,18 @@ def get_manual_trade_suggestion(symbol, interval, direction="Bullish"):
         return None
 
 
-def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_loss=None, take_profit=None, leverage=5.0, bot_state=None, bot_state_lock=None):
+def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_loss=None, take_profit=None, leverage=5.0, bot_state=None, bot_state_lock=None, active_trades_lock=None):
     try:
         from data import get_history
         from core import add_features
         from bybit_client import place_bybit_taker_ioc_order, format_bybit_qty, set_bybit_leverage, get_bybit_min_qty_step
         from trade_calculators import assert_valid_geometry
+        from risk_engine import risk_engine
+        from decision_journal import DecisionRecord, write_decision, ReasonCode
+        import database
         import uuid
         import math
+        import threading
 
         sym = symbol.upper().strip()
         if not sym.endswith("USDT"):
@@ -241,8 +245,22 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
         else:
             return f"❌ Invalid direction: `{direction}`. Supported: Bullish/Long/Buy or Bearish/Short/Sell."
 
+        rec = DecisionRecord(
+            symbol=sym,
+            interval=str(iv),
+            signal_source="TELEGRAM_MANUAL",
+            direction=ml_trend,
+            regime="MANUAL",
+            raw_confidence=1.0,
+            calibrated_conf=1.0
+        )
+
         df_raw = get_history(symbol=sym, interval=iv, limit=100)
         if df_raw is None or len(df_raw) < 10:
+            rec.outcome = "REJECTED"
+            rec.reject_reason = "Failed to fetch market data"
+            rec.reason_code = ReasonCode.PREDICTION_ERROR
+            write_decision(rec)
             return f"❌ Failed to fetch market data for `{sym}` ({iv}m)."
 
         df = add_features(df_raw)
@@ -265,19 +283,51 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
         tf_cap = HARD_TIMEFRAME_MAX_LEVERAGE_CAPS.get(str(iv), 5.0)
         req_lev = float(leverage) if leverage is not None and float(leverage) > 0 else tf_cap
         final_lev = min(req_lev, tf_cap)
+        rec.leverage = final_lev
 
         # Check circuit breaker and halt states
         if bot_state:
             with (bot_state_lock if bot_state_lock else threading.Lock()):
                 if bot_state.get("circuit_breaker_active", False):
+                    rec.outcome = "REJECTED"
+                    rec.reject_reason = "Circuit breaker active"
+                    rec.reason_code = ReasonCode.CIRCUIT_BREAKER_ACTIVE
+                    write_decision(rec)
                     return "❌ Order Rejected: Circuit Breaker is active."
                 if bot_state.get("bot_stopped", False):
+                    rec.outcome = "REJECTED"
+                    rec.reject_reason = "Bot stopped"
+                    rec.reason_code = ReasonCode.BOT_STOPPED
+                    write_decision(rec)
                     return "❌ Order Rejected: Bot is in STOPPED / Emergency Halt state."
 
         # Validate geometry
-        assert_valid_geometry(ml_trend, final_entry, final_sl, final_tp, symbol=sym)
+        try:
+            assert_valid_geometry(ml_trend, final_entry, final_sl, final_tp, symbol=sym)
+        except Exception as geom_err:
+            rec.outcome = "REJECTED"
+            rec.reject_reason = f"Invalid geometry: {geom_err}"
+            rec.reason_code = ReasonCode.GEOMETRY_INVALID
+            write_decision(rec)
+            return f"❌ Order Rejected: Invalid Geometry — {geom_err}"
 
         position_size_usd = 2.0
+        rec.position_size_usd = position_size_usd
+
+        # Evaluate pre-trade risk checklist
+        active_trades_list = [t for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in (bot_state.get(f"active_trade_{tf_k}", []) if bot_state else [])]
+        df_dict = {sym: df}
+        passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
+            sym, position_size_usd, final_lev, active_trades_list, bot_state or {}, df_dict, interval=str(iv), direction=ml_trend, journal=rec
+        )
+        if not passed_checklist:
+            rec.outcome = "REJECTED"
+            rec.reject_reason = checklist_msg
+            rec.reason_code = ReasonCode.RISK_CHECKLIST_BLOCKED
+            write_decision(rec)
+            return f"❌ Order Rejected by Risk Engine: {checklist_msg}"
+
+        position_size_usd = min(position_size_usd, capped_size)
         set_bybit_leverage(sym, final_lev)
 
         leveraged_size = position_size_usd * final_lev
@@ -298,8 +348,9 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
             tf_map_inv = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
             tf_key = tf_map_inv.get(iv, f"{iv}m")
             trade_uuid = str(uuid.uuid4())
+            trade_id_str = f"{sym}_{trade_uuid}"
             trade_record = {
-                "trade_id": f"{sym}_{trade_uuid}",
+                "trade_id": trade_id_str,
                 "bybit_order_id": bybit_order_id,
                 "symbol": sym,
                 "direction": ml_trend,
@@ -316,14 +367,21 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
                 "end_time": time.time() + (int(iv) * 60 * 10),
                 "atr_dollars": atr_dollars
             }
-            if bot_state and bot_state_lock:
-                with bot_state_lock:
-                    key = f"active_trade_{tf_key}"
-                    curr_list = bot_state.get(key, [])
-                    if not isinstance(curr_list, list):
-                        curr_list = []
-                    curr_list.append(trade_record)
+
+            lock_to_use = active_trades_lock if active_trades_lock is not None else (bot_state_lock if bot_state_lock else threading.Lock())
+            with lock_to_use:
+                key = f"active_trade_{tf_key}"
+                curr_list = bot_state.get(key, []) if bot_state else []
+                if not isinstance(curr_list, list):
+                    curr_list = []
+                curr_list.append(trade_record)
+                if bot_state:
                     bot_state[key] = curr_list
+                database.save_active_trades(tf_key, curr_list)
+
+            rec.outcome = "EXECUTED"
+            rec.trade_id = trade_id_str
+            write_decision(rec)
 
             return (
                 f"🟢 *MANUAL TRADE EXECUTED SUCCESSFULLY*\n\n"
@@ -336,13 +394,17 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
                 f"• *Bybit Order ID*: `{bybit_order_id}`"
             )
         else:
+            rec.outcome = "REJECTED"
+            rec.reject_reason = order_res.get("retMsg", "Order rejected by Bybit")
+            rec.reason_code = ReasonCode.EXECUTION_VALIDATION_FAILED
+            write_decision(rec)
             return f"🔴 *Manual Trade Execution Failed*: {order_res.get('retMsg')}"
 
     except Exception as ex:
         return f"🔴 *Manual Trade Error*: {str(ex)}"
 
 
-def start_telegram_command_listener(bot_state, bot_state_lock):
+def start_telegram_command_listener(bot_state, bot_state_lock, active_trades_lock=None):
     """Starts the background thread to poll and handle incoming Telegram commands."""
     from secret_manager import get_secure_env
     token = get_secure_env("TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -525,27 +587,38 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                     cb_query = update.get("callback_query")
                     if cb_query:
                         cb_chat_id = str(cb_query.get("message", {}).get("chat", {}).get("id"))
+                        cb_from_id = str(cb_query.get("from", {}).get("id"))
                         cb_data = str(cb_query.get("data", ""))
-                        if allowed_chat_ids and cb_chat_id in allowed_chat_ids:
-                            if cb_data.startswith("skipped_"):
-                                tf_choice = cb_data.replace("skipped_", "")
-                                rep = get_skipped_trades_report(tf_choice)
-                                execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": rep, "parse_mode": "Markdown"})
-                            elif cb_data.startswith("quick_trade_"):
-                                # Format: quick_trade_BTC_15_Bullish
-                                cb_parts = cb_data.split("_")
-                                if len(cb_parts) >= 4:
-                                    q_sym, q_tf, q_dir = cb_parts[2], cb_parts[3], cb_parts[4] if len(cb_parts) > 4 else "Bullish"
-                                    res_msg = execute_manual_trade(q_sym, q_tf, q_dir, bot_state=bot_state, bot_state_lock=bot_state_lock)
-                                    execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": res_msg, "parse_mode": "Markdown"})
-                            elif cb_data.startswith("exec_manual_"):
-                                # Format: exec_manual_{sym}_{tf}_{direction}_{entry}_{sl}_{tp}_{lev}
-                                cb_parts = cb_data.split("_")
-                                if len(cb_parts) >= 8:
-                                    e_sym, e_tf, e_dir = cb_parts[2], cb_parts[3], cb_parts[4]
-                                    e_entry, e_sl, e_tp, e_lev = cb_parts[5], cb_parts[6], cb_parts[7], cb_parts[8] if len(cb_parts) > 8 else 5.0
-                                    res_msg = execute_manual_trade(e_sym, e_tf, e_dir, entry_price=e_entry, stop_loss=e_sl, take_profit=e_tp, leverage=e_lev, bot_state=bot_state, bot_state_lock=bot_state_lock)
-                                    execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": res_msg, "parse_mode": "Markdown"})
+
+                        is_cb_auth = bool(allowed_chat_ids and (cb_chat_id in allowed_chat_ids or cb_from_id in allowed_chat_ids))
+                        if not is_cb_auth:
+                            print(f"[Telegram Security] Unauthorized callback attempt: chat_id {cb_chat_id}, from_id {cb_from_id}")
+                            execute_telegram_api_call("answerCallbackQuery", {
+                                "callback_query_id": cb_query.get("id"),
+                                "text": "⛔ Access Denied: Unauthorized user",
+                                "show_alert": True
+                            })
+                            continue
+
+                        if cb_data.startswith("skipped_"):
+                            tf_choice = cb_data.replace("skipped_", "")
+                            rep = get_skipped_trades_report(tf_choice)
+                            execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": rep, "parse_mode": "Markdown"})
+                        elif cb_data.startswith("quick_trade_"):
+                            # Format: quick_trade_BTC_15_Bullish
+                            cb_parts = cb_data.split("_")
+                            if len(cb_parts) >= 4:
+                                q_sym, q_tf, q_dir = cb_parts[2], cb_parts[3], cb_parts[4] if len(cb_parts) > 4 else "Bullish"
+                                res_msg = execute_manual_trade(q_sym, q_tf, q_dir, bot_state=bot_state, bot_state_lock=bot_state_lock, active_trades_lock=active_trades_lock)
+                                execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": res_msg, "parse_mode": "Markdown"})
+                        elif cb_data.startswith("exec_manual_"):
+                            # Format: exec_manual_{sym}_{tf}_{direction}_{entry}_{sl}_{tp}_{lev}
+                            cb_parts = cb_data.split("_")
+                            if len(cb_parts) >= 8:
+                                e_sym, e_tf, e_dir = cb_parts[2], cb_parts[3], cb_parts[4]
+                                e_entry, e_sl, e_tp, e_lev = cb_parts[5], cb_parts[6], cb_parts[7], cb_parts[8] if len(cb_parts) > 8 else 5.0
+                                res_msg = execute_manual_trade(e_sym, e_tf, e_dir, entry_price=e_entry, stop_loss=e_sl, take_profit=e_tp, leverage=e_lev, bot_state=bot_state, bot_state_lock=bot_state_lock, active_trades_lock=active_trades_lock)
+                                execute_telegram_api_call("sendMessage", {"chat_id": cb_chat_id, "text": res_msg, "parse_mode": "Markdown"})
 
                     message = update.get("message") or update.get("edited_message") or update.get("channel_post")
                     if not message:
@@ -554,7 +627,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                     chat_id = str(message.get("chat", {}).get("id"))
                     text = message.get("text", "").strip()
 
-                    if chat_id not in allowed_chat_ids and len(allowed_chat_ids) > 0:
+                    if not allowed_chat_ids or chat_id not in allowed_chat_ids:
                         print(f"[Telegram Security] Unauthorized command attempt from chat_id {chat_id}: '{text}'")
                         execute_telegram_api_call("sendMessage", {
                             "chat_id": chat_id,
@@ -701,7 +774,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                                     "reply_markup": reply_markup
                                 })
                             else:
-                                res_msg = execute_manual_trade(m_sym, m_tf, m_dir, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                                res_msg = execute_manual_trade(m_sym, m_tf, m_dir, bot_state=bot_state, bot_state_lock=bot_state_lock, active_trades_lock=active_trades_lock)
                                 execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": res_msg, "parse_mode": "Markdown"})
                         else:
                             m_sym = args[0]
@@ -711,7 +784,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock):
                             c_sl = args[4] if len(args) > 4 else None
                             c_tp = args[5] if len(args) > 5 else None
                             c_lev = args[6] if len(args) > 6 else 5.0
-                            res_msg = execute_manual_trade(m_sym, m_tf, m_dir, entry_price=c_entry, stop_loss=c_sl, take_profit=c_tp, leverage=c_lev, bot_state=bot_state, bot_state_lock=bot_state_lock)
+                            res_msg = execute_manual_trade(m_sym, m_tf, m_dir, entry_price=c_entry, stop_loss=c_sl, take_profit=c_tp, leverage=c_lev, bot_state=bot_state, bot_state_lock=bot_state_lock, active_trades_lock=active_trades_lock)
                             execute_telegram_api_call("sendMessage", {"chat_id": chat_id, "text": res_msg, "parse_mode": "Markdown"})
 
                     elif cmd in ["regime"]:

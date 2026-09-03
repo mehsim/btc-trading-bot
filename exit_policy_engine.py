@@ -112,8 +112,8 @@ class ExitPolicyEngine:
         round_trip_fee_pct = 0.0011 # 0.055% * 2 taker fee
         est_slippage_pct = 0.0005   # 0.05% expected slippage
         
-        overhead_pct = (round_trip_fee_pct + est_slippage_pct) * max(1.0, leverage)
-        price_overhead = entry_price * (overhead_pct / 100.0)
+        overhead_pct = round_trip_fee_pct + est_slippage_pct
+        price_overhead = entry_price * overhead_pct
         safety_buffer = atr_dollars * safety_margin_atr
         
         return float(price_overhead + safety_buffer)

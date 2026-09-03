@@ -19,6 +19,41 @@ get_connection = get_db_connection
 _db_initialized = False
 
 
+class ReasonCode:
+    TCM_NET_EDGE_NEGATIVE = "TCM_NET_EDGE_NEGATIVE"
+    RR_BELOW_FLOOR = "RR_BELOW_FLOOR"
+    EXPECTANCY_NEGATIVE = "EXPECTANCY_NEGATIVE"
+    MACRO_OPPOSITION = "MACRO_OPPOSITION"
+    FLASH_CRASH_ACTIVE = "FLASH_CRASH_ACTIVE"
+    LOW_LIQUIDITY = "LOW_LIQUIDITY"
+    SPREAD_WIDENING = "SPREAD_WIDENING"
+    KELLY_EDGE_NON_POSITIVE = "KELLY_EDGE_NON_POSITIVE"
+    RISK_CHECKLIST_BLOCKED = "RISK_CHECKLIST_BLOCKED"
+    PREDICTION_ERROR = "PREDICTION_ERROR"
+    CONFIDENCE_BELOW_DYNAMIC_THRESHOLD = "CONFIDENCE_BELOW_DYNAMIC_THRESHOLD"
+    CIRCUIT_BREAKER_ACTIVE = "CIRCUIT_BREAKER_ACTIVE"
+    BOT_STOPPED = "BOT_STOPPED"
+    MARGIN_GUARD_EXCEEDED = "MARGIN_GUARD_EXCEEDED"
+    GEOMETRY_INVALID = "GEOMETRY_INVALID"
+    EXECUTION_VALIDATION_FAILED = "EXECUTION_VALIDATION_FAILED"
+    MAX_CONCURRENT_POSITIONS = "MAX_CONCURRENT_POSITIONS"
+    COOL_OFF_ACTIVE = "COOL_OFF_ACTIVE"
+    FUNDING_BLOCK = "FUNDING_BLOCK"
+    HIGH_CONFORMAL_UNCERTAINTY = "HIGH_CONFORMAL_UNCERTAINTY"
+    DIRECTIONAL_MASS_FAILED = "DIRECTIONAL_MASS_FAILED"
+    CALIBRATOR_NON_VIABLE = "CALIBRATOR_NON_VIABLE"
+    ADX_BELOW_FLOOR = "ADX_BELOW_FLOOR"
+    CLUSTER_LIMIT = "CLUSTER_LIMIT"
+    ALREADY_ACTIVE = "ALREADY_ACTIVE"
+    NEWS_BLOCK = "NEWS_BLOCK"
+    CONTRADICTION = "CONTRADICTION"
+    NEUTRAL = "NEUTRAL"
+    UNCERTAINTY_HIGH = "UNCERTAINTY_HIGH"
+    VOLUME_COMPRESSION = "VOLUME_COMPRESSION"
+    ATR_SPIKE = "ATR_SPIKE"
+    MANUAL_BYPASS = "MANUAL_BYPASS"
+
+
 @dataclass
 class DecisionRecord:
     decision_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -52,6 +87,11 @@ class DecisionRecord:
     liquidity_score: Optional[float] = None
     spread_bp: Optional[float] = None
 
+    # economics and sizing intent
+    expected_value: Optional[float] = None
+    expected_rr: Optional[float] = None
+    round_trip_cost_bp: Optional[float] = None
+
     # gate verdicts: NULL means NOT EVALUATED (default None)
     gate_var_pct: Optional[float] = None
     gate_var_pass: Optional[int] = None
@@ -73,6 +113,7 @@ class DecisionRecord:
     # outcome
     outcome: str = "ERROR"  # pessimistic default; overwritten on EXECUTED / REJECTED
     reject_reason: Optional[str] = None
+    reason_code: Optional[str] = None
     position_size_usd: Optional[float] = None
     leverage: Optional[float] = None
     trade_id: Optional[str] = None
@@ -148,6 +189,10 @@ def init_decision_journal_db(force: bool = False):
                     liquidity_score    REAL,
                     spread_bp          REAL,
 
+                    expected_value     REAL,
+                    expected_rr        REAL,
+                    round_trip_cost_bp REAL,
+
                     gate_var_pct       REAL, gate_var_pass       INTEGER,
                     gate_stress_pct    REAL, gate_stress_pass    INTEGER,
                     gate_stress_cvar   REAL,
@@ -160,6 +205,7 @@ def init_decision_journal_db(force: bool = False):
 
                     outcome            TEXT NOT NULL,
                     reject_reason      TEXT,
+                    reason_code        TEXT,
                     position_size_usd  REAL,
                     leverage           REAL,
                     trade_id           TEXT,
@@ -172,7 +218,18 @@ def init_decision_journal_db(force: bool = False):
                 );
             """)
 
-            for col_n, col_t in [("candle_timestamp", "INTEGER"), ("directional_mass_passed", "INTEGER"), ("is_calibrated", "INTEGER"), ("is_floor_scaled", "INTEGER"), ("order_payload_json", "TEXT"), ("venue_response_json", "TEXT")]:
+            for col_n, col_t in [
+                ("candle_timestamp", "INTEGER"),
+                ("directional_mass_passed", "INTEGER"),
+                ("is_calibrated", "INTEGER"),
+                ("is_floor_scaled", "INTEGER"),
+                ("order_payload_json", "TEXT"),
+                ("venue_response_json", "TEXT"),
+                ("reason_code", "TEXT"),
+                ("expected_value", "REAL"),
+                ("expected_rr", "REAL"),
+                ("round_trip_cost_bp", "REAL"),
+            ]:
                 try:
                     conn.execute(f"ALTER TABLE decision_journal ADD COLUMN {col_n} {col_t};")
                 except sqlite3.OperationalError:

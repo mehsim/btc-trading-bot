@@ -815,7 +815,16 @@ def run_backtest():
             rule_feature=RULE_FEATURE
         )
         t_count_o, win_rate_o, pf_o, mdd_o, ret_o, exp_r_o = res_o[:6]
-        avg_ret_p = (ret_p / max(1, t_count_p)) if t_count_p > 0 else 0.0
+        avg_ret_p = (ret_p / t_count_p) if t_count_p > 0 else 0.0
+        from pattern_miner import wilson_score_interval
+        if t_count_p > 0:
+            wins_p = int(round((win_rate_p / 100.0) * t_count_p))
+            ci_l, ci_u = wilson_score_interval(wins_p, t_count_p)
+            pess_wr_str = f"{win_rate_p:.1f}% [{ci_l*100:.1f}%, {ci_u*100:.1f}%] (n={t_count_p})"
+            if t_count_p < 784:
+                pess_wr_str += " [n<784]"
+        else:
+            pess_wr_str = "N/A"
 
         results.append({
             "Scenario": name,
@@ -825,7 +834,7 @@ def run_backtest():
             "Expectancy (R)": f"{exp_r_p:+.2f}R" if t_count_p > 0 else "0.00R",
             "Optimistic Return": f"{ret_o:+.2f}%" if t_count_o > 0 else "0.00%",
             "Pessimistic MDD": f"{mdd_p:.2f}%" if t_count_p > 0 else "N/A",
-            "Pessimistic WinRate": f"{win_rate_p:.2f}%" if t_count_p > 0 else "N/A"
+            "Pessimistic WinRate": pess_wr_str
         })
 
         # Export per-trade granular backtest context to JSONL
