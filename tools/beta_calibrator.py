@@ -171,6 +171,9 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
         return False
     if calibrator_data.get("is_fitted") is False:
         return False
+    target_def = calibrator_data.get("target_definition")
+    if target_def and target_def not in ["triple_barrier_exact", "triple_barrier"]:
+        return False
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
         a_val = float(calibrator_data.get("a", 1.0))
         b_val = float(calibrator_data.get("b", 1.0))
@@ -179,7 +182,7 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
             return False
         bc = BetaCalibrator.from_dict(calibrator_data)
         return bc.is_viable(min_required_p_star=min_required_p_star)
-    Ys = calibrator_data.get("y", [])
+    Ys = calibrator_data.get("y") or calibrator_data.get("y_thresholds", [])
     if Ys and len(Ys) > 0:
         max_y = max(Ys)
         min_y = min(Ys)

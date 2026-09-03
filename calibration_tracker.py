@@ -30,8 +30,8 @@ def init_calibration_db():
                     last_updated REAL DEFAULT 0.0
                 );
             """)
-            # Initialize default buckets
-            default_buckets = ["50-60%", "60-70%", "70-80%", "80-90%", "90-100%"]
+            # Initialize default buckets (Finding #97: widen range to [0.20, 1.00] to capture live model confidences)
+            default_buckets = ["20-30%", "30-40%", "40-50%", "50-60%", "60-70%", "70-80%", "80-90%", "90-100%"]
             for b in default_buckets:
                 conn.execute("INSERT OR IGNORE INTO calibration_buckets (bucket) VALUES (?);", (b,))
             conn.commit()
@@ -41,8 +41,14 @@ def init_calibration_db():
             conn.close()
 
 def get_bucket_label(confidence: float) -> str:
-    c = max(0.50, min(1.00, safe_float(confidence, 0.60)))
-    if c < 0.60:
+    c = max(0.20, min(1.00, safe_float(confidence, 0.40)))
+    if c < 0.30:
+        return "20-30%"
+    elif c < 0.40:
+        return "30-40%"
+    elif c < 0.50:
+        return "40-50%"
+    elif c < 0.60:
         return "50-60%"
     elif c < 0.70:
         return "60-70%"

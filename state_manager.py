@@ -103,9 +103,6 @@ class StateManager(MutableMapping):
             "calibration_2h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
             "calibration_4h": {"p95": 0.55, "max_conf": 0.75, "mean": 54.81},
             
-            "daily_drawdown_start_balance": 80.0,
-            "daily_drawdown_reset_day": -1,
-            "circuit_breaker_active": False,
             "win_rate_by_tf": {"15": None, "30": None, "60": None, "120": None, "240": None}
         }
         database.init_db()
@@ -113,11 +110,15 @@ class StateManager(MutableMapping):
         sys.stderr.write("[StateManager Debug] database.init_db() done.\n")
         sys.stderr.flush()
         
-        # Load settings from db or use default
+        # Load settings from db or use default (Finding #88)
         self._cache["simulated_balance"] = float(database.get_setting("simulated_balance", 80.0))
         self._cache["bot_running"] = database.get_setting("bot_running", "True") == "True"
         self._cache["bot_stopped"] = database.get_setting("bot_stopped", "False") == "True"
         self._cache["fresh_reset_v3"] = database.get_setting("fresh_reset_v3", "False") == "True"
+        self._cache["daily_drawdown_start_balance"] = float(database.get_setting("daily_drawdown_start_balance", 80.0))
+        self._cache["daily_drawdown_reset_day"] = int(database.get_setting("daily_drawdown_reset_day", -1))
+        self._cache["circuit_breaker_active"] = database.get_setting("circuit_breaker_active", "False") == "True"
+        self._cache["peak_balance"] = float(database.get_setting("peak_balance", self._cache["simulated_balance"]))
         sys.stderr.write("[StateManager Debug] Settings loaded from DB.\n")
         sys.stderr.flush()
         
@@ -246,11 +247,11 @@ class StateManager(MutableMapping):
                     
             self._cache[key] = value
             
-            # Persist to database if it's one of the persistent keys
+            # Persist to database if it's one of the persistent keys (Finding #88)
             if key.startswith("active_trade_"):
                 tf = key.replace("active_trade_", "")
                 database.save_active_trades(tf, raw_value)
-            elif key in ["simulated_balance", "bot_running", "fresh_reset_v3"]:
+            elif key in ["simulated_balance", "bot_running", "bot_stopped", "fresh_reset_v3", "daily_drawdown_start_balance", "daily_drawdown_reset_day", "circuit_breaker_active", "peak_balance"]:
                 database.set_setting(key, str(raw_value))
 
     def get(self, key, default=None):

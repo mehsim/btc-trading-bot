@@ -92,9 +92,15 @@ class ContinuousLearningEngine:
             if not is_healthy or not is_valid:
                 log_learning_action("SCHEMA_WARNING", "schema_validator", trade_id=trade_id, details={"health_issues": health_issues, "schema_errors": schema_errors})
                 
-            # 3. Calibration Tracking
+            # 3. Calibration Tracking & Drift Monitoring (Finding #97)
             record_trade_outcome(confidence=conf, is_win=is_win)
             log_learning_action("CALIBRATION_UPDATED", "calibration_tracker", trade_id=trade_id)
+            try:
+                from drift_monitor import drift_monitor
+                drift_res = drift_monitor.evaluate_drift()
+                log_learning_action("DRIFT_EVALUATED", "drift_monitor", trade_id=trade_id, details=drift_res)
+            except Exception as ex_drift:
+                log_learning_action("DRIFT_ERROR", "drift_monitor", trade_id=trade_id, details=str(ex_drift))
             
             # 4. Decision Snapshot
             raw_snap = trade.get("decision_snapshot")

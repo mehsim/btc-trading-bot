@@ -121,31 +121,40 @@ class PortfolioRiskEngine:
         proposed_size_usd: float,
         open_positions: List[Dict],
         total_equity: float,
-        max_directional_ratio: float = 0.125
+        max_directional_ratio: Optional[float] = None,
+        proposed_leverage: float = 1.0,
+        candidate_leverage: Optional[float] = None
     ) -> Tuple[bool, float, str]:
         """
-        Dynamically limits aggregate portfolio directional delta (Long vs Short concentration).
+        Dynamically limits aggregate portfolio directional delta in NOTIONAL terms (Long vs Short concentration).
+        Accounts for leverage across both existing positions and proposed trade (Finding #86).
         Prevents multi-asset correlated basket wipeouts during broad market swings.
         Returns: (is_approved: bool, current_directional_exposure: float, reason: str)
         """
         if total_equity <= 0:
             return True, 0.0, "OK (Zero Equity)"
 
+        import config
+        if max_directional_ratio is None:
+            max_directional_ratio = getattr(config, "MAX_DIRECTIONAL_RATIO", 1.25)
+
         dir_sign = 1.0 if str(proposed_direction).title() in ["Bullish", "Long", "Buy"] else -1.0
         
-        current_net_margin = 0.0
+        current_net_notional = 0.0
         for p in (open_positions or []):
             if isinstance(p, dict):
                 p_dir = str(p.get("direction", "Bullish")).title()
                 p_sign = 1.0 if p_dir in ["Bullish", "Long", "Buy"] else -1.0
-                p_size = float(p.get("position_size_usd", 0.0))
-                current_net_margin += p_size * p_sign
+                p_margin = float(p.get("position_size_usd", 0.0))
+                p_lev = float(p.get("leverage", 1.0))
+                current_net_notional += (p_margin * p_lev) * p_sign
                 
-        proposed_net_margin = current_net_margin + (proposed_size_usd * dir_sign)
-        directional_ratio = abs(proposed_net_margin) / max(1e-9, total_equity)
+        eff_cand_lev = float(candidate_leverage if candidate_leverage is not None else proposed_leverage)
+        proposed_net_notional = current_net_notional + (float(proposed_size_usd) * eff_cand_lev * dir_sign)
+        directional_ratio = abs(proposed_net_notional) / max(1e-9, total_equity)
         
         # If the candidate trade acts as a hedge (reduces net directional imbalance), always approve
-        if abs(proposed_net_margin) < abs(current_net_margin):
+        if abs(proposed_net_notional) < abs(current_net_notional):
             return True, directional_ratio, f"APPROVED (Hedge/De-risking: Net Directional Exposure {directional_ratio*100:.1f}%)"
             
         if directional_ratio > max_directional_ratio:

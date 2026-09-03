@@ -524,7 +524,11 @@ app.register_blueprint(dashboard_bp)
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    cors_origin = os.environ.get("DASHBOARD_CORS_ORIGIN", "").strip()
+    if cors_origin:
+        response.headers["Access-Control-Allow-Origin"] = cors_origin
+    elif os.environ.get("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1"):
+        response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-KEY, X-ADMIN-KEY, Authorization"
     return response
@@ -1654,51 +1658,37 @@ def get_real_bybit_balance():
     if not api_key or not api_secret:
         return "API_KEYS_MISSING"
         
-    max_balance = 0.0
     geo_blocked_encountered = False
     
-    for account_type in ["UNIFIED", "CONTRACT", "SPOT", "FUND"]:
-        if account_type == "FUND":
-            res = bybit_get_request("/v5/asset/transfer/query-account-coins-balance", {"accountType": "FUND"})
-        else:
-            res = bybit_get_request("/v5/account/wallet-balance", {"accountType": account_type})
+    # Finding #92: Query strictly derivatives-tradable balance (UNIFIED or CONTRACT).
+    # Never query FUND or SPOT which would oversize risk against unusable/non-tradable spot capital.
+    for account_type in ["UNIFIED", "CONTRACT"]:
+        res = bybit_get_request("/v5/account/wallet-balance", {"accountType": account_type})
             
         ret_code = res.get("retCode")
         if ret_code == 0:
-            if account_type == "FUND":
-                balances = res.get("result", {}).get("balance", [])
-                fund_sum = 0.0
-                for b_item in balances:
-                    coin_name = b_item.get("coin", "")
-                    coin_bal = float(b_item.get("walletBalance", "0"))
-                    if coin_name in ["USDT", "USDC"]:
-                        fund_sum += coin_bal
-                    elif coin_name == "BTC":
-                        fund_sum += coin_bal * float(get_fallback_price("BTCUSDT") or 60000.0)
-                    elif coin_name == "ETH":
-                        fund_sum += coin_bal * float(get_fallback_price("ETHUSDT") or 33000.0)
-                    elif coin_name == "SOL":
-                        fund_sum += coin_bal * float(get_fallback_price("SOLUSDT") or 140.0)
-                max_balance = max(max_balance, fund_sum)
-            else:
-                list_data = res.get("result", {}).get("list", [])
-                if list_data:
-                    total_equity = list_data[0].get("totalEquity") or list_data[0].get("totalWalletBalance") or "0"
-                    max_balance = max(max_balance, float(total_equity))
+            list_data = res.get("result", {}).get("list", [])
+            if list_data:
+                # Prefer available balance for derivatives, fallback to wallet balance / total equity
+                derivatives_balance = (
+                    list_data[0].get("totalAvailableBalance")
+                    or list_data[0].get("totalWalletBalance")
+                    or list_data[0].get("totalEquity")
+                    or "0"
+                )
+                bal_val = float(derivatives_balance)
+                if bal_val > 0.0:
+                    return bal_val
         else:
             ret_msg = res.get("retMsg", "")
-            # If the response is HTTP error (retCode is HTTP status code)
             if isinstance(ret_code, int) and (400 <= ret_code <= 599):
                 print(f"[Bybit Balance] HTTP {ret_code} for {account_type}: {ret_msg}")
                 if ret_code == 403 and ("cloudfront" in ret_msg.lower() or "block" in ret_msg.lower()):
                     geo_blocked_encountered = True
             else:
-                # Suppress legacy warnings (10001, 10003) for Unified accounts
-                if not (ret_code in [10001, 10003] and account_type in ["SPOT", "CONTRACT", "FUND"]):
+                if not (ret_code in [10001, 10003] and account_type == "CONTRACT"):
                     print(f"[Bybit Balance] Query error for {account_type}: Code {ret_code} - {ret_msg}")
                     
-    if max_balance > 0.0:
-        return max_balance
     if geo_blocked_encountered:
         return "GEO_BLOCKED"
     return 0.0
@@ -2332,6 +2322,25 @@ def load_model_weights(iv):
                 log_event("CRITICAL", f"[Calibrator Barrier Divergence] {msg} Slot set to None (Fail-Closed).")
                 send_telegram_alert(f"🚨 *CALIBRATOR BARRIER DIVERGENCE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
                 return False
+
+            # Finding #96 & #100: Check economic viability against fee-inclusive break-even p* & target compatibility
+            from tools.beta_calibrator import is_calibrator_viable
+            haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
+            eff_tp = live_tp * haircut
+            roundtrip_cost = 0.0010
+            p_star = (live_sl + roundtrip_cost) / (eff_tp + live_sl)
+            if not is_calibrator_viable(cal_obj, min_required_p_star=p_star):
+                msg = f"Calibrator '{cal_file}' achievable probability ceiling cannot reach break-even p* ({p_star:.4f}) under live R:R."
+                log_event("CRITICAL", f"[Calibrator Non-Viable] {msg} Slot set to None (Fail-Closed).")
+                send_telegram_alert(f"🚨 *CALIBRATOR NON-VIABLE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
+                return False
+
+            target_def = cal_obj.get("target_definition")
+            if target_def and target_def not in ["triple_barrier_exact", "triple_barrier"]:
+                msg = f"Calibrator '{cal_file}' target definition '{target_def}' is incompatible with live execution engine."
+                log_event("CRITICAL", f"[Calibrator Target Incompatible] {msg} Slot set to None (Fail-Closed).")
+                return False
+
             return True
 
         try:
@@ -7543,8 +7552,9 @@ def main():
 
                             # Bound final threshold relative to economic base
                             from config import MAX_THRESHOLD_UPLIFT
-                            max_allowed_threshold = min(0.60, economic_base_threshold + MAX_THRESHOLD_UPLIFT)
-                            dynamic_conf_threshold = float(round(min(max_allowed_threshold, max(economic_base_threshold, dynamic_conf_threshold)), 4))
+                            effective_base = max(economic_base_threshold, base_cfg_thresh)
+                            max_allowed_threshold = min(0.65, effective_base + MAX_THRESHOLD_UPLIFT)
+                            dynamic_conf_threshold = float(round(max(base_cfg_thresh, min(max_allowed_threshold, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
                             for k_suffix in [str(tf), str(iv)]:
@@ -8153,7 +8163,7 @@ def main():
                                                 passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
                                                     symbol, position_size_usd, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=rec
                                                 )
-                                                rec.outcome = "EXECUTED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
+                                                rec.outcome = "APPROVED" if (passed_checklist and not wallet_exceeded) else "REJECTED"
                                                 rec.reject_reason = None if (passed_checklist and not wallet_exceeded) else checklist_msg
                                                 if passed_checklist and not wallet_exceeded:
                                                     rec.position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
@@ -8220,8 +8230,9 @@ def main():
 
                                                     scaled_risk_usd = (scaled_notional / max(1e-8, entry_price)) * new_stop_dist
                                                 
-                                                    # Priority 2: Risk Check — Allow minimum notional trade if max loss <= 1.5% of balance ($1.40)
-                                                    max_allowed_risk_usd = max(original_risk_usd * 1.50, current_bal * 0.015)
+                                                    # Priority 2: Risk Check — Strictly bounded by MAX_SCALED_RISK_CAP_RATIO (1.10x) (Finding #91)
+                                                    max_allowed_risk_ratio = getattr(config, "MAX_SCALED_RISK_CAP_RATIO", 1.10)
+                                                    max_allowed_risk_usd = original_risk_usd * max_allowed_risk_ratio
                                                     if scaled_risk_usd > max_allowed_risk_usd:
                                                         print(f"[{symbol} {iv}m Risk Guard] REJECTED: Scaling to ${scaled_notional:.2f} would exceed risk budget (Scaled: ${scaled_risk_usd:.2f} vs Max: ${max_allowed_risk_usd:.2f})")
                                                         status_msg = "Skipped (Exceeds Risk Cap)"
@@ -8534,8 +8545,12 @@ def main():
                         rec.status_msg = status_msg
                         if not getattr(rec, "reject_reason", None) and status_msg not in ("Pending", ""):
                             rec.reject_reason = status_msg
-                        if not hasattr(rec, "outcome") or not rec.outcome or rec.outcome == "ERROR":
-                            rec.outcome = "EXECUTED" if placed else ("REJECTED" if status_msg.startswith("REJECTED") else "SKIPPED")
+                        if placed:
+                            rec.outcome = "EXECUTED"
+                        elif status_msg.startswith("REJECTED"):
+                            rec.outcome = "REJECTED"
+                        else:
+                            rec.outcome = "SKIPPED"
                         write_decision(rec)
                         log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
                         last_processed_timestamps[last_ts_key] = latest_completed_ts

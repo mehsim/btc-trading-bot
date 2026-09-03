@@ -6,6 +6,7 @@ from risk_limits import HARD_MAX_DRAWDOWN_HALT_PCT, HARD_MAX_RISK_PER_TRADE_PCT
 from kelly_tracker import global_kelly_tracker
 from portfolio_risk import portfolio_risk_engine
 from pain_feedback import pain_feedback
+from database import log_event
 
 class AutoStopFloor:
     def __init__(self, lookback_trades=200, min_sample_size=10):
@@ -123,6 +124,9 @@ def compute_conservative_kelly(
     from kelly_tracker import global_kelly_tracker
     from config import QUALITY_SIZING
     
+    from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
+    haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
+    
     if trade_history and len(trade_history) >= 10:
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
             timeframe=str(interval),
@@ -140,11 +144,20 @@ def compute_conservative_kelly(
             return kelly_val
             
     p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
-    b_ratio = float(tp_multiplier / sl_multiplier) if sl_multiplier > 0 else 1.5
+    # Apply 0.80 realized haircut and deduct 0.10% roundtrip fee from payoff ratio (Finding #99)
+    eff_tp = float(tp_multiplier) * haircut
+    eff_sl = max(1e-6, float(sl_multiplier))
+    roundtrip_cost = 0.0010
+    b_ratio = max(0.01, (eff_tp - roundtrip_cost) / eff_sl)
     
     # Pure Quarter-Kelly formula using calibrated model probability:
     # Full Kelly: f* = (p * (b + 1) - 1) / b
-    raw_kelly = max(0.0, (p_hat * (b_ratio + 1.0) - 1.0) / b_ratio) if b_ratio > 0 else 0.0
+    # Requires p_hat > 1 / (b + 1) to produce positive edge; otherwise returns 0.0 (Finding #94)
+    p_star = 1.0 / (b_ratio + 1.0)
+    if p_hat <= p_star:
+        return 0.0
+
+    raw_kelly = max(0.0, (p_hat * (b_ratio + 1.0) - 1.0) / b_ratio)
     scaled_kelly = 0.25 * raw_kelly
 
     # R-1 Model Quality Sizing Multiplier
@@ -234,32 +247,77 @@ def _get_returns_series(df: pd.DataFrame) -> Optional[pd.Series]:
         s.index = pd.to_numeric(df["timestamp"], errors="coerce")
     return s.tail(100)
 
-def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict, interval: str = "60") -> float:
-    if not open_positions or symbol not in df_dict or not isinstance(df_dict[symbol], pd.DataFrame):
+def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: dict, interval: str = "60", candidate_direction: str = "Bullish", direction: Optional[str] = None) -> float:
+    if direction is not None:
+        candidate_direction = direction
+    """
+    Calculates maximum portfolio correlation with active positions (Finding #87).
+    - If candle data for candidate or open positions is missing, returns conservative fallback prior (0.80).
+    - Evaluates signed correlation relative to trade direction:
+      Opposite direction with positive correlation acts as a hedge (negative effective correlation) and is credited.
+    """
+    if not open_positions:
         return 0.0
+    if not df_dict or symbol not in df_dict or not isinstance(df_dict[symbol], pd.DataFrame):
+        log_event("WARNING", f"[Portfolio Correlation Guard] Candidate {symbol} missing candle data in df_dict — applying conservative fallback prior (0.80).")
+        return 0.80
     corr_cfg = getattr(config, "CORRELATION_WINDOW_CONFIG", {})
     lookback = corr_cfg.get(str(interval)) or corr_cfg.get("default", 20)
     
     target_s = _get_returns_series(df_dict[symbol])
     if target_s is None or len(target_s) < lookback:
-        return 0.0
+        log_event("WARNING", f"[Portfolio Correlation Guard] Candidate {symbol} return series too short ({len(target_s) if target_s is not None else 0} < {lookback}) — applying conservative fallback prior (0.80).")
+        return 0.80
     
-    max_corr = 0.0
+    cand_dir_str = str(candidate_direction).title()
+    cand_is_long = cand_dir_str in ["Bullish", "Long", "Buy"]
+    max_corr = None
+    has_valid_comparison = False
+
     for pos in open_positions:
         if isinstance(pos, dict):
             pos_symbol = pos.get("symbol")
-            if pos_symbol and pos_symbol in df_dict and pos_symbol != symbol and isinstance(df_dict[pos_symbol], pd.DataFrame):
-                other_s = _get_returns_series(df_dict[pos_symbol])
-                if other_s is not None and len(other_s) >= lookback:
-                    combined = pd.concat([target_s, other_s], axis=1, join="inner").dropna()
-                    if len(combined) >= lookback:
-                        corr_matrix = combined.corr()
-                        if corr_matrix.shape == (2, 2):
-                            corr_val = corr_matrix.iloc[0, 1]
-                            if not np.isnan(corr_val):
-                                max_corr = max(max_corr, abs(float(corr_val)))
+            if not pos_symbol or pos_symbol == symbol:
+                continue
+            pos_dir_str = str(pos.get("direction", "Bullish")).title()
+            pos_is_long = pos_dir_str in ["Bullish", "Long", "Buy"]
+            # Multiplier: +1 if same direction (correlated = risk concentration), -1 if opposite direction (correlated = hedge)
+            net_mult = 1.0 if (cand_is_long == pos_is_long) else -1.0
+
+            if pos_symbol not in df_dict or not isinstance(df_dict[pos_symbol], pd.DataFrame):
+                log_event("WARNING", f"[Portfolio Correlation Guard] Position {pos_symbol} missing from df_dict — assuming conservative correlation (0.80).")
+                effective_corr = 0.80 * net_mult
+                max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
+                has_valid_comparison = True
+                continue
+
+            other_s = _get_returns_series(df_dict[pos_symbol])
+            if other_s is None or len(other_s) < lookback:
+                log_event("WARNING", f"[Portfolio Correlation Guard] Position {pos_symbol} history too short — assuming conservative correlation (0.80).")
+                effective_corr = 0.80 * net_mult
+                max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
+                has_valid_comparison = True
+                continue
+
+            combined = pd.concat([target_s, other_s], axis=1, join="inner").dropna()
+            if len(combined) >= lookback:
+                corr_matrix = combined.corr()
+                if corr_matrix.shape == (2, 2):
+                    corr_val = corr_matrix.iloc[0, 1]
+                    if not np.isnan(corr_val):
+                        effective_corr = float(corr_val) * net_mult
+                        max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
+                        has_valid_comparison = True
+            else:
+                effective_corr = 0.80 * net_mult
+                max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
+                has_valid_comparison = True
                     
-    return max_corr
+    # If open positions exist but none could be checked (e.g. all missing), return conservative prior
+    if not has_valid_comparison and len([p for p in open_positions if isinstance(p, dict) and p.get("symbol") != symbol]) > 0:
+        return 0.80
+
+    return max_corr if max_corr is not None else 0.0
 
 def extract_or_build_returns_df(df_dict: dict) -> pd.DataFrame:
     """Extracts or dynamically constructs a percentage returns DataFrame from candle data in df_dict."""
@@ -432,13 +490,15 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if not heat_safe or heat_pct > max_heat:
             return False, f"REJECTED: Portfolio risk/heat ({heat_pct:.1f}%) exceeds safety limit ({max_heat}%)", dd_mult, 0.0
 
-        # 2.3 Net Directional Beta / Portfolio Delta Capping
+        # 2.3 Net Directional Beta / Portfolio Delta Capping (Finding #86)
+        max_dir_cap = getattr(config, "MAX_DIRECTIONAL_RATIO", 1.25)
         dir_ok, dir_ratio, dir_reason = portfolio_risk_engine.check_directional_budget(
             proposed_direction=direction,
             proposed_size_usd=capped_size,
             open_positions=active_trades,
             total_equity=equity,
-            max_directional_ratio=0.125
+            max_directional_ratio=max_dir_cap,
+            proposed_leverage=leverage_val
         )
         if not dir_ok:
             return False, dir_reason, dd_mult, 0.0
@@ -470,8 +530,8 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if mc_scale_factor < 1.0:
             capped_size = round(capped_size * mc_scale_factor, 2)
         
-        # 3. Correlation check
-        corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict, interval=interval)
+        # 3. Correlation check (Direction-aware signed correlation, Finding #87)
+        corr_val = calculate_portfolio_correlation(symbol, active_trades, df_dict, interval=interval, candidate_direction=direction)
         corr_ok = corr_val <= max_corr
         if journal:
             journal.gate("corr", corr_val, corr_ok)
@@ -616,8 +676,10 @@ class JointRiskBudgetAllocator:
                 "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"
             }
 
-        # Raw Kelly formula b = TP_dist / SL_dist, p = confidence
-        b_ratio = target_distance / stop_distance if stop_distance > 0 else 1.5
+        # Raw Kelly formula b = (TP_dist * haircut) / SL_dist, p = confidence (Finding #99)
+        haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
+        eff_target_dist = target_distance * haircut if target_distance > 0 else 0.0
+        b_ratio = eff_target_dist / stop_distance if stop_distance > 0 else 1.5
         p_win = max(0.01, min(0.99, calibrated_confidence))
         raw_kelly = (p_win * b_ratio - (1.0 - p_win)) / b_ratio if b_ratio > 0 else 0.05
         raw_kelly = max(0.0, raw_kelly)
@@ -638,8 +700,9 @@ class JointRiskBudgetAllocator:
             effective_kelly *= quality_mult
         
         # Calculate Unconstrained Risk-Budgeted Position Size (USD)
-        # Position Size = Capital * Effective Kelly (bounded by max available risk)
-        uncapped_size_usd = min(total_equity * effective_kelly, max_available_risk_usd / (stop_distance / entry_price))
+        # Position Size = Capital * Effective Kelly / stop_pct (bounded by max available risk / stop_pct) (Finding #95)
+        stop_pct = max(1e-6, stop_distance / entry_price)
+        uncapped_size_usd = min((total_equity * effective_kelly) / stop_pct, max_available_risk_usd / stop_pct)
 
         # 5. Orderbook Executable Liquidity Constraint (<= 2% Top-of-Book Depth & Market Impact < 0.05%)
         max_depth_cap = top_book_depth_usd * 0.02 if top_book_depth_usd > 0 else uncapped_size_usd
@@ -682,6 +745,7 @@ class JointRiskBudgetAllocator:
             "target_distance": round(target_distance, 6),
             "risk_per_trade": round(capital_at_risk, 2),
             "position_size": round(position_size_usd, 2),
+            "position_size_usd": round(position_size_usd, 2),
             "expected_edge": round(expected_edge, 6),
             "expected_utility": round(expected_utility, 4),
             "capital_at_risk": round(capital_at_risk, 2),
@@ -744,7 +808,11 @@ def calculate_anti_martingale_risk_multiplier(
     - Drawdown Defense Mode: Multiplier = 0.50x to 0.75x
     """
     current_equity = max(1.0, float(current_equity))
-    peak_equity = max(current_equity, float(peak_equity or current_equity))
+    if isinstance(peak_equity, dict):
+        peak_val = float(peak_equity.get("peak_balance", peak_equity.get("peak_wallet_balance", current_equity)) or current_equity)
+    else:
+        peak_val = float(peak_equity or current_equity)
+    peak_equity = max(current_equity, peak_val)
     
     drawdown_pct = (peak_equity - current_equity) / peak_equity
     

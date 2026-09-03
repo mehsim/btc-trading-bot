@@ -264,6 +264,8 @@ MODEL_SELECTION = {
 # Order Execution Bounds
 MIN_ORDER_VALUE_USDT = 5.1
 MAX_SCALED_RISK_CAP_RATIO = 1.10  # 110% hard cap on approved risk when order size is scaled up
+MAX_DIRECTIONAL_RATIO = 1.25      # 125% notional directional concentration cap relative to equity
+REALIZED_RR_HAIRCUT = 0.80        # Haircut applied to nominal reward-to-risk ratio for Kelly calculations
 
 INTERVAL_MAX_POSITION_PCT = {
     "5": 0.05,

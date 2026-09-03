@@ -171,8 +171,9 @@ def require_ip_whitelist(f):
         else:
             client_ip = request.remote_addr
 
-        # Local loopback is always allowed
-        if client_ip in ["127.0.0.1", "::1", "localhost"]:
+        # Local loopback access
+        trust_loopback = get_secure_env("DASHBOARD_TRUST_LOOPBACK", "true").lower() in ("true", "1")
+        if trust_loopback and client_ip in ["127.0.0.1", "::1", "localhost"]:
             return f(*args, **kwargs)
 
         # If IP whitelist is configured, enforce it (supports '*' for all or comma-separated IPs)
@@ -190,8 +191,8 @@ def require_ip_whitelist(f):
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        # If neither IP whitelist nor API key is configured, allow public read-only access by default unless explicitly disabled
-        allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "true").lower() in ("true", "1")
+        # Finding #101: Fail-Closed by default — external public access is disabled unless explicitly set to true
+        allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1")
         if allow_public:
             return f(*args, **kwargs)
 

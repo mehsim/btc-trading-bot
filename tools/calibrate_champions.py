@@ -102,17 +102,15 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
     min_mass = 0.15
     
     bull_mask = (p_bull >= p_bear) & (dir_total >= min_mass) & (p_dir_bull >= min_dir)
-    # Long win: hit TP (target_trend == 2) or closed profitable before SL
+    # Long win: strictly hit TP barrier (target_trend == 2) (Finding #100)
     bull_target = df_eval.loc[bull_mask, "target_trend"].values
-    bull_ret = df_eval.loc[bull_mask, "future_return"].values
-    bull_wins = ((bull_target == 2) | ((bull_target != 0) & (bull_ret > 0))).astype(float)
+    bull_wins = (bull_target == 2).astype(float)
     bull_conf = p_dir_bull[bull_mask]
     
     bear_mask = (p_bear > p_bull) & (dir_total >= min_mass) & (p_dir_bear >= min_dir)
-    # Short win: hit TP (target_trend == 0) or closed profitable before SL
+    # Short win: strictly hit TP barrier (target_trend == 0) (Finding #100)
     bear_target = df_eval.loc[bear_mask, "target_trend"].values
-    bear_ret = df_eval.loc[bear_mask, "future_return"].values
-    bear_wins = ((bear_target == 0) | ((bear_target != 2) & (bear_ret < 0))).astype(float)
+    bear_wins = (bear_target == 0).astype(float)
     bear_conf = p_dir_bear[bear_mask]
     
     calibration_probs = np.concatenate([bull_conf, bear_conf])
@@ -152,6 +150,7 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
         "min_bin_support": MIN_BIN,
         "is_fitted": bool(bc.is_fitted),
         "is_fallback": bool(not bc.is_fitted),
+        "target_definition": "triple_barrier_exact",
         "champion_sha": manifest.get("git_sha", "unknown")
     }
     
