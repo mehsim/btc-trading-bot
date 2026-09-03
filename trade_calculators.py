@@ -476,6 +476,9 @@ def validate_trade_structure(entry_price, stop_price, tp_price, atr_dollars, lev
     Validates & adjusts R:R ratio, minimum stop width, and leverage compatibility.
     Returns: (is_valid, adjusted_dict, log_reason_str)
     """
+    if entry_price <= 0 or stop_price <= 0 or tp_price <= 0:
+        return False, {"entry_price": entry_price, "stop_price": stop_price, "tp_price": tp_price}, f"[INVALID_PRICE] Non-positive price detected: entry={entry_price}, stop={stop_price}, tp={tp_price}"
+
     stop_dist = abs(entry_price - stop_price)
     tp_dist = abs(tp_price - entry_price)
     

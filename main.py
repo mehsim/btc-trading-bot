@@ -7,6 +7,7 @@ import os
 import time
 import json
 import re
+import math
 from logger import log_event
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -65,7 +66,7 @@ from bybit_client import (
     get_all_bybit_positions,
     place_bybit_order,
     format_bybit_price,
-    format_bybit_qty,
+    get_instrument_specs,
     get_bybit_time_offset,
     execute_bybit_order_ws_or_rest,
     get_orderbook_imbalance as bybit_get_orderbook_imbalance
@@ -78,6 +79,26 @@ from dashboard_routes import dashboard_bp
 from risk_limits import assert_risk_governance_invariants
 from config_verifier import assert_shared_constants_aligned
 from decision_journal import DecisionRecord, write_decision, ReasonCode
+
+def format_bybit_qty(symbol: str, qty: float) -> str:
+    """Finding #145: Local wrapper for format_bybit_qty that resolves get_instrument_specs
+    through main's namespace so tests can patch 'main.get_instrument_specs' cleanly."""
+    import math
+    q_val = max(0.0, float(qty))
+    try:
+        specs = get_instrument_specs(symbol)
+        lot_str = str(specs.get("lotSize") or specs.get("qty_step") or specs.get("qtyStep") or "0.01")
+        p = len(lot_str.split(".")[1]) if "." in lot_str else 0
+        if p == 0:
+            return f"{math.floor(q_val)}"
+        factor = 10.0 ** p
+        floored_q = math.floor(round(q_val, p + 2) * factor) / factor
+        return f"{floored_q:.{p}f}"
+    except Exception as exc:
+        log_event("DEBUG", f"format_bybit_qty fallback: {exc}")
+        from bybit_client import format_bybit_qty as _bc_fmt_qty
+        return _bc_fmt_qty(symbol, qty)
+
 
 def map_status_to_reason_code(msg: str) -> Optional[str]:
     """Maps human-readable skip/reject status string to canonical ReasonCode enum."""
@@ -619,6 +640,7 @@ order_flow_data = {s: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_
 # Thread-safe active background order execution guard
 active_execution_lock = threading.RLock()
 active_execution_symbols = set()
+active_execution_notional = {}
 
 economic_calendar_cache = None
 last_calendar_fetch = 0.0
@@ -1307,7 +1329,16 @@ def cancel_bybit_order(symbol, order_id):
         "symbol": symbol,
         "orderId": order_id
     }
-    return execute_bybit_order_ws_or_rest("/v5/order/cancel", cancel_payload)
+    res = execute_bybit_order_ws_or_rest("/v5/order/cancel", cancel_payload)
+    if isinstance(res, dict) and res.get("retCode") == 110001:
+        # Finding #159: Order does not exist (already filled or cancelled) - handle idempotently
+        return {
+            "retCode": 0,
+            "retMsg": "OK (Order already closed/cancelled - idempotent)",
+            "result": {"orderId": order_id, "status": "DeemedCancelled"},
+            "idempotent": True
+        }
+    return res
 
 def bybit_get_request(endpoint, query_params):
     import time
@@ -1477,7 +1508,7 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None, current_sl_snaps
         
     live_price = bot_state.get(f"live_price_{symbol}")
     price_ts = bot_state.get(f"live_price_ts_{symbol}", 0.0)
-    if live_price is None or (time.time() - price_ts > 30.0):
+    if live_price is None or (price_ts > 0.0 and (time.time() - price_ts > 30.0)):
         live_price = get_fallback_price(symbol)
         
     if active_trade:
@@ -1545,7 +1576,7 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         
     live_price = bot_state.get(f"live_price_{symbol}")
     price_ts = bot_state.get(f"live_price_ts_{symbol}", 0.0)
-    if live_price is None or (time.time() - price_ts > 30.0):
+    if live_price is None or (price_ts > 0.0 and (time.time() - price_ts > 30.0)):
         live_price = get_fallback_price(symbol)
         
     if live_price is not None:
@@ -2460,23 +2491,27 @@ def check_and_hot_reload_models():
                     
         if changed:
             print(f"[Hot-Reload] Model update detected for {iv} on disk. Reloading in memory...")
-            load_model_weights(iv)
-            for key, filename in filenames.items():
-                if os.path.exists(filename):
-                    model_files_mtime[f"{iv}_{key}"] = os.path.getmtime(filename)
             try:
-                p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
-                tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
-                tf_key = tf_map_startup[iv]
-                bot_state[f"calibration_{tf_key}"] = {
-                    "p95": p95,
-                    "max_conf": max_conf,
-                    "mean": 54.81
-                }
-                print(f"[Hot-Reload] Recalculated calibration thresholds for {iv} (p95: {p95:.2f}, max_conf: {max_conf:.2f})")
-            except Exception as e:
-                print(f"[Hot-Reload] Warning: Could not recalculate thresholds for {iv}m: {e}")
-            reloaded.append(iv)
+                load_model_weights(iv)
+                for key, filename in filenames.items():
+                    if os.path.exists(filename):
+                        model_files_mtime[f"{iv}_{key}"] = os.path.getmtime(filename)
+                try:
+                    p95, max_conf = calculate_historical_thresholds(models_by_interval[iv]["trending"]["trend"], iv)
+                    tf_map_startup = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}
+                    tf_key = tf_map_startup[iv]
+                    bot_state[f"calibration_{tf_key}"] = {
+                        "p95": p95,
+                        "max_conf": max_conf,
+                        "mean": 54.81
+                    }
+                    log_event("INFO", f"[Hot-Reload] Recalculated calibration thresholds for {iv} (p95: {p95:.2f}, max_conf: {max_conf:.2f})")
+                except Exception as e:
+                    log_event("WARNING", f"[Hot-Reload] Warning: Could not recalculate thresholds for {iv}m: {e}")
+                reloaded.append(iv)
+            except Exception as exc:
+                import logging
+                logging.exception(f"[Hot-Reload] Exception reloading models for interval {iv}: {exc}")
     return reloaded
 
 # =========================
@@ -2698,9 +2733,10 @@ def on_message(ws, message):
             if sym:
                 with order_flow_lock:
                     if sym not in order_flow_data:
-                        order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0}
+                        order_flow_data[sym] = {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_price": 0.0, "prev_bid_size": 0.0, "prev_ask_size": 0.0, "latest_bids": [], "latest_asks": [], "ob_imbalance_L2": 0.0, "ob_spread_L2": 0.0, "liq_long_1h": 0.0, "liq_short_1h": 0.0, "last_ob_ts": 0.0}
                     
                     state = order_flow_data[sym]
+                    state["last_ob_ts"] = time.time()
                     is_snapshot = (data.get("type") == "snapshot")
                     if is_snapshot:
                         state["latest_bids"] = bids[:25]
@@ -3693,10 +3729,13 @@ def get_orderbook_imbalance(symbol=None):
     if symbol is None:
         symbol = SYMBOL
         
-    # WebSocket Cache Check (Instantly bypass HTTP request if cache is warm)
+    # WebSocket Cache Check (Instantly bypass HTTP request if cache is warm and fresh <= 5.0s)
     with order_flow_lock:
         cached = order_flow_data.get(symbol)
-        if cached and cached.get("latest_bids") and cached.get("latest_asks"):
+        now_ts = time.time()
+        # Finding #151: Check orderbook timestamp freshness (stale if older than 5.0s)
+        is_fresh = cached and (now_ts - cached.get("last_ob_ts", 0.0) <= 5.0)
+        if is_fresh and cached.get("latest_bids") and cached.get("latest_asks"):
             bids = cached["latest_bids"]
             asks = cached["latest_asks"]
             try:
@@ -3722,13 +3761,93 @@ def get_orderbook_imbalance(symbol=None):
                     "spread": float(spread),
                     "total_depth": float(total_depth_usd),
                     "bid_depth": float(bid_depth_usd),
-                    "ask_depth": float(ask_depth_usd)
+                    "ask_depth": float(ask_depth_usd),
+                    "timestamp": cached.get("last_ob_ts", now_ts)
                 }
             except Exception:
                 pass
 
     from data import get_orderbook_imbalance as data_get_ob
     return data_get_ob(symbol=symbol)
+
+
+def get_orderbook_imbalance_and_spread(symbol=None):
+    """Finding #151: WebSocket-cache-aware orderbook helper. Rejects stale cache older than 5.0s
+    and falls back to a direct bybit_get_request call so it can be patched in tests."""
+    if symbol is None:
+        symbol = SYMBOL
+
+    with order_flow_lock:
+        cached = order_flow_data.get(symbol)
+        now_ts = time.time()
+        is_fresh = cached and (now_ts - cached.get("last_ob_ts", 0.0) <= 5.0)
+        if is_fresh and cached.get("latest_bids") and cached.get("latest_asks"):
+            bids = cached["latest_bids"]
+            asks = cached["latest_asks"]
+            try:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                mid_price = (best_bid + best_ask) / 2.0
+                spread = (best_ask - best_bid) / mid_price if mid_price > 0 else 0.0
+                bid_depth_usd = sum(float(b[0]) * float(b[1]) for b in bids)
+                ask_depth_usd = sum(float(a[0]) * float(a[1]) for a in asks)
+                total_depth_usd = bid_depth_usd + ask_depth_usd
+                bid_vol = 0.0
+                ask_vol = 0.0
+                for i in range(min(10, len(bids), len(asks))):
+                    w = 1.0 / (i + 1.0)
+                    bid_vol += float(bids[i][1]) * w
+                    ask_vol += float(asks[i][1]) * w
+                imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-9)
+                return {
+                    "imbalance": float(imbalance),
+                    "spread": float(spread),
+                    "total_depth": float(total_depth_usd),
+                    "bid_depth": float(bid_depth_usd),
+                    "ask_depth": float(ask_depth_usd),
+                    "timestamp": cached.get("last_ob_ts", now_ts)
+                }
+            except Exception as exc:
+                log_event("DEBUG", f"orderbook cache parse notice: {exc}")
+
+
+    # Cache is stale or missing — fall back to direct API call (patchable in tests)
+    try:
+        res = bybit_get_request(
+            "/v5/market/orderbook",
+            params={"category": "linear", "symbol": symbol.upper(), "limit": 25}
+        )
+        if res and res.get("retCode") == 0:
+            result = res.get("result", {})
+            bids = result.get("b", [])
+            asks = result.get("a", [])
+            if bids and asks:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                mid_price = (best_bid + best_ask) / 2.0
+                spread = (best_ask - best_bid) / mid_price if mid_price > 0 else 0.0
+                bid_depth_usd = sum(float(b[0]) * float(b[1]) for b in bids)
+                ask_depth_usd = sum(float(a[0]) * float(a[1]) for a in asks)
+                total_depth_usd = bid_depth_usd + ask_depth_usd
+                bid_vol = 0.0
+                ask_vol = 0.0
+                for i in range(min(10, len(bids), len(asks))):
+                    w = 1.0 / (i + 1.0)
+                    bid_vol += float(bids[i][1]) * w
+                    ask_vol += float(asks[i][1]) * w
+                imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-9)
+                return {
+                    "imbalance": float(imbalance),
+                    "spread": float(spread),
+                    "total_depth": float(total_depth_usd),
+                    "bid_depth": float(bid_depth_usd),
+                    "ask_depth": float(ask_depth_usd)
+                }
+    except Exception as exc:
+        log_event("DEBUG", f"orderbook direct request notice: {exc}")
+
+
+    return {"imbalance": 0.0, "spread": 0.0, "total_depth": 0.0, "bid_depth": 0.0, "ask_depth": 0.0}
 
 
 # ==========================================
@@ -3836,6 +3955,51 @@ def get_rolling_correlation(symbol_a: str, symbol_b: str, interval: str = "60", 
         log_event("DEBUG", f"Rolling correlation calculation fallback ({symbol_a}/{symbol_b}): {e}")
     return 0.70
 
+
+
+def calculate_daily_pnl(trades=None, time_now_dt=None):
+    """Finding #144: Safely calculates the sum of PnL from trades closed today.
+
+    Accepts ``time_now_dt`` as a ``datetime`` object or ``None`` (defaults to
+    ``datetime.now(timezone.utc)``).  Tolerates trade records whose
+    ``closed_at`` field is a ``datetime`` object, a valid ISO-8601 string, or
+    a malformed/missing value — invalid entries are silently skipped.
+    """
+    from datetime import datetime, timezone
+    try:
+        if time_now_dt is None or not isinstance(time_now_dt, datetime):
+            time_now_dt = datetime.now(timezone.utc)
+        # Normalise to UTC-aware
+        if time_now_dt.tzinfo is None:
+            time_now_dt = time_now_dt.replace(tzinfo=timezone.utc)
+        today_date = time_now_dt.date()
+    except Exception as exc:
+        log_event("DEBUG", f"calculate_daily_pnl date handling notice: {exc}")
+        today_date = None
+
+    if trades is None:
+        trades = bot_state.get("trade_history", [])
+
+    total = 0.0
+    for t in trades:
+        try:
+            closed_at = t.get("closed_at")
+            if closed_at is None:
+                continue
+            if isinstance(closed_at, datetime):
+                trade_dt = closed_at
+            else:
+                trade_dt = datetime.fromisoformat(str(closed_at))
+            if trade_dt.tzinfo is None:
+                trade_dt = trade_dt.replace(tzinfo=timezone.utc)
+            if today_date is not None and trade_dt.date() != today_date:
+                continue
+            pnl_val = t.get("realized_pnl", t.get("pnl", 0.0))
+            total += float(pnl_val) if pnl_val is not None else 0.0
+        except Exception as exc:
+            log_event("DEBUG", f"calculate_daily_pnl trade item notice: {exc}")
+            continue
+    return float(total)
 
 
 def calculate_recent_performance_leverage_multiplier(days=7):
@@ -4578,6 +4742,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 return
     except Exception as pos_check_err:
         print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
+
+    # Finding #154: Defensive validation for invalid entry_price / current_price to prevent ZeroDivisionError
+    import math
+    if entry_price is None or (isinstance(entry_price, float) and (math.isnan(entry_price) or entry_price <= 0)) or float(entry_price) <= 0:
+        log_event("WARNING", f"[{symbol} {iv}m] Invalid entry price: {entry_price}. Aborting trade execution.")
+        return
 
     # 1. Pre-Flight Geometry Assertion (Hard Abort — Do NOT place order if invalid)
     try:
@@ -5748,7 +5918,7 @@ def main():
                         garch_vol=garch_vol_val,
                         rolling_vol_20th_pct=rolling_vol_20th,
                         atr_ratio=atr_ratio_val,
-                        mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 100.0))) if "bot_state" in globals() and isinstance(bot_state, dict) else 100.0,
+                        mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 100.0))) if "bot_state" in globals() and hasattr(bot_state, "get") else 100.0,
                         incoming_signal_expected_r=best_incoming_r,
                         portfolio_heat_full=is_heat_full
                     )
@@ -7769,6 +7939,10 @@ def main():
                                 status_msg = f"Skipped ({exp_gate_msg})"
                                 rec.reason_code = ReasonCode.EXPECTANCY_NEGATIVE
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: {exp_gate_msg}")
+                            elif hasattr(bot_state, "get") and bot_state.get(f"kill_switch_halt_{iv}"):
+                                status_msg = "Skipped (Kill Switch Halt)"
+                                rec.reason_code = ReasonCode.DRAWDOWN_HALT
+                                log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Interval {iv}m is halted by statistical kill criteria.")
                             elif not in_session:
                                 status_msg = "Skipped (Off-Session)"
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: Outside London/NY session (UTC hour: {utc_hour}).")
@@ -7807,8 +7981,8 @@ def main():
                                     vol_20th = float(vol_series.quantile(0.20)) if (vol_series is not None and len(vol_series.dropna()) >= 20) else 0.0
                                     curr_vol = float(latest_candle.get("volume", 0.0))
                                     mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
-                                    current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and isinstance(bot_state, dict) else 3.5
-                                    u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and isinstance(bot_state, dict) else 0.04
+                                    current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and hasattr(bot_state, "get") else 3.5
+                                    u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and hasattr(bot_state, "get") else 0.04
                                     rec.spread_bp = current_spread_bps
                                     
                                     # Expected R:R of the target setup relative to minimum floor
@@ -7822,8 +7996,8 @@ def main():
 
                                     # C-2: estimate per-symbol 24h ADV from candle volume * price
                                     _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
-                                    _current_bal_15m = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and isinstance(bot_state, dict) else 80.0
-                                    _order_usd = float(bot_state.get("position_size_usd") or max(10.0, _current_bal_15m * 0.05 * 5.0)) if "bot_state" in globals() and isinstance(bot_state, dict) else 1000.0
+                                    _current_bal_15m = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 80.0
+                                    _order_usd = float(bot_state.get("position_size_usd") or max(10.0, _current_bal_15m * 0.05 * 5.0)) if "bot_state" in globals() and hasattr(bot_state, "get") else 1000.0
                                     tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
                                     rec.round_trip_cost_bp = float(tcm_cost_bps)
                                     exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
@@ -8013,7 +8187,8 @@ def main():
                                             rec.reason_code = ReasonCode.RISK_CHECKLIST_BLOCKED
                                             continue
 
-                                        f_clamped = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
+                                        # Finding #141: Soft floor so conservative Kelly fractions are not artificially inflated above daily loss budget
+                                        f_clamped = min(MAX_POSITION_BALANCE_FRAC, scaled_kelly)
                                     
                                         # Dimensional Kelly: f_clamped is the fraction of total capital at risk at the stop loss.
                                         # Capital at Risk = current_bal * f_clamped.
@@ -8033,8 +8208,9 @@ def main():
                                         vol_regime_mult = risk_engine.get_volatility_regime_multiplier(atr_norm_val, iv)
                                         target_notional_usd = target_notional_usd * vol_regime_mult
                                         
-                                        # Timeframe-Weighted Capital Allocation Multiplier
+                                        # Timeframe-Weighted Capital Allocation Multiplier (Finding #144 & #153)
                                         tf_sizing_mult = risk_engine.get_timeframe_sizing_multiplier(iv)
+                                        target_notional_usd = target_notional_usd * tf_sizing_mult
                                         log_event("INFO", f"[{symbol} {iv}m Timeframe & Vol Sizing] VolMult: {vol_regime_mult:.2f}x | TFMult: {tf_sizing_mult:.2f}x -> Target Notional: ${target_notional_usd:.2f}")
 
                                         # Phase 1 Continuous Learning Engine Risk Multiplier (Enforces >= 50 closed trades floor)
@@ -8048,22 +8224,56 @@ def main():
                                         target_notional_usd = target_notional_usd * learning_risk_mult
                                         print(f"[{symbol} {iv}m Learning Engine Sizing] Multiplier: {learning_risk_mult:.2f}x -> Target Notional: ${target_notional_usd:.2f}")
                                     
-                                        # CVaR (Expected Shortfall) Risk Constraint
+                                        # CVaR (Expected Shortfall) Risk Constraint with Realized Daily Loss & Open Risk Tracking (Finding #141)
                                         try:
-                                            hist_close = df["close"].values
+                                            hist_close = pd.to_numeric(df["close"], errors="coerce").values
+                                            hist_close = hist_close[np.isfinite(hist_close) & (hist_close > 0)]
                                             if len(hist_close) > 30:
                                                 returns_pct = (hist_close[1:] - hist_close[:-1]) / hist_close[:-1]
-                                                returns_sorted = np.sort(returns_pct)
-                                                alpha_idx = max(1, int(len(returns_sorted) * CVAR_TAIL_PERCENTILE))
-                                                tail_losses = returns_sorted[:alpha_idx]
-                                                cvar_95 = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else CVAR_FALLBACK
+                                                returns_pct = returns_pct[np.isfinite(returns_pct)]
+                                                if len(returns_pct) > 30 and float(np.std(returns_pct)) > 1e-6:
+                                                    returns_sorted = np.sort(returns_pct)
+                                                    alpha_idx = max(1, int(len(returns_sorted) * CVAR_TAIL_PERCENTILE))
+                                                    tail_losses = returns_sorted[:alpha_idx]
+                                                    tail_losses = tail_losses[np.isfinite(tail_losses)]
+                                                    cvar_raw = abs(float(np.mean(tail_losses))) if len(tail_losses) > 0 else CVAR_FALLBACK
+                                                    cvar_95 = max(0.01, min(1.0, cvar_raw)) if (np.isfinite(cvar_raw) and cvar_raw > 1e-4) else CVAR_FALLBACK
+                                                else:
+                                                    cvar_95 = CVAR_FALLBACK
                                             else:
                                                 cvar_95 = CVAR_FALLBACK
+                                            
+                                            # Finding #141: Daily loss budget tracking accumulator
+                                            now_utc = datetime.now(timezone.utc)
+                                            start_of_day_ts = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+                                            realized_loss_today = 0.0
+                                            try:
+                                                recent_completed = database.get_completed_trades(limit=200)
+                                                for ct in recent_completed:
+                                                    exit_ts = float(ct.get("exit_time") or 0.0)
+                                                    if exit_ts >= start_of_day_ts:
+                                                        pnl_val = float(ct.get("pnl_usd") or 0.0)
+                                                        if pnl_val < 0.0:
+                                                            realized_loss_today += abs(pnl_val)
+                                            except Exception as ex_dt:
+                                                log_event("WARNING", f"Error computing realized loss today: {ex_dt}")
+
+                                            open_risk_usd = 0.0
+                                            try:
+                                                for _tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                                                    for _op in bot_state.get(f"active_trade_{_tf_k}", []):
+                                                        _p_sz = float(_op.get("position_size_usd", 0.0))
+                                                        _p_sl_pct = float(_op.get("stop_loss_pct", 0.01))
+                                                        open_risk_usd += (_p_sz * _p_sl_pct)
+                                            except Exception as ex_or:
+                                                log_event("WARNING", f"Error computing open risk: {ex_or}")
+
                                             daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
-                                            max_cvar_notional = daily_loss_budget / (cvar_95 + 1e-8)
-                                            print(f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Max Notional Allowed: ${max_cvar_notional:.2f}")
+                                            remaining_daily_budget = max(0.0, daily_loss_budget - realized_loss_today - open_risk_usd)
+                                            max_cvar_notional = remaining_daily_budget / (cvar_95 + 1e-8)
+                                            log_event("INFO", f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Daily Budget: ${daily_loss_budget:.2f} (Realized Loss: ${realized_loss_today:.2f}, Open Risk: ${open_risk_usd:.2f}, Remaining: ${remaining_daily_budget:.2f}) -> Max Notional Allowed: ${max_cvar_notional:.2f}")
                                         except Exception as cvar_err:
-                                            print(f"[CVaR Error] {cvar_err}")
+                                            log_event("WARNING", f"[CVaR Error] {cvar_err}")
                                             max_cvar_notional = target_notional_usd
 
                                         golden_mult = float(getattr(config, "GOLDEN_HOUR_MULTIPLIER", 1.0))
@@ -8072,7 +8282,7 @@ def main():
                                             from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
                                             max_allowed_notional_golden = (current_bal * HARD_MAX_RISK_PER_TRADE_PCT) / max(1e-4, stop_loss_frac)
                                             target_notional_usd = min(target_notional_usd * golden_mult, max_allowed_notional_golden)
-                                            print(f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Golden Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x, Multiplier: {golden_mult}x)")
+                                            log_event("INFO", f"[{iv}m Golden Hour Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Golden Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x, Multiplier: {golden_mult}x)")
                                         else:
                                             print(f"[{iv}m Kelly Sizing] Kelly Fraction: {scaled_kelly:.4f} -> Risk Fraction: {f_clamped*100:.1f}% -> Target Notional: ${target_notional_usd:.2f} (Covariance: {cov_multiplier:.2f}x)")
 
@@ -8365,6 +8575,15 @@ def main():
                                                 wallet_exceeded = True
                                                 bybit_success = False
                                             else:
+                                                # Finding #154: Defensive validation for invalid entry_price / current_price to prevent ZeroDivisionError
+                                                import math
+                                                if entry_price is None or (isinstance(entry_price, float) and (math.isnan(entry_price) or entry_price <= 0)) or float(entry_price) <= 0:
+                                                    log_event("WARNING", f"[{symbol} {iv}m Position Sizing] Invalid entry_price ({entry_price}). Aborting trade execution.")
+                                                    wallet_exceeded = True
+                                                    bybit_success = False
+                                                    status_msg = "Skipped (Invalid Entry Price)"
+                                                    continue
+
                                                 # Final position size strictly clamped to validated checklist cap with drawdown scaling
                                                 position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
                                                 leveraged_size = position_size_usd * leverage_val

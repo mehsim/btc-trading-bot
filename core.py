@@ -29,6 +29,38 @@ for lag in [1, 2]:
     features.append(f"MACD_diff_lag{lag}")
     features.append(f"BB_pct_lag{lag}")
 
+def get_core_features_for_interval(interval: str = "60") -> list:
+    """
+    Finding #153: Returns the deterministic list of features for the specified timeframe interval.
+    Inspects on-disk manifests or selected_features_{interval}.json first,
+    falling back to core.features to ensure all intervals in TIMEFRAME_CONFIG
+    (1, 5, 15, 30, 60, 120, 240, 360, D) return valid, consistent feature lists without throwing KeyError.
+    """
+    iv_str = str(interval).replace("m", "").replace("M", "")
+    manifest_filename = f"ensemble_trending_trend_{iv_str}_manifest.json"
+    selected_features_filename = f"selected_features_{iv_str}.json"
+    
+    if os.path.exists(manifest_filename):
+        try:
+            with open(manifest_filename, "r") as f:
+                m_data = json.load(f)
+                feat_list = m_data.get("feature_names") or m_data.get("features")
+                if feat_list and isinstance(feat_list, list) and len(feat_list) >= 10:
+                    return list(feat_list)
+        except (IOError, OSError, json.JSONDecodeError):
+            pass
+
+    if os.path.exists(selected_features_filename):
+        try:
+            with open(selected_features_filename, "r") as f:
+                feat_list = json.load(f)
+                if feat_list and isinstance(feat_list, list) and len(feat_list) >= 10:
+                    return list(feat_list)
+        except (IOError, OSError, json.JSONDecodeError):
+            pass
+            
+    return list(features)
+
 def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
     return features_module.add_features(df, fetch_calendar_callback=fetch_calendar_callback, symbol=symbol, interval=interval)
 

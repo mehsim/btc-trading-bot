@@ -744,3 +744,9 @@ def sanitize_feature_matrix(X):
             return X
     return X
 
+def get_core_features_for_interval(interval: str = "60") -> list:
+    """Finding #153: Helper to return core features for interval."""
+    import core
+    return core.get_core_features_for_interval(interval)
+
+

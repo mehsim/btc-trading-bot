@@ -231,22 +231,77 @@ def get_timeframe_stop_multiplier(interval: str) -> float:
         "60": 1.00,  # 1h: 1.00x ATR
         "30": 0.80,  # 30m: 0.80x ATR
         "15": 0.80,  # 15m: 0.80x ATR
+        "5": 0.70,   # 5m: 0.70x ATR
     }
     return float(tf_stop_mults.get(iv_str, 1.0))
 
 
+calculate_timeframe_stop_multiplier = get_timeframe_stop_multiplier
+
+
+def calibrate_dynamic_sl_multiplier(
+    interval: str,
+    realized_volatility: Optional[float] = None,
+    recent_slippage: Optional[float] = None,
+    base_multiplier: Optional[float] = None
+) -> float:
+    """
+    Finding #157: Dynamic Stop Calibration.
+    Calculates calibrated ATR stop multiplier value locally without mutating global
+    config.DYNAMIC_SL_MULTIPLIER directly (preventing concurrent request race conditions).
+    """
+    if base_multiplier is None:
+        base_multiplier = get_timeframe_stop_multiplier(interval)
+
+    # Use global configured multiplier as scaling factor without mutating it
+    cfg_base = float(getattr(config, "DYNAMIC_SL_MULTIPLIER", 1.0))
+    multiplier = float(base_multiplier) * cfg_base
+
+    if realized_volatility is not None and realized_volatility > 0:
+        vol_scalar = np.clip(realized_volatility / 0.02, 0.8, 1.5)
+        multiplier *= float(vol_scalar)
+
+    if recent_slippage is not None and recent_slippage > 0:
+        slip_buffer = 1.0 + min(0.3, recent_slippage * 50.0)
+        multiplier *= float(slip_buffer)
+
+    return float(np.clip(multiplier, 0.5, 2.5))
+
+
+def recalculate_dynamic_sl_multiplier(
+    interval: str,
+    realized_volatility: Optional[float] = None,
+    recent_slippage: Optional[float] = None,
+    base_multiplier: Optional[float] = None
+) -> float:
+    """Alias for calibrate_dynamic_sl_multiplier returning calibrated value without global config mutation."""
+    return calibrate_dynamic_sl_multiplier(
+        interval=interval,
+        realized_volatility=realized_volatility,
+        recent_slippage=recent_slippage,
+        base_multiplier=base_multiplier
+    )
+
+
 def calculate_volatility_leverage(symbol: str, base_leverage: float, current_atr: float, target_atr: float = 0.005, min_lev: float = 1.0, max_lev: float = 10.0) -> float:
-    if current_atr <= 0:
-        return base_leverage
+    if current_atr <= 0 or not np.isfinite(current_atr):
+        return float(base_leverage)
+    if target_atr <= 0 or not np.isfinite(target_atr):
+        return float(base_leverage)
+    if not np.isfinite(base_leverage) or base_leverage <= 0:
+        return float(min_lev)
     cap = 10.0 if "BTC" in symbol else 5.0
     max_limit = min(max_lev, cap)
     effective_lev = base_leverage * np.sqrt(target_atr / max(1e-9, current_atr))
+    if not np.isfinite(effective_lev):
+        return float(base_leverage)
     return float(np.clip(effective_lev, min_lev, max_limit))
 
 def _get_returns_series(df: pd.DataFrame) -> Optional[pd.Series]:
     if df is None or not isinstance(df, pd.DataFrame) or "close" not in df.columns or len(df) < 10:
         return None
-    s = pd.to_numeric(df["close"], errors="coerce").pct_change().fillna(0.0)
+    close_series = pd.to_numeric(df["close"], errors="coerce")
+    s = close_series.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
     if "timestamp" in df.columns:
         s.index = pd.to_numeric(df["timestamp"], errors="coerce")
     return s.tail(100)
@@ -305,13 +360,19 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
 
             combined = pd.concat([target_s, other_s], axis=1, join="inner").dropna()
             if len(combined) >= lookback:
-                corr_matrix = combined.corr()
-                if corr_matrix.shape == (2, 2):
-                    corr_val = corr_matrix.iloc[0, 1]
-                    if not np.isnan(corr_val):
-                        effective_corr = float(corr_val) * net_mult
-                        max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
-                        has_valid_comparison = True
+                # Check for zero volatility (zero standard deviation)
+                std_0 = float(combined.iloc[:, 0].std())
+                std_1 = float(combined.iloc[:, 1].std())
+                if std_0 <= 1e-8 or std_1 <= 1e-8 or not np.isfinite(std_0) or not np.isfinite(std_1):
+                    # Zero volatility: correlation is zero (orthogonal flat movement)
+                    corr_val = 0.0
+                else:
+                    corr_matrix = combined.corr()
+                    corr_val = corr_matrix.iloc[0, 1] if corr_matrix.shape == (2, 2) else 0.0
+                if not np.isnan(corr_val) and np.isfinite(corr_val):
+                    effective_corr = float(corr_val) * net_mult
+                    max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
+                    has_valid_comparison = True
             else:
                 effective_corr = 0.80 * net_mult
                 max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
@@ -392,6 +453,30 @@ def check_margin_utilization(used_margin: float, total_equity: float, max_levera
     elif utilization_pct >= max(warn_p, warning_thresh):
         return "WARNING_ALERT"
     return "NORMAL"
+
+
+def check_wallet_margin_utilization(candidate_margin: float, margin_info: Any) -> Tuple[bool, str]:
+    """
+    Finding #153: Safely evaluate candidate margin against wallet margin info.
+    Handles non-dict, None, or malformed inputs without raising exceptions.
+    """
+    if not isinstance(margin_info, dict):
+        return False, "REJECTED: Malformed or missing wallet margin info"
+
+    try:
+        total_equity = float(margin_info.get("total_equity", margin_info.get("equity", 0.0)))
+        used_margin = float(margin_info.get("used_margin", margin_info.get("total_margin_used", 0.0)))
+        if total_equity <= 0.0:
+            return False, "REJECTED: Total equity non-positive"
+        new_used = used_margin + float(candidate_margin)
+        utilization_pct = (new_used / total_equity) * 100.0
+        max_allowed = float(getattr(config, "MAX_WALLET_MARGIN_UTILIZATION_PCT", 85.0))
+        if utilization_pct > max_allowed:
+            return False, f"REJECTED: Wallet margin utilization {utilization_pct:.1f}% exceeds max {max_allowed:.1f}%"
+        return True, "APPROVED"
+    except (ValueError, TypeError) as e:
+        return False, f"REJECTED: Margin calculation error: {e}"
+
 
 def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage_val: float, active_trades: list, bot_state: dict, df_dict: dict, interval: str = "60", direction: str = "Bullish", journal: Any = None) -> tuple:
     try:

@@ -11,7 +11,7 @@ import json
 import ssl
 import threading
 import websocket
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 TRADE_MODE = os.environ.get("TRADE_MODE", "simulation").lower()
 BYBIT_WS_URL = "wss://stream-testnet.bybit.com/v5/public/linear" if TRADE_MODE == "testnet" else "wss://stream.bybit.com/v5/public/linear"
@@ -211,6 +211,43 @@ def on_message(ws, message, bot_state=None):
         print(f"[WebSocket msg exception] {e}")
 
 
+def parse_orderbook_depth(bids: list, asks: list) -> Tuple[float, float, float, float]:
+    """
+    Finding #158: Parses order book depth price and size levels with float casting.
+    Handles fractional altcoin ticks (e.g. 0.0012) without raising ValueError from int cast.
+    Returns (best_bid, best_ask, total_bid_depth_usd, total_ask_depth_usd).
+    """
+    try:
+        best_bid = float(bids[0][0]) if bids and len(bids) > 0 and len(bids[0]) > 0 else 0.0
+    except (ValueError, TypeError, IndexError):
+        best_bid = 0.0
+
+    try:
+        best_ask = float(asks[0][0]) if asks and len(asks) > 0 and len(asks[0]) > 0 else 0.0
+    except (ValueError, TypeError, IndexError):
+        best_ask = 0.0
+
+    bid_depth = 0.0
+    if bids:
+        for b in bids:
+            try:
+                if len(b) >= 2:
+                    bid_depth += float(b[0]) * float(b[1])
+            except (ValueError, TypeError, IndexError):
+                continue
+
+    ask_depth = 0.0
+    if asks:
+        for a in asks:
+            try:
+                if len(a) >= 2:
+                    ask_depth += float(a[0]) * float(a[1])
+            except (ValueError, TypeError, IndexError):
+                continue
+
+    return best_bid, best_ask, bid_depth, ask_depth
+
+
 def on_open(ws):
     global ws_connected, ws_retry_delay, active_public_ws, last_ws_update_time
     ws_connected = True
@@ -247,6 +284,8 @@ def on_open(ws):
     global _public_heartbeat_thread
     if _public_heartbeat_thread is None or not _public_heartbeat_thread.is_alive():
         def send_heartbeat():
+            global ws_connected
+            consecutive_missed = 0
             while ws_connected:
                 try:
                     ws.send(json.dumps({"op": "ping"}))
@@ -254,6 +293,19 @@ def on_open(ws):
                     log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
                     break
                 time.sleep(20)
+                # Finding #153: Disconnect threshold at 3 consecutive missed pings (60s without inbound message)
+                if time.time() - last_ws_update_time >= 60.0:
+                    consecutive_missed += 1
+                    if consecutive_missed >= 3:
+                        log_event("WARNING", f"[WEBSOCKET] 3 consecutive missed pings (60s silent). Disconnecting half-open socket.")
+                        ws_connected = False
+                        try:
+                            ws.close()
+                        except Exception as _e:
+                            log_event("DEBUG", f"ws close error: {_e}")
+                        break
+                else:
+                    consecutive_missed = 0
         _public_heartbeat_thread = threading.Thread(target=send_heartbeat, daemon=True)
         _public_heartbeat_thread.start()
 
@@ -341,6 +393,8 @@ def on_private_open(ws):
     global _private_heartbeat_thread
     if _private_heartbeat_thread is None or not _private_heartbeat_thread.is_alive():
         def send_private_heartbeat():
+            global private_ws_connected
+            consecutive_missed = 0
             while private_ws_connected:
                 try:
                     ws.send(json.dumps({"op": "ping"}))
@@ -348,6 +402,19 @@ def on_private_open(ws):
                     log_event("WARNING", f"websocket_client notice: {ex_websocket_client}")
                     break
                 time.sleep(20)
+                # Disconnect threshold at 3 consecutive missed pings (60s without inbound message)
+                if time.time() - last_private_ws_update_time >= 60.0:
+                    consecutive_missed += 1
+                    if consecutive_missed >= 3:
+                        log_event("WARNING", f"[WEBSOCKET Private] 3 consecutive missed pings (60s silent). Disconnecting half-open socket.")
+                        private_ws_connected = False
+                        try:
+                            ws.close()
+                        except Exception as _e:
+                            log_event("DEBUG", f"private ws close error: {_e}")
+                        break
+                else:
+                    consecutive_missed = 0
         _private_heartbeat_thread = threading.Thread(target=send_private_heartbeat, daemon=True)
         _private_heartbeat_thread.start()
 
@@ -460,12 +527,29 @@ def start_private_ws(bot_state=None):
         private_ws_retry_delay = min(private_ws_retry_delay * 2, 60)
 
 
+def reconnect(ws_type: str = "all"):
+    """Forces websocket disconnection to trigger automated reconnection."""
+    global ws_connected, private_ws_connected, active_public_ws, active_private_ws
+    if ws_type in ("all", "public") and active_public_ws:
+        ws_connected = False
+        try:
+            active_public_ws.close()
+        except Exception as _e:
+            log_event("DEBUG", f"active_public_ws close error: {_e}")
+    if ws_type in ("all", "private") and active_private_ws:
+        private_ws_connected = False
+        try:
+            active_private_ws.close()
+        except Exception as _e:
+            log_event("DEBUG", f"active_private_ws close error: {_e}")
+
+
 def run_websocket_watchdog():
     global last_ws_update_time, last_private_ws_update_time
     global active_public_ws, active_private_ws
     global ws_connected, private_ws_connected
     
-    print("[WebSocket Watchdog] Active keep-alive thread started.")
+    log_event("INFO", "[WebSocket Watchdog] Active keep-alive thread started.")
     last_ws_update_time = time.time()
     last_private_ws_update_time = time.time()
     
@@ -473,20 +557,23 @@ def run_websocket_watchdog():
         time.sleep(15)
         now = time.time()
         
+        # Finding #153: Disconnect threshold at 3 consecutive missed pings (60s silent)
         if ws_connected and active_public_ws:
             silent_duration = now - last_ws_update_time
-            if silent_duration > 120:
-                print(f"[WebSocket Watchdog] Public WebSocket silent for {silent_duration:.1f}s (>120s). Force closing to trigger reconnect...")
+            if silent_duration >= 60:
+                log_event("WARNING", f"[WebSocket Watchdog] Public WebSocket silent for {silent_duration:.1f}s (>=60s). Force closing to trigger reconnect...")
+                ws_connected = False
                 try:
                     active_public_ws.close()
                 except Exception as e:
-                    print(f"[WebSocket Watchdog] Error closing public ws: {e}")
+                    log_event("WARNING", f"[WebSocket Watchdog] Error closing public ws: {e}")
                     
         if private_ws_connected and active_private_ws:
             silent_priv_duration = now - last_private_ws_update_time
-            if silent_priv_duration > 180:
-                print(f"[WebSocket Watchdog] Private WebSocket silent for {silent_priv_duration:.1f}s (>180s). Force closing to trigger reconnect...")
+            if silent_priv_duration >= 60:
+                log_event("WARNING", f"[WebSocket Watchdog] Private WebSocket silent for {silent_priv_duration:.1f}s (>=60s). Force closing to trigger reconnect...")
+                private_ws_connected = False
                 try:
                     active_private_ws.close()
                 except Exception as e:
-                    print(f"[WebSocket Watchdog] Error closing private ws: {e}")
+                    log_event("WARNING", f"[WebSocket Watchdog] Error closing private ws: {e}")

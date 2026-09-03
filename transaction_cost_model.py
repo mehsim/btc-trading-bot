@@ -79,5 +79,43 @@ class TransactionCostModel:
             "model": "Almgren-Chriss"
         }
 
+    def calculate_slippage_ratio(
+        self,
+        trade_notional: float,
+        market_depth_usd: float,
+        max_slippage_pct: Optional[float] = None,
+        epsilon: float = 1e-6
+    ) -> float:
+        """
+        Finding #156: Protected Division in Slippage Ratio Calculation.
+        Computes slippage_ratio = trade_notional / market_depth_usd safely.
+        When market_depth_usd is 0.0 or negative, defaults to configured max slippage
+        or clamps denominator to epsilon.
+        """
+        configured_max = getattr(config, "MAX_SLIPPAGE_PCT", 0.005)
+        max_slip = float(max_slippage_pct) if max_slippage_pct is not None else float(configured_max)
+        if market_depth_usd is None or float(market_depth_usd) <= 0.0:
+            return max_slip
+
+        denom = max(epsilon, float(market_depth_usd))
+        slippage_ratio = float(trade_notional) / denom
+        return min(slippage_ratio, max_slip)
+
+
+def calculate_slippage_ratio(
+    trade_notional: float,
+    market_depth_usd: float,
+    max_slippage_pct: Optional[float] = None,
+    epsilon: float = 1e-6
+) -> float:
+    """Module-level helper for protected slippage ratio computation."""
+    return transaction_cost_model.calculate_slippage_ratio(
+        trade_notional=trade_notional,
+        market_depth_usd=market_depth_usd,
+        max_slippage_pct=max_slippage_pct,
+        epsilon=epsilon
+    )
+
+
 transaction_cost_model = TransactionCostModel(gamma=0.42)
 

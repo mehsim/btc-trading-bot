@@ -191,10 +191,14 @@ class ExitPolicyEngine:
     @staticmethod
     def _resolve_regime_key(regime: str, adx_val: float = 15.0) -> str:
         r = str(regime).upper()
-        if "STRONG" in r or (("TREND" in r) and float(adx_val) >= 30.0):
+        if "STRONG" in r or ("HIGH VOL" in r and "TREND" in r) or (("TREND" in r) and float(adx_val) >= 30.0):
             return "STRONG_TREND"
         if "TREND" in r or "MODERATE" in r or float(adx_val) >= 25.0:
             return "MODERATE_TREND"
+        if "RANG" in r:
+            return "RANGING"
+        from logger import log_event
+        log_event("WARNING", f"[Exit Policy Engine] Unrecognized regime '{regime}' (ADX={adx_val:.1f}). Falling back to RANGING.")
         return "RANGING"
 
     def evaluate_exit(
@@ -250,15 +254,6 @@ class ExitPolicyEngine:
         if trigger_scale_out and not half_closed:
             updates["trigger_scale_out"] = True
             updates["scale_out_pct"] = scale_out_pct
-            
-            # Compute dynamic BE buffer
-            be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
-            target_sl = (entry_price + be_buffer) if direction == "Bullish" else (entry_price - be_buffer)
-            is_tighter = (target_sl > stop_loss + 1e-4) if direction == "Bullish" else (target_sl < stop_loss - 1e-4)
-            if is_tighter:
-                updates["new_stop_loss"] = target_sl
-                stop_loss = target_sl
-            updates["break_even_triggered"] = True
 
         # 2. Check Break-Even trigger if price moved past be_trigger_atr_mult without scale-out
         if not active_trade.get("break_even_triggered"):

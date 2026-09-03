@@ -388,7 +388,16 @@ def get_bybit_order_details(symbol: str, order_id: str) -> Dict[str, Any]:
 
 
 def cancel_bybit_order(symbol: str, order_id: str) -> Dict[str, Any]:
-    return execute_bybit_order_ws_or_rest("/v5/order/cancel", {"category": "linear", "symbol": symbol, "orderId": order_id})
+    res = execute_bybit_order_ws_or_rest("/v5/order/cancel", {"category": "linear", "symbol": symbol, "orderId": order_id})
+    if isinstance(res, dict) and res.get("retCode") == 110001:
+        # Finding #159: Order does not exist (already filled or cancelled) - handle idempotently
+        return {
+            "retCode": 0,
+            "retMsg": "OK (Order already closed/cancelled - idempotent)",
+            "result": {"orderId": order_id, "status": "DeemedCancelled"},
+            "idempotent": True
+        }
+    return res
 
 
 def get_bybit_position(symbol: str) -> Dict[str, Any]:
@@ -554,16 +563,21 @@ def get_real_bybit_balance() -> float:
     return 0.0
 
 
-_instrument_specs_cache = {}
+_specs_cache: Dict[str, Any] = {}
+_instrument_specs_cache = _specs_cache
 _instrument_specs_lock = threading.Lock()
 
 def get_instrument_specs(symbol: str) -> Dict[str, Any]:
     now = time.time()
     with _instrument_specs_lock:
-        if symbol in _instrument_specs_cache:
-            cached_specs, exp_ts = _instrument_specs_cache[symbol]
-            if now < exp_ts:
-                return cached_specs
+        if symbol in _specs_cache:
+            entry = _specs_cache[symbol]
+            if isinstance(entry, tuple):
+                cached_specs, exp_ts = entry
+                if now < exp_ts:
+                    return cached_specs.copy()
+            elif isinstance(entry, dict):
+                return entry.copy()
 
     default_specs = {
         "tickSize": "0.01" if symbol in ["BTCUSDT", "ETHUSDT"] else "0.0001",
@@ -587,14 +601,14 @@ def get_instrument_specs(symbol: str) -> Dict[str, Any]:
                     "minNotionalValue": lot_filter.get("minNotionalValue", default_specs["minNotionalValue"])
                 }
                 with _instrument_specs_lock:
-                    _instrument_specs_cache[symbol] = (specs, now + 86400.0)  # 24h success TTL
-                return specs
+                    _specs_cache[symbol] = (specs.copy(), now + 86400.0)  # 24h success TTL
+                return specs.copy()
     except Exception as e:
         log_event("WARNING", f"[Instrument Specs Warning] Failed to fetch instrument info for {symbol}: {e}")
 
     with _instrument_specs_lock:
-        _instrument_specs_cache[symbol] = (default_specs, now + 60.0)  # 60s fallback TTL
-    return default_specs
+        _specs_cache[symbol] = (default_specs.copy(), now + 60.0)  # 60s fallback TTL
+    return default_specs.copy()
 
 def quantize_bybit_price(symbol: str, price: float) -> str:
     specs = get_instrument_specs(symbol)

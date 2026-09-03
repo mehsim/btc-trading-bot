@@ -46,8 +46,8 @@ trades.db
 db_snapshots/
 junit/
 .manifest_hmac_secret
-bot.log
-*.log
+bot.log*
+*.log*
 backups/
 mlruns/
 *.bak*
@@ -57,3 +57,4 @@ trade_journal.csv
 governance_audit_trail.json*
 data/
 models_backup_*/
+circuit_breaker_state.json

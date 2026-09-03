@@ -224,3 +224,4 @@ class ContinuousLearningEngine:
             return 1.0
 
 continuous_learning_engine = ContinuousLearningEngine()
+LearningEngine = ContinuousLearningEngine

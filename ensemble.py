@@ -310,6 +310,35 @@ class PurgedEmbargoTimeSeriesSplit:
             if len(train_indices) > 50 and len(val_indices) > 50:
                 yield train_indices, val_indices
 
+
+def _sanitize_probabilities(probs, default_classes: int = 3) -> np.ndarray:
+    """
+    Finding #160: Sanitizes prediction and regime probabilities by checking for NaN/Inf.
+    When feature inputs contain infinities or edge values, predict_proba can produce NaNs.
+    Imputes uniform fallback prior ([0.5, 0.5] or [1/3, 1/3, 1/3]) so argmax, routing,
+    and threshold evaluations never crash or silently drop signals.
+    """
+    if probs is None:
+        val = 0.5 if default_classes == 2 else (1.0 / float(default_classes))
+        return np.array([[val] * default_classes])
+
+    probs = np.asarray(probs, dtype=float)
+    if probs.ndim == 1:
+        probs = probs.reshape(1, -1)
+
+    n_classes = probs.shape[1] if probs.shape[1] > 0 else default_classes
+    if np.isnan(probs).any() or np.isinf(probs).any():
+        row_has_bad = np.isnan(probs).any(axis=1) | np.isinf(probs).any(axis=1)
+        fallback_val = 0.5 if n_classes == 2 else (1.0 / float(n_classes))
+        probs[row_has_bad] = fallback_val
+        log_event("WARNING", f"[Ensemble Sanitize] NaN/Inf detected in probabilities. Imputed uniform prior ({fallback_val:.3f}).")
+
+    probs = np.maximum(0.0, np.nan_to_num(probs, nan=1.0 / float(n_classes), posinf=1.0, neginf=0.0))
+    row_sums = probs.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0.0] = 1.0
+    return probs / row_sums
+
+
 class EnsembleClassifier:
     """
     Blends XGBoost, LightGBM, and CatBoost classifiers using a Stacking Meta-Classifier
@@ -436,21 +465,28 @@ class EnsembleClassifier:
             w = np.array(w_to_use, dtype=float)
             w = w / np.sum(w)
             if lgb_prob is None and cat_prob is None:
-                return xgb_prob
+                return _sanitize_probabilities(xgb_prob)
             elif lgb_prob is not None and cat_prob is None:
-                return (xgb_prob * 0.5 + lgb_prob * 0.5)
+                return _sanitize_probabilities(xgb_prob * 0.5 + lgb_prob * 0.5)
             elif lgb_prob is None and cat_prob is not None:
-                return (xgb_prob * 0.5 + cat_prob * 0.5)
-            return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+                return _sanitize_probabilities(xgb_prob * 0.5 + cat_prob * 0.5)
+            return _sanitize_probabilities(xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
         else:
             self.is_fallback = False
             
         # Stack probabilities for prediction, matching fit-time meta-feature distribution
         X_meta = np.column_stack([xgb_prob, lgb_prob, cat_prob])
+        if weights is not None:
+            w = np.array(weights, dtype=float)
+            w = (w / max(1e-9, float(np.sum(w)))) * 3.0
+            k = xgb_prob.shape[1]
+            X_meta[:, 0:k] *= w[0]
+            X_meta[:, k:2*k] *= w[1]
+            X_meta[:, 2*k:3*k] *= w[2]
         
         if getattr(self, "meta_clf", None) is not None:
             try:
-                return self.meta_clf.predict_proba(X_meta)
+                return _sanitize_probabilities(self.meta_clf.predict_proba(X_meta))
             except Exception as ex_ens:
                 log_event("WARNING", f"Ensemble notice: {ex_ens}")
 
@@ -472,21 +508,22 @@ class EnsembleClassifier:
                 three_probs[:, 1] = np.maximum(0.0, 1.0 - (three_probs[:, 0] + three_probs[:, 2]))
                 row_sums = three_probs.sum(axis=1, keepdims=True)
                 three_probs = three_probs / np.maximum(1e-9, row_sums)
-                return three_probs
+                return _sanitize_probabilities(three_probs)
 
             except Exception as ex_ens:
                 log_event("WARNING", f"Ensemble notice: {ex_ens}")
                 w = np.array(self.weights, dtype=float)
                 w = w / max(1e-9, float(np.sum(w)))
-                return (xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
+                return _sanitize_probabilities(xgb_prob * w[0] + lgb_prob * w[1] + cat_prob * w[2])
         else:
             meta_clf.coef_ = coef
             meta_clf.intercept_ = intercept
             meta_clf.classes_ = np.array([0, 1, 2])
-            return meta_clf.predict_proba(X_meta)
+            return _sanitize_probabilities(meta_clf.predict_proba(X_meta))
 
     def predict(self, X, weights=None):
         probs = self.predict_proba(X, weights=weights)
+        probs = _sanitize_probabilities(probs)
         return np.argmax(probs, axis=1)
 
     def predict_with_uncertainty(self, X, weights=None, uncertainty_threshold=0.18):
@@ -646,6 +683,12 @@ class EnsembleRegressor:
             
         # Apply Ridge meta-model via linear matrix multiplication, matching fit-time meta-feature distribution
         X_meta = np.column_stack([xgb_pred, lgb_pred, cat_pred])
+        if weights is not None:
+            w = np.array(weights, dtype=float)
+            w = (w / max(1e-9, float(np.sum(w)))) * 3.0
+            X_meta[:, 0] *= w[0]
+            X_meta[:, 1] *= w[1]
+            X_meta[:, 2] *= w[2]
         coef = np.array(self.meta_coef_, dtype=float)
         intercept = float(self.meta_intercept_) if self.meta_intercept_ is not None else 0.0
         return np.dot(X_meta, coef) + intercept

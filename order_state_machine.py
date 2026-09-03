@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 import time
 import random
 import uuid
@@ -12,6 +12,7 @@ class OrderState(Enum):
     SETTLED = "SETTLED"
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
+    FAILED = "FAILED"
 
 import threading
 
@@ -85,6 +86,51 @@ class ManagedOrder:
             self.transition_to(OrderState.FILLED, f"Filled {self.filled_qty}/{self.qty} @ {fill_price}")
         else:
             self.transition_to(OrderState.PARTIALLY_FILLED, f"Partial fill {self.filled_qty}/{self.qty} @ {fill_price}")
+
+
+class OrderStateMachine:
+    """
+    Finding #143: Manages lifecycle, state transitions, and terminal failures of orders.
+    """
+    def __init__(self):
+        self.orders: Dict[str, ManagedOrder] = {}
+        self.active_orders: Dict[str, ManagedOrder] = {}
+        self._lock = threading.Lock()
+
+    def create_order(
+        self,
+        order_id: str,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: Optional[float] = None,
+        order_type: str = "Market"
+    ) -> ManagedOrder:
+        with self._lock:
+            order = ManagedOrder(
+                client_order_id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                qty=qty,
+                price=price
+            )
+            self.orders[order_id] = order
+            self.active_orders[order_id] = order
+            return order
+
+    def get_order_state(self, order_id: str) -> Optional[OrderState]:
+        with self._lock:
+            order = self.orders.get(order_id)
+            return order.state if order else None
+
+    def handle_terminal_failure(self, order_id: str, reason: str = ""):
+        with self._lock:
+            order = self.orders.get(order_id)
+            if order:
+                order.transition_to(OrderState.FAILED, reason)
+            if order_id in self.active_orders:
+                del self.active_orders[order_id]
 
 
 class StopState(Enum):

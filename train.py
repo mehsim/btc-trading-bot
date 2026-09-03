@@ -40,6 +40,7 @@ from sklearn.metrics import (
 from config import MODEL_SELECTION
 from mlops_engine import calculate_expected_calibration_error
 from data import get_history, merge_derivatives_sentiment_features
+from champion_challenger_framework import run_challenger_promotion_check
 import threading
 import requests
 import features as features_module
@@ -913,6 +914,30 @@ def build_regressor_governance_manifest(model_name: str, mae: float, rmse: Optio
         }
     }
 
+
+def load_feature_columns(file_path: str) -> List[str]:
+    """
+    Finding #154: Load feature columns from file with safe fallback for nonexistent or malformed files.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [str(x) for x in data]
+        return []
+    except (OSError, IOError, json.JSONDecodeError, UnicodeDecodeError):
+        return []
+
+
+def _train_single_timeframe(interval: str, pages: int = 15, regime_type: Optional[str] = None, **kwargs) -> Any:
+    """
+    Finding #149: Clean single-timeframe training wrapper with explicit regime_type.
+    """
+    return train_models(interval=interval, pages=pages)
+
+
 def train_models(interval=INTERVAL, pages=PAGES):
     global OPTIMIZED_BARRIERS
     OPTIMIZED_BARRIERS = {}
@@ -961,6 +986,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 df_target = get_history(symbol=s, interval=interval, limit=1000, pages=pages)
                 if df_target is None or len(df_target) == 0:
                     continue
+                # Finding #150: Validate candle continuity during dataset loading
+                if df_target.attrs.get("gap_exceeded", False):
+                    log_event("WARNING", f"[Data Continuity] {s} {interval}m has large unserviceable gaps (>3 bars). Truncating to recent contiguous segment.")
+                    diffs = df_target["timestamp"].diff()
+                    step_ms = int(interval) * 60 * 1000 if str(interval).isdigit() else 3600 * 1000
+                    large_gaps = diffs[diffs > step_ms * 3]
+                    if not large_gaps.empty:
+                        last_gap_idx = large_gaps.index[-1]
+                        df_target = df_target.iloc[last_gap_idx:].reset_index(drop=True)
                 df_coin = df_target.copy()
                 df_coin["symbol"] = s
                 df_coin["close_btc"] = df_coin["close"]
@@ -968,9 +1002,25 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 df_target = get_history(symbol=s, interval=interval, limit=1000, pages=pages)
                 if df_target is None or len(df_target) == 0:
                     continue
+                # Finding #150: Validate candle continuity during dataset loading
+                if df_target.attrs.get("gap_exceeded", False):
+                    log_event("WARNING", f"[Data Continuity] {s} {interval}m has large unserviceable gaps (>3 bars). Truncating to recent contiguous segment.")
+                    diffs = df_target["timestamp"].diff()
+                    step_ms = int(interval) * 60 * 1000 if str(interval).isdigit() else 3600 * 1000
+                    large_gaps = diffs[diffs > step_ms * 3]
+                    if not large_gaps.empty:
+                        last_gap_idx = large_gaps.index[-1]
+                        df_target = df_target.iloc[last_gap_idx:].reset_index(drop=True)
                 df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=pages)
                 if df_btc is None or len(df_btc) == 0:
                     continue
+                if df_btc.attrs.get("gap_exceeded", False):
+                    diffs = df_btc["timestamp"].diff()
+                    step_ms = int(interval) * 60 * 1000 if str(interval).isdigit() else 3600 * 1000
+                    large_gaps = diffs[diffs > step_ms * 3]
+                    if not large_gaps.empty:
+                        last_gap_idx = large_gaps.index[-1]
+                        df_btc = df_btc.iloc[last_gap_idx:].reset_index(drop=True)
                 df_btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
                 df_coin = pd.merge(df_target, df_btc_sub, on="timestamp", how="inner")
                 df_coin["symbol"] = s
@@ -1088,18 +1138,24 @@ def train_models(interval=INTERVAL, pages=PAGES):
         gc.collect()
 
         # ---- Stage 2: proper RFECV on survivors ----
-        selector = RFECV(
-            estimator=XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1),
-            step=1,
-            cv=cv_selector,
-            scoring="balanced_accuracy",
-            min_features_to_select=10,
-            n_jobs=1,
-        )
-        selector.fit(X_prelim[top_feats], y_prelim)
-        selected_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
-        del selector
-        gc.collect()
+        if len(top_feats) <= 1:
+            selected_features = list(top_feats)
+        else:
+            min_f = min(10, len(top_feats))
+            selector = RFECV(
+                estimator=XGBClassifier(n_estimators=40, max_depth=3, random_state=42, n_jobs=1),
+                step=1,
+                cv=cv_selector,
+                scoring="balanced_accuracy",
+                min_features_to_select=min_f,
+                n_jobs=1,
+            )
+            selector.fit(X_prelim[top_feats], y_prelim)
+            selected_features = [f for f, keep in zip(top_feats, selector.support_) if keep]
+            if not selected_features:
+                selected_features = list(top_feats)
+            del selector
+            gc.collect()
         print(f"[Stage 2] RFECV selected {len(selected_features)} of {len(top_feats)}.")
         from feature_pipeline import filter_multicollinear_features
         selected_features = filter_multicollinear_features(df_sub, selected_features, vif_threshold=10.0)
@@ -1880,9 +1936,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         from mlops_engine import calculate_brier_score, calculate_expected_calibration_error
         try:
+            # Finding #156: Compute calibration Brier score and ECE directly on out-of-sample holdout probabilities
             chal_prob_raw = final_ensemble_t.predict_proba(X_holdout)
-            chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_raw))
-            chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_raw))
+            chal_prob_cal = chal_prob_raw
+            if 'bc' in locals() and bc is not None and hasattr(bc, "predict"):
+                try:
+                    chal_prob_cal = bc.predict(chal_prob_raw)
+                except Exception as ex_cal:
+                    log_event("WARNING", f"Calibrator evaluation fallback: {ex_cal}")
+                    chal_prob_cal = chal_prob_raw
+            chal_brier = float(calculate_brier_score(y_holdout_trend, chal_prob_cal))
+            chal_ece = float(calculate_expected_calibration_error(y_holdout_trend, chal_prob_cal))
         except Exception as ex_brier:
             log_event("WARNING", f"Holdout calibration metric calculation failure: {ex_brier}")
             chal_brier = 0.99
@@ -2353,6 +2417,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "optuna_objective": safe_stat(locals().get('optuna_fold_scores', [])),
             "training_pipeline_version": "v7.2.0",
             "effective_n_convention": "lookahead_x_nsymbols_v2",
+            "champion_model_name": champ_manifest.get("model_name") if ('champ_manifest' in locals() and isinstance(champ_manifest, dict)) else f"{name}_{interval}",
+            "target_slot": f"{name}_{interval}",
             "git_sha": _pipeline_git_sha
         }
 
@@ -2380,6 +2446,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         manifest_data = json.load(mf)
                 from features import FEATURE_PIPELINE_VERSION
                 manifest_data["effective_n_convention"] = "lookahead_x_nsymbols_v2"
+                manifest_data["champion_model_name"] = champ_manifest.get("model_name") if ('champ_manifest' in locals() and isinstance(champ_manifest, dict)) else f"{name}_{interval}"
+                manifest_data["target_slot"] = f"{name}_{interval}"
                 manifest_data["feature_names"] = challenger_feature_names
                 manifest_data["feature_count"] = len(challenger_feature_names)
                 manifest_data["surviving_features"] = challenger_feature_names

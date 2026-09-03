@@ -14,7 +14,7 @@ class DynamicEnsembleOptimizer:
     def __init__(self, base_weights: Tuple[float, float, float] = (0.35, 0.35, 0.30)):
         self.base_weights = np.array(base_weights)
 
-    def optimize_weights(self, model_performances: Dict[str, float]) -> np.ndarray:
+    def optimize_weights(self, model_performances: Dict[str, float], temperature: float = 0.5) -> np.ndarray:
         """
         Computes dynamic softmax-weighted ensemble weights.
         model_performances: dict mapping 'xgb', 'lgb', 'cat' to recent accuracy/score.
@@ -28,8 +28,8 @@ class DynamicEnsembleOptimizer:
             float(model_performances.get("cat", 0.5))
         ])
 
-        # Softmax scaling with temperature
-        temperature = 0.5
+        # Softmax scaling with temperature (floored at 0.1 to avoid degenerate one-hot distributions)
+        temperature = max(0.1, min(5.0, float(temperature)))
         exp_scores = np.exp((scores - np.max(scores)) / temperature)
         dynamic_w = exp_scores / np.sum(exp_scores)
         

@@ -36,10 +36,17 @@ class DriftMonitor:
             import numpy as np
             confidences = [float(t.get("confidence", 0.5)) for t in trades if t.get("confidence") is not None]
             if len(confidences) >= 20:
-                baseline_ref = np.linspace(0.40, 0.70, len(confidences))
-                calc_p = calculate_psi(baseline_ref, np.array(confidences))
-                if calc_p is not None and not np.isnan(calc_p):
-                    psi_val = round(float(calc_p), 4)
+                conf_arr = np.array(confidences, dtype=float)
+                # Finding #154: Guard against zero variance / constant confidence values
+                if np.std(conf_arr) < 1e-6:
+                    from logger import log_event
+                    log_event("WARNING", "[DriftMonitor] Zero variance / constant confidence values detected across recent trades. Defaulting PSI to 0.0.")
+                    psi_val = 0.0
+                else:
+                    baseline_ref = np.linspace(0.40, 0.70, len(confidences))
+                    calc_p = calculate_psi(baseline_ref, conf_arr)
+                    if calc_p is not None and not np.isnan(calc_p) and not np.isinf(calc_p):
+                        psi_val = round(float(calc_p), 4)
             elif drift_alert:
                 psi_val = 0.16
         except Exception as ex_psi:

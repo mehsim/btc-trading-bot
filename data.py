@@ -385,139 +385,153 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     if len(df_history) == 0 or fetch_failed or is_stale:
         log_event("WARNING", f"Bybit klines unavailable/failed/stale for {symbol} {interval}m (age={(now_ms-latest_ts)/1000:.1f}s). Attempting Binance API fallback...")
         try:
-            binance_interval = "1h"
-            if str(interval) == "5":
-                binance_interval = "5m"
-            elif str(interval) == "15":
-                binance_interval = "15m"
-            elif str(interval) == "30":
-                binance_interval = "30m"
-            elif str(interval) == "60":
-                binance_interval = "1h"
-            elif str(interval) == "120":
-                binance_interval = "2h"
-            elif str(interval) == "240":
-                binance_interval = "4h"
-            elif str(interval) == "360":
-                binance_interval = "6h"
-            elif str(interval).upper() == "D":
-                binance_interval = "1d"
-
-            binance_url = "https://api.binance.com/api/v3/klines"
-            binance_params = {
-                "symbol": symbol.upper(),
-                "interval": binance_interval,
-                "limit": min(limit * pages, 1000)
+            # Finding #147: Explicit interval map with 1m support, fail-closed for unmapped intervals
+            BINANCE_INTERVAL_MAP = {
+                "1": "1m",
+                "5": "5m",
+                "15": "15m",
+                "30": "30m",
+                "60": "1h",
+                "120": "2h",
+                "240": "4h",
+                "360": "6h",
+                "D": "1d",
+                "1D": "1d",
             }
-            # Binance fallback does not use proxy to conserve metered proxy bandwidth
-            resp = requests.get(binance_url, params=binance_params, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                binance_data = resp.json()
-                fallback_data = []
-                for item in binance_data:
-                    fallback_data.append([
-                        float(item[0]), # timestamp
-                        float(item[1]), # open
-                        float(item[2]), # high
-                        float(item[3]), # low
-                        float(item[4]), # close
-                        float(item[5]), # volume
-                        float(item[7])  # turnover
-                    ])
-                df_binance = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
-                if not df_binance.empty:
-                    df_history = pd.concat([df_history, df_binance], ignore_index=True) if not df_history.empty else df_binance
-                    df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-                    latest_ts = float(df_history["timestamp"].max())
-                    is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms))
-                    if not is_stale:
-                        fetch_failed = False
-                        print(f"Successfully loaded {len(df_binance)} fresh candles from Binance API fallback.")
+            binance_interval = BINANCE_INTERVAL_MAP.get(str(interval).upper() if str(interval).upper() in ["D", "1D"] else str(interval))
+            if not binance_interval:
+                log_event("INFO", f"[Binance] Interval {interval} not supported on Binance. Skipping fallback.")
             else:
-                print(f"Binance fallback failed with HTTP {resp.status_code}")
+                binance_url = "https://api.binance.com/api/v3/klines"
+                binance_params = {
+                    "symbol": symbol.upper(),
+                    "interval": binance_interval,
+                    "limit": min(limit * pages, 1000)
+                }
+                # Binance fallback does not use proxy to conserve metered proxy bandwidth
+                resp = requests.get(binance_url, params=binance_params, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    binance_data = resp.json()
+                    fallback_data = []
+                    for item in binance_data:
+                        fallback_data.append([
+                            float(item[0]), # timestamp
+                            float(item[1]), # open
+                            float(item[2]), # high
+                            float(item[3]), # low
+                            float(item[4]), # close
+                            float(item[5]), # volume
+                            float(item[7])  # turnover
+                        ])
+                    df_binance = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
+                    if not df_binance.empty:
+                        # Finding #147 & #148: Verify median timestamp step matches expected_step_ms within 5%
+                        if len(df_binance) > 1:
+                            steps = np.diff(df_binance["timestamp"].values)
+                            median_step = float(np.median(steps))
+                            if abs(median_step - expected_step_ms) > (0.05 * expected_step_ms):
+                                log_event("WARNING", f"[Binance Fallback Mismatch] Timestamp step mismatch: got {median_step}ms, expected {expected_step_ms}ms. Discarding fallback data.")
+                                df_binance = pd.DataFrame()
+                    if not df_binance.empty:
+                        df_history = pd.concat([df_history, df_binance], ignore_index=True) if not df_history.empty else df_binance
+                        df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                        latest_ts = float(df_history["timestamp"].max())
+                        is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms))
+                        if not is_stale:
+                            fetch_failed = False
+                            log_event("INFO", f"Successfully loaded {len(df_binance)} fresh candles from Binance API fallback.")
+                else:
+                    log_event("WARNING", f"Binance fallback failed with HTTP {resp.status_code}")
         except Exception as ex:
-            print(f"Error fetching Binance fallback klines: {ex}")
+            log_event("WARNING", f"Error fetching Binance fallback klines: {ex}")
 
     # If still empty or stale after Binance fallback, try Kraken API fallback!
     if len(df_history) == 0 or fetch_failed or is_stale:
         log_event("WARNING", f"Bybit & Binance failed/stale for {symbol} {interval}m. Attempting Kraken API fallback...")
         try:
-            kraken_interval = 60
-            if str(interval) == "5":
-                kraken_interval = 5
-            elif str(interval) == "15":
-                kraken_interval = 15
-            elif str(interval) == "60":
-                kraken_interval = 60
-            elif str(interval) == "120":
-                kraken_interval = 60
-            elif str(interval) == "240":
-                kraken_interval = 240
-            elif str(interval) == "360":
-                kraken_interval = 240
-            elif str(interval).upper() == "D":
-                kraken_interval = 1440
-
-            # Explicit symbol map for Kraken (None = not supported, skip cleanly)
-            KRAKEN_SYMBOL_MAP = {
-                "BTCUSDT": "XBTUSDT",
-                "ETHUSDT": "ETHUSDT",
-                "SOLUSDT": "SOLUSDT",
-                "XRPUSDT": "XRPUSDT",
-                "LTCUSDT": "LTCUSDT",
-                "DOGEUSDT": "XDGUSDT",
-                "AVAXUSDT": "AVAXUSDT",
-                "NEARUSDT": None,   # Not available on Kraken
-                "BNBUSDT": None,    # Not available on Kraken
-                "SUIUSDT": None,    # Not available on Kraken
-                "APTUSDT": None,    # Not available on Kraken
-                "DOTUSDT": "DOTUSDT",
-                "ADAUSDT": "ADAUSDT",
+            # Finding #148: Explicit interval map treating 120 and 360 as unsupported on Kraken
+            KRAKEN_INTERVAL_MAP = {
+                "1": 1,
+                "5": 5,
+                "15": 15,
+                "30": 30,
+                "60": 60,
+                "240": 240,
+                "D": 1440,
+                "1D": 1440,
             }
-            symbol_upper = symbol.upper()
-            kraken_pair = KRAKEN_SYMBOL_MAP.get(symbol_upper, symbol_upper)
-            if kraken_pair is None:
-                print(f"[Kraken] {symbol_upper} not supported on Kraken. Skipping fallback.")
+            kraken_interval = KRAKEN_INTERVAL_MAP.get(str(interval).upper() if str(interval).upper() in ["D", "1D"] else str(interval))
+            if not kraken_interval:
+                log_event("INFO", f"[Kraken] Interval {interval} not supported on Kraken. Skipping fallback.")
             else:
-                kraken_url = "https://api.kraken.com/0/public/OHLC"
-                kraken_params = {
-                    "pair": kraken_pair,
-                    "interval": kraken_interval
+                # Explicit symbol map for Kraken (None = not supported, skip cleanly)
+                KRAKEN_SYMBOL_MAP = {
+                    "BTCUSDT": "XBTUSDT",
+                    "ETHUSDT": "ETHUSDT",
+                    "SOLUSDT": "SOLUSDT",
+                    "XRPUSDT": "XRPUSDT",
+                    "LTCUSDT": "LTCUSDT",
+                    "DOGEUSDT": "XDGUSDT",
+                    "AVAXUSDT": "AVAXUSDT",
+                    "NEARUSDT": None,   # Not available on Kraken
+                    "BNBUSDT": None,    # Not available on Kraken
+                    "SUIUSDT": None,    # Not available on Kraken
+                    "APTUSDT": None,    # Not available on Kraken
+                    "DOTUSDT": "DOTUSDT",
+                    "ADAUSDT": "ADAUSDT",
                 }
-                # Kraken fallback does not use proxy to conserve metered proxy bandwidth
-                resp = requests.get(kraken_url, params=kraken_params, headers=headers, timeout=10)
-                if resp.status_code == 200:
-                    res = resp.json()
-                    if "result" in res and len(res["result"]) > 0:
-                        pair_key = [k for k in res["result"].keys() if k != "last"][0]
-                        kraken_data = res["result"][pair_key]
-                        candles_to_take = kraken_data[-limit:] if len(kraken_data) > limit else kraken_data
-                        fallback_data = []
-                        for item in candles_to_take:
-                            fallback_data.append([
-                                float(item[0]) * 1000,
-                                float(item[1]),
-                                float(item[2]),
-                                float(item[3]),
-                                float(item[4]),
-                                float(item[6]),
-                                float(item[6]) * float(item[4])
-                            ])
-                        df_kraken = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
-                        if not df_kraken.empty:
-                            df_history = pd.concat([df_history, df_kraken], ignore_index=True) if not df_history.empty else df_kraken
-                            df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-                            latest_ts = float(df_history["timestamp"].max())
-                            is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms))
-                            if not is_stale:
-                                fetch_failed = False
-                                print(f"Successfully loaded {len(df_kraken)} fresh candles from Kraken API fallback.")
-                    else:
-                        print(f"Kraken returned empty results or error: {res.get('error')}")
+                symbol_upper = symbol.upper()
+                kraken_pair = KRAKEN_SYMBOL_MAP.get(symbol_upper, symbol_upper)
+                if kraken_pair is None:
+                    log_event("INFO", f"[Kraken] {symbol_upper} not supported on Kraken. Skipping fallback.")
                 else:
-                    print(f"Kraken fallback failed with HTTP {resp.status_code}")
+                    kraken_url = "https://api.kraken.com/0/public/OHLC"
+                    kraken_params = {
+                        "pair": kraken_pair,
+                        "interval": kraken_interval
+                    }
+                    # Kraken fallback does not use proxy to conserve metered proxy bandwidth
+                    resp = requests.get(kraken_url, params=kraken_params, headers=headers, timeout=10)
+                    if resp.status_code == 200:
+                        res = resp.json()
+                        if "result" in res and len(res["result"]) > 0:
+                            pair_key = [k for k in res["result"].keys() if k != "last"][0]
+                            kraken_data = res["result"][pair_key]
+                            candles_to_take = kraken_data[-limit:] if len(kraken_data) > limit else kraken_data
+                            fallback_data = []
+                            for item in candles_to_take:
+                                fallback_data.append([
+                                    float(item[0]) * 1000,
+                                    float(item[1]),
+                                    float(item[2]),
+                                    float(item[3]),
+                                    float(item[4]),
+                                    float(item[6]),
+                                    float(item[6]) * float(item[4])
+                                ])
+                            df_kraken = pd.DataFrame(fallback_data, columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"]).astype(float)
+                            if not df_kraken.empty:
+                                # Finding #147 & #148: Verify median timestamp step matches expected_step_ms within 5%
+                                if len(df_kraken) > 1:
+                                    steps = np.diff(df_kraken["timestamp"].values)
+                                    median_step = float(np.median(steps))
+                                    if abs(median_step - expected_step_ms) > (0.05 * expected_step_ms):
+                                        log_event("WARNING", f"[Kraken Fallback Mismatch] Timestamp step mismatch: got {median_step}ms, expected {expected_step_ms}ms. Discarding fallback data.")
+                                        df_kraken = pd.DataFrame()
+                            if not df_kraken.empty:
+                                df_history = pd.concat([df_history, df_kraken], ignore_index=True) if not df_history.empty else df_kraken
+                                df_history = df_history.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                                latest_ts = float(df_history["timestamp"].max())
+                                is_stale = ((now_ms - latest_ts) > (2.5 * expected_step_ms))
+                                if not is_stale:
+                                    fetch_failed = False
+                                    log_event("INFO", f"Successfully loaded {len(df_kraken)} fresh candles from Kraken API fallback.")
+                        else:
+                            log_event("WARNING", f"Kraken returned empty results or error: {res.get('error')}")
+                    else:
+                        log_event("WARNING", f"Kraken fallback failed with HTTP {resp.status_code}")
         except Exception as ex:
-            print(f"Error fetching Kraken fallback klines: {ex}")
+            log_event("WARNING", f"Error fetching Kraken fallback klines: {ex}")
 
 
     if len(df_history) == 0:

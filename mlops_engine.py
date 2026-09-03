@@ -237,6 +237,38 @@ def log_mlflow_training_run(
         return None
 
 
+def check_for_new_models_worker(check_func: Optional[Any] = None, poll_interval: float = 60.0, stop_event: Optional[threading.Event] = None):
+    """
+    Background worker thread checking for new models or artifacts.
+    Catches Exception and logs full trace via logging.exception to prevent silent death,
+    then continues the poll loop.
+    """
+    import logging
+    if stop_event is None:
+        stop_event = threading.Event()
+
+    while not stop_event.is_set():
+        try:
+            if check_func is not None:
+                check_func()
+        except Exception as exc:
+            logging.exception(f"[Model Hot-Reload Worker] Exception encountered while checking for new models: {exc}")
+        stop_event.wait(poll_interval)
+
+
+def start_model_hot_reload_thread(check_func: Optional[Any] = None, poll_interval: float = 60.0) -> Tuple[threading.Thread, threading.Event]:
+    """Starts the model hot reload background polling thread."""
+    stop_event = threading.Event()
+    worker_thread = threading.Thread(
+        target=check_for_new_models_worker,
+        args=(check_func, poll_interval, stop_event),
+        name="ModelHotReloadWorker",
+        daemon=True
+    )
+    worker_thread.start()
+    return worker_thread, stop_event
+
+
 def promote_if_better(name: Any = None, challenger_version: Any = None, gates: Optional[Dict[str, float]] = None, cand: Optional[Dict[str, Any]] = None, champ: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
     """
     Step 2: Promotion gates replace unconditional overwrite.
@@ -357,6 +389,8 @@ class FeatureContractMismatchError(RuntimeError):
     pass
 
 _mlflow_unreachable = False
+_mlflow_unreachable_until = 0.0
+MLFLOW_RETRY_COOLDOWN_SEC = 300.0  # 5-minute TTL retry cooldown
 
 def load_production_model_from_registry(interval: str, regime: str, live_features: Optional[List[str]] = None) -> Tuple[Any, str]:
     """
@@ -364,9 +398,11 @@ def load_production_model_from_registry(interval: str, regime: str, live_feature
     Asserts feature_contract_hash match before serving.
     Returns: (model_object, model_version_string)
     """
-    global _mlflow_unreachable
+    global _mlflow_unreachable, _mlflow_unreachable_until
     name = f"btc_{interval}m_{regime}_clf"
-    if MLFLOW_AVAILABLE and not _mlflow_unreachable:
+    now_ts = time.time()
+    if MLFLOW_AVAILABLE and (not _mlflow_unreachable or now_ts >= _mlflow_unreachable_until):
+        _mlflow_unreachable = False
         try:
             from mlflow.tracking import MlflowClient
             tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5002")
@@ -397,7 +433,8 @@ def load_production_model_from_registry(interval: str, regime: str, live_feature
             raise
         except Exception as e:
             _mlflow_unreachable = True
-            print(f"[Model Governance Warning] Could not load from MLflow registry ({e}) — caching MLflow unreachable")
+            _mlflow_unreachable_until = time.time() + MLFLOW_RETRY_COOLDOWN_SEC
+            print(f"[Model Governance Warning] Could not load from MLflow registry ({e}) — caching MLflow unreachable for {MLFLOW_RETRY_COOLDOWN_SEC}s")
 
     version_str = f"{name}:v3.0_local"
     return None, version_str
@@ -439,6 +476,18 @@ def calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 1
     
     psi_val = np.sum((target_pct - base_pct) * np.log(target_pct / base_pct))
     return float(psi_val)
+
+def calibrate_temperature(temperature: float, min_temp: float = 0.1, max_temp: float = 5.0) -> float:
+    """Enforces temperature scaling lower bound of 0.1 and upper bound of 5.0."""
+    return float(np.clip(float(temperature), min_temp, max_temp))
+
+def apply_temperature_scaling(logits: Any, temperature: float = 1.0) -> np.ndarray:
+    """Applies temperature scaling to logits with floor 0.1 to prevent degenerate one-hot distributions."""
+    t = calibrate_temperature(temperature, min_temp=0.1, max_temp=5.0)
+    arr = np.asarray(logits, dtype=float)
+    scaled = arr / t
+    exp_scaled = np.exp(scaled - np.max(scaled, axis=-1, keepdims=True))
+    return exp_scaled / np.sum(exp_scaled, axis=-1, keepdims=True)
 
 def explain_prediction_top_features(candle_series: pd.Series, feature_names: list, top_k: int = 3) -> list:
     """Extracts top feature drivers for model explainability."""

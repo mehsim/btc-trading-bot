@@ -5,7 +5,11 @@ Auto-disables new trades if health thresholds are breached.
 """
 
 import time
-from typing import Dict, Any, Tuple
+import os
+import json
+import tempfile
+from datetime import datetime, timezone
+from typing import Dict, Any, Tuple, List
 
 class CircuitBreaker:
     def __init__(self, max_latency_ms: float = 1000.0, max_balance_age_sec: float = 300.0):
@@ -71,3 +75,39 @@ class CircuitBreaker:
         return True, "HEALTHY"
 
 circuit_breaker = CircuitBreaker()
+
+_circuit_breaker_history: List[Dict[str, Any]] = []
+
+def record_circuit_breaker_event(reason: str, metric_val: float = 0.0) -> Dict[str, Any]:
+    """Records a circuit breaker trip or health warning event with ISO-8601 UTC timestamp."""
+    event = {
+        "reason": reason,
+        "metric_val": metric_val,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    _circuit_breaker_history.append(event)
+    return event
+
+def save_circuit_breaker_state(filepath: str = "circuit_breaker_state.json") -> bool:
+    """Atomically persists circuit breaker state to disk."""
+    data = {
+        "tripped": circuit_breaker.is_circuit_active,
+        "active_reason": circuit_breaker.active_reason,
+        "history_count": len(_circuit_breaker_history),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    dirname = os.path.dirname(os.path.abspath(filepath)) or "."
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False) as tf:
+            json.dump(data, tf, indent=2)
+            temp_name = tf.name
+        os.replace(temp_name, filepath)
+        return True
+    except (OSError, IOError):
+        if temp_name and os.path.exists(temp_name):
+            try:
+                os.remove(temp_name)
+            except OSError:
+                pass
+        return False

@@ -232,8 +232,9 @@ def run_rolling_retrain_scheduler(retrain_models_thread_func=None):
 def run_statistical_governance_scheduler():
     """
     Periodic background scheduler that evaluates live trade distributions per interval slot.
-    If a slot produces statistically confirmed negative expectancy (REJECT), it persists the slot
-    to governance_denylist.json to automatically offline the model on next execution cycle.
+    Finding #146: If a slot breaches KILL_CRITERIA (realised win rate stop delta or negative expectancy),
+    it persists the slot to governance_denylist.json and sets state_manager[f"kill_switch_halt_{iv}"] = True.
+    Also periodically invokes drift_monitor.evaluate_drift().
     """
     from logger import log_event
     log_event("INFO", "[Scheduler] Automated statistical governance monitoring scheduler started.")
@@ -241,16 +242,46 @@ def run_statistical_governance_scheduler():
     while True:
         try:
             import database
+            from config import KILL_CRITERIA
+            from state_manager import state_manager
             from statistical_validation import statistical_validation
             from train import _record_to_governance_denylist
+            from drift_monitor import drift_monitor
+            
+            # Periodically evaluate drift
+            try:
+                drift_monitor.evaluate_drift()
+            except Exception as ex_drift:
+                log_event("WARNING", f"[Statistical Governance] Drift evaluation notice: {ex_drift}")
             
             all_trades = database.get_completed_trades(limit=1000)
             if all_trades:
                 import numpy as np
                 now_ts = time.time()
+                min_trades_kill = KILL_CRITERIA.get("min_closed_trades", 250)
+                win_rate_stop_delta = KILL_CRITERIA.get("win_rate_stop_delta", 0.08)
+                expectancy_stop_floor = KILL_CRITERIA.get("expectancy_stop_floor", 0.0)
+
                 for iv in intervals_to_monitor:
                     slot_trades = [t for t in all_trades if str(t.get("interval", "")) == iv and float(t.get("exit_time") or 0.0) >= (now_ts - 14 * 86400)]
                     n_trades = len(slot_trades)
+                    
+                    # Finding #146: Check KILL_CRITERIA
+                    if n_trades >= min_trades_kill:
+                        pnls = [float(t.get("pnl_usd") or 0.0) for t in slot_trades]
+                        confs = [float(t.get("confidence") or 0.55) for t in slot_trades]
+                        avg_claimed_conf = float(np.mean(confs)) if confs else 0.55
+                        wins = sum(1 for p in pnls if p > 0.0)
+                        realised_win_rate = float(wins) / float(n_trades)
+                        net_expectancy = float(np.mean(pnls)) if pnls else 0.0
+
+                        if (avg_claimed_conf - realised_win_rate) > win_rate_stop_delta or net_expectancy <= expectancy_stop_floor:
+                            reason = f"KILL_CRITERIA breached: ClaimedConf={avg_claimed_conf:.2%}, RealisedWinRate={realised_win_rate:.2%}, Exp=${net_expectancy:.2f}"
+                            log_event("WARNING", f"[Kill Switch Activated] Interval {iv}m halted: {reason}")
+                            state_manager[f"kill_switch_halt_{iv}"] = True
+                            _record_to_governance_denylist(f"trending_{iv}", reason=reason)
+                            _record_to_governance_denylist(f"ranging_{iv}", reason=reason)
+
                     if n_trades >= 100:
                         returns = [float(t.get("change_pct") or t.get("pnl_pct") or 0.0) for t in slot_trades]
                         # Empirical fee/slippage hurdle baseline (-0.05% per roundtrip) with slight variance
@@ -268,6 +299,7 @@ def run_statistical_governance_scheduler():
                         if decision == "REJECT" and stat_power >= 0.50:
                             reasons_str = "; ".join(matrix_res.get("governance", {}).get("reasons", ["Statistical rejection"]))
                             log_event("WARNING", f"[Statistical Governance Live Gate] Denylisting trending_{iv} and ranging_{iv} due to statistical rejection: {reasons_str}")
+                            state_manager[f"kill_switch_halt_{iv}"] = True
                             _record_to_governance_denylist(f"trending_{iv}", reason=f"Live statistical rejection: {reasons_str}")
                             _record_to_governance_denylist(f"ranging_{iv}", reason=f"Live statistical rejection: {reasons_str}")
         except Exception as e:

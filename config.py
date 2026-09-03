@@ -56,6 +56,9 @@ TIMEFRAME_MIN_BAL_ACC = {"15": 0.340, "30": 0.348, "60": 0.348, "default": 0.360
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "default": 0.035}
 TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "default": 0.355}
 
+# Finding #157: Base Dynamic Stop Loss Multiplier
+DYNAMIC_SL_MULTIPLIER = 1.0
+
 # Dynamic Regime-Based Model Routing (Trending vs Ranging)
 # When False (Default): Routes to validated universal/trending models across all market regimes.
 # When True: Routes strictly to regime-specific models (trending vs ranging) and abstains fail-closed if unservable.

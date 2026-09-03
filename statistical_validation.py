@@ -7,10 +7,24 @@ Family-Wise Multiple Testing Corrections (Bonferroni / Benjamini-Hochberg), and 
 """
 
 import numpy as np
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple, List, Optional, Union
 import config
 
 BENCHMARK_OPTUNA_TRIALS: float = 12.0  # Reference baseline study length for trial-adjusted effect penalty scaling
+MIN_TEMPERATURE: float = 0.1
+MAX_TEMPERATURE: float = 5.0
+
+def calibrate_temperature(temperature: float, min_temp: float = MIN_TEMPERATURE, max_temp: float = MAX_TEMPERATURE) -> float:
+    """Enforces temperature scaling lower bound of 0.1 and upper bound of 5.0."""
+    return float(np.clip(float(temperature), min_temp, max_temp))
+
+def apply_temperature_scaling(logits: Any, temperature: float = 1.0) -> np.ndarray:
+    """Applies temperature scaling to logits with floor 0.1 to prevent degenerate one-hot distributions."""
+    t = calibrate_temperature(temperature, min_temp=MIN_TEMPERATURE, max_temp=MAX_TEMPERATURE)
+    arr = np.asarray(logits, dtype=float)
+    scaled = arr / t
+    exp_scaled = np.exp(scaled - np.max(scaled, axis=-1, keepdims=True))
+    return exp_scaled / np.sum(exp_scaled, axis=-1, keepdims=True)
 
 class StatisticalValidation:
     """
@@ -350,20 +364,63 @@ class StatisticalValidation:
             }
 
         names = list(individual_predictions.keys())
-        preds = np.array([float(individual_predictions[k]) for k in names])
-        weights = np.array([float(model_weights.get(k, 0.25)) for k in names])
-        weights = weights / max(1e-6, np.sum(weights))
+        first_val = individual_predictions[names[0]]
+        is_vector = isinstance(first_val, (list, tuple, np.ndarray)) and len(first_val) > 1
 
-        # 1. Performance-Weighted Mean & Weighted Std Dev
-        weighted_mean = float(np.sum(weights * preds))
-        weighted_var = float(np.sum(weights * ((preds - weighted_mean) ** 2)))
-        weighted_std = float(np.sqrt(max(1e-8, weighted_var)))
+        if is_vector:
+            # Finding #152: Vector case (e.g. 3-class probability distributions)
+            vecs = [np.asarray(individual_predictions[k], dtype=float) for k in names]
+            weights = np.array([float(model_weights.get(k, 1.0 / len(names))) for k in names])
+            weights = weights / max(1e-6, np.sum(weights))
+
+            # Weighted average probability vector
+            avg_vec = sum(w * v for w, v in zip(weights, vecs))
+            avg_vec = np.clip(avg_vec, 1e-9, 1.0)
+            avg_vec = avg_vec / np.sum(avg_vec)
+
+            # Pairwise L1 total variation distance across models
+            pairwise_dists = []
+            for i in range(len(vecs)):
+                for j in range(i + 1, len(vecs)):
+                    l1_dist = 0.5 * np.sum(np.abs(vecs[i] - vecs[j]))
+                    pairwise_dists.append(l1_dist)
+            disagreement = float(np.mean(pairwise_dists)) if pairwise_dists else 0.0
+
+            # Top-class margin & normalized entropy
+            sorted_p = np.sort(avg_vec)
+            margin = float(sorted_p[-1] - sorted_p[-2]) if len(sorted_p) >= 2 else 1.0
+            margin_unc = float(np.clip(1.0 - margin, 0.0, 1.0))
+
+            entropy = -float(np.sum(avg_vec * np.log(avg_vec)))
+            max_entropy = np.log(len(avg_vec))
+            norm_entropy = float(entropy / max(1e-6, max_entropy))
+
+            # Composite disagreement uncertainty combining pairwise distance, margin, and entropy
+            weighted_std = disagreement
+            weighted_mean = float(sorted_p[-1])
+            u_base = 0.50 * disagreement + 0.30 * margin_unc + 0.20 * norm_entropy
+        else:
+            # Scalar case
+            preds = np.array([float(individual_predictions[k]) for k in names])
+            weights = np.array([float(model_weights.get(k, 1.0 / len(names))) for k in names])
+            weights = weights / max(1e-6, np.sum(weights))
+
+            # 1. Performance-Weighted Mean & Weighted Std Dev
+            weighted_mean = float(np.sum(weights * preds))
+            weighted_var = float(np.sum(weights * ((preds - weighted_mean) ** 2)))
+            weighted_std = float(np.sqrt(max(1e-8, weighted_var)))
+
+            # Pairwise absolute difference across models
+            pairwise_diffs = [abs(preds[i] - preds[j]) for i in range(len(preds)) for j in range(i + 1, len(preds))]
+            disagreement = float(np.mean(pairwise_diffs)) if pairwise_diffs else weighted_std
+            margin_unc = float(np.clip(1.0 - weighted_mean, 0.0, 1.0))
+            u_base = 0.60 * disagreement + 0.40 * margin_unc
 
         # 2. Adaptive Penalty Scaling Multiplier (learned from Brier Score calibration)
         adaptive_penalty_mult = round(float(np.clip(2.5 * (brier_score / 0.20), 1.8, 3.2)), 2)
 
         # 3. Model Disagreement Uncertainty (U_ensemble)
-        u_ensemble = round(float(np.clip(weighted_std * adaptive_penalty_mult, 0.0, 0.50)), 4)
+        u_ensemble = round(float(np.clip(u_base * adaptive_penalty_mult, 0.0, 0.50)), 4)
 
         # 4. Market Uncertainty (U_market: ATR expansion + Spread widening)
         atr_risk = max(0.0, (float(atr_expansion_ratio) - 1.0) * 0.30)
@@ -775,6 +832,80 @@ class StatisticalValidation:
 
 
 statistical_validation = StatisticalValidation()
+
+
+def calculate_composite_uncertainty(
+    calibrated_p: Optional[float] = None,
+    model_predictions: Optional[List[float]] = None,
+    individual_predictions: Optional[Dict[str, float]] = None,
+    model_weights: Optional[Dict[str, float]] = None,
+    atr_expansion_ratio: float = 1.12,
+    spread_bp: float = 3.5,
+    brier_score: float = 0.214,
+    **kwargs
+) -> Union[float, Dict[str, Any]]:
+    """
+    Finding #142: Calculate composite uncertainty supporting both list/array model predictions
+    (with robust NaN and empty list handling) and full ensemble weighting dictionary calls.
+    """
+    if model_predictions is not None:
+        valid_preds = []
+        for p in model_predictions:
+            if p is not None:
+                try:
+                    fp = float(p)
+                    if np.isfinite(fp):
+                        valid_preds.append(fp)
+                except (ValueError, TypeError):
+                    pass
+
+        if not valid_preds:
+            p_val = float(calibrated_p) if (calibrated_p is not None and np.isfinite(calibrated_p)) else 0.5
+            unc = abs(p_val - 0.5) * 2.0
+            return float(np.clip(unc, 0.0, 1.0))
+
+        std_dev = float(np.std(valid_preds))
+        p_val = float(calibrated_p) if (calibrated_p is not None and np.isfinite(calibrated_p)) else float(np.mean(valid_preds))
+        composite = (std_dev * 1.5) + (abs(p_val - 0.5) * 0.2)
+        return float(np.clip(composite, 0.0, 1.0))
+
+    return statistical_validation.compute_ensemble_uncertainty_weighting(
+        individual_predictions=individual_predictions,
+        model_weights=model_weights,
+        atr_expansion_ratio=atr_expansion_ratio,
+        spread_bp=spread_bp,
+        brier_score=brier_score
+    )
+
+
+def calibrate_probabilities(y_true: Any, y_probs: Any) -> Tuple[float, bool]:
+    """
+    Finding #146: Probability calibration with fallback for degenerate/constant inputs.
+    Returns (calibrated_p, is_calibrated).
+    """
+    try:
+        yt = np.asarray(y_true, dtype=float).ravel()
+        yp = np.asarray(y_probs, dtype=float).ravel()
+
+        if len(yt) < 2 or len(yp) < 2:
+            mean_p = float(np.mean(yp)) if len(yp) > 0 else 0.5
+            return float(np.clip(mean_p, 0.0, 1.0)), False
+
+        if len(np.unique(yt)) < 2 or len(np.unique(yp)) < 2:
+            mean_p = float(np.mean(yp))
+            return float(np.clip(mean_p, 0.0, 1.0)), False
+
+        from sklearn.linear_model import LogisticRegression
+        clf = LogisticRegression(C=1.0, solver="lbfgs")
+        clf.fit(yp.reshape(-1, 1), yt)
+        latest_prob = yp[-1] if len(yp) > 0 else 0.5
+        cal_p = float(clf.predict_proba([[latest_prob]])[0, 1])
+        return float(np.clip(cal_p, 0.0, 1.0)), True
+    except Exception as exc:
+        print(f"[StatisticalValidation notice] calibrate_probabilities fallback: {exc}")
+        mean_p = float(np.mean(y_probs)) if hasattr(y_probs, "__len__") and len(y_probs) > 0 else 0.5
+        return float(np.clip(mean_p, 0.0, 1.0)), False
+
 
 
 

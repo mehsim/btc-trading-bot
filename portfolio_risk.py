@@ -309,15 +309,19 @@ class PortfolioRiskEngine:
         if returns_df is not None and not returns_df.empty and len(returns_df) >= 10:
             btc_col = "BTCUSDT" if "BTCUSDT" in returns_df.columns else (returns_df.columns[0] if len(returns_df.columns) > 0 else None)
             if btc_col and btc_col in returns_df.columns:
-                btc_ret = returns_df[btc_col].dropna()
-                btc_var = float(btc_ret.var())
+                btc_ret = returns_df[btc_col].replace([np.inf, -np.inf], np.nan).dropna()
+                btc_var = float(btc_ret.var()) if len(btc_ret) >= 10 else 0.0
                 for s in symbols:
                     if s in returns_df.columns:
-                        s_ret = returns_df[s].dropna()
+                        s_ret = returns_df[s].replace([np.inf, -np.inf], np.nan).dropna()
                         common_idx = btc_ret.index.intersection(s_ret.index)
-                        if len(common_idx) >= 10 and btc_var > 1e-8:
-                            cov = float(np.cov(s_ret.loc[common_idx], btc_ret.loc[common_idx])[0, 1])
-                            betas[s] = max(0.2, min(3.0, cov / btc_var))
+                        if len(common_idx) >= 10 and np.isfinite(btc_var) and btc_var > 1e-8:
+                            cov_mat = np.cov(s_ret.loc[common_idx], btc_ret.loc[common_idx])
+                            cov = float(cov_mat[0, 1]) if cov_mat.shape == (2, 2) else 0.0
+                            if np.isfinite(cov):
+                                betas[s] = max(0.2, min(3.0, cov / btc_var))
+                            else:
+                                betas[s] = 1.0
                         else:
                             betas[s] = 1.0
                     else:
@@ -343,11 +347,13 @@ class PortfolioRiskEngine:
             for i, s in enumerate(symbols):
                 use_quantile = False
                 if returns_df is not None and s in returns_df.columns:
-                    s_returns = returns_df[s].dropna()
+                    s_returns = returns_df[s].replace([np.inf, -np.inf], np.nan).dropna()
                     if len(s_returns) >= MIN_STRESS_HISTORICAL_BARS:
                         q_level = HISTORICAL_STRESS_QUANTILE * 100.0 if current_shock < 0 else (1.0 - HISTORICAL_STRESS_QUANTILE) * 100.0
-                        expected_asset_shocks[i] = float(np.percentile(s_returns, q_level))
-                        use_quantile = True
+                        q_val = float(np.percentile(s_returns, q_level))
+                        if np.isfinite(q_val):
+                            expected_asset_shocks[i] = q_val
+                            use_quantile = True
                 if not use_quantile:
                     if returns_df is not None and not returns_df.empty and len(returns_df) < MIN_STRESS_HISTORICAL_BARS:
                         log_event("INFO", f"[Stress Test Info] Sparse history for {s} (< {MIN_STRESS_HISTORICAL_BARS} bars); falling back to beta stress shock.")
@@ -357,9 +363,10 @@ class PortfolioRiskEngine:
             stressed_corr = np.full((n_assets, n_assets), 0.95)
             if returns_df is not None and not returns_df.empty and len(returns_df) >= 50 and n_assets > 1:
                 try:
-                    mkt = returns_df.mean(axis=1)
+                    clean_rets = returns_df.replace([np.inf, -np.inf], np.nan)
+                    mkt = clean_rets.mean(axis=1)
                     panic_mask = mkt <= mkt.quantile(0.10)
-                    panic_df = returns_df[panic_mask].dropna()
+                    panic_df = clean_rets[panic_mask].dropna()
                     if len(panic_df) >= 20:
                         emp_corr = panic_df.corr().values
                         emp_corr = np.nan_to_num(emp_corr, nan=0.95)
@@ -371,8 +378,11 @@ class PortfolioRiskEngine:
             vol_vec = np.array([0.03] * n_assets)
             if returns_df is not None and not returns_df.empty:
                 for i, s in enumerate(symbols):
-                    if s in returns_df.columns and len(returns_df[s].dropna()) >= 10:
-                        vol_vec[i] = max(0.01, min(0.15, float(returns_df[s].dropna().std())))
+                    if s in returns_df.columns:
+                        s_clean = returns_df[s].replace([np.inf, -np.inf], np.nan).dropna()
+                        if len(s_clean) >= 10:
+                            s_std = float(s_clean.std())
+                            vol_vec[i] = max(0.01, min(0.15, s_std)) if (np.isfinite(s_std) and s_std > 0) else 0.03
 
             cov_matrix = np.outer(vol_vec, vol_vec) * stressed_corr
 
@@ -388,14 +398,15 @@ class PortfolioRiskEngine:
             simulated_returns = expected_asset_shocks + simulated_residuals
             simulated_pnls = simulated_returns @ exposure_vec
             simulated_losses = -simulated_pnls
+            simulated_losses = np.nan_to_num(simulated_losses, nan=0.0, posinf=total_equity, neginf=0.0)
 
             mean_loss_usd = float(np.mean(simulated_losses))
             var_999 = float(np.percentile(simulated_losses, 99.9))
             tail_losses = simulated_losses[simulated_losses >= var_999]
             cvar_999_usd = float(np.mean(tail_losses)) if len(tail_losses) > 0 else var_999
 
-            mean_loss_usd = max(0.0, mean_loss_usd)
-            cvar_999_usd = max(0.0, cvar_999_usd)
+            mean_loss_usd = max(0.0, mean_loss_usd) if np.isfinite(mean_loss_usd) else 0.0
+            cvar_999_usd = max(0.0, cvar_999_usd) if np.isfinite(cvar_999_usd) else 0.0
 
             loss_pct = float(mean_loss_usd / max(1e-9, total_equity))
             cvar_pct = float(cvar_999_usd / max(1e-9, total_equity))

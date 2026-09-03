@@ -39,6 +39,8 @@ def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
         bot_state.get(f"latest_prediction_{symbol}_4h") or
         bot_state.get(f"latest_prediction_{symbol}_240") or
         bot_state.get(f"latest_prediction_240m_{symbol}") or
+        bot_state.get(f"latest_prediction_bg_{symbol}_4h") or
+        bot_state.get(f"evaluator_prediction_{symbol}_4h") or
         bot_state.get("latest_prediction_4h") or
         bot_state.get("latest_prediction_240m")
     )
@@ -348,19 +350,25 @@ class SignalEvaluator:
                         prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
 
                     from config import TIMEFRAME_CONFIG, MIN_EVAL_THRESHOLD_FLOOR
-                    from trade_calculators import transaction_cost_model, UnifiedTargetGenerator
+                    from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, get_realized_rr_haircut
+                    from risk_engine import risk_engine
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
-                    tp_m = cfg.get("tp_mult_trending", 1.85)
+                    tp_m = cfg.get("tp_mult_trending", 1.85) if "Trending" in regime else cfg.get("tp_mult_ranging", 1.15)
                     sl_m = cfg.get("sl_mult", 0.8)
                     close_price = float(df["close"].iloc[-1]) if ("close" in df.columns and len(df) > 0) else 100.0
                     atr_val = float(df["ATR"].iloc[-1]) if ("ATR" in df.columns and len(df) > 0 and pd.notna(df["ATR"].iloc[-1])) else float(close_price * 0.01)
                     actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(interval, close_price, atr_val, tp_m)
 
+                    if str(interval) in ["15", "30", "60"]:
+                        actual_sl_m = max(1.25, sl_m)
+                    else:
+                        actual_sl_m = sl_m * risk_engine.get_timeframe_stop_multiplier(str(interval))
+
                     # H-4: compute round-trip cost from TCM using per-symbol ADV from df.
                     # df loaded at line 125; tail(96) × 15m bars ≈ 24h volume.
                     _bars_per_day = max(1, round(1440 / max(1, int(interval))))
                     _adv_se = float(df["volume"].tail(_bars_per_day).sum() * df["close"].iloc[-1]) if ("volume" in df.columns and "close" in df.columns and len(df) >= _bars_per_day) else 50_000_000.0
-                    _order_se = float(self.bot_state.get("position_size_usd", 1000.0)) if hasattr(self, "bot_state") and isinstance(self.bot_state, dict) else 1000.0
+                    _order_se = float(self.bot_state.get("position_size_usd", 1000.0)) if hasattr(self, "bot_state") and hasattr(self.bot_state, "get") else 1000.0
                     _tcm = transaction_cost_model.estimate_transaction_cost(
                         order_size_usd=_order_se,
                         volume_24h_usd=_adv_se,
@@ -368,8 +376,12 @@ class SignalEvaluator:
                     )
                     cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
                     atr_norm = (atr_val / close_price) if close_price > 0 else 0.01
-                    p_star = sl_m / (actual_tp_m + sl_m)
-                    cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + sl_m) * max(1e-4, atr_norm))
+                    
+                    nominal_rr = (actual_tp_m * atr_val) / max(1e-6, actual_sl_m * atr_val)
+                    realized_haircut = get_realized_rr_haircut(interval=str(interval), regime=str(regime), nominal_rr=nominal_rr)
+                    effective_tp_m = actual_tp_m * realized_haircut
+                    p_star = actual_sl_m / max(1e-6, (effective_tp_m + actual_sl_m))
+                    cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + actual_sl_m) * max(1e-4, atr_norm))
                     
                     # Information-Theoretic Regime Entropy Hurdle:
                     # In quiet sideways markets (ADX < 25), demand higher statistical signal-to-noise ratio (up to +0.15).
@@ -386,7 +398,21 @@ class SignalEvaluator:
                     from ensemble import resolve_direction
                     _top_trend, _top_conf = resolve_direction(probs)
                     raw_conf = _top_conf
-                    if _top_trend in ["Bullish", "Bearish"] and _top_conf >= eval_threshold:
+
+                    # Pre-calibrate probability if calibrator exists (Finding #143)
+                    calibrator = models.get("calibrator")
+                    p_star_req = float(round(p_star + cost_adj, 4))
+                    if calibrator is not None and isinstance(calibrator, dict):
+                        from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
+                        if is_calibrator_viable(calibrator, min_required_p_star=p_star_req):
+                            calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
+                        else:
+                            calibrated_conf = float(raw_conf)
+                    else:
+                        calibrated_conf = float(raw_conf)
+
+                    gate_conf = calibrated_conf if calibrated_conf is not None else raw_conf
+                    if _top_trend in ["Bullish", "Bearish"] and gate_conf >= eval_threshold:
                         # Governance Holdout & CV Metric Validation
                         from config import TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, MODEL_GOVERNANCE
                         min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
@@ -484,9 +510,15 @@ class SignalEvaluator:
                         "timestamp": time.time()
                     }
                     with self.state_lock:
-                        self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
+                        self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = pred_entry
+                        self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = pred_entry
+                        if f"latest_prediction_{symbol}_{tf_key}" not in self.bot_state:
+                            self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
                         if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
-                            self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
+                            self.bot_state[f"latest_prediction_bg_{tf_key}"] = pred_entry
+                            self.bot_state[f"evaluator_prediction_{tf_key}"] = pred_entry
+                            if f"latest_prediction_{tf_key}" not in self.bot_state:
+                                self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
                         
                         history = self.bot_state.get("prediction_history", [])
                         if isinstance(history, list):
