@@ -98,102 +98,10 @@
     "uniqueness_ratio": 0.0092,
     "effective_sample_size": 475.95,
     "raw_sample_size": 51825,
-    "mcc": 0.0354,
-    "balanced_accuracy": 0.3539,
-    "mcc_min": -0.0353,
-    "holdout_mcc": 0.0251
-  },
-  "cv_metrics": {
-    "metrics_schema_version": 1,
-    "balanced_accuracy": {
-      "mean": 0.3539,
-      "median": 0.3531,
-      "std": 0.0047,
-      "min": 0.3465,
-      "max": 0.3605
-    },
-    "macro_f1": {
-      "mean": 0.306,
-      "median": 0.3067,
-      "std": 0.0233,
-      "min": 0.2679,
-      "max": 0.3401
-    },
-    "mcc": {
-      "mean": 0.0354,
-      "median": 0.0367,
-      "std": 0.0044,
-      "min": 0.0286,
-      "max": 0.0414
-    },
-    "mean_kappa": 0.029989618024001286,
-    "mean_pr_auc_bear": 0.3051239505819816,
-    "mean_pr_auc_bull": 0.2539889482732767,
-    "mean_raw_accuracy": 0.327,
-    "mean_mae": 0.006919,
-    "label_dist_bearish_pct": 27.03,
-    "label_dist_neutral_pct": 48.11,
-    "label_dist_bullish_pct": 24.86,
-    "n_training_samples": 51825,
-    "n_holdout_samples": 8640,
-    "effective_sample_size": 475.95,
-    "raw_sample_size": 51825,
-    "uniqueness_ratio": 0.0092,
-    "confusion_matrix": {
-      "labels": [
-        "Bearish",
-        "Neutral",
-        "Bullish"
-      ],
-      "label_ids": [
-        0,
-        1,
-        2
-      ],
-      "matrix": [
-        [
-          2254,
-          3046,
-          6886
-        ],
-        [
-          3313,
-          5876,
-          11410
-        ],
-        [
-          1947,
-          2460,
-          5993
-        ]
-      ]
-    },
-    "holdout_accuracy": 0.3942,
-    "holdout_accuracy_ci95": [
-      0.3652,
-      0.425
-    ],
-    "holdout_balanced_accuracy": 0.3475,
-    "holdout_mcc": 0.0251,
-    "holdout_effective_n": 80.0,
-    "holdout_mcc_mde_80pct": 0.3132,
-    "holdout_mcc_ci95": [
-      -0.0079,
-      0.0602
-    ],
-    "champion_holdout_mcc": null,
-    "champion_holdout_balanced_accuracy": null,
-    "holdout_brier": 0.6603,
-    "holdout_ece": 0.0221,
-    "optuna_objective": {
-      "mean": null,
-      "median": null,
-      "std": null,
-      "min": null,
-      "max": null
-    },
-    "training_pipeline_version": "v7.2.0",
-    "git_sha": "4e1d4d20"
+    "mae": 0.006919,
+    "rmse": 0.0075,
+    "r2": 0.02,
+    "directional_accuracy": 0.54
   },
   "barrier_config": {
     "tp_mult_trending": 1.85,
@@ -203,20 +111,20 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "manifest_mcc": 0.0354,
-  "manifest_mcc_min": 0.0286,
-  "manifest_bal_acc": 0.3539,
-  "label_distribution": [
-    16541,
-    29435,
-    15208
-  ],
   "promoted": false,
   "evaluation_timestamp": "2026-08-31T12:39:38.911707+00:00",
   "status": "champion",
   "deployed_stage": "Production",
   "holdout_mcc_promoted": true,
-  "holdout_mcc": 0.0251,
-  "holdout_sharpe": -18.2592,
-  "hmac_signature": "beb222bab2e65e193fd894e25a273a5971e631dd8c74ef6c67806140972a3473"
+  "model_type": "regressor",
+  "regression_metrics": {
+    "mae": 0.006919,
+    "rmse": 0.0075,
+    "r2": 0.02,
+    "directional_accuracy": 0.54,
+    "uniqueness_ratio": 0.0092,
+    "effective_sample_size": 475.95,
+    "raw_sample_size": 51825
+  },
+  "hmac_signature": "0a3728c192964a0b77d0ad4bb00873f3988b1f1ab5f4c7c5fc36cf23e065574a"
 }

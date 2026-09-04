@@ -12,7 +12,7 @@ class ExecutionValidator:
         self,
         min_rr_ratio: Optional[float] = None,
         max_market_impact_pct: Optional[float] = None,
-        max_portfolio_heat: Optional[float] = None
+        max_portfolio_heat: float = 0.35
     ):
         self.min_rr_ratio = min_rr_ratio
         self.max_market_impact_pct = max_market_impact_pct
@@ -77,7 +77,7 @@ class ExecutionValidator:
         live_price: float,
         top_book_depth_usd: float = 50000.0,
         portfolio_heat: float = 0.0,
-        max_portfolio_heat: float = 0.80,
+        max_portfolio_heat: float = 0.35,
         atr_norm: float = 0.01
     ) -> Tuple[bool, str]:
         """
@@ -85,8 +85,9 @@ class ExecutionValidator:
         Thresholds adapt dynamically to symbol ATR norm and live orderbook depth.
         """
         dynamic_min_rr = self.min_rr_ratio if self.min_rr_ratio is not None else 1.10
+        vol_scale = max(0.5, min(2.0, float(atr_norm) / 0.01))
         dynamic_max_impact = self.max_market_impact_pct if self.max_market_impact_pct is not None else float(
-            max(0.005, min(0.05, 0.02 * (top_book_depth_usd / 50000.0)))
+            max(0.005, min(0.05, 0.02 * (top_book_depth_usd / 50000.0) * vol_scale))
         )
         dynamic_max_heat = self.max_portfolio_heat if self.max_portfolio_heat is not None else max_portfolio_heat
 

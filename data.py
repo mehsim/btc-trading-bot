@@ -184,7 +184,7 @@ def bybit_public_get(url, params=None, headers=None, max_retries=3):
                 continue
             raise e
 
-def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
+def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1, fail_if_stale=False):
     init_db()
     target_count = limit * pages
     
@@ -659,6 +659,14 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1):
     final_df.attrs["fetch_ok"] = bool(is_fresh)
     final_df.attrs["last_bar_age_sec"] = float(last_bar_age_sec)
     final_df.attrs["latest_ts"] = float(latest_ts)
+
+    if fail_if_stale and not is_fresh:
+        empty_res = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
+        empty_res.attrs["fetch_ok"] = False
+        empty_res.attrs["last_bar_age_sec"] = float(last_bar_age_sec)
+        empty_res.attrs["latest_ts"] = float(latest_ts)
+        log_event("WARNING", f"[{symbol} {interval}m] get_history returning empty DataFrame due to fail_if_stale=True (age={last_bar_age_sec:.1f}s, fetch_failed={fetch_failed})")
+        return empty_res
 
     return final_df
 

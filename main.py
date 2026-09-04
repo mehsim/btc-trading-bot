@@ -434,14 +434,16 @@ class HTFTrendCache:
                     return cached["ema9"], cached["ema21"]
         
         try:
-            df = get_history(symbol=symbol, interval=str(interval), limit=100)
-            if df is not None and len(df) >= 21:
+            df = get_history(symbol=symbol, interval=str(interval), limit=100, fail_if_stale=True)
+            if df is not None and not df.empty and df.attrs.get("fetch_ok", True) and len(df) >= 21:
                 df_completed = df.iloc[:-1].copy()
                 ema9 = float(EMAIndicator(df_completed["close"], window=9).ema_indicator().iloc[-1])
                 ema21 = float(EMAIndicator(df_completed["close"], window=21).ema_indicator().iloc[-1])
                 with self._lock:
                     self._cache[key] = {"ema9": ema9, "ema21": ema21, "timestamp": now}
                 return ema9, ema21
+            else:
+                log_event("WARNING", f"[HTFTrendCache] Data stale or insufficient for {symbol} {interval}m, returning neutral (0.0, 0.0)")
         except Exception as e:
             print(f"[HTFTrendCache Error] Failed to fetch {symbol} {interval}m: {e}")
             
@@ -2434,7 +2436,7 @@ def load_model_weights(iv):
             cal_sl = float(b_geom.get("sl_mult", live_sl))
             cal_lh = int(b_geom.get("lookahead", live_lh))
 
-            if abs(cal_tp - live_tp) > 0.35 or abs(cal_sl - live_sl) > 0.20 or abs(cal_lh - live_lh) > 3:
+            if abs(cal_tp - live_tp) > 0.20 or abs(cal_sl - live_sl) > 0.15 or abs(cal_lh - live_lh) > 2:
                 msg = f"Calibrator '{cal_file}' barrier geometry (TP={cal_tp:.2f}, SL={cal_sl:.2f}, LH={cal_lh}) diverges from active TIMEFRAME_CONFIG (TP={live_tp:.2f}, SL={live_sl:.2f}, LH={live_lh})."
                 log_event("CRITICAL", f"[Calibrator Barrier Divergence] {msg} Slot set to None (Fail-Closed).")
                 send_telegram_alert(f"🚨 *CALIBRATOR BARRIER DIVERGENCE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
@@ -2442,7 +2444,7 @@ def load_model_weights(iv):
 
             # Finding #96 & #100: Check economic viability against fee-inclusive break-even p* & target compatibility
             from tools.beta_calibrator import is_calibrator_viable
-            haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
+            haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
             eff_tp = live_tp * haircut
             roundtrip_cost = 0.0010
             p_star = (live_sl + roundtrip_cost) / (eff_tp + live_sl)
@@ -6791,7 +6793,7 @@ def main():
                 if sym == "BTCUSDT" and interval_val in btc_hist_cache:
                     df_raw_val = btc_hist_cache[interval_val]
                 else:
-                    df_raw_val = get_history(symbol=sym, interval=interval_val, limit=300)
+                    df_raw_val = get_history(symbol=sym, interval=interval_val, limit=300, fail_if_stale=(interval_val not in forced_intervals))
                 if df_raw_val is None or len(df_raw_val) < 2:
                     return sym, interval_val, None, None
                 
@@ -6802,7 +6804,7 @@ def main():
                 # Check fetch_ok attribute
                 if not df_raw_val.attrs.get("fetch_ok", True) and not is_forced_val:
                     log_event("WARNING", f"[{sym} {interval_val}m] Candle fetch marked unsuccessful/stale (age={df_raw_val.attrs.get('last_bar_age_sec', 0):.1f}s). Skipping evaluation.")
-                    return sym, interval_val, df_raw_val, None
+                    return sym, interval_val, None, None
 
                 df_completed_val = df_raw_val.iloc[:-1].copy()
                 latest_completed_ts_val = int(df_completed_val.iloc[-1]["timestamp"])
@@ -7596,8 +7598,10 @@ def main():
                                 adjustments_applied.append(("asian_session", 0.02))
                                 print(f"[{symbol} {iv}m Asian Session] UTC hour {utc_hour_now:02d}:00 in low-volatility Asian window (+0.02 threshold -> {dynamic_conf_threshold:.2f})")
                                 
-                            # Cap additive penalties so 3-class models (random chance 33.3%) are not pushed to unreachable binary thresholds
-                            max_conf_cap = 0.50 if str(iv) in ["15", "30", "60"] else 0.55
+                            # Cap additive penalties so 3-class models (random chance 33.3%) are not pushed to unreachable binary thresholds,
+                            # but never cap below effective_base (which would loosen the model's baseline gating)
+                            effective_base = max(float(economic_base_threshold), float(base_cfg_thresh))
+                            max_conf_cap = max(effective_base, 0.50 if str(iv) in ["15", "30", "60"] else 0.55)
                             dynamic_conf_threshold = min(max_conf_cap, dynamic_conf_threshold)
 
                             # Calculate live market microstructure spread in bps
@@ -7850,8 +7854,8 @@ def main():
                                         # STEP 2: EMA9 vs EMA21 + EMA21 Slope > 0 Technical Fallback
                                         try:
                                             from ta.trend import EMAIndicator, ADXIndicator, SMAIndicator
-                                            htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=60)
-                                            if htf_df is not None and len(htf_df) >= 50:
+                                            htf_df = get_history(symbol=symbol, interval=str(macro_iv), limit=60, fail_if_stale=True)
+                                            if htf_df is not None and not htf_df.empty and htf_df.attrs.get("fetch_ok", True) and len(htf_df) >= 50:
                                                 s_e9 = EMAIndicator(htf_df["close"], window=9).ema_indicator()
                                                 s_e21 = EMAIndicator(htf_df["close"], window=21).ema_indicator()
                                                 s_adx = ADXIndicator(htf_df["high"], htf_df["low"], htf_df["close"], window=14).adx()
@@ -8275,7 +8279,8 @@ def main():
                                             sl_multiplier=realized_sl_m,
                                             interval=str(iv),
                                             trade_history=bot_state.get("trade_history", []),
-                                            mcc_val=_mcc_val
+                                            mcc_val=_mcc_val,
+                                            haircut=realized_haircut
                                         )
                                         rec.kelly_effective = float(scaled_kelly)
                                     
@@ -8867,11 +8872,11 @@ def main():
                                                             top_depth_calc = float((obi_res.get("bid_vol", 0.0) + obi_res.get("ask_vol", 0.0)) * mid_ref)
                                                             if top_depth_calc > 0:
                                                                 top_book_depth = top_depth_calc
-                                                    except Exception:
-                                                        pass
+                                                    except Exception as ex_ob:
+                                                        log_event("WARNING", f"Failed to fetch orderbook depth for {symbol}: {ex_ob}")
 
                                                     if not wallet_exceeded:
-                                                        ev_valid, ev_msg = ExecutionValidator().validate_order(
+                                                        ev_valid, ev_msg = ExecutionValidator(max_portfolio_heat=getattr(config, "MAX_PORTFOLIO_HEAT", 0.35)).validate_order(
                                                             symbol=symbol,
                                                             direction=ml_trend,
                                                             entry_price=entry_price,

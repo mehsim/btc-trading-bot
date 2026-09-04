@@ -191,14 +191,15 @@ class SignalEvaluator:
     def evaluate_interval(self, symbol, interval):
         tf_key = TF_MAP.get(interval, f"{interval}m")
         try:
-            df = get_history(symbol=symbol, interval=interval, limit=350)
-            if df is None or len(df) < 50:
+            df = get_history(symbol=symbol, interval=interval, limit=350, fail_if_stale=True)
+            if df is None or len(df) < 50 or not df.attrs.get("fetch_ok", True):
+                log_event("WARNING", f"[SignalEvaluator] Data stale or insufficient for {symbol} {interval}m. Aborting evaluation.")
                 return
 
             if symbol.upper() != "BTCUSDT" and "close_btc" not in df.columns:
                 try:
-                    df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350)
-                    if df_btc is not None and "close" in df_btc.columns and "timestamp" in df_btc.columns:
+                    df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350, fail_if_stale=True)
+                    if df_btc is not None and not df_btc.empty and df_btc.attrs.get("fetch_ok", True) and "close" in df_btc.columns and "timestamp" in df_btc.columns:
                         btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
                         df = pd.merge(df, btc_sub, on="timestamp", how="inner")
                 except Exception as ex_btc:

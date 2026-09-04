@@ -11,23 +11,29 @@ from cycle_detector import detect_market_regime_with_hysteresis
 
 def get_valid_htf_cache(htf_cache: dict, key: tuple, ttl_seconds: float = 900.0):
     """
-    Retrieves HTF DataFrame from htf_cache with a 15-minute TTL eviction rule.
+    Retrieves HTF DataFrame from htf_cache with a 15-minute TTL eviction rule and freshness validation.
     """
     if htf_cache is None or key not in htf_cache:
         return None
     val = htf_cache[key]
+    df_cached = None
     if isinstance(val, tuple) and len(val) == 2:
-        df_cached, timestamp = val
+        df_cand, timestamp = val
         if time.time() - timestamp < ttl_seconds:
-            return df_cached
+            df_cached = df_cand
         else:
             return None
     elif isinstance(val, pd.DataFrame):
-        return val
+        df_cached = val
+
+    if df_cached is not None:
+        if df_cached.empty or not df_cached.attrs.get("fetch_ok", True):
+            return None
+        return df_cached
     return None
 
 def set_valid_htf_cache(htf_cache: dict, key: tuple, df: pd.DataFrame):
-    if htf_cache is not None and df is not None:
+    if htf_cache is not None and df is not None and not df.empty and df.attrs.get("fetch_ok", True):
         htf_cache[key] = (df, time.time())
 
 
@@ -128,7 +134,10 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if df_1d is None and get_history_fn:
         try:
             df_1d = get_history_fn(symbol=symbol, interval="D", limit=100)
-            set_valid_htf_cache(htf_cache, (symbol, "D"), df_1d)
+            if df_1d is not None and (df_1d.empty or not df_1d.attrs.get("fetch_ok", True)):
+                df_1d = None
+            if df_1d is not None:
+                set_valid_htf_cache(htf_cache, (symbol, "D"), df_1d)
         except Exception as ex_confluence_engine:
             log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
             df_1d = None
@@ -138,7 +147,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
         results["1d_Trend"] = {"pass": True, "detail": "Bypassed for short TF", "weight": 0}
     elif str(interval) == "30":
         weight_1d = 0.5
-        if df_1d is None or len(df_1d) < 21:
+        if df_1d is None or len(df_1d) < 21 or not df_1d.attrs.get("fetch_ok", True):
             results["1d_Trend"] = {"pass": False, "detail": "Could not fetch 1d data", "weight": weight_1d}
             max_score += weight_1d
         else:
@@ -205,13 +214,16 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     if df_4h is None and get_history_fn:
         try:
             df_4h = get_history_fn(symbol=symbol, interval="240", limit=100)
-            set_valid_htf_cache(htf_cache, (symbol, "240"), df_4h)
+            if df_4h is not None and (df_4h.empty or not df_4h.attrs.get("fetch_ok", True)):
+                df_4h = None
+            if df_4h is not None:
+                set_valid_htf_cache(htf_cache, (symbol, "240"), df_4h)
         except Exception as ex_confluence_engine:
             log_event("WARNING", f"confluence_engine notice: {ex_confluence_engine}")
             df_4h = None
 
     is_soft_intraday = str(interval) in ["5", "15", "30"]
-    if df_4h is None or len(df_4h) < 21:
+    if df_4h is None or len(df_4h) < 21 or not df_4h.attrs.get("fetch_ok", True):
         results["4h_Trend"] = {"pass": False, "detail": f"Could not fetch 4h data [{'SOFT GATE (Intraday/Ranging)' if (is_ranging_regime or is_soft_intraday) else 'HARD GATE'}]", "weight": weight_4h}
         results["4h_RSI"] = {"pass": False, "detail": f"Could not fetch 4h data [{'SOFT GATE (Intraday/Ranging)' if (is_ranging_regime or is_soft_intraday) else 'HARD GATE'}]", "weight": weight_4h}
         if not is_ranging_regime and not is_soft_intraday:

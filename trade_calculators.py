@@ -94,10 +94,19 @@ def estimate_empirical_realized_rr(
     losses = []
     for tr in filtered:
         pnl = float(tr.get("pnl_usd", tr.get("pnl", tr.get("realized_pnl", 0.0))) or 0.0)
-        if pnl > 0:
-            wins.append(pnl)
-        elif pnl < 0:
-            losses.append(abs(pnl))
+        pos_size = float(tr.get("position_size_usd", tr.get("intended_size_usd", tr.get("original_size", 0.0))) or 0.0)
+        # Finding #29: Normalize return by trade position size (or change_pct) to prevent unequal sizing from distorting empirical R:R
+        if "change_pct" in tr and tr["change_pct"] is not None:
+            ret_val = float(tr["change_pct"]) / 100.0
+        elif pos_size > 0:
+            ret_val = pnl / pos_size
+        else:
+            ret_val = pnl
+
+        if ret_val > 0:
+            wins.append(ret_val)
+        elif ret_val < 0:
+            losses.append(abs(ret_val))
 
     if not wins or not losses:
         return None

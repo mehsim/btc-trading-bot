@@ -149,10 +149,12 @@ def test_finding_93_quantity_lot_flooring():
 def test_finding_94_and_99_kelly_haircut_rr():
     """Findings #94 & #99: compute_conservative_kelly applies REALIZED_RR_HAIRCUT."""
     # Given calibrated win rate 0.55, nominal tp_mult 1.85, sl_mult 0.85
-    # Haircut = 0.80 -> effective tp = 1.85 * 0.80 = 1.48
-    eff_tp = 1.85 * 0.80
+    # Haircut dynamically resolved from config.REALIZED_RR_HAIRCUT
+    haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
+    eff_tp = 1.85 * haircut
     b_ratio = (eff_tp - 0.0010) / 0.85
-    raw_k = (0.55 * (b_ratio + 1.0) - 1.0) / b_ratio
+    p_star = 1.0 / (b_ratio + 1.0)
+    raw_k = (0.55 * (b_ratio + 1.0) - 1.0) / b_ratio if 0.55 > p_star else 0.0
     expected_quarter_k = 0.25 * raw_k
     
     kelly_res = compute_conservative_kelly(
@@ -167,12 +169,13 @@ def test_finding_95_joint_risk_budget_allocator_units():
     """Finding #95: allocate_risk_budget converts risk capital to notional using stop_distance."""
     allocator = JointRiskBudgetAllocator()
     # Total equity = 1000. Stop distance = 1000 (2% of 50000)
+    # Calibrated confidence 0.75 ensures positive edge under 0.28 haircut
     result = allocator.allocate_risk_budget(
         symbol="BTCUSDT",
         entry_price=50000.0,
         atr_dollars=1000.0,
         atr_norm=0.02,
-        calibrated_confidence=0.55,
+        calibrated_confidence=0.75,
         direction="Bullish",
         total_equity=1000.0,
         stop_distance=1000.0,

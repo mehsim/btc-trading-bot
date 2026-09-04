@@ -16,12 +16,12 @@ class BetaCalibrator:
     Transforms raw probability scores s in (0, 1) into calibrated probabilities.
     Ensures strictly monotonic, smooth calibration without staircase artifacts.
     """
-    def __init__(self, eps: float = 1e-5):
+    def __init__(self, eps: float = 1e-5, a: float = 1.0, b: float = 1.0, c: float = 0.0):
         self.eps = eps
-        self.a = 1.0
-        self.b = 1.0
-        self.c = 0.0
-        self.is_fitted = False
+        self.a = float(a)
+        self.b = float(b)
+        self.c = float(c)
+        self.is_fitted = False if (a == 1.0 and b == 1.0 and abs(c) < 1e-6) else True
         self.fit_n = 0
 
     def fit(self, scores: Union[np.ndarray, List[float]], labels: Union[np.ndarray, List[int]]) -> "BetaCalibrator":
@@ -124,8 +124,8 @@ class BetaCalibrator:
         # logit = a * ln(s) - b * ln(1-s) + c
         logit = self.a * np.log(s) - self.b * np.log(1.0 - s) + self.c
         prob = 1.0 / (1.0 + np.exp(-np.clip(logit, -20.0, 20.0)))
-        # Bounded empirical probability ceiling/floor to protect Kelly sizing from saturation
-        prob = np.clip(prob, 0.20, 0.85)
+        # Bounded empirical probability ceiling to protect Kelly sizing from saturation (Finding #30: eliminate artificial 0.20 floor)
+        prob = np.clip(prob, 1e-4, 0.85)
         
         if is_scalar:
             return float(prob.item() if hasattr(prob, 'item') else prob)
@@ -184,6 +184,13 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
         return bc.is_viable(min_required_p_star=min_required_p_star)
     Ys = calibrator_data.get("y") or calibrator_data.get("y_thresholds", [])
     if Ys and len(Ys) > 0:
+        # Finding #23: Require minimum support for empirical isotonic step functions
+        if "min_bin_support" in calibrator_data or "min_support" in calibrator_data:
+            min_bin_support = int(calibrator_data.get("min_bin_support", calibrator_data.get("min_support", 0)))
+            if min_bin_support < 100:
+                return False
+        elif calibrator_data.get("fitting_sample_size", 0) > 0 and calibrator_data.get("fitting_sample_size", 0) < 5000:
+            return False
         max_y = max(Ys)
         min_y = min(Ys)
         if max_y <= 0.02 or (max_y - min_y) < 0.02:
@@ -213,6 +220,9 @@ def calibrate_probability(raw_score: float, calibrator_data: Optional[Dict], min
     Xs = calibrator_data.get("X", [0.0, 1.0])
     Ys = calibrator_data.get("y", [0.0, 1.0])
     if len(Xs) > 0 and len(Ys) == len(Xs):
+        # Finding #23: Verify isotonic viability before interpolation; fail closed if non-viable
+        if not is_calibrator_viable(calibrator_data, min_required_p_star=min_required_p_star):
+            return 0.0
         return float(np.interp(raw_score, Xs, Ys))
 
     return float(raw_score)

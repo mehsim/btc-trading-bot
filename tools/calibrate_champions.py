@@ -139,6 +139,16 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
         if first_ok > 0:
             Ys[:first_ok] = Ys[first_ok]
             
+    # Finding #28: Record exact barrier geometry used to fit calibrator to ensure parity with TIMEFRAME_CONFIG
+    from config import TIMEFRAME_CONFIG
+    _bcfg = manifest.get("barrier_config") if (isinstance(manifest, dict) and manifest.get("barrier_config")) else TIMEFRAME_CONFIG.get(str(interval), {})
+    b_geom = {
+        "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 1.85)),
+        "tp_mult_ranging": float(_bcfg.get("tp_mult_ranging", 1.40)),
+        "sl_mult": float(_bcfg.get("sl_mult", 0.85)),
+        "lookahead": int(_bcfg.get("lookahead", 12))
+    }
+
     calibrator_data = {
         "scaling_method": "beta_calibration",
         "a": float(bc.a),
@@ -151,6 +161,7 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
         "is_fitted": bool(bc.is_fitted),
         "is_fallback": bool(not bc.is_fitted),
         "target_definition": "triple_barrier_exact",
+        "barrier_geometry": b_geom,
         "champion_sha": manifest.get("git_sha", "unknown")
     }
     

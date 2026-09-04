@@ -116,7 +116,8 @@ def compute_conservative_kelly(
     sl_multiplier: float,
     interval: str = "15",
     trade_history: Optional[list] = None,
-    mcc_val: Optional[float] = None
+    mcc_val: Optional[float] = None,
+    haircut: Optional[float] = None
 ) -> float:
     """
     Computes conservative Kelly fraction for trading loop.
@@ -129,7 +130,7 @@ def compute_conservative_kelly(
     from config import QUALITY_SIZING
     
     from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
-    haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
+    haircut = haircut if haircut is not None else getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
     
     realized_wr = None
     if trade_history and len(trade_history) >= 10:
@@ -779,8 +780,8 @@ class JointRiskBudgetAllocator:
                 "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"
             }
 
-        # Raw Kelly formula b = (TP_dist * haircut) / SL_dist, p = confidence (Finding #99, #71)
-        haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
+        # Raw Kelly formula b = (TP_dist * haircut) / SL_dist, p = confidence (Finding #99, #71, #27, #29)
+        haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
         eff_target_dist = target_distance * haircut if target_distance > 0 else 0.0
         b_ratio = eff_target_dist / stop_distance if stop_distance > 0 else 1.5
         p_win = max(0.01, min(0.99, calibrated_confidence))

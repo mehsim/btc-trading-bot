@@ -127,9 +127,9 @@
     "raw_sample_size": 41051,
     "mcc": 0.0667,
     "balanced_accuracy": 0.3768,
-    "profit_factor": 1.0,
+    "profit_factor": null,
     "holdout_mcc": 0.0253,
-    "holdout_sharpe": 0.0
+    "holdout_sharpe": null
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -239,10 +239,10 @@
     32794,
     8298
   ],
-  "profit_factor": 1.0,
+  "profit_factor": null,
   "holdout_mcc": 0.0253,
-  "holdout_sharpe": 0.0,
+  "holdout_sharpe": null,
   "promoted": false,
   "evaluation_timestamp": "2026-08-28T16:45:37.637272+00:00",
-  "hmac_signature": "7ac7d8c3ff1f7aa9db3e8bfb52a51ee05fee47340da11954369d1a364f621af9"
+  "hmac_signature": "0593fcad23a22cba6d5a15f61619c8c0bbeb5276802ac9b4361f168676d7a9b2"
 }

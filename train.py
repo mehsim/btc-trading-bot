@@ -458,11 +458,17 @@ def add_triple_barrier_labels(df, interval):
             is_trending_state = False
             
         tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
-        cur_sl_mult = sl_mult
+        # Finding #24: Align label stop and profit barriers with live execution geometry
+        import risk_engine
+        from config import MIN_TARGET_ATR_MULT
+        if str(interval) in ["5", "15", "30", "60"]:
+            sl_dist = max(sl_mult * atr_t, 1.25 * atr_t, p_t * 0.008)
+        else:
+            tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(interval)
+            sl_dist = sl_mult * tf_sl_mult * atr_t
+        min_tp_mult = float(MIN_TARGET_ATR_MULT.get(str(interval), MIN_TARGET_ATR_MULT.get("default", 1.20)) if isinstance(MIN_TARGET_ATR_MULT, dict) else MIN_TARGET_ATR_MULT)
+        tp_dist = max(tp_mult * atr_t, min_tp_mult * atr_t)
         effective_lookahead = lookahead
-        
-        tp_dist = tp_mult * atr_t
-        sl_dist = cur_sl_mult * atr_t
 
         long_tp,  long_sl  = p_t + tp_dist, p_t - sl_dist
         short_tp, short_sl = p_t - tp_dist, p_t + sl_dist
@@ -1350,8 +1356,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 json.dump(regime_features, f)
             print(f"Saved {name.upper()} regime selected features to {features_filename}")
 
-        chal_pf = 1.0
-        chal_sharpe = 0.0
+        # Finding #25: Initialize to None to prevent placeholder values in rejected models
+        chal_pf = None
+        chal_sharpe = None
         regime_features = [f for f in regime_features if f not in NON_STATIONARY_EXCLUDE]
         X_full = df_regime[regime_features]
         y_trend_full = df_regime["target_trend"]
@@ -1938,6 +1945,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_pred_p = final_ensemble_p.predict(X_holdout)
         chal_acc = float(balanced_accuracy_score(y_holdout_trend, chal_pred_t))
         chal_mae = float(mean_absolute_error(y_holdout_price, chal_pred_p))
+        from sklearn.metrics import mean_squared_error, r2_score
+        chal_rmse = float(np.sqrt(mean_squared_error(y_holdout_price, chal_pred_p)))
+        chal_r2 = float(r2_score(y_holdout_price, chal_pred_p)) if len(y_holdout_price) > 1 else 0.0
+        chal_dir_acc = float(np.mean(np.sign(chal_pred_p) == np.sign(y_holdout_price))) if len(y_holdout_price) > 0 else 0.0
         holdout_raw_acc = float(accuracy_score(y_holdout_trend, chal_pred_t))
         holdout_mcc = float(matthews_corrcoef(y_holdout_trend, chal_pred_t))
 
@@ -2475,26 +2486,46 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["timestamp"] = now_iso
 
                 if m_prefix == c_prefix_p:
-                    # Finding #135: Dedicated regressor manifest metrics
+                    # Finding #21: Dedicated regressor manifest metrics with genuine MAE/RMSE/R2/DirAcc
                     manifest_data["model_type"] = "regressor"
                     manifest_data["regression_metrics"] = {
-                        "mae": round(float(chal_pf), 4) if 'chal_pf' in locals() else None,
+                        "mae": round(float(chal_mae), 4) if chal_mae is not None else None,
+                        "rmse": round(float(chal_rmse), 4) if chal_rmse is not None else None,
+                        "r2": round(float(chal_r2), 4) if chal_r2 is not None else None,
+                        "directional_accuracy": round(float(chal_dir_acc), 4) if chal_dir_acc is not None else None,
                         "uniqueness_ratio": uniq_ratio_val,
                         "effective_sample_size": eff_n_val,
                         "raw_sample_size": raw_n_val
                     }
                     manifest_data.pop("label_distribution", None)
                     manifest_data.pop("manifest_bal_acc", None)
+                    manifest_data.pop("manifest_mcc", None)
+                    manifest_data.pop("manifest_mcc_min", None)
+                    manifest_data.pop("profit_factor", None)
+                    manifest_data.pop("holdout_mcc", None)
+                    manifest_data.pop("holdout_sharpe", None)
+                    manifest_data.pop("cv_metrics", None)
+                    manifest_data.pop("confusion_matrix", None)
+                    if "metrics" in manifest_data and isinstance(manifest_data["metrics"], dict):
+                        manifest_data["metrics"].pop("mcc", None)
+                        manifest_data["metrics"].pop("balanced_accuracy", None)
+                        manifest_data["metrics"].pop("profit_factor", None)
+                        manifest_data["metrics"].pop("holdout_mcc", None)
+                        manifest_data["metrics"].pop("holdout_sharpe", None)
+                        manifest_data["metrics"]["mae"] = manifest_data["regression_metrics"]["mae"]
+                        manifest_data["metrics"]["rmse"] = manifest_data["regression_metrics"]["rmse"]
+                        manifest_data["metrics"]["r2"] = manifest_data["regression_metrics"]["r2"]
+                        manifest_data["metrics"]["directional_accuracy"] = manifest_data["regression_metrics"]["directional_accuracy"]
                 else:
                     # Trend classifier manifest metrics
                     manifest_data["model_type"] = "classifier"
                     manifest_data["cv_metrics"] = cv_metrics_block
-                    manifest_data["manifest_mcc"] = round(float(chal_mcc_mean), 4)
-                    manifest_data["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
-                    manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
-                    manifest_data["profit_factor"] = round(float(chal_pf), 4)
-                    manifest_data["holdout_mcc"] = round(float(holdout_mcc), 4)
-                    manifest_data["holdout_sharpe"] = round(float(chal_sharpe), 4)
+                    manifest_data["manifest_mcc"] = round(float(chal_mcc_mean), 4) if chal_mcc_mean is not None else None
+                    manifest_data["manifest_mcc_min"] = round(float(chal_mcc_min), 4) if chal_mcc_min is not None else None
+                    manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4) if chal_bal_acc_mean is not None else None
+                    manifest_data["profit_factor"] = round(float(chal_pf), 4) if chal_pf is not None else None
+                    manifest_data["holdout_mcc"] = round(float(holdout_mcc), 4) if holdout_mcc is not None else None
+                    manifest_data["holdout_sharpe"] = round(float(chal_sharpe), 4) if chal_sharpe is not None else None
                     if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
                         manifest_data["metrics"] = {}
                     manifest_data["metrics"]["mcc"] = manifest_data["manifest_mcc"]
@@ -2530,19 +2561,32 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_manifest = dict(manifest_data)
                 chal_manifest["promoted"] = bool(should_save)
                 chal_manifest["evaluation_timestamp"] = now_iso
-                chal_manifest["manifest_mcc"] = round(float(chal_mcc_mean), 4)
-                chal_manifest["manifest_mcc_min"] = round(float(chal_mcc_min), 4)
-                chal_manifest["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4)
-                chal_manifest["profit_factor"] = round(float(chal_pf), 4)
-                chal_manifest["holdout_mcc"] = round(float(holdout_mcc), 4)
-                chal_manifest["holdout_sharpe"] = round(float(chal_sharpe), 4)
-                if "metrics" not in chal_manifest or not isinstance(chal_manifest["metrics"], dict):
-                    chal_manifest["metrics"] = {}
-                chal_manifest["metrics"]["mcc"] = chal_manifest["manifest_mcc"]
-                chal_manifest["metrics"]["balanced_accuracy"] = chal_manifest["manifest_bal_acc"]
-                chal_manifest["metrics"]["profit_factor"] = chal_manifest["profit_factor"]
-                chal_manifest["metrics"]["holdout_mcc"] = chal_manifest["holdout_mcc"]
-                chal_manifest["metrics"]["holdout_sharpe"] = chal_manifest["holdout_sharpe"]
+                if m_prefix == c_prefix_p:
+                    chal_manifest["model_type"] = "regressor"
+                    chal_manifest["regression_metrics"] = dict(manifest_data.get("regression_metrics", {}))
+                    chal_manifest.pop("manifest_mcc", None)
+                    chal_manifest.pop("manifest_mcc_min", None)
+                    chal_manifest.pop("manifest_bal_acc", None)
+                    chal_manifest.pop("profit_factor", None)
+                    chal_manifest.pop("holdout_mcc", None)
+                    chal_manifest.pop("holdout_sharpe", None)
+                    chal_manifest.pop("cv_metrics", None)
+                    chal_manifest.pop("confusion_matrix", None)
+                else:
+                    chal_manifest["model_type"] = "classifier"
+                    chal_manifest["manifest_mcc"] = round(float(chal_mcc_mean), 4) if chal_mcc_mean is not None else None
+                    chal_manifest["manifest_mcc_min"] = round(float(chal_mcc_min), 4) if chal_mcc_min is not None else None
+                    chal_manifest["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4) if chal_bal_acc_mean is not None else None
+                    chal_manifest["profit_factor"] = round(float(chal_pf), 4) if chal_pf is not None else None
+                    chal_manifest["holdout_mcc"] = round(float(holdout_mcc), 4) if holdout_mcc is not None else None
+                    chal_manifest["holdout_sharpe"] = round(float(chal_sharpe), 4) if chal_sharpe is not None else None
+                    if "metrics" not in chal_manifest or not isinstance(chal_manifest["metrics"], dict):
+                        chal_manifest["metrics"] = {}
+                    chal_manifest["metrics"]["mcc"] = chal_manifest["manifest_mcc"]
+                    chal_manifest["metrics"]["balanced_accuracy"] = chal_manifest["manifest_bal_acc"]
+                    chal_manifest["metrics"]["profit_factor"] = chal_manifest["profit_factor"]
+                    chal_manifest["metrics"]["holdout_mcc"] = chal_manifest["holdout_mcc"]
+                    chal_manifest["metrics"]["holdout_sharpe"] = chal_manifest["holdout_sharpe"]
                 chal_manifest.pop("hmac_signature", None)
                 chal_canonical = json.dumps(chal_manifest, sort_keys=True, default=_json_safe).encode("utf-8")
                 chal_manifest["hmac_signature"] = hmac.new(hmac_key, chal_canonical, hashlib.sha256).hexdigest()
@@ -2805,8 +2849,11 @@ def load_live_trade_samples(interval, days=2, weight=1.0):
                     # Simple PnL simulator (TP vs SL)
                     atr_series = df_c_before["close"].diff().abs().rolling(14).mean()
                     atr = atr_series.iloc[-1] if len(atr_series) > 0 and not pd.isna(atr_series.iloc[-1]) else entry_price * 0.01
-                    sl = entry_price - 1.5 * atr if direction == "Bullish" else entry_price + 1.5 * atr
-                    tp = entry_price + 1.25 * atr if direction == "Bullish" else entry_price - 1.25 * atr
+                    _sim_tf_cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+                    _sim_sl_mult = float(_sim_tf_cfg.get("sl_mult", 1.5))
+                    _sim_tp_mult = float(_sim_tf_cfg.get("tp_mult_trending", 1.25))
+                    sl = entry_price - _sim_sl_mult * atr if direction == "Bullish" else entry_price + _sim_sl_mult * atr
+                    tp = entry_price + _sim_tp_mult * atr if direction == "Bullish" else entry_price - _sim_tp_mult * atr
                     
                     df_future = df_c[df_c["timestamp"] > entry_time_ms].copy()
                     pnl = 0.0

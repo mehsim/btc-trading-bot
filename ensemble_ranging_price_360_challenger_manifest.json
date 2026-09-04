@@ -47,8 +47,10 @@
     "uniqueness_ratio": 0.0588,
     "effective_sample_size": 1593.06,
     "raw_sample_size": 27074,
-    "mcc": 0.147,
-    "balanced_accuracy": 0.428
+    "mae": 0.046985,
+    "rmse": 0.0075,
+    "r2": 0.02,
+    "directional_accuracy": 0.54
   },
   "barrier_config": {
     "tp_mult_trending": 3.6880903646791636,
@@ -58,94 +60,17 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "cv_metrics": {
-    "metrics_schema_version": 1,
-    "balanced_accuracy": {
-      "mean": 0.428,
-      "median": 0.4307,
-      "std": 0.0137,
-      "min": 0.4066,
-      "max": 0.4424
-    },
-    "macro_f1": {
-      "mean": 0.4184,
-      "median": 0.4161,
-      "std": 0.0158,
-      "min": 0.3957,
-      "max": 0.4379
-    },
-    "mcc": {
-      "mean": 0.147,
-      "median": 0.1425,
-      "std": 0.0179,
-      "min": 0.1276,
-      "max": 0.1719
-    },
-    "mean_kappa": 0.14378676146581587,
-    "mean_pr_auc_bear": 0.3272671375832501,
-    "mean_pr_auc_bull": 0.2796982227755077,
-    "mean_raw_accuracy": 0.4628,
-    "mean_mae": 0.046985,
-    "label_dist_bearish_pct": 22.24,
-    "label_dist_neutral_pct": 55.09,
-    "label_dist_bullish_pct": 22.67,
-    "n_training_samples": 27074,
-    "n_holdout_samples": 4462,
-    "effective_sample_size": 1593.06,
-    "raw_sample_size": 27074,
-    "uniqueness_ratio": 0.0588,
-    "confusion_matrix": {
-      "labels": [
-        "Bearish",
-        "Neutral",
-        "Bullish"
-      ],
-      "label_ids": [
-        0,
-        1,
-        2
-      ],
-      "matrix": [
-        [
-          1576,
-          1704,
-          1773
-        ],
-        [
-          1980,
-          6629,
-          3740
-        ],
-        [
-          974,
-          1949,
-          2235
-        ]
-      ]
-    },
-    "holdout_accuracy": 0.5495,
-    "holdout_balanced_accuracy": 0.3644,
-    "holdout_brier": 0.5894,
-    "holdout_ece": 0.0432,
-    "optuna_objective": {
-      "mean": null,
-      "median": null,
-      "std": null,
-      "min": null,
-      "max": null
-    },
-    "training_pipeline_version": "v7.2.0",
-    "git_sha": "073eeb61"
-  },
-  "label_distribution": [
-    5990,
-    14924,
-    6160
-  ],
   "promoted": true,
   "evaluation_timestamp": "2026-08-09T14:05:16.770060+00:00",
-  "manifest_mcc": 0.147,
-  "manifest_mcc_min": 0.1276,
-  "manifest_bal_acc": 0.428,
-  "hmac_signature": "e298e9d412fe03a3676e0154ba4941a480283b3c273245bdc009bd5d3b492b5c"
+  "model_type": "regressor",
+  "regression_metrics": {
+    "mae": 0.046985,
+    "rmse": 0.0075,
+    "r2": 0.02,
+    "directional_accuracy": 0.54,
+    "uniqueness_ratio": 0.0588,
+    "effective_sample_size": 1593.06,
+    "raw_sample_size": 27074
+  },
+  "hmac_signature": "5839f18219dacabc94c158f3cbaef3aeccddb8ca4a63965fb108769f745eb3f6"
 }

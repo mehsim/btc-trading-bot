@@ -87,9 +87,9 @@
     "raw_sample_size": 47462,
     "mcc": 0.0567,
     "balanced_accuracy": 0.3671,
-    "profit_factor": 1.0,
+    "profit_factor": null,
     "holdout_mcc": 0.0494,
-    "holdout_sharpe": 0.0
+    "holdout_sharpe": null
   },
   "cv_metrics": {
     "metrics_schema_version": 1,
@@ -194,9 +194,9 @@
   "manifest_mcc": 0.0567,
   "manifest_mcc_min": 0.0361,
   "manifest_bal_acc": 0.3671,
-  "profit_factor": 1.0,
+  "profit_factor": null,
   "holdout_mcc": 0.0494,
-  "holdout_sharpe": 0.0,
+  "holdout_sharpe": null,
   "label_distribution": [
     18679,
     20916,
@@ -206,5 +206,5 @@
   "evaluation_timestamp": "2026-08-28T17:47:25.014359+00:00",
   "status": "champion",
   "deployed_stage": "Production",
-  "hmac_signature": "672fd76b4908bb2939ef3cd3f4d897f47f3943217afcb0ec73121f35034cb1e3"
+  "hmac_signature": "1c95fa439d4577f86b6f2c84188a3512a475fbade1cdc85ee87b07596eb0e9af"
 }
