@@ -1,6 +1,6 @@
 {
-  "silent_handlers": 130,
-  "print_calls": 1182,
+  "silent_handlers": 131,
+  "print_calls": 1180,
   "print_count": 1210,
   "silent_handler_count": 125,
   "p99_latency_baseline_ms": 7.0

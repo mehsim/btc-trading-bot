@@ -207,7 +207,7 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
             if trend_1h_pass:
                 total_score += 1
         else:
-            results["1h_Trend"] = {"pass": True, "detail": "Bypassed (Insufficient 1h data)", "weight": 0}
+            results["1h_Trend"] = {"pass": False, "detail": "Rejected (Insufficient 1h data)", "weight": 0}
 
     # Evaluate 4h Trend & RSI Hard Gates for ALL timeframes
     df_4h = get_valid_htf_cache(htf_cache, (symbol, "240"))
@@ -391,15 +391,19 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
     is_ranging_regime = "ranging" in str(current_regime).lower()
-    if is_ranging_regime:
-        trend_gates_passed = True
-    elif is_soft_intraday:
-        # In trending regimes for intraday (5m/15m/30m), require that 1h and 4h do NOT both oppose the signal
-        pass_1h = results.get("1h_Trend", {}).get("pass", True)
-        pass_4h = results.get("4h_Trend", {}).get("pass", True)
+    pass_1h = results.get("1h_Trend", {}).get("pass", False)
+    pass_4h = results.get("4h_Trend", {}).get("pass", False)
+
+    if is_soft_intraday or is_ranging_regime:
+        # Neither ranging nor soft intraday may enter when BOTH 1h and 4h HTF structures oppose the signal
         trend_gates_passed = not (not pass_1h and not pass_4h)
     else:
-        trend_gates_passed = results.get("1d_Trend", {}).get("pass", True) and results.get("4h_Trend", {}).get("pass", True) and results.get("1h_Trend", {}).get("pass", True)
+        pass_1d = results.get("1d_Trend", {}).get("pass", False)
+        trend_gates_passed = pass_1d and pass_4h and pass_1h
+
+    if not pass_1h and not pass_4h:
+        hard_gate_failed = True
+        traditional_approved = False
 
     effective_conf_threshold = float(dynamic_conf_threshold)
     approved = (calibrated_confidence >= effective_conf_threshold) and trend_gates_passed and traditional_approved

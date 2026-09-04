@@ -298,6 +298,7 @@ def format_bybit_price(symbol: str, price: float) -> str:
 
 def format_bybit_qty(symbol: str, qty: float) -> str:
     import math
+    from decimal import Decimal
     q_val = max(0.0, float(qty))
     try:
         specs = get_instrument_specs(symbol)
@@ -305,9 +306,10 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
         p = len(lot_str.split(".")[1]) if "." in lot_str else 0
         if p == 0:
             return f"{math.floor(q_val)}"
-        factor = 10.0 ** p
-        floored_q = math.floor(round(q_val, p + 2) * factor) / factor
-        return f"{floored_q:.{p}f}"
+        lot_dec = Decimal(str(lot_str))
+        q_dec = Decimal(str(q_val))
+        floored_dec = (q_dec // lot_dec) * lot_dec
+        return f"{floored_dec:.{p}f}"
     except Exception as ex_bybit_client:
         log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         precisions = {
@@ -319,9 +321,11 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
         p = precisions.get(symbol, 1)
         if p == 0:
             return f"{math.floor(q_val)}"
-        factor = 10.0 ** p
-        floored_q = math.floor(round(q_val, p + 2) * factor) / factor
-        return f"{floored_q:.{p}f}"
+        step_str = f"0.{'0' * (p - 1)}1"
+        lot_dec = Decimal(step_str)
+        q_dec = Decimal(str(q_val))
+        floored_dec = (q_dec // lot_dec) * lot_dec
+        return f"{floored_dec:.{p}f}"
 
 
 def get_bybit_min_qty_step(symbol: str) -> tuple:

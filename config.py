@@ -51,8 +51,8 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.010, "30": 0.035, "60": 0.040, "default": 0.050}
-TIMEFRAME_MIN_BAL_ACC = {"15": 0.340, "30": 0.348, "60": 0.348, "default": 0.360}
+TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "60": 0.040, "default": 0.050}
+TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "default": 0.360}
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "default": 0.035}
 TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "default": 0.355}
 
@@ -376,6 +376,7 @@ TIMEFRAME_CONFIG = {
         "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.80),
         "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.38),
         "min_adx": _get_tf_env("TF_15M_MIN_ADX", 16.0),
+        "min_direction_mass": _get_tf_env("TF_15M_MIN_DIR_MASS", 0.20),
         "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.15),
         "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.85)
     },
@@ -383,6 +384,7 @@ TIMEFRAME_CONFIG = {
         "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.0565524801510242),
         "base_confidence_threshold": _get_tf_env("TF_30M_CONF_THRESH", 0.40),
+        "min_direction_mass": _get_tf_env("TF_30M_MIN_DIR_MASS", 0.20),
         "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.3620801690780144),
         "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 2.8909683078238504)
     },
@@ -391,6 +393,7 @@ TIMEFRAME_CONFIG = {
         "sl_mult": _get_tf_env("TF_60M_SL_MULT", 0.6585006543095501),
         "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.42),
         "min_adx": _get_tf_env("TF_60M_MIN_ADX", 24.0),
+        "min_direction_mass": _get_tf_env("TF_60M_MIN_DIR_MASS", 0.15),
         "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.258257285199672),
         "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.4746788008303522)
     },
@@ -398,6 +401,7 @@ TIMEFRAME_CONFIG = {
         "lookahead": int(_get_tf_env("TF_120M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_120M_SL_MULT", 0.90),
         "base_confidence_threshold": _get_tf_env("TF_120M_CONF_THRESH", 0.45),
+        "min_direction_mass": _get_tf_env("TF_120M_MIN_DIR_MASS", 0.15),
         "tp_mult_ranging": _get_tf_env("TF_120M_TP_RANGING", 2.20),
         "tp_mult_trending": _get_tf_env("TF_120M_TP_TRENDING", 2.60)
     },
@@ -406,6 +410,7 @@ TIMEFRAME_CONFIG = {
         "sl_mult": _get_tf_env("TF_240M_SL_MULT", 0.7692996169158203),
         "base_confidence_threshold": _get_tf_env("TF_240M_CONF_THRESH", 0.48),
         "min_adx": _get_tf_env("TF_240M_MIN_ADX", 28.0),
+        "min_direction_mass": _get_tf_env("TF_240M_MIN_DIR_MASS", 0.15),
         "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.783121353301515),
         "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 2.4005024826625188)
     },
@@ -413,6 +418,7 @@ TIMEFRAME_CONFIG = {
         "lookahead": int(_get_tf_env("TF_360M_LOOKAHEAD", 12)),
         "sl_mult": _get_tf_env("TF_360M_SL_MULT", 1.00),
         "base_confidence_threshold": _get_tf_env("TF_360M_CONF_THRESH", 0.50),
+        "min_direction_mass": _get_tf_env("TF_360M_MIN_DIR_MASS", 0.15),
         "tp_mult_ranging": _get_tf_env("TF_360M_TP_RANGING", 2.20),
         "tp_mult_trending": _get_tf_env("TF_360M_TP_TRENDING", 2.50)
     }

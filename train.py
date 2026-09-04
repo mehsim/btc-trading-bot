@@ -669,7 +669,7 @@ def tune_triple_barrier_multipliers(df_coin, interval, n_trials=30):
 
 _EXECUTED_OPTUNA_TRIALS = 0
 
-def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15):
+def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15, n_trials=30):
     global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
@@ -714,12 +714,14 @@ def optimize_xgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=8)
+    sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=5)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5)
+    study = optuna.create_study(direction="maximize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15):
+def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15, n_trials=30):
     global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
@@ -763,12 +765,14 @@ def optimize_lgb_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=8)
+    sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=5)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5)
+    study = optuna.create_study(direction="maximize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15):
+def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regime, interval=15, n_trials=30):
     global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
@@ -803,12 +807,14 @@ def optimize_cat_classifier(X_train, y_train, X_val, y_val, sample_weights, regi
         model.fit(X_train, y_train, sample_weight=sample_weights)
         preds = model.predict(X_val)
         return balanced_accuracy_score(y_val, preds)
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=8)
+    sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=5)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5)
+    study = optuna.create_study(direction="maximize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
+def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15, n_trials=30):
     global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
@@ -836,12 +842,14 @@ def optimize_xgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=8)
+    sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=5)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5)
+    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
+def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15, n_trials=30):
     global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
@@ -869,12 +877,14 @@ def optimize_lgb_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=8)
+    sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=5)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5)
+    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
-def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
+def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime, interval=15, n_trials=30):
     global _EXECUTED_OPTUNA_TRIALS
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     def objective(trial):
@@ -898,8 +908,10 @@ def optimize_cat_regressor(X_train, y_train, X_val, y_val, regime, interval=15):
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
         return mean_absolute_error(y_val, preds)
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=8)
+    sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=5)
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5)
+    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
+    study.optimize(objective, n_trials=n_trials)
     _EXECUTED_OPTUNA_TRIALS += len(study.trials)
     return study.best_params
 
@@ -945,8 +957,9 @@ def _train_single_timeframe(interval: str, pages: int = 15, regime_type: Optiona
 
 
 def train_models(interval=INTERVAL, pages=PAGES):
-    global OPTIMIZED_BARRIERS
+    global OPTIMIZED_BARRIERS, _EXECUTED_OPTUNA_TRIALS
     OPTIMIZED_BARRIERS = {}
+    _EXECUTED_OPTUNA_TRIALS = 0
     
     # Pre-tune Triple-Barrier Multipliers on BTCUSDT to maximize general accuracy
     # Skip retuning if a saved barriers file already exists — reuse it to avoid
@@ -1572,7 +1585,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             from ensemble import resolve_direction
             probs_val = ensemble_t.predict_proba(X_val)
             for j in range(len(X_val)):
-                dir_label, dir_conf = resolve_direction(probs_val[j])
+                dir_label, dir_conf = resolve_direction(probs_val[j], interval=str(interval))
                 if dir_label in ["Bearish", "Bullish"]:
                     dir_class = 2 if dir_label == "Bullish" else 0
                     calibration_probs.append(float(dir_conf))
@@ -1805,23 +1818,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
         sample_weight_train_last = compute_balanced_uniqueness_weights(y_train_t, uniqueness=uniqueness_last, decay=decay_train_last)
         
         if len(X) >= 50:
-            inner_split_f = int(len(X) * 0.8)
-            X_tr_f = X.iloc[:inner_split_f]
-            y_tr_f = y_trend.iloc[:inner_split_f]
-            w_tr_f = sample_weight_full[:inner_split_f] if sample_weight_full is not None else None
-            X_val_f = X.iloc[inner_split_f:]
-            y_val_f = y_trend.iloc[inner_split_f:]
-            final_ensemble_t.fit(
-                X, y_trend, sample_weight=sample_weight_full, 
-                X_val=X_val_f, y_val=y_val_f, 
-                X_train=X_tr_f, y_train=y_tr_f, 
-                sample_weight_train=w_tr_f
-            )
-            final_ensemble_p.fit(
-                X, y_price, 
-                X_val=X_val_f, y_val=y_price.iloc[inner_split_f:], 
-                X_train=X_tr_f, y_train=y_price.iloc[:inner_split_f:]
-            )
+            # Finding #45: Withhold dedicated calibration slice from final model fitting
+            cal_split = int(len(X) * 0.85)
+            X_tr_final = X.iloc[:cal_split]
+            y_tr_final = y_trend.iloc[:cal_split]
+            w_tr_final = sample_weight_full[:cal_split] if sample_weight_full is not None else None
+            final_ensemble_t.fit(X_tr_final, y_tr_final, sample_weight=w_tr_final)
+            final_ensemble_p.fit(X_tr_final, y_price.iloc[:cal_split])
         else:
             final_ensemble_t.fit(X, y_trend, sample_weight=sample_weight_full)
             final_ensemble_p.fit(X, y_price)
@@ -2114,10 +2117,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif holdout_mcc < min_holdout_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
                 should_save = False
-            elif holdout_mcc_ci_low < -0.05 or (holdout_mcc_ci_low < 0.0 and round(2.8 / np.sqrt(max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))), 4) > min_holdout_mcc_floor * 5.0):
-                _eff_n = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
-                _mde_val = round(2.8 / np.sqrt(_eff_n), 4)
-                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) fails zero-floor or MDE(80%) was {_mde_val:.4f} > 5x floor ({min_holdout_mcc_floor}).")
+            elif holdout_mcc_ci_low < 0.0:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) < 0 — fails non-negative lower bound requirement.")
                 should_save = False
             elif holdout_mcc_ci_high < 0.0:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI upper bound ({holdout_mcc_ci_high:.4f}) < 0 — clear negative correlation out of sample")
@@ -2155,7 +2156,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     is_distribution_shifted = True
 
                 # Finding #134: MDE 80% Power Gate
-                chal_mde = round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead)))), 4)
+                _n_eff_holdout = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
+                chal_mde = round(2.8016 / np.sqrt(_n_eff_holdout), 4)
                 if abs(holdout_mcc) < chal_mde:
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger holdout MCC ({holdout_mcc:.4f}) below 80% MDE ({chal_mde:.4f}) — underpowered.")
                     should_save = False
@@ -2277,7 +2279,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     wf_pass = False
                     try:
                         from walk_forward_engine import run_walk_forward_backtest
-                        from xgboost import XGBClassifier as _XGB_WF
+                        from ensemble import EnsembleClassifier
                         
                         def _wf_train_fn(_w_train_df):
                             _wf_feats = [c for c in challenger_feature_names if c in _w_train_df.columns]
@@ -2285,7 +2287,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 return None
                             _w_X = _w_train_df[_wf_feats].fillna(0.0)
                             _w_y = _w_train_df["target_trend"].astype(int) if "target_trend" in _w_train_df.columns else np.zeros(len(_w_train_df), dtype=int)
-                            _w_m = _XGB_WF(n_estimators=30, max_depth=3, random_state=42, n_jobs=1)
+                            _w_xgb = create_model(XGBClassifier, best_params_xgb_t)
+                            _w_lgb = create_model(LGBMClassifier, best_params_lgb_t)
+                            _w_cat = create_model(CatBoostClassifier, best_params_cat_t)
+                            _w_m = EnsembleClassifier(_w_xgb, _w_lgb, _w_cat)
                             _w_m.fit(_w_X, _w_y)
                             
                             def _wf_sim_fn(_w_test_df):
@@ -2294,11 +2299,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
                                 _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
                                 _w_trades = []
+                                _roundtrip_fee = 0.0010  # 10 bps roundtrip fee & slippage deduction
                                 for _p_d, _p_r in zip(_t_preds, _t_prices):
                                     if _p_d == 2:  # Bullish long
-                                        _w_trades.append({"net_return": float(_p_r), "sl_frac": 0.01})
+                                        _w_trades.append({"net_return": float(_p_r) - _roundtrip_fee, "sl_frac": 0.01})
                                     elif _p_d == 0:  # Bearish short
-                                        _w_trades.append({"net_return": -float(_p_r), "sl_frac": 0.01})
+                                        _w_trades.append({"net_return": -float(_p_r) - _roundtrip_fee, "sl_frac": 0.01})
                                 return {"trades": _w_trades}
                             return _wf_sim_fn
 
@@ -2311,7 +2317,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 step_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
                                 train_fn=_wf_train_fn
                             )
-                            wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= -0.10 and _w_res.get("mean_profit_factor", 0.0) >= 0.90)
+                            wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= 0.0 and _w_res.get("mean_profit_factor", 0.0) >= 1.0)
                         else:
                             wf_pass = False  # Fail-closed if insufficient walk-forward data
                     except Exception as _wf_ex:
@@ -2710,7 +2716,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         print(f"[Regime Filter] Skipping RANGING regime training (target_regime='{target_regime}')")
 
     # M-3: persist total Optuna trial count so governance gate uses real search breadth.
-    _TOTAL_OPTUNA_TRIALS = _EXECUTED_OPTUNA_TRIALS if _EXECUTED_OPTUNA_TRIALS > 0 else (5 + 2 * 6 * 8)
+    _TOTAL_OPTUNA_TRIALS = _EXECUTED_OPTUNA_TRIALS
     try:
         _gov_path = "governance_state.json"
         _gov = {}
@@ -2720,10 +2726,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     _gov = json.load(_gf)
             except Exception as _ex_rd2:
                 log_event("WARNING", f"[Governance] Could not read {_gov_path}: {_ex_rd2}")
-        _gov["last_study_trial_count"] = _TOTAL_OPTUNA_TRIALS
+        _gov["last_optuna_trial_count"] = _TOTAL_OPTUNA_TRIALS
         with open(_gov_path, "w") as f:
             json.dump(_gov, f)
-        print(f"[Governance] Persisted last_study_trial_count={_TOTAL_OPTUNA_TRIALS} to {_gov_path}")
+        print(f"[Governance] Persisted last_optuna_trial_count={_TOTAL_OPTUNA_TRIALS} to {_gov_path}")
     except Exception as _ex_gov:
         print(f"[Governance] Warning: Could not update governance_state.json: {_ex_gov}")
 

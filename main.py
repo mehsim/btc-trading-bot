@@ -84,6 +84,7 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
     """Finding #145: Local wrapper for format_bybit_qty that resolves get_instrument_specs
     through main's namespace so tests can patch 'main.get_instrument_specs' cleanly."""
     import math
+    from decimal import Decimal
     q_val = max(0.0, float(qty))
     try:
         specs = get_instrument_specs(symbol)
@@ -91,9 +92,10 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
         p = len(lot_str.split(".")[1]) if "." in lot_str else 0
         if p == 0:
             return f"{math.floor(q_val)}"
-        factor = 10.0 ** p
-        floored_q = math.floor(round(q_val, p + 2) * factor) / factor
-        return f"{floored_q:.{p}f}"
+        lot_dec = Decimal(str(lot_str))
+        q_dec = Decimal(str(q_val))
+        floored_dec = (q_dec // lot_dec) * lot_dec
+        return f"{floored_dec:.{p}f}"
     except Exception as exc:
         log_event("DEBUG", f"format_bybit_qty fallback: {exc}")
         from bybit_client import format_bybit_qty as _bc_fmt_qty
@@ -2316,6 +2318,7 @@ def load_model_weights(iv):
         print(f"Loaded feature counts - Trending: {n_features_trending}, Ranging: {n_features_ranging} for interval {iv}")
         
         from model_governance import extract_metric, validate_manifest_governance_floors
+        manifest_by_prefix = {}
 
         def check_startup_manifest_health(prefix: str) -> bool:
             manifest_path = f"{prefix}_manifest.json"
@@ -2333,6 +2336,7 @@ def load_model_weights(iv):
                     send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {reason}")
                     return False
 
+                manifest_by_prefix[prefix] = m
                 from model_governance import model_governance_engine
                 model_governance_engine.log_barrier_manifest_audit("BTCUSDT", str(iv), m)
                 return True
@@ -2359,7 +2363,14 @@ def load_model_weights(iv):
                         log_event("CRITICAL", f"[Model Governance Rejection] MLflow production model {ver_trending} failed startup manifest health check.")
                 elif os.path.exists(f"{prefixes['trending_trend']}_xgb.json") and check_startup_manifest_health(prefixes['trending_trend']):
                     models_by_interval[iv]["trending"]["trend"] = load_ensemble_classifier(prefixes["trending_trend"], n_features_trending, feature_names=feat_trending)
-                    models_by_interval[iv]["trending"]["model_version"] = f"btc_{iv}m_trending_clf:v1.0"
+                    m_tr = manifest_by_prefix.get(prefixes['trending_trend'], {})
+                    models_by_interval[iv]["trending"]["manifest"] = m_tr
+                    models_by_interval[iv]["trending"]["model_version"] = m_tr.get("model_version") or f"btc_{iv}m_trending_clf:v1.0"
+                    models_by_interval[iv]["trending"]["git_sha"] = m_tr.get("git_sha")
+                    models_by_interval[iv]["trending"]["manifest_schema_version"] = m_tr.get("manifest_schema_version")
+                    models_by_interval[iv]["trending"]["feature_contract_hash"] = m_tr.get("feature_contract_hash") or m_tr.get("feature_hash")
+                    models_by_interval[iv]["trending"]["calibrator_version"] = m_tr.get("calibrator_version")
+                    models_by_interval[iv]["trending"]["calibrator_ece"] = m_tr.get("calibrator_ece")
             except Exception as e:
                 log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['trending_trend']} for {iv}m: {e}")
                 send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['trending_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
@@ -2398,7 +2409,14 @@ def load_model_weights(iv):
                         log_event("CRITICAL", f"[Model Governance Rejection] MLflow production model {ver_ranging} failed startup manifest health check.")
                 elif os.path.exists(f"{prefixes['ranging_trend']}_xgb.json") and check_startup_manifest_health(prefixes['ranging_trend']):
                     models_by_interval[iv]["ranging"]["trend"] = load_ensemble_classifier(prefixes["ranging_trend"], n_features_ranging, feature_names=feat_ranging)
-                    models_by_interval[iv]["ranging"]["model_version"] = f"btc_{iv}m_ranging_clf:v1.0"
+                    m_rg = manifest_by_prefix.get(prefixes['ranging_trend'], {})
+                    models_by_interval[iv]["ranging"]["manifest"] = m_rg
+                    models_by_interval[iv]["ranging"]["model_version"] = m_rg.get("model_version") or f"btc_{iv}m_ranging_clf:v1.0"
+                    models_by_interval[iv]["ranging"]["git_sha"] = m_rg.get("git_sha")
+                    models_by_interval[iv]["ranging"]["manifest_schema_version"] = m_rg.get("manifest_schema_version")
+                    models_by_interval[iv]["ranging"]["feature_contract_hash"] = m_rg.get("feature_contract_hash") or m_rg.get("feature_hash")
+                    models_by_interval[iv]["ranging"]["calibrator_version"] = m_rg.get("calibrator_version")
+                    models_by_interval[iv]["ranging"]["calibrator_ece"] = m_rg.get("calibrator_ece")
             except Exception as e:
                 log_event("CRITICAL", f"[Model Load Error] Refused/failed to load {prefixes['ranging_trend']} for {iv}m: {e}")
                 send_telegram_alert(f"🚨 *MODEL GOVERNANCE LOAD FAILURE* 🚨\n• *Model*: {prefixes['ranging_trend']}\n• *Interval*: {iv}m\n• *Reason*: {str(e)}")
@@ -4762,6 +4780,7 @@ def recover_missed_closed_trades():
 
 def execute_bybit_trade_async(*args, **kwargs):
     symbol = args[0] if args else "Unknown"
+    journal_rec = kwargs.get("journal_rec")
     try:
         _execute_bybit_trade_async_inner(*args, **kwargs)
     except Exception as e:
@@ -4770,13 +4789,21 @@ def execute_bybit_trade_async(*args, **kwargs):
         print(f"[CRITICAL EXECUTION ERROR] Async trade execution failed for {symbol}: {err_msg}")
         traceback.print_exc()
         send_telegram_alert(f"🚨 *Async Trade Execution Error* 🚨\n• Symbol: `{symbol}`\n• Error: `{err_msg}`")
+        if journal_rec is not None:
+            try:
+                journal_rec.outcome = "SKIPPED"
+                journal_rec.reject_reason = f"Async execution exception: {err_msg}"
+                journal_rec.trade_id = None
+                write_decision(journal_rec)
+            except Exception as _wj_err:
+                log_event("WARNING", f"Failed to journal async execution exception: {_wj_err}")
     finally:
         with active_execution_lock:
             active_execution_symbols.discard(symbol)
             active_execution_margins.pop(symbol, None)
             active_execution_notional.pop(symbol, None)
 
-def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None, decision_ts=None):
+def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None, decision_ts=None, journal_rec=None):
 
     if latest_candle is None:
         latest_candle = {}
@@ -4788,6 +4815,17 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     bybit_scale_out_order_id = None
     actual_qty = raw_qty
     order_res = {}
+
+    def _abort_async(reason: str):
+        if journal_rec is not None:
+            try:
+                journal_rec.outcome = "SKIPPED"
+                journal_rec.reject_reason = reason
+                journal_rec.trade_id = None
+                write_decision(journal_rec)
+                log_event("INFO", f"[{symbol} {iv}m] Journalled async skipped decision: {reason}")
+            except Exception as _w_err:
+                log_event("WARNING", f"Failed to journal async abort ({reason}): {_w_err}")
     
     # 0. Signal TTL Guard (Hard Abort if decision was made too long ago)
     signal_ttl_seconds = min(120.0, max(30.0, int(iv) * 60 * 0.10))
@@ -4796,6 +4834,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         if elapsed_since_decision > signal_ttl_seconds:
             log_event("WARNING", f"[{symbol} {iv}m Signal TTL] Decision expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s). Aborting order submission.")
             send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s).")
+            _abort_async(f"Signal TTL expired ({elapsed_since_decision:.1f}s > {signal_ttl_seconds:.1f}s)")
             return
 
     sl_source = "STRUCTURAL_SWING" if str(iv) in ["15", "30", "60"] else "ATR_DYNAMIC"
@@ -4814,6 +4853,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             if existing_pos:
                 print(f"[{symbol} {iv}m API Block] Live order placement skipped: a live position already exists on Bybit.")
                 sync_active_positions_from_bybit()
+                _abort_async("Live position already exists on Bybit")
                 return
     except Exception as pos_check_err:
         print(f"[{symbol} {iv}m API Warning] Live Position Guard check failed: {pos_check_err}")
@@ -4822,6 +4862,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     import math
     if entry_price is None or (isinstance(entry_price, float) and (math.isnan(entry_price) or entry_price <= 0)) or float(entry_price) <= 0:
         log_event("WARNING", f"[{symbol} {iv}m] Invalid entry price: {entry_price}. Aborting trade execution.")
+        _abort_async(f"Invalid entry price: {entry_price}")
         return
 
     # 1. Pre-Flight Geometry Assertion (Hard Abort — Do NOT place order if invalid)
@@ -4830,6 +4871,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     except ValueError as geom_err:
         log_event("ERROR", str(geom_err))
         send_telegram_alert(f"🚨 *CRITICAL ORDER ABORT*: {symbol} {iv}m invalid geometry: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}")
+        _abort_async(f"Invalid geometry: {geom_err}")
         return
 
     # 2. Pre-Flight Horizon Reachability Guard
@@ -4843,6 +4885,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     if preflight_tp_dist > max_reachable:
         log_event("WARNING", f"[{symbol} {iv}m Reachability Guard] Pre-flight TP distance (${preflight_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}). Aborting trade entry.")
         send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted pre-flight — TP target (${preflight_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f}).")
+        _abort_async(f"TP target (${preflight_tp_dist:.4f}) exceeds horizon reach (${max_reachable:.4f})")
         return
 
     # 3. Pre-Flight Economic Gate (Realized R:R with haircut)
@@ -4852,6 +4895,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         _required_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
         log_event("WARNING", f"[{symbol} {iv}m Pre-Flight Economic Gate] Realized R:R gate failed (nominal R:R {preflight_tp_dist/max(1e-9, _sl_dist):.2f} with haircut requires {_required_p:.3f}, have {calibrated_confidence:.3f}). Aborting.")
         send_telegram_alert(f"⚠️ [{symbol} {iv}m] Trade aborted pre-flight — Realized R:R requires {_required_p:.3f}, have {calibrated_confidence:.3f}")
+        _abort_async(f"Realized R:R requires {_required_p:.3f}, have {calibrated_confidence:.3f}")
         return
 
     pre_entry_price = float(entry_price)
@@ -4864,16 +4908,19 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     if live_mid is None or live_mid <= 0:
         log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Cannot retrieve live market price. Aborting order (Fail-Closed).")
         send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Market price unavailable for pre-flight drift check.")
+        _abort_async("Market price unavailable for pre-flight drift check")
         return
     # 4. Immediate Trigger Invariant: Abort if live price has already breached Stop Loss
     if stop_loss_price is not None:
         if ml_trend == "Bullish" and live_mid <= stop_loss_price:
             log_event("WARNING", f"[{symbol} {iv}m Immediate Trigger Guard] Live mid (${live_mid:.4f}) already breached Long Stop Loss (${stop_loss_price:.4f}). Aborting order placement.")
             send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Live price (${live_mid:.4f}) already breached Stop Loss (${stop_loss_price:.4f}).")
+            _abort_async(f"Live price (${live_mid:.4f}) already breached Long Stop Loss (${stop_loss_price:.4f})")
             return
         elif ml_trend == "Bearish" and live_mid >= stop_loss_price:
             log_event("WARNING", f"[{symbol} {iv}m Immediate Trigger Guard] Live mid (${live_mid:.4f}) already breached Short Stop Loss (${stop_loss_price:.4f}). Aborting order placement.")
             send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Live price (${live_mid:.4f}) already breached Stop Loss (${stop_loss_price:.4f}).")
+            _abort_async(f"Live price (${live_mid:.4f}) already breached Short Stop Loss (${stop_loss_price:.4f})")
             return
 
     max_adverse_drift = max(0.25 * atr_dollars, pre_entry_price * 0.0025)
@@ -4882,11 +4929,13 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         adverse_pts = pre_entry_price - live_mid
         log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_mid:.2f}) drifted {adverse_pts:.2f} below entry ({pre_entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Aborting order.")
         send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Adverse price drift ({adverse_pts:.2f} > {max_adverse_drift:.2f}).")
+        _abort_async(f"Adverse price drift ({adverse_pts:.2f} > {max_adverse_drift:.2f})")
         return
     elif ml_trend == "Bearish" and (live_mid - pre_entry_price) > max_adverse_drift:
         adverse_pts = live_mid - pre_entry_price
         log_event("WARNING", f"[{symbol} {iv}m Adverse Drift Guard] Live price ({live_mid:.2f}) drifted {adverse_pts:.2f} above entry ({pre_entry_price:.2f}) > max allowed {max_adverse_drift:.2f} (0.25 ATR). Aborting order.")
         send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Adverse price drift ({adverse_pts:.2f} > {max_adverse_drift:.2f}).")
+        _abort_async(f"Adverse price drift ({adverse_pts:.2f} > {max_adverse_drift:.2f})")
         return
 
     print(f"[{symbol} {iv}m API] Preparing to open live position on Bybit ({TRADE_MODE.upper()})...")
@@ -4937,6 +4986,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         else:
                             log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase with 0 fills. Aborting order placement completely.")
                             send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired during chase.")
+                            _abort_async("Signal TTL expired during chase with 0 fills")
                             return
 
                 remaining_qty = max(0.0, raw_qty - filled_so_far)
@@ -5180,6 +5230,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     flatten_ok = emergency_flatten_position(symbol, flatten_side, format_bybit_qty(symbol, actual_qty))
                     if flatten_ok:
                         log_event("INFO", f"[{symbol} {iv}m] Emergency flatten succeeded after SL failure.")
+                        _abort_async("Emergency flatten succeeded after SL failure")
                         return
                     else:
                         log_event("CRITICAL", f"[{symbol} {iv}m] Emergency flatten FAILED after SL placement failure! Retaining trade in state with sl_failed=True.")
@@ -5227,6 +5278,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             f"• *Target Leverage*: {leverage_val}x\n"
             f"• *Detail*: Failed to configure leverage on Bybit."
         )
+        _abort_async("Failed to configure leverage on Bybit")
         return
         
     if bybit_success:
@@ -5302,6 +5354,18 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             bot_state[active_trade_key] = current_trades
             
         sync_active_positions_from_bybit()
+
+        if journal_rec is not None:
+            try:
+                journal_rec.outcome = "EXECUTED"
+                journal_rec.trade_id = f"{symbol}_{trade_uuid}"
+                journal_rec.reject_reason = None
+                journal_rec.position_size_usd = float(actual_margin_usd)
+                journal_rec.leverage = float(leverage_val)
+                write_decision(journal_rec)
+                log_event("INFO", f"[{symbol} {iv}m] Journalled async executed decision for {journal_rec.trade_id}")
+            except Exception as _w_exec_err:
+                log_event("WARNING", f"Failed to journal async executed decision: {_w_exec_err}")
         
         entry_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         send_telegram_alert(
@@ -5346,6 +5410,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             f"• *Direction*: {ml_trend}\n"
             f"• *Error Message*: {err_msg} (Code: {err_code})"
         )
+        _abort_async(f"Bybit API order error: {err_msg} (Code: {err_code})")
 
 def main():
     global live_price, last_ws_update_time
@@ -7045,6 +7110,9 @@ def main():
                     decision_ts = time.time()
                     status_msg = "Abstain"
                     placed = False
+                    async_spawned = False
+                    exp_edge_bps = None
+                    exp_r_val = None
                     try:
                     
                         latest_candle = df.iloc[-1]
@@ -7386,7 +7454,7 @@ def main():
                                 prob_bullish = val if val >= 0.5 else 0.0
 
                             from ensemble import resolve_direction
-                            ml_trend, ml_confidence = resolve_direction(probs)
+                            ml_trend, ml_confidence = resolve_direction(probs, interval=str(iv))
                             raw_class_prob = prob_bullish if ml_trend == "Bullish" else (prob_bearish if ml_trend == "Bearish" else prob_neutral)
 
                             # 1. Calibrate the directional confidence (matching economic 2-class break-even scale)
@@ -7434,6 +7502,14 @@ def main():
 
                             expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
 
+                            reg_dict = models_tf.get(regime_key, {})
+                            model_ver = reg_dict.get("model_version") or getattr(m_trend, "model_version", None)
+                            git_sha_val = reg_dict.get("git_sha")
+                            manifest_schema_val = reg_dict.get("manifest_schema_version")
+                            feature_contract_val = reg_dict.get("feature_contract_hash")
+                            cal_ver = reg_dict.get("calibrator_version")
+                            cal_ece = reg_dict.get("calibrator_ece")
+
                             pred_entry_dict = {
                                 "timestamp": float(time.time()),
                                 "time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -7446,7 +7522,13 @@ def main():
                                 "calibrated_confidence": calibrated_confidence,
                                 "manifest_mcc": _manifest_mcc_val,
                                 "signal_source": signal_source_type,
-                                "is_fallback": is_fallback_signal
+                                "is_fallback": is_fallback_signal,
+                                "model_version": model_ver,
+                                "git_sha": git_sha_val,
+                                "manifest_schema_version": manifest_schema_val,
+                                "feature_contract_hash": feature_contract_val,
+                                "calibrator_version": cal_ver,
+                                "calibrator_ece": cal_ece
                             }
                             for k_suffix in [str(tf), str(iv)]:
                                 bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
@@ -7475,6 +7557,24 @@ def main():
                             rec.is_floor_scaled = 1 if (locals().get('is_floor_scaled', False)) else 0
                             rec._inputs["predicted_change"] = float(pred_change)
                             rec._inputs["expected_pct_change"] = float(pred_change)
+                            if model_ver:
+                                rec.model_version = str(model_ver)
+                            if git_sha_val:
+                                rec.git_sha = str(git_sha_val)
+                            if manifest_schema_val is not None:
+                                try:
+                                    rec.manifest_schema = int(manifest_schema_val)
+                                except (ValueError, TypeError) as _sch_err:
+                                    log_event("DEBUG", f"manifest_schema conversion error: {_sch_err}")
+                            if feature_contract_val:
+                                rec.feature_hash = str(feature_contract_val)
+                            if cal_ver:
+                                rec.calibrator_version = str(cal_ver)
+                            if cal_ece is not None:
+                                try:
+                                    rec.calibrator_ece = float(cal_ece)
+                                except (ValueError, TypeError) as _ece_err:
+                                    log_event("DEBUG", f"calibrator_ece conversion error: {_ece_err}")
 
                             log_event("INFO", f"[{symbol} {iv}m] probs=[{prob_bearish:.4f}, {prob_neutral:.4f}, {prob_bullish:.4f}] ml_conf={ml_confidence:.4f} cal={calibrated_confidence:.4f}")
 
@@ -7565,13 +7665,18 @@ def main():
                             _bars_per_day = max(1, round(1440 / max(1, int(iv))))
                             _adv_usd = float(df_completed["volume"].tail(_bars_per_day).sum() * entry_close) if ("volume" in df_completed.columns and len(df_completed) >= _bars_per_day) else 50_000_000.0
                             _current_bal = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
-                            _order_usd = float(bot_state.get("position_size_usd") or max(10.0, _current_bal * 0.05 * 5.0))
+                            _max_risk_frac = float(getattr(config, "MAX_RISK_PER_TRADE", 0.02))
+                            _est_stop_dist = max(0.002, (resolved_sl_dist / max(1e-6, entry_close)))
+                            _est_notional = (_current_bal * _max_risk_frac) / _est_stop_dist
+                            _min_order = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
+                            _order_usd = float(bot_state.get("position_size_usd") or max(_min_order, min(_current_bal * 10.0, _est_notional)))
                             _tcm = transaction_cost_model.estimate_transaction_cost(
                                 order_size_usd=_order_usd,
                                 volume_24h_usd=_adv_usd,
                                 is_maker=True,
                             )
                             cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
+                            rec.round_trip_cost_bp = float(cost_bps)
                             nominal_rr = (resolved_tp_m * atr_dollars) / max(1e-6, resolved_sl_dist)
                             realized_haircut = get_realized_rr_haircut(interval=str(iv), regime=str(regime_name), nominal_rr=nominal_rr)
                             effective_tp_m = resolved_tp_m * realized_haircut
@@ -7581,6 +7686,11 @@ def main():
                             base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
                             dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
                             adjustments_applied = [("economic_base", dynamic_conf_threshold)]
+                            exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - cost_bps
+                            rec.expected_value = float(exp_edge_bps)
+                            exp_r_val = float(effective_tp_m / max(1e-6, resolved_sl_m))
+                            rec.expected_rr = exp_r_val
+                            rec.gate("cost", value=float(cost_bps), passed=bool(cost_adj <= 0.05))
 
                             # Calibrator Economic Viability Guard
                             from tools.beta_calibrator import is_calibrator_viable
@@ -8180,7 +8290,7 @@ def main():
                                     # C-2: estimate per-symbol 24h ADV from candle volume * price
                                     _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
                                     _current_bal_15m = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 80.0
-                                    _order_usd = float(bot_state.get("position_size_usd") or max(10.0, _current_bal_15m * 0.05 * 5.0)) if "bot_state" in globals() and hasattr(bot_state, "get") else 1000.0
+                                    _order_usd = float(bot_state.get("position_size_usd") or max(5.1, min(_current_bal_15m * 10.0, _est_notional if '_est_notional' in locals() else _current_bal_15m * 0.25))) if "bot_state" in globals() and hasattr(bot_state, "get") else 1000.0
                                     tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
                                     rec.round_trip_cost_bp = float(tcm_cost_bps)
                                     exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
@@ -8664,7 +8774,7 @@ def main():
                                             position_size_usd = min(available_margin, raw_target_margin)
 
                                             # Pre-Trade Signal Guard Check
-                                            pred_info = bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
+                                            pred_info = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{iv}m") or bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
                                             if pred_info.get("is_fallback", False) or pred_info.get("signal_source") in ["RULE_BASED_FALLBACK", "UNSET"]:
                                                 position_size_usd *= 0.50
                                                 print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
@@ -8747,7 +8857,6 @@ def main():
                                                     rec.reason_code = ReasonCode.MARGIN_GUARD_EXCEEDED if wallet_exceeded else ReasonCode.RISK_CHECKLIST_BLOCKED
                                                 if passed_checklist and not wallet_exceeded:
                                                     rec.position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
-                                                    rec.trade_id = f"{symbol}_{trade_uuid}"
                                             except Exception as risk_err:
                                                 rec.outcome = "ERROR"
                                                 rec.reject_reason = f"Risk checklist exception: {risk_err}"
@@ -8777,6 +8886,7 @@ def main():
                                                 # Final position size strictly clamped to validated checklist cap with drawdown scaling
                                                 position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
                                                 leveraged_size = position_size_usd * leverage_val
+                                                bot_state["position_size_usd"] = float(leveraged_size)
                                                 raw_qty = leveraged_size / entry_price if entry_price > 0 else 0.0
                                                 qty_str = format_bybit_qty(symbol, raw_qty)
                                                 qty_val = float(qty_str) if qty_str else 0.0
@@ -8850,9 +8960,24 @@ def main():
 
                                                         if not wallet_exceeded:
                                                             stop_loss_price = new_sl_price
-                                                            position_size_usd = min(available_margin, final_val)
-                                                            is_oversized_trade = True
-                                                            print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Applied noise-clearance SL (${new_stop_dist:.4f}) with total risk ${scaled_risk_usd:.2f}.")
+                                                            # Finding #47: Re-evaluate portfolio checklist against scaled-up final_val
+                                                            if final_val > position_size_usd:
+                                                                try:
+                                                                    re_passed, re_msg, _, _ = risk_engine.evaluate_pre_trade_checklist(
+                                                                        symbol, final_val, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=None
+                                                                    )
+                                                                    if not re_passed:
+                                                                        log_event("WARNING", f"[{symbol} {iv}m Min Order Risk] Scaled up size (${final_val:.2f}) failed re-evaluated portfolio checklist: {re_msg}. Aborting entry.")
+                                                                        status_msg = f"Skipped (Min Order Bump Checklist Fail: {re_msg})"
+                                                                        wallet_exceeded = True
+                                                                except Exception as _chk_err:
+                                                                    log_event("WARNING", f"[{symbol} {iv}m Min Order Risk] Checklist re-eval exception: {_chk_err}")
+                                                                    wallet_exceeded = True
+                                                            if not wallet_exceeded:
+                                                                position_size_usd = min(available_margin, final_val)
+                                                                is_oversized_trade = True
+                                                                bot_state["position_size_usd"] = float(position_size_usd * leverage_val)
+                                                                print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Applied noise-clearance SL (${new_stop_dist:.4f}) with total risk ${scaled_risk_usd:.2f}.")
 
                                                 # Priority 3: Balance Guard - If margin exceeds 90% of free available margin, reject trade.
                                                 required_margin = (qty_val * entry_price) / max(1e-8, leverage_val)
@@ -8890,7 +9015,7 @@ def main():
                                                     # Terminal Risk-at-Stop Hard Boundary Assertion
                                                     from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
                                                     final_stop_dist = abs(entry_price - stop_loss_price)
-                                                    terminal_risk_usd = (raw_qty * final_stop_dist)
+                                                    terminal_risk_usd = (qty_val * final_stop_dist)
                                                     max_terminal_risk_usd = current_bal * HARD_MAX_RISK_PER_TRADE_PCT
                                                     if terminal_risk_usd > max_terminal_risk_usd + 1e-6:
                                                         max_allowed_q = max_terminal_risk_usd / max(1e-8, final_stop_dist)
@@ -8989,9 +9114,11 @@ def main():
                                                         threading.Thread(
                                                             target=execute_bybit_trade_async,
                                                             args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size, decision_ts),
+                                                            kwargs={"journal_rec": rec},
                                                             daemon=True
                                                         ).start()
                                                         placed = True
+                                                        async_spawned = True
                                                         status_msg = "Traded"
                                                         bybit_success = False # Skip the simulation path for this trade
 
@@ -9058,6 +9185,10 @@ def main():
                                                     current_trades = list(current_trades)
                                                     current_trades.append(active_trade)
                                                     bot_state[active_trade_key] = current_trades
+
+                                                # Finding #49: In simulation mode, confirm trade ID and execution outcome upon storing active trade
+                                                rec.trade_id = f"{symbol}_{trade_uuid}"
+                                                rec.outcome = "EXECUTED"
                                             
                                                 # Mark symbol as opened this cycle — prevents duplicate opens due to Bybit sync latency
                                                 just_opened_symbols.add(symbol)
@@ -9184,16 +9315,19 @@ def main():
                             leverage=rec.leverage
                         )
 
-                        if placed:
-                            rec.outcome = "EXECUTED"
-                        elif status_msg.startswith("REJECTED"):
-                            rec.outcome = "REJECTED"
-                        elif rec.outcome == "ERROR":
-                            pass  # Preserve genuine runtime exception outcome
+                        if not async_spawned:
+                            if placed:
+                                rec.outcome = "EXECUTED"
+                            elif status_msg.startswith("REJECTED"):
+                                rec.outcome = "REJECTED"
+                            elif rec.outcome == "ERROR":
+                                pass  # Preserve genuine runtime exception outcome
+                            else:
+                                rec.outcome = "SKIPPED"
+                            write_decision(rec)
+                            log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
                         else:
-                            rec.outcome = "SKIPPED"
-                        write_decision(rec)
-                        log_event("INFO", f"[{symbol} {iv}m] Journalling decision: {status_msg}")
+                            log_event("INFO", f"[{symbol} {iv}m] Async execution spawned; decision journaling delegated to async executor.")
                         last_processed_timestamps[last_ts_key] = latest_completed_ts
             except Exception as e:
                 import traceback

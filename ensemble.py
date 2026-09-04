@@ -21,6 +21,15 @@ def resolve_direction(probs, interval=None, min_dir_mass=0.15):
     Handles 1, 2, or 3-class probability arrays seamlessly without indexing assumptions.
     Applies directional mass normalization when neutral probability dominates to prevent argmax collapse.
     """
+    if interval is not None:
+        from config import TIMEFRAME_CONFIG
+        tf_cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+        if isinstance(tf_cfg, dict) and "min_direction_mass" in tf_cfg:
+            try:
+                min_dir_mass = float(tf_cfg["min_direction_mass"])
+            except (ValueError, TypeError) as _cfg_err:
+                log_event("DEBUG", f"min_direction_mass config parse error: {_cfg_err}")
+
     if len(probs) >= 3:
         prob_bearish = float(probs[0])
         prob_neutral = float(probs[1])
@@ -356,69 +365,98 @@ class EnsembleClassifier:
 
     def fit(self, X, y, sample_weight=None, X_val=None, y_val=None, X_train=None, y_train=None, sample_weight_train=None):
         X_arr = np.asarray(X, dtype=float)
+        y_arr = np.asarray(y, dtype=int) if y is not None else None
         
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
         self.meta_coef_ = None
         self.meta_intercept_ = None
+        self.meta_clf = None
         
-        # Fit stacking meta-classifier on validation out-of-fold predictions
-        if X_val is not None and y_val is not None and self.lgb_model is not None and self.cat_model is not None:
+        # Finding #42: Fit stacking meta-classifier on pooled out-of-fold predictions (no leakage)
+        if self.lgb_model is not None and self.cat_model is not None and len(X_arr) >= 20 and y_arr is not None:
             try:
                 from sklearn.metrics import accuracy_score
                 from sklearn.linear_model import LogisticRegression
+                from sklearn.model_selection import StratifiedKFold, KFold
+                from sklearn.base import clone
+
+                n_samples = len(X_arr)
+                classes, counts = np.unique(y_arr, return_counts=True)
+                min_class_count = int(np.min(counts)) if len(counts) > 1 else 0
+                n_splits = min(5, max(2, min_class_count)) if min_class_count >= 2 else min(5, max(2, n_samples // 10))
                 
-                # Fit base models on training fold ONLY to avoid data leakage
-                X_tr = X_train if X_train is not None else X
-                y_tr = y_train if y_train is not None else y
-                w_tr = sample_weight_train if sample_weight_train is not None else sample_weight
-                
-                X_tr_arr = np.asarray(X_tr, dtype=float)
-                self.xgb_model.fit(X_tr_arr, y_tr, sample_weight=w_tr)
-                self.lgb_model.fit(X_tr_arr, y_tr, sample_weight=w_tr)
-                self.cat_model.fit(X_tr_arr, y_tr, sample_weight=w_tr)
-                
-                X_v_arr = np.asarray(X_val, dtype=float)
-                xgb_acc = accuracy_score(y_val, self.xgb_model.predict(X_v_arr))
-                lgb_acc = accuracy_score(y_val, self.lgb_model.predict(X_v_arr))
-                cat_acc = accuracy_score(y_val, self.cat_model.predict(X_v_arr))
-                raw_weights = [max(0.01, xgb_acc), max(0.01, lgb_acc), max(0.01, cat_acc)]
-                sum_w = max(1e-9, sum(raw_weights))
-                self.weights = [w / sum_w for w in raw_weights]
-                
-                # Extract validation probabilities from each base model
-                p_xgb = self.xgb_model.predict_proba(X_v_arr)
-                p_lgb = self.lgb_model.predict_proba(X_v_arr)
-                p_cat = self.cat_model.predict_proba(X_v_arr)
-                
-                # Stack features for meta-learner (multi-class probabilities stacked column-wise)
-                # Extract out-of-fold predictions
-                xgb_val_prob = self.xgb_model.predict_proba(_slice_model_input(self.xgb_model, X_val))
-                lgb_val_prob = self.lgb_model.predict_proba(_slice_model_input(self.lgb_model, X_val))
-                cat_val_prob = self.cat_model.predict_proba(_slice_model_input(self.cat_model, X_val))
-                
-                acc_xgb = accuracy_score(y_val, np.argmax(xgb_val_prob, axis=1))
-                acc_lgb = accuracy_score(y_val, np.argmax(lgb_val_prob, axis=1))
-                acc_cat = accuracy_score(y_val, np.argmax(cat_val_prob, axis=1))
-                
+                if min_class_count >= 2 and n_splits >= 2:
+                    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+                else:
+                    cv = KFold(n_splits=max(2, min(5, n_samples // 5)), shuffle=True, random_state=42)
+
+                oof_xgb = np.zeros((n_samples, 3), dtype=float)
+                oof_lgb = np.zeros((n_samples, 3), dtype=float)
+                oof_cat = np.zeros((n_samples, 3), dtype=float)
+
+                def _clone_or_create(model):
+                    try:
+                        return clone(model)
+                    except Exception:
+                        import copy
+                        return copy.deepcopy(model)
+
+                for fold_tr_idx, fold_val_idx in cv.split(X_arr, y_arr):
+                    fold_X_tr, fold_y_tr = X_arr[fold_tr_idx], y_arr[fold_tr_idx]
+                    fold_X_val, fold_y_val = X_arr[fold_val_idx], y_arr[fold_val_idx]
+                    fold_w_tr = sample_weight[fold_tr_idx] if sample_weight is not None else None
+
+                    # Fit fold models
+                    m_xgb = _clone_or_create(self.xgb_model)
+                    m_lgb = _clone_or_create(self.lgb_model)
+                    m_cat = _clone_or_create(self.cat_model)
+
+                    m_xgb.fit(_slice_model_input(m_xgb, fold_X_tr), fold_y_tr, sample_weight=fold_w_tr)
+                    m_lgb.fit(_slice_model_input(m_lgb, fold_X_tr), fold_y_tr, sample_weight=fold_w_tr)
+                    m_cat.fit(_slice_model_input(m_cat, fold_X_tr), fold_y_tr, sample_weight=fold_w_tr)
+
+                    p_x = m_xgb.predict_proba(_slice_model_input(m_xgb, fold_X_val))
+                    p_l = m_lgb.predict_proba(_slice_model_input(m_lgb, fold_X_val))
+                    p_c = m_cat.predict_proba(_slice_model_input(m_cat, fold_X_val))
+
+                    def _align_prob3(p):
+                        if p.shape[1] == 3:
+                            return p
+                        res = np.zeros((len(p), 3), dtype=float)
+                        if p.shape[1] == 2:
+                            res[:, [0, 2]] = p
+                        else:
+                            res[:, 1] = 1.0
+                        return res
+
+                    oof_xgb[fold_val_idx] = _align_prob3(p_x)
+                    oof_lgb[fold_val_idx] = _align_prob3(p_l)
+                    oof_cat[fold_val_idx] = _align_prob3(p_c)
+
+                # Accuracies on pooled OOF predictions
+                acc_xgb = accuracy_score(y_arr, np.argmax(oof_xgb, axis=1))
+                acc_lgb = accuracy_score(y_arr, np.argmax(oof_lgb, axis=1))
+                acc_cat = accuracy_score(y_arr, np.argmax(oof_cat, axis=1))
                 raw_w = np.array([acc_xgb, acc_lgb, acc_cat], dtype=float)
                 raw_w = np.maximum(0.01, raw_w - 0.33)
                 self.weights = (raw_w / np.sum(raw_w)).tolist()
-                
+
                 # Create Meta-Feature Matrix [N, 9] (3 classes x 3 models)
-                X_meta = np.column_stack([xgb_val_prob, lgb_val_prob, cat_val_prob])
-                
+                X_meta = np.column_stack([oof_xgb, oof_lgb, oof_cat])
+
                 # Fit L2 Regularized Logistic Regression Stacking Meta-Classifier with balanced class weighting
                 meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42, class_weight='balanced')
-                meta_clf.fit(X_meta, y_val)
+                meta_clf.fit(X_meta, y_arr)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
                 self.meta_clf = meta_clf
-                print(f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully with accuracy weights: {self.weights}")
+                log_event("INFO", f"[Ensemble Stacking] Classifier Meta-Learner calibrated successfully on pooled OOF matrix with weights: {self.weights}")
             except Exception as e:
                 self.meta_coef_ = None
                 self.meta_intercept_ = None
                 self.meta_clf = None
-                print(f"[Ensemble Stacking Warning] Stacking calibration failed, using weighted average fallback: {e}")
+                log_event("ERROR", f"[Ensemble Stacking Failure] Pooled OOF stacking calibration failed: {e}")
+                raise RuntimeError(f"Stacking calibration failed: {e}")
                 
         # Now refit base models on the ENTIRE dataset for live trading
         self.xgb_model.fit(_slice_model_input(self.xgb_model, X_arr), y, sample_weight=sample_weight)
