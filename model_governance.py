@@ -109,8 +109,8 @@ def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str)
     if schema_v > SUPPORTED_MANIFEST_SCHEMA_VERSION or schema_v < 1:
         return False, f"Manifest schema version mismatch ({schema_v} > {SUPPORTED_MANIFEST_SCHEMA_VERSION})"
 
-    min_holdout_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
-    min_holdout_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+    min_holdout_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
+    min_holdout_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.355)))
 
     h_mcc = extract_metric(manifest, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
     h_bal = extract_metric(manifest, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])

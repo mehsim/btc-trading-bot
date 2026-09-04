@@ -284,7 +284,8 @@ class ExitPolicyEngine:
         if not exit_reason and params.get("enable_stagnation_gate", True):
             entry_time_ms = active_trade.get("entry_time")
             if entry_time_ms:
-                trade_age_hours = (time.time() - (entry_time_ms / 1000.0)) / 3600.0
+                entry_sec = (float(entry_time_ms) / 1000.0) if float(entry_time_ms) > 1e11 else float(entry_time_ms)
+                trade_age_hours = (time.time() - entry_sec) / 3600.0
                 trade_iv = str(active_trade.get("interval", "15")).replace("m", "").replace("h", "")
                 iv_min = int(trade_iv) if trade_iv.isdigit() else 15
                 stagnation_age_hours = max(1.5, (iv_min * 12) / 60.0) # 12 candles scaled by interval
@@ -346,7 +347,7 @@ class ExitPolicyEngine:
         }
 
         # 7. Evaluate Parallel Shadow Policy Simulations
-        self.evaluate_shadow_simulations(active_trade, current_price, current_time, regime, adx_val, current_volume, avg_volume, swing_price)
+        self.evaluate_shadow_simulations(active_trade, current_price, current_time, regime, adx_val, current_volume, avg_volume, swing_price, current_atr=atr_dollars)
 
         return exit_reason, updates, trace
 
@@ -359,7 +360,8 @@ class ExitPolicyEngine:
         adx_val: float,
         current_volume: float,
         avg_volume: float,
-        swing_price: Optional[float]
+        swing_price: Optional[float] = None,
+        current_atr: Optional[float] = None
     ):
         """Runs shadow candidate policies in parallel without sending real exchange orders."""
         regime_key = self._resolve_regime_key(regime, adx_val)
@@ -375,7 +377,8 @@ class ExitPolicyEngine:
                 entry_price = float(active_trade.get("entry_price", current_price))
                 stop_loss = float(active_trade.get("stop_loss", current_price * 0.95))
                 take_profit = float(active_trade.get("take_profit", current_price * 1.05))
-                atr_dollars = float(active_trade.get("atr_dollars") or (entry_price * 0.01))
+                entry_atr = float(active_trade.get("entry_atr") or active_trade.get("atr_dollars") or (entry_price * 0.01))
+                atr_dollars = float(current_atr) if current_atr is not None else float(active_trade.get("current_atr") or entry_atr)
 
                 # 1. Shadow Trailing Stop Evaluation
                 shadow_sl = self.evaluate_hybrid_trailing_stop(
@@ -390,11 +393,12 @@ class ExitPolicyEngine:
                 # 2. Shadow Stagnation Check
                 stag_hours = float(shadow_params.get("stagnation_exit_hours", 2.0))
                 entry_time = float(active_trade.get("entry_time", current_time))
+                if entry_time > 1e11:
+                    entry_time = entry_time / 1000.0
                 trade_age_hours = (current_time - entry_time) / 3600.0
                 is_long = direction == "Bullish"
                 pnl_usd = (current_price - entry_price) * float(active_trade.get("qty", 1.0)) if is_long else (entry_price - current_price) * float(active_trade.get("qty", 1.0))
                 price_dev = abs(current_price - entry_price)
-                entry_atr = float(active_trade.get("atr_dollars", atr_dollars))
 
                 stag_exit, stag_reason = self.evaluate_stagnation_gate(
                     pnl_usd=pnl_usd,

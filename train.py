@@ -2553,12 +2553,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
-        model_registry.register_model(
-            run_id=f"train_{interval}m_{name}_{int(time.time())}",
-            model_name=f"ensemble_{name}_{interval}",
-            metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
-            stage="Production"
-        )
+        if should_save:
+            model_registry.register_model(
+                run_id=f"train_{interval}m_{name}_{int(time.time())}",
+                model_name=f"ensemble_{name}_{interval}",
+                metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
+                stage="Production"
+            )
+        else:
+            model_registry.register_model(
+                run_id=f"train_{interval}m_{name}_{int(time.time())}",
+                model_name=f"ensemble_{name}_{interval}",
+                metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
+                stage="Rejected"
+            )
 
         import hashlib as _hl
         _n_feats = len(challenger_feature_names)

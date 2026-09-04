@@ -648,6 +648,7 @@ order_flow_data = {s: {"cvd": 0.0, "ofi": 0.0, "prev_bid_price": 0.0, "prev_ask_
 active_execution_lock = threading.RLock()
 active_execution_symbols = set()
 active_execution_notional = {}
+active_execution_margins = {}
 
 economic_calendar_cache = None
 last_calendar_fetch = 0.0
@@ -1075,26 +1076,7 @@ def bybit_post_request(endpoint, payload):
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
-    offset = get_bybit_time_offset()
-    timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "5000"
-    
     payload_str = json.dumps(payload)
-    val_str = timestamp + api_key + recv_window + payload_str
-    sign = hmac.new(
-        api_secret.encode("utf-8"),
-        val_str.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
-    
-    headers = {
-        "X-BAPI-API-KEY": api_key,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
-    
     url = f"{BYBIT_BASE_URL}{endpoint}"
     
     async def do_post(url, headers, json_data):
@@ -1123,6 +1105,22 @@ def bybit_post_request(endpoint, payload):
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            offset = get_bybit_time_offset()
+            timestamp = str(int(time.time() * 1000) + offset)
+            recv_window = "5000"
+            val_str = timestamp + api_key + recv_window + payload_str
+            sign = hmac.new(
+                api_secret.encode("utf-8"),
+                val_str.encode("utf-8"),
+                hashlib.sha256
+            ).hexdigest()
+            headers = {
+                "X-BAPI-API-KEY": api_key,
+                "X-BAPI-SIGN": sign,
+                "X-BAPI-TIMESTAMP": timestamp,
+                "X-BAPI-RECV-WINDOW": recv_window,
+                "Content-Type": "application/json"
+            }
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
             status, res = future.result(timeout=10)
@@ -1359,27 +1357,7 @@ def bybit_get_request(endpoint, query_params):
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
-    offset = get_bybit_time_offset()
-    timestamp = str(int(time.time() * 1000) + offset)
-    recv_window = "5000"
-    
     query_string = urllib.parse.urlencode(query_params)
-    
-    val_str = timestamp + api_key + recv_window + query_string
-    sign = hmac.new(
-        api_secret.encode("utf-8"),
-        val_str.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
-    
-    headers = {
-        "X-BAPI-API-KEY": api_key,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
-    
     url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
     
     async def do_get(url, headers):
@@ -1408,6 +1386,22 @@ def bybit_get_request(endpoint, query_params):
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            offset = get_bybit_time_offset()
+            timestamp = str(int(time.time() * 1000) + offset)
+            recv_window = "5000"
+            val_str = timestamp + api_key + recv_window + query_string
+            sign = hmac.new(
+                api_secret.encode("utf-8"),
+                val_str.encode("utf-8"),
+                hashlib.sha256
+            ).hexdigest()
+            headers = {
+                "X-BAPI-API-KEY": api_key,
+                "X-BAPI-SIGN": sign,
+                "X-BAPI-TIMESTAMP": timestamp,
+                "X-BAPI-RECV-WINDOW": recv_window,
+                "Content-Type": "application/json"
+            }
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
             status, res = future.result(timeout=10)
@@ -1658,22 +1652,27 @@ def emergency_flatten_position(symbol, opp_side, qty_str, max_retries=3):
     for attempt in range(1, max_retries + 1):
         try:
             pos = get_bybit_position(symbol)
-            live_sz = float(pos.get("size", 0.0)) if pos else 0.0
-            if live_sz == 0.0:
-                log_event("INFO", f"[{symbol} Emergency Flatten] Position already confirmed flat on Bybit (size == 0.0).")
-                return True
+            if pos is not None:
+                live_sz = float(pos.get("size", 0.0))
+                if live_sz == 0.0:
+                    log_event("INFO", f"[{symbol} Emergency Flatten] Position already confirmed flat on Bybit (size == 0.0).")
+                    return True
+                submit_qty = format_bybit_qty(symbol, live_sz)
+            else:
+                log_event("WARNING", f"[{symbol} Emergency Flatten] Position query returned None (API error/timeout on attempt {attempt}). Proceeding with fallback qty {qty_str}.")
+                submit_qty = qty_str
+                live_sz = 0.0
 
-            submit_qty = format_bybit_qty(symbol, live_sz) if live_sz > 0 else qty_str
             res = place_bybit_taker_ioc_order(symbol, opp_side, submit_qty, reduce_only=True)
             ret_code = res.get("retCode", -1) if isinstance(res, dict) else -1
             time.sleep(0.4)
             pos_after = get_bybit_position(symbol)
-            if pos_after and float(pos_after.get("size", 0.0)) == 0.0:
+            if pos_after is not None and float(pos_after.get("size", 0.0)) == 0.0:
                 log_event("INFO", f"[{symbol} Emergency Flatten] Position strictly confirmed flat on Bybit (Attempt {attempt}, status code: {ret_code}).")
                 return True
             else:
                 rem = float(pos_after.get("size", 0.0)) if pos_after else live_sz
-                log_event("WARNING", f"[{symbol} Emergency Flatten] Order execution left residual size {rem} (Attempt {attempt}).")
+                log_event("WARNING", f"[{symbol} Emergency Flatten] Order execution left unconfirmed or residual size {rem} (Attempt {attempt}).")
         except Exception as ex:
             log_event("ERROR", f"[{symbol} Emergency Flatten] Exception on attempt {attempt}: {ex}")
         time.sleep(0.5)
@@ -2358,9 +2357,12 @@ def load_model_weights(iv):
             # 3. Trending Meta Classifier
             try:
                 if os.path.exists(prefixes["trending_meta"]):
-                    meta_clf = XGBClassifier()
-                    meta_clf.load_model(prefixes["trending_meta"])
-                    models_by_interval[iv]["trending"]["meta"] = meta_clf
+                    if check_startup_manifest_health(prefixes['trending_trend']):
+                        meta_clf = XGBClassifier()
+                        meta_clf.load_model(prefixes["trending_meta"])
+                        models_by_interval[iv]["trending"]["meta"] = meta_clf
+                    else:
+                        log_event("WARNING", f"[Model Load Warning] Skipped {prefixes['trending_meta']} due to failed manifest health check.")
             except Exception as e:
                 log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
 
@@ -2394,9 +2396,12 @@ def load_model_weights(iv):
             # 6. Ranging Meta Classifier
             try:
                 if os.path.exists(prefixes["ranging_meta"]):
-                    meta_clf = XGBClassifier()
-                    meta_clf.load_model(prefixes["ranging_meta"])
-                    models_by_interval[iv]["ranging"]["meta"] = meta_clf
+                    if check_startup_manifest_health(prefixes['ranging_trend']):
+                        meta_clf = XGBClassifier()
+                        meta_clf.load_model(prefixes["ranging_meta"])
+                        models_by_interval[iv]["ranging"]["meta"] = meta_clf
+                    else:
+                        log_event("WARNING", f"[Model Load Warning] Skipped {prefixes['ranging_meta']} due to failed manifest health check.")
             except Exception as e:
                 log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['ranging_meta']}: {e}")
 
@@ -4743,6 +4748,8 @@ def execute_bybit_trade_async(*args, **kwargs):
     finally:
         with active_execution_lock:
             active_execution_symbols.discard(symbol)
+            active_execution_margins.pop(symbol, None)
+            active_execution_notional.pop(symbol, None)
 
 def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None, decision_ts=None):
 
@@ -5922,6 +5929,7 @@ def main():
                         prev_close_s = close_s.shift(1)
                         tr_s = pd.concat([high_s - low_s, (high_s - prev_close_s).abs(), (low_s - prev_close_s).abs()], axis=1).max(axis=1)
                         atr_s = tr_s.rolling(14).mean()
+                        df_recent_pos["ATR"] = atr_s
                         df_recent_pos["ATR_norm"] = atr_s / close_s.replace(0, np.nan)
                     df_norm_clean = df_recent_pos["ATR_norm"].dropna()
                     if len(df_norm_clean) >= 20:
@@ -5930,7 +5938,9 @@ def main():
                         atr_ratio_val = float(df_norm_clean.iloc[-1] / max(1e-4, mean_atr))
                 
                 # Incoming signal opportunity cost & portfolio heat
-                total_active_val = sum(t.get("position_size_usd", 0.0) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_k}", []))
+                with active_execution_lock:
+                    in_flight_margin_val = sum(active_execution_margins.values())
+                total_active_val = sum(t.get("position_size_usd", 0.0) for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_k}", [])) + in_flight_margin_val
                 current_equity = bot_state.get("simulated_balance", 80.0)
                 port_heat = total_active_val / max(1.0, current_equity)
                 is_heat_full = port_heat >= 0.80
@@ -5964,7 +5974,7 @@ def main():
                     garch_vol=garch_vol_val,
                     rolling_vol_20th_pct=rolling_vol_20th,
                     atr_ratio=atr_ratio_val,
-                    mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 100.0))) if "bot_state" in globals() and hasattr(bot_state, "get") else 100.0,
+                    mhi_status=float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 70.0))) if "bot_state" in globals() and hasattr(bot_state, "get") else 70.0,
                     incoming_signal_expected_r=best_incoming_r,
                     portfolio_heat_full=is_heat_full
                 )
@@ -5973,11 +5983,17 @@ def main():
                     exit_reason = f"EXIT HIERARCHY LEVEL {hierarchy_eval.get('exit_level')}: {hierarchy_eval.get('exit_reason')}"
                     print(f"[{active_symbol} {iv}m Exit Hierarchy Triggered] Level {hierarchy_eval.get('exit_level')} -> {hierarchy_eval.get('exit_reason')} | Exit Score: {hierarchy_eval.get('exit_score')}")
 
-                # Champion & Shadow Exit Policy Engine Evaluation (Finding #139)
+                # Champion & Shadow Exit Policy Engine Evaluation (Finding #139, #11, #14)
                 try:
                     curr_vol = float(df_recent_pos["volume"].iloc[-1]) if (df_recent_pos is not None and "volume" in df_recent_pos.columns and len(df_recent_pos) > 0) else 100.0
                     avg_vol = float(df_recent_pos["volume"].iloc[-20:].mean()) if (df_recent_pos is not None and "volume" in df_recent_pos.columns and len(df_recent_pos) >= 5) else 120.0
-                    curr_atr_val = float(df_recent_pos["ATR"].iloc[-1]) if (df_recent_pos is not None and "ATR" in df_recent_pos.columns and len(df_recent_pos) > 0) else None
+                    curr_atr_val = None
+                    if df_recent_pos is not None and not df_recent_pos.empty:
+                        if "ATR" in df_recent_pos.columns and len(df_recent_pos["ATR"].dropna()) > 0:
+                            curr_atr_val = float(df_recent_pos["ATR"].dropna().iloc[-1])
+                        elif "ATR_norm" in df_recent_pos.columns and "close" in df_recent_pos.columns and len(df_recent_pos["ATR_norm"].dropna()) > 0:
+                            curr_atr_val = float(df_recent_pos["ATR_norm"].dropna().iloc[-1] * float(df_recent_pos["close"].iloc[-1]))
+
                     champ_exit_reason, champ_updates, exit_trace = exit_policy_engine.evaluate_exit(
                         active_trade=active_trade,
                         current_price=current_price,
@@ -6017,6 +6033,27 @@ def main():
                             if not active_trade.get("scale_out_triggered"):
                                 active_trade["scale_out_triggered"] = True
                                 active_trades_updated = True
+
+                    # Exit Quality Score (Finding #17, #76)
+                    eqs_mode = getattr(config, "EXIT_QUALITY_MODE", "shadow")
+                    if eqs_mode != "disabled":
+                        try:
+                            from confluence_engine import calculate_exit_quality_score
+                            eqs_score = calculate_exit_quality_score(
+                                structure_pass=bool(not active_trade.get("sl_failed", False)),
+                                liquidity_pass=bool(not is_heat_full),
+                                expected_move_pct=abs(current_price - entry_price) / max(1e-6, entry_price),
+                                spread_pct=float(bot_state.get(f"spread_bps_{active_symbol}", 3.0)) / 10000.0,
+                                funding_rate=float(bot_state.get(f"funding_rate_{active_symbol}", 0.0001)),
+                                atr_norm=float(atr_ratio_val * 0.004),
+                                regime=str(curr_regime)
+                            )
+                            if exit_trace and isinstance(exit_trace, dict):
+                                exit_trace["exit_quality_score"] = eqs_score
+                            bot_state[f"latest_eqs_{active_symbol}_{iv}"] = eqs_score
+                        except Exception as ex_eqs:
+                            log_event("DEBUG", f"[{active_symbol} {iv}m] EQS evaluation notice: {ex_eqs}")
+
                     if exit_trace:
                         bot_state["latest_exit_decision_trace"] = exit_trace
                     if champ_exit_reason and not exit_reason:
@@ -7587,14 +7624,18 @@ def main():
                                     log_event("WARNING", f"Individual prediction notice: {ex_ind}")
                             if not ind_preds:
                                 ref_prob = prob_bullish if ml_trend == "Bullish" else prob_bearish
-                                ind_preds = {
-                                    "xgb": float(ref_prob),
-                                    "lgb": float(ref_prob),
-                                    "cat": float(ref_prob),
-                                }
-                            w_dict = {"xgb": 0.3333, "lgb": 0.3333, "cat": 0.3334}
-                            if "ensemble_weights" in locals() and isinstance(ensemble_weights, (list, tuple)) and len(ensemble_weights) == 3:
+                                ind_preds = {"xgb": float(ref_prob)}
+                                log_event("WARNING", f"[{symbol} {iv}m] No individual learner predictions available; falling back to single model uncertainty.")
+                            elif len(ind_preds) < 2:
+                                log_event("WARNING", f"[{symbol} {iv}m] Only {len(ind_preds)} model prediction available ({list(ind_preds.keys())}); cross-learner disagreement unavailable.")
+
+                            ens_w = getattr(active_model_trend, "weights", None)
+                            if ens_w is not None and isinstance(ens_w, (list, tuple, np.ndarray)) and len(ens_w) == 3:
+                                w_dict = {"xgb": float(ens_w[0]), "lgb": float(ens_w[1]), "cat": float(ens_w[2])}
+                            elif "ensemble_weights" in locals() and isinstance(ensemble_weights, (list, tuple)) and len(ensemble_weights) == 3:
                                 w_dict = {"xgb": float(ensemble_weights[0]), "lgb": float(ensemble_weights[1]), "cat": float(ensemble_weights[2])}
+                            else:
+                                w_dict = {"xgb": 0.3333, "lgb": 0.3333, "cat": 0.3334}
 
                             unc_metrics = statistical_validation.calculate_composite_uncertainty(
                                 individual_predictions=ind_preds,
@@ -7908,7 +7949,7 @@ def main():
                             from config import MAX_THRESHOLD_UPLIFT
                             effective_base = max(economic_base_threshold, base_cfg_thresh)
                             max_allowed_threshold = min(0.65, effective_base + MAX_THRESHOLD_UPLIFT)
-                            dynamic_conf_threshold = float(round(max(base_cfg_thresh, min(max_allowed_threshold, dynamic_conf_threshold)), 4))
+                            dynamic_conf_threshold = float(round(max(effective_base, min(max_allowed_threshold, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
                             for k_suffix in [str(tf), str(iv)]:
@@ -7958,26 +7999,32 @@ def main():
                             low_liquidity = (liq_score < 0.3)
                             rec.liquidity_score = float(liq_score)
 
-                            # Component 9: Realized Closed-Trade Expectancy Gate (Finding #105)
+                            # Component 9: Realized Closed-Trade Expectancy Gate (Finding #105, #17)
                             exp_gate_blocked = False
                             exp_gate_msg = ""
-                            try:
-                                recent_closed = database.get_completed_trades(symbol=symbol, limit=50)
-                                interval_closed = [t for t in recent_closed if str(t.get("interval", "")).replace("m", "") == str(iv).replace("m", "")]
-                                if len(interval_closed) >= 15:
-                                    wins = [float(t.get("change_pct", 0.0)) for t in interval_closed if float(t.get("pnl_usd", 0.0)) > 0]
-                                    losses = [abs(float(t.get("change_pct", 0.0))) for t in interval_closed if float(t.get("pnl_usd", 0.0)) < 0]
-                                    if len(wins) > 0 and len(losses) > 0:
-                                        hist_wr = len(wins) / len(interval_closed)
-                                        avg_win_p = sum(wins) / len(wins)
-                                        avg_loss_p = sum(losses) / len(losses)
-                                        from confluence_engine import evaluate_expectancy_gate
-                                        exp_pass, hist_ev = evaluate_expectancy_gate(hist_wr, avg_win_p, avg_loss_p)
-                                        if not exp_pass:
-                                            exp_gate_blocked = True
-                                            exp_gate_msg = f"Negative Historical EV ({hist_ev*100:+.2f}%) over last {len(interval_closed)} trades"
-                            except Exception as ex_exp:
-                                log_event("DEBUG", f"Expectancy gate check notice for {symbol} {iv}m: {ex_exp}")
+                            exp_mode = getattr(config, "EXPECTANCY_GATE_MODE", "shadow")
+                            if exp_mode != "disabled":
+                                try:
+                                    recent_closed = database.get_completed_trades(limit=50, symbol=symbol)
+                                    interval_closed = [t for t in recent_closed if str(t.get("interval", "")).replace("m", "") == str(iv).replace("m", "")]
+                                    if len(interval_closed) >= 15:
+                                        wins = [float(t.get("change_pct", 0.0)) for t in interval_closed if float(t.get("pnl_usd", 0.0)) > 0]
+                                        losses = [abs(float(t.get("change_pct", 0.0))) for t in interval_closed if float(t.get("pnl_usd", 0.0)) < 0]
+                                        if len(wins) > 0 and len(losses) > 0:
+                                            hist_wr = len(wins) / len(interval_closed)
+                                            avg_win_p = sum(wins) / len(wins)
+                                            avg_loss_p = sum(losses) / len(losses)
+                                            from confluence_engine import evaluate_expectancy_gate
+                                            exp_pass, hist_ev = evaluate_expectancy_gate(hist_wr, avg_win_p, avg_loss_p)
+                                            if not exp_pass:
+                                                if exp_mode == "active":
+                                                    exp_gate_blocked = True
+                                                    exp_gate_msg = f"Negative Historical EV ({hist_ev*100:+.2f}%) over last {len(interval_closed)} trades"
+                                                else:
+                                                    log_event("INFO", f"[{symbol} {iv}m] [Shadow Expectancy Gate] Negative Historical EV ({hist_ev*100:+.2f}%) over {len(interval_closed)} trades — would block in active mode.")
+                                                    bot_state[f"shadow_expectancy_block_{symbol}_{iv}"] = True
+                                except Exception as ex_exp:
+                                    log_event("DEBUG", f"Expectancy gate check notice for {symbol} {iv}m: {ex_exp}")
 
                             # P3: Correlated Portfolio Cluster Exposure Guard
                             cluster_blocked = False
@@ -8189,7 +8236,9 @@ def main():
                                         is_golden_hour = 18 <= current_hour_pkt < 21
                                     
                                         # Pre-calculate active trade stats needed for dynamic sizing
-                                        total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", []))
+                                        with active_execution_lock:
+                                            in_flight_margin_val = sum(active_execution_margins.values())
+                                        total_active_size = sum(t.get("position_size_usd", 0.0) for tf_key in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in bot_state.get(f"active_trade_{tf_key}", [])) + in_flight_margin_val
                                         current_bal = bot_state.get("simulated_balance", 80.0)
                                         if TRADE_MODE != "simulation":
                                             real_bal = get_real_bybit_balance_cached(force=True)
@@ -8239,7 +8288,7 @@ def main():
 
                                         # Joint Risk Budget Allocation (MHI-governed fractional Kelly + Portfolio Heat + Liquidity Capping)
                                         portfolio_heat = min(1.0, total_active_size / max(1.0, current_bal))
-                                        mhi_val = float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 90.0)))
+                                        mhi_val = float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 70.0)))
                                         rec.mhi_score = float(mhi_val)
                                         budget_res = risk_engine.joint_risk_budget_allocator.allocate_risk_budget(
                                             symbol=symbol,
@@ -8850,11 +8899,13 @@ def main():
                                                     # Live trading execution offloaded to background thread to minimize latency
                                                     just_opened_symbols.add(symbol)
                                                     if bybit_success:
-                                                        with active_execution_lock:
-                                                            active_execution_symbols.add(symbol)
                                                         actual_qty = raw_qty if raw_qty > 0 else (float((position_size_usd * leverage_val) / entry_price) if entry_price > 0 else 0.0)
                                                         actual_notional_val = float(actual_qty * entry_price)
                                                         actual_margin_usd = float(actual_notional_val / leverage_val) if leverage_val > 0 else float(position_size_usd)
+                                                        with active_execution_lock:
+                                                            active_execution_symbols.add(symbol)
+                                                            active_execution_margins[symbol] = float(actual_margin_usd)
+                                                            active_execution_notional[symbol] = float(actual_notional_val)
                                                         threading.Thread(
                                                             target=execute_bybit_trade_async,
                                                             args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size, decision_ts),

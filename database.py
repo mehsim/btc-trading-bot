@@ -390,21 +390,33 @@ def init_db():
             conn.close()
 
 
-def get_completed_trades(limit: int = 100) -> List[Dict[str, Any]]:
+def get_completed_trades(limit: int = 100, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
     """Retrieve recent completed trades from SQLite database, deduplicated by symbol, exit_time, entry & exit price."""
     with db_lock:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM completed_trades 
-                WHERE rowid IN (
-                    SELECT MIN(rowid) 
-                    FROM completed_trades 
-                    GROUP BY symbol, round(exit_time / 60), round(entry_price, 4), round(exit_price, 4)
-                )
-                ORDER BY exit_time DESC LIMIT ?;
-            """, (limit,))
+            if symbol:
+                cursor.execute("""
+                    SELECT * FROM completed_trades 
+                    WHERE symbol = ? AND rowid IN (
+                        SELECT MIN(rowid) 
+                        FROM completed_trades 
+                        WHERE symbol = ?
+                        GROUP BY symbol, round(exit_time / 60), round(entry_price, 4), round(exit_price, 4)
+                    )
+                    ORDER BY exit_time DESC LIMIT ?;
+                """, (symbol, symbol, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM completed_trades 
+                    WHERE rowid IN (
+                        SELECT MIN(rowid) 
+                        FROM completed_trades 
+                        GROUP BY symbol, round(exit_time / 60), round(entry_price, 4), round(exit_price, 4)
+                    )
+                    ORDER BY exit_time DESC LIMIT ?;
+                """, (limit,))
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
         except Exception as ex:

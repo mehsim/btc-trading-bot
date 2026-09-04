@@ -576,8 +576,8 @@ class EnsembleClassifier:
                     p = m.predict_proba(_slice_model_input(m, X))
                     if len(p) > 0:
                         res[name] = p[0]
-                except Exception:
-                    pass
+                except Exception as ex:
+                    log_event("WARNING", f"[Ensemble Base Predict Proba Error] Model '{name}' failed: {ex}")
         return res
 
 class EnsembleRegressor:

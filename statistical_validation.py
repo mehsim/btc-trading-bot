@@ -412,7 +412,7 @@ class StatisticalValidation:
 
             # Pairwise absolute difference across models
             pairwise_diffs = [abs(preds[i] - preds[j]) for i in range(len(preds)) for j in range(i + 1, len(preds))]
-            disagreement = float(np.mean(pairwise_diffs)) if pairwise_diffs else weighted_std
+            disagreement = float(np.mean(pairwise_diffs)) if pairwise_diffs else (0.05 if len(preds) <= 1 else weighted_std)
             margin_unc = float(np.clip(1.0 - weighted_mean, 0.0, 1.0))
             u_base = 0.60 * disagreement + 0.40 * margin_unc
 

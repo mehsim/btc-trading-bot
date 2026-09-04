@@ -82,7 +82,8 @@ MODEL_SLOT_DENYLIST = {
     "trending_30",    # Finding #122: holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
-    # trending_240 & ranging_240 lifted: retrained with 16-page RFECV (+0.0667 / +0.0567 CV MCC, +0.0253 / +0.0494 Holdout MCC)
+    "trending_240",   # Finding #16: holdout MCC 0.0253 below default floor 0.0350 — fail-closed
+    "ranging_240",    # Finding #16: challenger manifest unpromoted — fail-closed
 }.union(_persisted_denylist)
 
 def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:

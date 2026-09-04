@@ -217,21 +217,29 @@ class StrategyHealthEngine:
         pnls = [float(p) for p in (recent_pnls or [])]
         trades_count = len(pnls)
         
+        # Cold-Start / Bootstrap Prior:
+        # Prior expectations for an unproven but initialized system before statistical edge can be measured
+        prior_pf = 1.25
+        prior_exp = 0.35
+        prior_sqn = 1.50
+        prior_recovery = 1.80
+        prior_calmar = 1.80
+
         if trades_count > 0:
             wins = [p for p in pnls if p > 0]
             losses = [abs(p) for p in pnls if p < 0]
-            pf = (sum(wins) / max(1e-4, sum(losses))) if losses else (2.0 if wins else 0.0)
+            raw_pf = (sum(wins) / max(1e-4, sum(losses))) if losses else (2.0 if wins else 0.0)
             
             # 1. Expectancy in R-multiples (mean PnL / avg loss)
             avg_loss = (float(np.mean(losses))) if losses else 1.0
-            expectancy_r = max(0.0, float(np.mean(pnls) / max(1e-4, avg_loss))) if np.mean(pnls) > 0 else 0.0
+            raw_expectancy_r = max(0.0, float(np.mean(pnls) / max(1e-4, avg_loss))) if np.mean(pnls) > 0 else 0.0
             
             # 2. System Quality Number (SQN)
             if trades_count >= 3:
                 std_pnl = float(np.std(pnls, ddof=1))
-                sqn_score = max(0.0, float((np.mean(pnls) / max(1e-4, std_pnl)) * np.sqrt(trades_count))) if np.mean(pnls) > 0 else 0.0
+                raw_sqn_score = max(0.0, float((np.mean(pnls) / max(1e-4, std_pnl)) * np.sqrt(trades_count))) if np.mean(pnls) > 0 else 0.0
             else:
-                sqn_score = 0.0
+                raw_sqn_score = 0.0
                 
             # 3. Recovery Factor & Calmar Ratio from equity curve drawdown
             cum_pnl = np.cumsum(pnls)
@@ -239,18 +247,33 @@ class StrategyHealthEngine:
             drawdown = peak - cum_pnl
             max_dd = max(1e-4, float(np.max(drawdown)))
             net_profit = float(np.sum(pnls))
-            recovery_factor = max(0.0, net_profit / max_dd)
-            calmar_ratio = max(0.0, (net_profit / max_dd) * (252.0 / max(1.0, float(trades_count)))) if net_profit > 0 else 0.0
+            raw_recovery_factor = max(0.0, net_profit / max_dd)
+            raw_calmar_ratio = max(0.0, (net_profit / max_dd) * (252.0 / max(1.0, float(trades_count)))) if net_profit > 0 else 0.0
             
+            if trades_count < 10:
+                w_emp = trades_count / 10.0
+                w_prior = 1.0 - w_emp
+                pf = (w_emp * raw_pf) + (w_prior * prior_pf)
+                expectancy_r = (w_emp * raw_expectancy_r) + (w_prior * prior_exp)
+                sqn_score = (w_emp * raw_sqn_score) + (w_prior * prior_sqn)
+                recovery_factor = (w_emp * raw_recovery_factor) + (w_prior * prior_recovery)
+                calmar_ratio = (w_emp * raw_calmar_ratio) + (w_prior * prior_calmar)
+            else:
+                pf = raw_pf
+                expectancy_r = raw_expectancy_r
+                sqn_score = raw_sqn_score
+                recovery_factor = raw_recovery_factor
+                calmar_ratio = raw_calmar_ratio
+
             # 4. Confidence Robustness from Brier score
             conf_robustness = max(0.0, min(100.0, (1.0 - float(brier_score)) * 100.0))
         else:
-            pf = 1.0
-            expectancy_r = 0.0
-            sqn_score = 0.0
-            recovery_factor = 0.0
-            calmar_ratio = 0.0
-            conf_robustness = 70.0
+            pf = prior_pf
+            expectancy_r = prior_exp
+            sqn_score = prior_sqn
+            recovery_factor = prior_recovery
+            calmar_ratio = prior_calmar
+            conf_robustness = max(0.0, min(100.0, (1.0 - float(brier_score)) * 100.0))
             trades_count = 0
 
         return self.calculate_model_health_index(
