@@ -131,7 +131,10 @@ def compute_conservative_kelly(
     from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
     haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
     
+    realized_wr = None
     if trade_history and len(trade_history) >= 10:
+        win_count = sum(1 for t in trade_history if float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or t.get("success"))
+        realized_wr = float(win_count) / float(len(trade_history))
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
             timeframe=str(interval),
             min_trades=10,
@@ -140,7 +143,7 @@ def compute_conservative_kelly(
         )
         if emp_kelly is not None:
             if emp_kelly <= 0.0:
-                # Finding #163: Measured negative or zero empirical edge -> Fail-closed! Abstain (0.0)
+                # Finding #163 & #71: Measured negative or zero empirical edge -> Fail-closed! Abstain (0.0)
                 # instead of falling through to confidence-based prior.
                 return 0.0
             kelly_val = float(emp_kelly)
@@ -153,6 +156,9 @@ def compute_conservative_kelly(
             return kelly_val
             
     p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
+    if realized_wr is not None:
+        p_hat = min(p_hat, realized_wr)
+
     # Apply 0.80 realized haircut and deduct 0.10% roundtrip fee from payoff ratio (Finding #99)
     eff_tp = float(tp_multiplier) * haircut
     eff_sl = max(1e-6, float(sl_multiplier))
@@ -161,7 +167,7 @@ def compute_conservative_kelly(
     
     # Pure Quarter-Kelly formula using calibrated model probability:
     # Full Kelly: f* = (p * (b + 1) - 1) / b
-    # Requires p_hat > 1 / (b + 1) to produce positive edge; otherwise returns 0.0 (Finding #94)
+    # Requires p_hat > 1 / (b + 1) to produce positive edge; otherwise returns 0.0 (Finding #94, #71)
     p_star = 1.0 / (b_ratio + 1.0)
     if p_hat <= p_star:
         return 0.0
@@ -773,13 +779,29 @@ class JointRiskBudgetAllocator:
                 "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"
             }
 
-        # Raw Kelly formula b = (TP_dist * haircut) / SL_dist, p = confidence (Finding #99)
+        # Raw Kelly formula b = (TP_dist * haircut) / SL_dist, p = confidence (Finding #99, #71)
         haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.80)
         eff_target_dist = target_distance * haircut if target_distance > 0 else 0.0
         b_ratio = eff_target_dist / stop_distance if stop_distance > 0 else 1.5
         p_win = max(0.01, min(0.99, calibrated_confidence))
-        raw_kelly = (p_win * b_ratio - (1.0 - p_win)) / b_ratio if b_ratio > 0 else 0.05
-        raw_kelly = max(0.0, raw_kelly)
+
+        # Finding #71: Align win rate with realized empirical outcomes
+        realized_wr = None
+        if df_completed is not None and len(df_completed) >= 10:
+            if "pnl_usd" in df_completed.columns:
+                realized_wr = float((df_completed["pnl_usd"] > 0).mean())
+            elif "success" in df_completed.columns:
+                realized_wr = float((df_completed["success"] > 0).mean())
+                
+        if realized_wr is not None:
+            p_win = min(p_win, realized_wr)
+
+        p_star = 1.0 / (b_ratio + 1.0) if b_ratio > 0 else 0.5
+        if p_win <= p_star:
+            raw_kelly = 0.0
+        else:
+            raw_kelly = (p_win * b_ratio - (1.0 - p_win)) / b_ratio if b_ratio > 0 else 0.0
+            raw_kelly = max(0.0, raw_kelly)
 
         # Apply MHI Kelly Fraction Cap & Upstream Portfolio Heat Reduction Factor & Context Size Boost
         # Multipliers applied first, then final clamp against max_kelly_frac (MHI ceiling is binding)

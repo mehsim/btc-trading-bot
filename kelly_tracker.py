@@ -55,6 +55,20 @@ class KellyTracker:
             except Exception as e:
                 print(f"[KellyTracker Error] Failed to save trade history: {e}")
 
+    def get_realized_win_rate(self, timeframe: Optional[str] = None, min_trades: int = 10) -> Optional[float]:
+        """Returns empirical win rate for timeframe if >= min_trades exist, else None."""
+        with self.lock:
+            if timeframe:
+                norm_target = _normalize_tf(timeframe)
+                filtered = [t for t in self.history if _normalize_tf(t.get("timeframe")) == norm_target]
+            else:
+                filtered = self.history
+            if len(filtered) < min_trades:
+                return None
+            returns = [float(t.get("return_pct", 0.0) or (t.get("pnl_usd", 0.0) > 0)) for t in filtered]
+            wins = [r for r in returns if r > 0]
+            return float(len(wins) / len(returns))
+
     def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25, insufficient_as_none: bool = False) -> Optional[float]:
         """
         Computes dynamic Quarter-Kelly fraction per timeframe.
@@ -81,10 +95,13 @@ class KellyTracker:
             max_trades = win_cfg["max_trades"]
             lookback_days = win_cfg["lookback_days"]
 
-            # H-3: per-timeframe minimum; never go below MIN_KELLY_SAMPLE_SIZE floor
-            tf_min_map = {"15": 30, "30": 25, "60": 20, "120": 15, "240": 10, "360": 8}
-            tf_min = tf_min_map.get(tf_key, 30) if tf_key else 30
-            effective_min_trades = max(tf_min, min_trades, MIN_KELLY_SAMPLE_SIZE)
+            # H-3: per-timeframe minimum; if min_trades explicitly passed, honor it
+            if min_trades is not None and min_trades != 30:
+                effective_min_trades = min_trades
+            else:
+                tf_min_map = {"15": 30, "30": 25, "60": 20, "120": 15, "240": 10, "360": 8}
+                tf_min = tf_min_map.get(tf_key, 30) if tf_key else 30
+                effective_min_trades = max(tf_min, MIN_KELLY_SAMPLE_SIZE)
 
             # H-1: filter to calendar lookback window first, then cap at max_trades
             cutoff_dt = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)

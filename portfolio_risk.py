@@ -136,7 +136,7 @@ class PortfolioRiskEngine:
 
         import config
         if max_directional_ratio is None:
-            max_directional_ratio = getattr(config, "MAX_DIRECTIONAL_RATIO", 1.25)
+            max_directional_ratio = getattr(config, "MAX_DIRECTIONAL_RATIO", 0.80)
 
         dir_sign = 1.0 if str(proposed_direction).title() in ["Bullish", "Long", "Buy"] else -1.0
         
@@ -145,17 +145,20 @@ class PortfolioRiskEngine:
             if isinstance(p, dict):
                 p_dir = str(p.get("direction", "Bullish")).title()
                 p_sign = 1.0 if p_dir in ["Bullish", "Long", "Buy"] else -1.0
-                p_margin = float(p.get("position_size_usd", 0.0))
-                p_lev = float(p.get("leverage", 1.0))
+                p_margin = float(p.get("position_size_usd", 0.0) or 0.0)
+                p_lev = float(p.get("leverage") or 1.0)
                 current_net_notional += (p_margin * p_lev) * p_sign
                 
-        eff_cand_lev = float(candidate_leverage if candidate_leverage is not None else proposed_leverage)
+        eff_cand_lev = float(candidate_leverage or proposed_leverage or 1.0)
         proposed_net_notional = current_net_notional + (float(proposed_size_usd) * eff_cand_lev * dir_sign)
         directional_ratio = abs(proposed_net_notional) / max(1e-9, total_equity)
         
-        # If the candidate trade acts as a hedge (reduces net directional imbalance), always approve
+        # If the candidate trade acts as a hedge (reduces net directional imbalance)
         if abs(proposed_net_notional) < abs(current_net_notional):
-            return True, directional_ratio, f"APPROVED (Hedge/De-risking: Net Directional Exposure {directional_ratio*100:.1f}%)"
+            if directional_ratio <= max_directional_ratio:
+                return True, directional_ratio, f"APPROVED (Hedge/De-risking: Net Directional Exposure {directional_ratio*100:.1f}%)"
+            else:
+                return False, directional_ratio, f"REJECTED: Hedge reduces imbalance but post-trade directional exposure ({directional_ratio*100:.1f}%) exceeds {max_directional_ratio*100:.1f}% budget cap"
             
         if directional_ratio > max_directional_ratio:
             return False, directional_ratio, f"REJECTED: Net Directional Exposure ({directional_ratio*100:.1f}%) exceeds {max_directional_ratio*100:.1f}% budget cap"

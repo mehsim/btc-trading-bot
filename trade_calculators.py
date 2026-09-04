@@ -1120,12 +1120,14 @@ def calculate_adaptive_structural_stop(
     direction: str,
     atr_val: float,
     regime: str = "Trending",
-    volatility: float = 0.015
+    volatility: float = 0.015,
+    cfg_sl_mult: Optional[float] = None
 ) -> Tuple[float, float, Dict[str, Any]]:
     """
     Refining 3 & 4: Adaptive Swing Window & Fresh Pivot Recency Guard.
     Window length: Trending (8-10 bars), Ranging (5 bars), High Vol (12 bars).
     Fallback to ATR floor if pivot is >12 bars old.
+    Honors cfg_sl_mult to prevent live divergence from model training label geometry (Finding #84).
     Returns: (stop_loss, sl_distance_pct, metadata)
     """
     regime_upper = str(regime).upper()
@@ -1136,26 +1138,30 @@ def calculate_adaptive_structural_stop(
     else:
         window = 5
 
+    target_mult = float(cfg_sl_mult) if cfg_sl_mult is not None and cfg_sl_mult > 0 else 1.25
+    effective_mult = min(target_mult, 1.25)
+
     is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]
     recent = df_recent.tail(window) if len(df_recent) >= window else df_recent
 
     if is_long:
-        swing_price = float(recent["low"].min()) if not recent.empty else (entry_price - 1.25 * atr_val)
+        swing_price = float(recent["low"].min()) if not recent.empty else (entry_price - effective_mult * atr_val)
         pivot_idx = recent["low"].idxmin() if not recent.empty else None
         bars_ago = (len(df_recent) - 1 - df_recent.index.get_loc(pivot_idx)) if (pivot_idx is not None and pivot_idx in df_recent.index) else 99
     else:
-        swing_price = float(recent["high"].max()) if not recent.empty else (entry_price + 1.25 * atr_val)
+        swing_price = float(recent["high"].max()) if not recent.empty else (entry_price + effective_mult * atr_val)
         pivot_idx = recent["high"].idxmax() if not recent.empty else None
         bars_ago = (len(df_recent) - 1 - df_recent.index.get_loc(pivot_idx)) if (pivot_idx is not None and pivot_idx in df_recent.index) else 99
 
     # Refinement 4: Recency Guard & Brownian Noise Clearance Envelope
     recency_passed = bars_ago <= 12
-    min_noise_dist = max(1.25 * atr_val, entry_price * 0.008)
+    noise_floor_pct = 0.002 if cfg_sl_mult is not None else 0.005
+    min_noise_dist = max(effective_mult * atr_val, entry_price * noise_floor_pct)
     if is_long:
-        structural_sl = swing_price - (0.25 * atr_val) if recency_passed else (entry_price - 1.5 * atr_val)
+        structural_sl = swing_price - (0.25 * atr_val) if recency_passed else (entry_price - (effective_mult + 0.25) * atr_val)
         final_sl = min(entry_price - min_noise_dist, structural_sl)
     else:
-        structural_sl = swing_price + (0.25 * atr_val) if recency_passed else (entry_price + 1.5 * atr_val)
+        structural_sl = swing_price + (0.25 * atr_val) if recency_passed else (entry_price + (effective_mult + 0.25) * atr_val)
         final_sl = max(entry_price + min_noise_dist, structural_sl)
     # Compute liquidity sweep and volume confirmation
     has_sweep = False
@@ -1178,7 +1184,8 @@ def calculate_adaptive_structural_stop(
         "recency_passed": recency_passed,
         "has_liquidity_sweep": has_sweep,
         "volume_confirmed": vol_confirmed,
-        "quality_score": quality_score
+        "quality_score": quality_score,
+        "cfg_sl_mult": target_mult
     }
 
 
