@@ -352,7 +352,7 @@ class SignalEvaluator:
                     from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, get_realized_rr_haircut
                     import risk_engine
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
-                    tp_m = cfg.get("tp_mult_trending", 1.85) if "Trending" in regime else cfg.get("tp_mult_ranging", 1.15)
+                    tp_m = cfg.get("tp_mult_trending", 1.85) if "Trending" in regime_str else cfg.get("tp_mult_ranging", 1.15)
                     sl_m = cfg.get("sl_mult", 0.8)
                     close_price = float(df["close"].iloc[-1]) if ("close" in df.columns and len(df) > 0) else 100.0
                     atr_val = float(df["ATR"].iloc[-1]) if ("ATR" in df.columns and len(df) > 0 and pd.notna(df["ATR"].iloc[-1])) else float(close_price * 0.01)
@@ -377,7 +377,7 @@ class SignalEvaluator:
                     atr_norm = (atr_val / close_price) if close_price > 0 else 0.01
                     
                     nominal_rr = (actual_tp_m * atr_val) / max(1e-6, actual_sl_m * atr_val)
-                    realized_haircut = get_realized_rr_haircut(interval=str(interval), regime=str(regime), nominal_rr=nominal_rr)
+                    realized_haircut = get_realized_rr_haircut(interval=str(interval), regime=str(regime_str), nominal_rr=nominal_rr)
                     effective_tp_m = actual_tp_m * realized_haircut
                     p_star = actual_sl_m / max(1e-6, (effective_tp_m + actual_sl_m))
                     cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + actual_sl_m) * max(1e-4, atr_norm))
