@@ -933,7 +933,7 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
     h_brier = m_data.get("cv_metrics", {}).get("holdout_brier")
     h_ece = m_data.get("cv_metrics", {}).get("holdout_ece")
     
-    if (h_brier == 0.99 or h_ece == 0.99) and os.environ.get("ALLOW_SENTINEL_MODELS") != "1":
+    if ((h_brier is not None and float(h_brier) >= 0.99) or (h_ece is not None and float(h_ece) >= 0.99)) and os.environ.get("ALLOW_SENTINEL_MODELS") != "1":
         raise RuntimeError(
             f"[Model Governance Quality Error] Model '{prefix}' contains crash handler sentinel metrics "
             f"(holdout_brier={h_brier}, holdout_ece={h_ece}). Model refused loading (Fail-Closed)."
@@ -942,6 +942,13 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         raise RuntimeError(
             f"[Model Governance Quality Error] Model '{prefix}' has negative out-of-sample holdout MCC "
             f"({float(h_mcc):.4f} < 0.0). Model refused loading (Fail-Closed)."
+        )
+
+    from config import is_manifest_degenerate
+    is_deg, deg_reason = is_manifest_degenerate(m_data)
+    if is_deg and os.environ.get("ALLOW_SENTINEL_MODELS") != "1":
+        raise RuntimeError(
+            f"[Model Governance Quality Error] Model '{prefix}' has degenerate manifest ({deg_reason}). Model refused loading (Fail-Closed)."
         )
 
     print(f"[Model Governance] Loaded '{prefix}' | Model: {model_ver} | Feature: {feat_ver} | Ensemble: {ens_ver} | SHA: {git_sha} | Features: {feat_count}")
@@ -1365,7 +1372,7 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
     h_brier = m_data.get("cv_metrics", {}).get("holdout_brier")
     h_ece = m_data.get("cv_metrics", {}).get("holdout_ece")
     
-    if (h_brier == 0.99 or h_ece == 0.99) and os.environ.get("ALLOW_SENTINEL_MODELS") != "1":
+    if ((h_brier is not None and float(h_brier) >= 0.99) or (h_ece is not None and float(h_ece) >= 0.99)) and os.environ.get("ALLOW_SENTINEL_MODELS") != "1":
         raise RuntimeError(
             f"[Model Governance Quality Error] Model '{prefix}' contains crash handler sentinel metrics "
             f"(holdout_brier={h_brier}, holdout_ece={h_ece}). Model refused loading (Fail-Closed)."

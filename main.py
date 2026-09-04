@@ -6329,6 +6329,11 @@ def main():
                             exit_reason = "TRAILING STOP HIT [SUCCESS]" if half_closed else "STOP LOSS HIT [FAIL]"
                         elif current_price <= take_profit:
                             exit_reason = "TAKE PROFIT HIT [SUCCESS]"
+
+                # Finding #90: Enforce label horizon expiration (end_time)
+                if not exit_reason and end_time > 0 and current_time >= end_time:
+                    exit_reason = "HORIZON_EXPIRY [LABEL_TIMEOUT]"
+                    log_event("INFO", f"[{active_symbol} {iv}m] Trade reached full label horizon ({countdown_str}). Programmatic close.")
                 
                 if TRADE_MODE != "simulation":
                     if exit_reason is not None and not bybit_closed:
@@ -7341,6 +7346,12 @@ def main():
                         # Dynamic Regime Routing based on GMM Unsupervised Classifier
                         regime = classify_market_regime(df, interval=iv)
                         adx_regime = latest_candle["ADX"]
+
+                        # Finding #84: Explicitly reset candidate loop-scoped governance state to prevent iteration leaks
+                        _mdata = None
+                        manifest_load_error = None
+                        is_promoted_flag = None
+                        abstain_reason = None
                     
                         # Ensure models for interval iv are loaded into memory on-demand
                         _tf = models_by_interval.get(iv, {})
@@ -7422,10 +7433,10 @@ def main():
                                 MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC,
                                 TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
                             )
-                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_mcc", 0.05))
-                            min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
-                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
-                            min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
+                            min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), TIMEFRAME_MIN_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)))
+                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
+                            min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.355)))
 
                             mcc_val = getattr(active_model_trend, "manifest_mcc", None) or models_tf.get(regime_key, {}).get("manifest_mcc") or models_tf.get("manifest_mcc")
                             mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
@@ -7435,35 +7446,32 @@ def main():
                             holdout_ci95_low = getattr(active_model_trend, "holdout_ci95_low", None) or models_tf.get(regime_key, {}).get("holdout_ci95_low") or models_tf.get("holdout_ci95_low")
                             is_promoted_flag = getattr(active_model_trend, "promoted", None) if getattr(active_model_trend, "promoted", None) is not None else models_tf.get(regime_key, {}).get("promoted")
 
-                            if (mcc_val is None or bal_acc_val is None or mcc_min_val is None or 
-                                holdout_mcc_val is None or holdout_bal_acc_val is None or is_promoted_flag is None):
-                                man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
-                                manifest_load_error = None
-                                if os.path.exists(man_path):
-                                    try:
-                                        with open(man_path, "r") as mf:
-                                            _mdata = json.load(mf)
-                                            if mcc_val is None:
-                                                mcc_val = extract_metric(_mdata, ["manifest_mcc"], ["cv_metrics", "mcc", "mean"], ["metrics", "mcc"])
-                                            if mcc_min_val is None:
-                                                mcc_min_val = extract_metric(_mdata, ["manifest_mcc_min"], ["cv_metrics", "mcc", "min"], ["metrics", "mcc_min"])
-                                            if bal_acc_val is None:
-                                                bal_acc_val = extract_metric(_mdata, ["manifest_bal_acc"], ["cv_metrics", "balanced_accuracy", "mean"], ["metrics", "balanced_accuracy"])
-                                            if holdout_mcc_val is None:
-                                                holdout_mcc_val = extract_metric(_mdata, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
-                                            if holdout_bal_acc_val is None:
-                                                holdout_bal_acc_val = extract_metric(_mdata, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
-                                            if holdout_ci95_low is None:
-                                                _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(_mdata.get("cv_metrics"), dict) else None
-                                                if isinstance(_ci, (list, tuple)) and len(_ci) >= 1:
-                                                    holdout_ci95_low = _ci[0]
-                                            if is_promoted_flag is None:
-                                                is_promoted_flag = _mdata.get("promoted", True)
-                                    except Exception as mf_err:
-                                        log_event("CRITICAL", f"Failed to load manifest {man_path}: {mf_err}")
-                                        manifest_load_error = str(mf_err)
-                                else:
-                                    manifest_load_error = f"Manifest {man_path} missing on disk"
+                            man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
+                            if os.path.exists(man_path):
+                                try:
+                                    with open(man_path, "r") as mf:
+                                        _mdata = json.load(mf)
+                                        if mcc_val is None:
+                                            mcc_val = extract_metric(_mdata, ["manifest_mcc"], ["cv_metrics", "mcc", "mean"], ["metrics", "mcc"])
+                                        if mcc_min_val is None:
+                                            mcc_min_val = extract_metric(_mdata, ["manifest_mcc_min"], ["cv_metrics", "mcc", "min"], ["metrics", "mcc_min"])
+                                        if bal_acc_val is None:
+                                            bal_acc_val = extract_metric(_mdata, ["manifest_bal_acc"], ["cv_metrics", "balanced_accuracy", "mean"], ["metrics", "balanced_accuracy"])
+                                        if holdout_mcc_val is None:
+                                            holdout_mcc_val = extract_metric(_mdata, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
+                                        if holdout_bal_acc_val is None:
+                                            holdout_bal_acc_val = extract_metric(_mdata, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
+                                        if holdout_ci95_low is None:
+                                            _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(_mdata.get("cv_metrics"), dict) else None
+                                            if isinstance(_ci, (list, tuple)) and len(_ci) >= 1:
+                                                holdout_ci95_low = _ci[0]
+                                        if is_promoted_flag is None:
+                                            is_promoted_flag = _mdata.get("promoted", False)  # Finding #84: Fail-closed default
+                                except Exception as mf_err:
+                                    log_event("CRITICAL", f"Failed to load manifest {man_path}: {mf_err}")
+                                    manifest_load_error = str(mf_err)
+                            else:
+                                manifest_load_error = f"Manifest {man_path} missing on disk"
 
                             abstain_reason = None
                             if "manifest_load_error" in locals() and manifest_load_error:
@@ -7472,25 +7480,27 @@ def main():
                                 abstain_reason = f"{served_regime} model offline"
                             elif active_calibrator is None or (isinstance(active_calibrator, dict) and active_calibrator.get("is_fallback", False)):
                                 abstain_reason = f"{served_regime} calibrator missing or fallback (Fail-Closed)"
-                            elif mcc_val is not None and mcc_val < min_mcc_floor:
-                                abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
-                            elif mcc_min_val is not None and mcc_min_val < -0.05:
-                                abstain_reason = f"min CV MCC {mcc_min_val:.4f} < -0.05"
-                            elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
-                                abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
-                            elif holdout_mcc_val is None or holdout_mcc_val < min_holdout_mcc_floor:
-                                abstain_reason = f"Holdout MCC ({holdout_mcc_val}) < floor {min_holdout_mcc_floor} or missing"
-                            elif holdout_bal_acc_val is None or holdout_bal_acc_val < min_holdout_bal_acc_floor:
-                                abstain_reason = f"Holdout BalAcc ({holdout_bal_acc_val}) < floor {min_holdout_bal_acc_floor} or missing"
-                            elif holdout_ci95_low is not None and holdout_ci95_low < -0.05:
-                                abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
-                            elif is_promoted_flag is False:
-                                abstain_reason = f"{served_regime} model manifest promoted=False"
-                            elif "_mdata" in locals() and isinstance(_mdata, dict):
+                            elif _mdata is not None and isinstance(_mdata, dict):
                                 from config import is_manifest_degenerate
                                 is_deg, deg_reason = is_manifest_degenerate(_mdata)
                                 if is_deg:
                                     abstain_reason = f"Degenerate manifest: {deg_reason}"
+                            
+                            if not abstain_reason:
+                                if mcc_val is not None and mcc_val < min_mcc_floor:
+                                    abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
+                                elif mcc_min_val is not None and mcc_min_val < -0.05:
+                                    abstain_reason = f"min CV MCC {mcc_min_val:.4f} < -0.05"
+                                elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
+                                    abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
+                                elif holdout_mcc_val is None or holdout_mcc_val < min_holdout_mcc_floor:
+                                    abstain_reason = f"Holdout MCC ({holdout_mcc_val}) < floor {min_holdout_mcc_floor} or missing"
+                                elif holdout_bal_acc_val is None or holdout_bal_acc_val < min_holdout_bal_acc_floor:
+                                    abstain_reason = f"Holdout BalAcc ({holdout_bal_acc_val}) < floor {min_holdout_bal_acc_floor} or missing"
+                                elif holdout_ci95_low is not None and holdout_ci95_low < -0.05:
+                                    abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
+                                elif is_promoted_flag is False:
+                                    abstain_reason = f"{served_regime} model manifest promoted=False"
 
                             if abstain_reason:
                                 log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] {abstain_reason}. Abstaining.")
@@ -7662,8 +7672,8 @@ def main():
 
                             # Governance MCC / Predictive Floor Check
                             from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC
-                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_mcc", 0.05))
-                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
+                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
+                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
                             _manifest_mcc_val = getattr(m_trend, "manifest_mcc", None)
                             _holdout_mcc_val = getattr(m_trend, "holdout_mcc", None)
                             if _manifest_mcc_val is None:
@@ -7849,13 +7859,19 @@ def main():
                             _est_stop_dist = max(0.002, (resolved_sl_dist / max(1e-6, entry_close)))
                             _est_notional = (_current_bal * _max_risk_frac) / _est_stop_dist
                             _min_order = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
-                            _order_usd = float(bot_state.get("position_size_usd") or max(_min_order, min(_current_bal * 10.0, _est_notional)))
+                            _order_usd = max(_min_order, _est_notional)
+                            _spread_bp = float(bot_state.get(f"spread_bp_{symbol}") or 1.5)
+                            _garch_sigma = float(bot_state.get(f"garch_sigma_{symbol}") or 0.015)
                             _tcm = transaction_cost_model.estimate_transaction_cost(
+                                symbol=symbol,
                                 order_size_usd=_order_usd,
                                 volume_24h_usd=_adv_usd,
+                                bid_ask_spread_bp=_spread_bp,
+                                garch_sigma=_garch_sigma,
                                 is_maker=True,
+                                round_trip=True
                             )
-                            cost_bps = _tcm["total_cost_bps"] * 2.0  # round-trip
+                            cost_bps = float(_tcm.get("total_cost_bp", 12.0))  # canonical round-trip with maker entry + taker exit
                             rec.round_trip_cost_bp = float(cost_bps)
                             nominal_rr = (resolved_tp_m * atr_dollars) / max(1e-6, resolved_sl_dist)
                             realized_haircut = get_realized_rr_haircut(interval=str(iv), regime=str(regime_name), nominal_rr=nominal_rr)
@@ -8259,6 +8275,12 @@ def main():
 
                                     # Save lineage metadata in bot_state
                                     bot_state[f"htf_trend_metadata_{symbol}_{iv}"] = htf_meta
+                                    if str(macro_iv) == "240" or str(macro_tf) == "4h":
+                                        bot_state[f"macro_trend_{symbol}_4h"] = htf_trend
+                                        bot_state[f"htf_trend_{symbol}_4h"] = htf_trend
+                                        if symbol == "BTCUSDT" or symbol == bot_state.get("active_symbol", "BTCUSDT"):
+                                            bot_state["macro_trend_4h"] = htf_trend
+                                            bot_state["htf_trend_4h"] = htf_trend
 
                                     if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
                                         if ml_trend == htf_trend:
@@ -8473,8 +8495,19 @@ def main():
                                 _bars_24h = max(10, round(1440 / max(1, int(iv))))
                                 _adv_usd = float(df["volume"].tail(_bars_24h).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
                                 _current_bal_eval = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 80.0
-                                _order_usd = float(bot_state.get("position_size_usd") or max(5.1, min(_current_bal_eval * 10.0, _est_notional if '_est_notional' in locals() else _current_bal_eval * 0.25))) if "bot_state" in globals() and hasattr(bot_state, "get") else 1000.0
-                                tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
+                                _min_order_eval = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
+                                _order_usd = max(_min_order_eval, _current_bal_eval * 0.02)
+                                _spread_bp_eval = float(bot_state.get(f"spread_bp_{symbol}", current_spread_bps))
+                                _garch_sigma_eval = float(bot_state.get(f"garch_sigma_{symbol}") or 0.015)
+                                tcm_cost_bps = float(transaction_cost_model.estimate_transaction_cost(
+                                    symbol=symbol,
+                                    order_size_usd=_order_usd,
+                                    volume_24h_usd=_adv_usd,
+                                    bid_ask_spread_bp=_spread_bp_eval,
+                                    garch_sigma=_garch_sigma_eval,
+                                    is_maker=True,
+                                    round_trip=True
+                                ).get("total_cost_bp", 12.0))
                                 rec.round_trip_cost_bp = float(tcm_cost_bps)
                                 exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
                                 rec.expected_value = float(exp_edge_bps)

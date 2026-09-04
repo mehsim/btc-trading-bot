@@ -111,10 +111,19 @@ class ModelRegistry:
         if os.path.exists(self.registry_file):
             try:
                 with open(self.registry_file, "r") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        prod = data.get("Production")
+                        if isinstance(prod, dict) and "model_name" in prod:
+                            data["Production"] = {prod["model_name"]: prod}
+                        elif not isinstance(prod, dict):
+                            data["Production"] = {}
+                        if not isinstance(data.get("Archived"), list):
+                            data["Archived"] = []
+                        return data
             except (OSError, IOError, json.JSONDecodeError):
                 pass
-        return {"Production": None, "Staging": None, "Archived": []}
+        return {"Production": {}, "Staging": None, "Archived": []}
 
     def _save(self):
         with open(self.registry_file, "w") as f:

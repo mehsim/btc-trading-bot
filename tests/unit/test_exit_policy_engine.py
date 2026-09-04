@@ -126,7 +126,7 @@ def test_mhi_scaling_soft_limit_differs():
         mhi_status=40.0
     )
     assert eval_healthy["soft_limit_candles"] > eval_degraded["soft_limit_candles"]
-    assert eval_degraded["soft_limit_candles"] == 8  # 15 * 0.50 floor round
+    assert eval_degraded["soft_limit_candles"] == 12  # floored at lookahead horizon (Finding #90)
 
 
 def test_continuous_atr_adj_and_exit_scoring():

@@ -140,27 +140,31 @@ def get_realized_rr_haircut(
     return float(default_haircut)
 
 
-def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> float:
+DEFAULT_ROUND_TRIP_COST_FRAC = float(getattr(config, "TAKER_FEE_PCT", 0.00055) + getattr(config, "MAKER_FEE_PCT", 0.00020) + 0.00015 + 0.00035)
+
+
+def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: Optional[float] = None, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> float:
     """
     Computes required break-even probability accounting for realistic execution costs, target realization,
-    and adverse funding over expected holding horizon (Finding #60).
+    and adverse funding over expected holding horizon (Finding #60 & #83).
     Formula: p* = (sl_frac + cost_frac + expected_funding_frac) / (sl_frac + (tp_frac * realized_rr_haircut))
     """
+    eff_cost_frac = DEFAULT_ROUND_TRIP_COST_FRAC if cost_frac is None else float(cost_frac)
     sl_dist = abs(entry - sl)
     tp_dist = abs(tp - entry)
     sl_frac = sl_dist / max(1e-9, entry)
     tp_frac = (tp_dist / max(1e-9, entry)) * realized_rr_haircut
-    total_cost_frac = cost_frac + max(0.0, float(expected_funding_frac or 0.0))
+    total_cost_frac = eff_cost_frac + max(0.0, float(expected_funding_frac or 0.0))
     return (sl_frac + total_cost_frac) / max(1e-9, (sl_frac + tp_frac))
 
-def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> bool:
+def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: Optional[float] = None, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> bool:
     """
     Evaluates whether calibrated confidence meets the required win rate for the given entry, TP, and SL,
     accounting for realistic execution costs, target realization, and adverse funding.
     Returns True if conf >= required_p, False otherwise.
     """
-    required_p = calculate_required_p(entry, tp, sl, cost_frac=cost_frac, realized_rr_haircut=realized_rr_haircut, expected_funding_frac=expected_funding_frac)
-    return conf >= required_p
+    req_p = calculate_required_p(entry, tp, sl, cost_frac=cost_frac, realized_rr_haircut=realized_rr_haircut, expected_funding_frac=expected_funding_frac)
+    return conf >= req_p
 
 MAX_RR_RATIO = {
     "5m": 3.0,
@@ -1266,15 +1270,23 @@ class TransactionCostModel:
         volume_24h_usd: float,  # C-2: required — no default; must be per-symbol live ADV
         is_maker: bool = True,
         gamma_bps: float = 2.5,
+        round_trip: bool = False,
+        bid_ask_spread_bp: float = 1.5,
+        garch_sigma: float = 0.015,
+        symbol: str = "BTCUSDT",
     ) -> Dict[str, float]:
         import transaction_cost_model as canonical_tcm
         tcm = canonical_tcm.TransactionCostModel(gamma=0.42)
         res = tcm.estimate_transaction_cost(
+            symbol=symbol,
             order_size_usd=order_size_usd,
             volume_24h_usd=volume_24h_usd,
-            is_maker=is_maker
+            bid_ask_spread_bp=bid_ask_spread_bp,
+            garch_sigma=garch_sigma,
+            is_maker=is_maker,
+            round_trip=round_trip
         )
-        fee_val = float(res.get("fee_bp", 1.0 if is_maker else 6.0))
+        fee_val = float(res.get("fee_bp", 2.0 if is_maker else 5.5))
         spread_val = float(res.get("half_spread_bp", 0.75))
         impact_val = float(res.get("market_impact_bp", 0.35))
         total_val = float(res.get("total_cost_bp", res.get("total_cost_bps", fee_val + spread_val + impact_val)))
@@ -1289,13 +1301,35 @@ class TransactionCostModel:
 transaction_cost_model = TransactionCostModel()
 
 
+def get_canonical_round_trip_cost_bp(
+    symbol: str = "BTCUSDT",
+    order_size_usd: float = 1000.0,
+    volume_24h_usd: float = 50_000_000.0,
+    bid_ask_spread_bp: float = 1.5,
+    garch_sigma: float = 0.015,
+    is_maker: bool = False
+) -> float:
+    """Returns canonical round-trip transaction cost in basis points (Finding #83)."""
+    import transaction_cost_model as canonical_tcm
+    tcm = canonical_tcm.TransactionCostModel(gamma=0.42)
+    res = tcm.estimate_transaction_cost(
+        symbol=symbol,
+        order_size_usd=order_size_usd,
+        volume_24h_usd=volume_24h_usd,
+        bid_ask_spread_bp=bid_ask_spread_bp,
+        garch_sigma=garch_sigma,
+        is_maker=is_maker,
+        round_trip=True
+    )
+    return float(res.get("total_cost_bp", 12.0))
+
 
 def calculate_break_even_stop(
     direction: str,
     entry_price: float,
     current_price: float = 0.0,
     atr_dollars: float = 0.0,
-    taker_fee_pct: float = 0.00055,
+    taker_fee_pct: Optional[float] = None,
     spread_pct: float = 0.00015,
     slippage_pct: float = 0.00050,
     interval: Optional[str] = None
@@ -1308,8 +1342,9 @@ def calculate_break_even_stop(
     dir_str = str(direction).lower()
     side_sign = 1 if dir_str in ["bullish", "long", "buy", "1"] else -1
 
-    # Round-trip cost buffer = entry fee (0.055%) + exit fee (0.055%) + spread + slippage
-    roundtrip_fee_pct = taker_fee_pct * 2.0  # 0.0011
+    # Round-trip cost buffer = entry fee + exit fee + spread + slippage
+    eff_taker_fee = float(getattr(config, "TAKER_FEE_PCT", 0.00055)) if taker_fee_pct is None else float(taker_fee_pct)
+    roundtrip_fee_pct = eff_taker_fee * 2.0  # 0.0011
     total_cost_pct = roundtrip_fee_pct + spread_pct + slippage_pct # ~0.00175 (0.175%)
 
     cost_buffer = entry_price * total_cost_pct

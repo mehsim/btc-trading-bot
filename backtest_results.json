@@ -9,7 +9,7 @@
       "Expectancy (R)": "-0.14R",
       "Optimistic Return": "+5.52%",
       "Pessimistic MDD": "14.79%",
-      "Pessimistic WinRate": "46.34%"
+      "Pessimistic WinRate": "46.3% [32.1%, 61.3%] (n=41) [INSUFFICIENT_SAMPLE: n<100]"
     },
     {
       "Scenario": "B (Pure Dynamic Economic Gate p*, Trend Align)",
@@ -19,7 +19,7 @@
       "Expectancy (R)": "-0.14R",
       "Optimistic Return": "+5.87%",
       "Pessimistic MDD": "16.51%",
-      "Pessimistic WinRate": "46.67%"
+      "Pessimistic WinRate": "46.7% [32.9%, 60.9%] (n=45) [INSUFFICIENT_SAMPLE: n<100] [STATISTICALLY_INDISTINGUISHABLE]"
     },
     {
       "Scenario": "C (High Conviction: Base Dynamic + 3%, Trend Align)",
@@ -29,7 +29,7 @@
       "Expectancy (R)": "-0.07R",
       "Optimistic Return": "+3.46%",
       "Pessimistic MDD": "12.17%",
-      "Pessimistic WinRate": "56.00%"
+      "Pessimistic WinRate": "56.0% [37.1%, 73.3%] (n=25) [INSUFFICIENT_SAMPLE: n<100] [STATISTICALLY_INDISTINGUISHABLE]"
     },
     {
       "Scenario": "D (Pure Model Signals: Production Floor, No HTF Filter)",
@@ -39,7 +39,7 @@
       "Expectancy (R)": "-0.36R",
       "Optimistic Return": "-11.92%",
       "Pessimistic MDD": "40.21%",
-      "Pessimistic WinRate": "38.95%"
+      "Pessimistic WinRate": "39.0% [29.8%, 49.0%] (n=95) [INSUFFICIENT_SAMPLE: n<100] [STATISTICALLY_INDISTINGUISHABLE]"
     },
     {
       "Scenario": "E (High Conviction: Base Dynamic + 3%, No HTF Filter)",
@@ -49,14 +49,14 @@
       "Expectancy (R)": "-0.38R",
       "Optimistic Return": "-12.19%",
       "Pessimistic MDD": "29.17%",
-      "Pessimistic WinRate": "41.94%"
+      "Pessimistic WinRate": "41.9% [30.5%, 54.3%] (n=62) [INSUFFICIENT_SAMPLE: n<100] [STATISTICALLY_INDISTINGUISHABLE]"
     }
   ],
   "fee_sensitivity": [
     {
       "Fee Structure": "1. Spot Taker Fee (0.20% roundtrip)",
       "Trades": 95,
-      "Win Rate": "38.95%",
+      "Win Rate": "39.0% [29.8%, 49.0%] (n=95)",
       "Profit Factor": "0.52",
       "Max Drawdown": "40.21%",
       "Net Cumulative Return": "-33.40%"
@@ -64,7 +64,7 @@
     {
       "Fee Structure": "2. Futures Taker Fee (0.10% roundtrip)",
       "Trades": 282,
-      "Win Rate": "35.82%",
+      "Win Rate": "35.8% [30.4%, 41.6%] (n=282)",
       "Profit Factor": "0.61",
       "Max Drawdown": "58.38%",
       "Net Cumulative Return": "-53.33%"
@@ -72,7 +72,7 @@
     {
       "Fee Structure": "3. Futures Limit/Maker Fee (0.04% roundtrip)",
       "Trades": 379,
-      "Win Rate": "40.90%",
+      "Win Rate": "40.9% [36.1%, 45.9%] (n=379)",
       "Profit Factor": "0.80",
       "Max Drawdown": "42.91%",
       "Net Cumulative Return": "-35.55%"

@@ -51,10 +51,10 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "60": 0.040, "default": 0.050}
-TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "default": 0.360}
-TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "default": 0.035}
-TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "default": 0.355}
+TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "60": 0.040, "120": 0.050, "240": 0.050, "default": 0.050}
+TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "120": 0.360, "240": 0.360, "default": 0.360}
+TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.035}
+TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "120": 0.355, "240": 0.355, "default": 0.355}
 
 # Finding #157: Base Dynamic Stop Loss Multiplier
 DYNAMIC_SL_MULTIPLIER = 1.0
@@ -88,12 +88,12 @@ MODEL_SLOT_DENYLIST = {
 
 def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
     """
-    Evaluates out-of-sample manifest quality rules (Finding #122 & #127):
+    Evaluates out-of-sample manifest quality rules (Finding #122 & #127 & #81):
     Abstains when:
     1. holdout_balanced_accuracy <= 1/n_classes (~0.3334)
     2. holdout_mcc <= 0.0
     3. holdout_brier >= 0.99 or holdout_ece >= 0.99 (crash sentinels)
-    4. |holdout_mcc| < holdout_mcc_mde_80pct (when MDE is recorded)
+    4. |holdout_mcc| < holdout_mcc_mde_80pct (dynamically computed if not present)
     """
     if not manifest or not isinstance(manifest, dict):
         return True, "Manifest missing or invalid"
@@ -110,11 +110,25 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
                         return sub[k]
         return default
 
-    h_mcc = _extract(["holdout_mcc"])
-    h_bal_acc = _extract(["holdout_balanced_accuracy", "manifest_bal_acc"])
-    h_brier = _extract(["holdout_brier", "brier_score"])
+    h_mcc = _extract(["holdout_mcc", "mcc"])
+    h_bal_acc = _extract(["holdout_balanced_accuracy", "manifest_bal_acc", "balanced_accuracy"])
+    h_brier = _extract(["holdout_brier", "brier_score", "brier"])
     h_ece = _extract(["holdout_ece", "ece"])
     h_mde = _extract(["holdout_mcc_mde_80pct"])
+    h_eff_n = _extract(["holdout_effective_n", "effective_sample_size", "effective_n"])
+
+    # Finding #81: Derive 80% MDE dynamically if missing
+    if h_mde is None:
+        import math
+        if h_eff_n is not None and float(h_eff_n) > 0:
+            h_mde = round(2.8016 / math.sqrt(float(h_eff_n)), 4)
+        else:
+            h_raw = _extract(["n_holdout_samples", "holdout_samples", "raw_sample_size"])
+            barrier_cfg = manifest.get("barrier_config") if isinstance(manifest.get("barrier_config"), dict) else {}
+            lookahead_val = float(manifest.get("lookahead", barrier_cfg.get("lookahead", 12)))
+            if h_raw is not None and float(h_raw) > 0 and lookahead_val > 0:
+                derived_eff = float(h_raw) / lookahead_val
+                h_mde = round(2.8016 / math.sqrt(max(1.0, derived_eff)), 4)
 
     try:
         if h_brier is not None and float(h_brier) >= 0.99:

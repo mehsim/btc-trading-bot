@@ -1,13 +1,15 @@
 {
   "Production": {
-    "run_id": "train_15m_trending_1788184667",
-    "model_name": "ensemble_trending_15",
-    "metrics": {
-      "val_accuracy": 0.3343289802488714,
-      "val_mae": 0.00853817045434727
-    },
-    "stage": "Production",
-    "registered_at_utc": "2026-08-31T13:57:47.825455+00:00"
+    "ensemble_trending_15": {
+      "run_id": "train_15m_trending_1788184667",
+      "model_name": "ensemble_trending_15",
+      "metrics": {
+        "val_accuracy": 0.3343289802488714,
+        "val_mae": 0.00853817045434727
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-08-31T13:57:47.825455+00:00"
+    }
   },
   "Staging": {
     "run_id": "train_240m_trending_1787071122",

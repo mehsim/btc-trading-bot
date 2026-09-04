@@ -530,7 +530,7 @@ class ExitPolicyEngine:
         import config
         tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(tf_clean, {})
         lookahead = int(tf_cfg.get("lookahead", 12))
-        base_soft = max(6, int(lookahead))
+        base_soft = max(16, int(lookahead))
         hard_limit = max(base_soft + 2, int(lookahead * 1.5))
 
         import config
@@ -549,7 +549,8 @@ class ExitPolicyEngine:
                 mhi_num = 100.0
         mhi_floor = getattr(config, "MHI_MULT_FLOOR", 0.50)
         mhi_mult = float(np.clip(mhi_num / 100.0, mhi_floor, 1.0))
-        soft_limit = max(4, int(round((base_soft + atr_adj) * mhi_mult)))
+        # Finding #90: Floor soft limit at full label lookahead horizon
+        soft_limit = max(int(lookahead), int(round((base_soft + atr_adj) * mhi_mult)))
 
         is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]
         pnl_dist = (current_price - entry_price) if is_long else (entry_price - current_price)

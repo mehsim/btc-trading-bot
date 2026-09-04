@@ -883,6 +883,7 @@ def run_backtest():
             elif t_count_p < 784:
                 pess_wr_str += " [n<784]"
         else:
+            ci_l, ci_u = 0.0, 0.0
             pess_wr_str = "N/A"
 
         results.append({
@@ -893,11 +894,23 @@ def run_backtest():
             "Expectancy (R)": f"{exp_r_p:+.2f}R" if t_count_p > 0 else "0.00R",
             "Optimistic Return": f"{ret_o:+.2f}%" if t_count_o > 0 else "0.00%",
             "Pessimistic MDD": f"{mdd_p:.2f}%" if t_count_p > 0 else "N/A",
-            "Pessimistic WinRate": pess_wr_str
+            "Pessimistic WinRate": pess_wr_str,
+            "_ci_l": ci_l,
+            "_ci_u": ci_u
         })
 
         # Export per-trade granular backtest context to JSONL
         export_backtest_trades(all_scenario_trades)
+
+    # Finding #86: Overlapping Wilson CI detection & decision refusal
+    baseline_ci = (results[0]["_ci_l"], results[0]["_ci_u"]) if results else None
+    for r in results:
+        r_l = r.pop("_ci_l", 0.0)
+        r_u = r.pop("_ci_u", 1.0)
+        if baseline_ci and r["Scenario"] != results[0]["Scenario"] and r["Trades"] > 0:
+            # Check interval overlap: max(L1, L2) <= min(U1, U2)
+            if max(baseline_ci[0], r_l) <= min(baseline_ci[1], r_u):
+                r["Pessimistic WinRate"] += " [STATISTICALLY_INDISTINGUISHABLE]"
 
     # Print Comparison Table
     results_df = pd.DataFrame(results)
@@ -928,10 +941,16 @@ def run_backtest():
             rule_feature=RULE_FEATURE
         )
         t_count, win_rate, pf, mdd, ret = res_fee[:5]
+        if t_count > 0:
+            w_cnt = int(round((win_rate / 100.0) * t_count))
+            f_ci_l, f_ci_u = wilson_score_interval(w_cnt, t_count)
+            f_wr_str = f"{win_rate:.1f}% [{f_ci_l*100:.1f}%, {f_ci_u*100:.1f}%] (n={t_count})"
+        else:
+            f_wr_str = "N/A"
         fee_results.append({
             "Fee Structure": structure_name,
             "Trades": t_count,
-            "Win Rate": f"{win_rate:.2f}%",
+            "Win Rate": f_wr_str,
             "Profit Factor": f"{pf:.2f}",
             "Max Drawdown": f"{mdd:.2f}%",
             "Net Cumulative Return": f"{ret:+.2f}%"
@@ -1022,7 +1041,16 @@ def run_backtest():
             print("=" * 90)
             print(f"Total Windows Evaluated        : {wf_summary.get('window_count')}")
             print(f"Evaluation Mode                : {wf_summary.get('evaluation_mode')}")
-            print(f"Mean Window Win Rate           : {wf_summary.get('mean_win_rate'):.2f}%")
+            mean_wr = float(wf_summary.get('mean_win_rate', 0.0))
+            tot_w_trades = sum(int(w.get("trades", 0)) for w in wf_summary.get("windows", [])) if "windows" in wf_summary else 0
+            if tot_w_trades > 0:
+                from pattern_miner import wilson_score_interval
+                w_wins = int(round((mean_wr / 100.0) * tot_w_trades))
+                w_ci_l, w_ci_u = wilson_score_interval(w_wins, tot_w_trades)
+                wr_disp = f"{mean_wr:.2f}% [{w_ci_l*100:.1f}%, {w_ci_u*100:.1f}%] (n={tot_w_trades})"
+            else:
+                wr_disp = f"{mean_wr:.2f}%"
+            print(f"Mean Window Win Rate           : {wr_disp}")
             print(f"Mean Window Return             : {wf_summary.get('mean_return'):+.2f}%")
             print(f"Worst Window Drawdown          : {wf_summary.get('max_drawdown'):.2f}%")
             print("=" * 90 + "\n")

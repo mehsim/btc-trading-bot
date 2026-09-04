@@ -948,6 +948,9 @@ def api_status():
                             "mcc_mean": float(mcc_mean_val),
                             "mcc_min": float(mcc_min_val),
                             "mcc_std": m_data.get("mcc_std", 0.025),
+                            "holdout_mcc": m_data.get("holdout_mcc") or (m_data.get("cv_metrics", {}).get("holdout_mcc") if isinstance(m_data.get("cv_metrics"), dict) else None),
+                            "holdout_effective_n": m_data.get("holdout_effective_n") or (m_data.get("cv_metrics", {}).get("holdout_effective_n") if isinstance(m_data.get("cv_metrics"), dict) else None) or (m_data.get("metrics", {}).get("effective_sample_size") if isinstance(m_data.get("metrics"), dict) else None),
+                            "holdout_mcc_mde_80pct": m_data.get("holdout_mcc_mde_80pct") or (m_data.get("cv_metrics", {}).get("holdout_mcc_mde_80pct") if isinstance(m_data.get("cv_metrics"), dict) else None),
                             "label_distribution": ld,
                             "barrier_config": m_data.get("barrier_config", {"tp_mult_trending": 2.5, "sl_mult": 1.0, "lookahead": 12}),
                             "feature_count": m_data.get("feature_count") or len(m_data.get("feature_names", [])) or 34

@@ -48,6 +48,28 @@ def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
         macro_dir = str(macro_pred.get("direction", "Neutral"))
         macro_conf = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.50)
         
+    # Finding #88: If ML model abstains or is offline/neutral, fall back to 4H technical trend tape
+    if macro_dir not in ["Bullish", "Bearish"]:
+        tech_trend = (
+            bot_state.get(f"macro_trend_{symbol}_4h") or
+            bot_state.get(f"htf_trend_{symbol}_4h") or
+            bot_state.get("macro_trend_4h") or
+            bot_state.get("htf_trend_4h")
+        )
+        if tech_trend in ["Bullish", "Bearish"]:
+            macro_dir = str(tech_trend)
+            macro_conf = 0.55
+        else:
+            p_4h = bot_state.get(f"close_{symbol}_4h") or bot_state.get(f"live_price_{symbol}")
+            ema_4h = bot_state.get(f"ema200_{symbol}_4h") or bot_state.get(f"ema50_{symbol}_4h")
+            if p_4h is not None and ema_4h is not None:
+                if float(p_4h) > float(ema_4h):
+                    macro_dir = "Bullish"
+                    macro_conf = 0.52
+                elif float(p_4h) < float(ema_4h):
+                    macro_dir = "Bearish"
+                    macro_conf = 0.52
+
     macro_adx = float(bot_state.get(f"adx_{symbol}_4h") or (bot_state.get("adx_4h") if symbol == "BTCUSDT" else None) or 25.0)
     is_trending = macro_adx >= 25.0
     
@@ -88,24 +110,39 @@ class SignalEvaluator:
         manifest_mcc_min = None
         manifest_bal_acc = None
 
+        is_degenerate = False
+        deg_reason = "OK"
         if os.path.exists(manifest_path):
             try:
                 with open(manifest_path, "r") as mf:
                     m_data = json.load(mf)
+                    from config import is_manifest_degenerate
+                    is_degenerate, deg_reason = is_manifest_degenerate(m_data)
+                    if is_degenerate:
+                        log_event("WARNING", f"[SignalEvaluator] Manifest {manifest_path} is degenerate ({deg_reason}). Model will abstain.")
+
                     m_ver = m_data.get("model_version", "v7.2.0")
                     git_sha_str = m_data.get("git_sha", "unknown")
                     model_ver_str = f"btc_{interval}m_{regime_key}_clf:{m_ver}"
 
-                    cv_m = m_data.get("cv_metrics", {})
-                    m_m = m_data.get("metrics", {})
+                    cv_m = m_data.get("cv_metrics", {}) if isinstance(m_data.get("cv_metrics"), dict) else {}
+                    m_m = m_data.get("metrics", {}) if isinstance(m_data.get("metrics"), dict) else {}
                     manifest_mcc = cv_m.get("mcc") if isinstance(cv_m.get("mcc"), (int, float)) else (m_m.get("mcc") if isinstance(m_m.get("mcc"), (int, float)) else (cv_m.get("mcc", {}).get("mean") if isinstance(cv_m.get("mcc"), dict) else None))
                     manifest_mcc_min = cv_m.get("mcc", {}).get("min") if isinstance(cv_m.get("mcc"), dict) else m_m.get("mcc_min")
                     manifest_bal_acc = cv_m.get("balanced_accuracy") if isinstance(cv_m.get("balanced_accuracy"), (int, float)) else (m_m.get("balanced_accuracy") if isinstance(m_m.get("balanced_accuracy"), (int, float)) else (cv_m.get("balanced_accuracy", {}).get("mean") if isinstance(cv_m.get("balanced_accuracy"), dict) else None))
-                    holdout_mcc = m_data.get("holdout_mcc") or cv_m.get("holdout_mcc") or m_m.get("holdout_mcc")
-                    holdout_bal_acc = m_data.get("holdout_balanced_accuracy") or cv_m.get("holdout_balanced_accuracy")
+                    
+                    # 0.0-safe metric extraction (Finding #87)
+                    def _ext_metric(srcs, key):
+                        for s in srcs:
+                            if isinstance(s, dict) and key in s and s[key] is not None:
+                                return s[key]
+                        return None
+
+                    holdout_mcc = _ext_metric([m_data, cv_m, m_m], "holdout_mcc")
+                    holdout_bal_acc = _ext_metric([m_data, cv_m, m_m], "holdout_balanced_accuracy")
                     _ci = cv_m.get("holdout_mcc_ci95")
                     holdout_ci95_low = _ci[0] if isinstance(_ci, (list, tuple)) and len(_ci) >= 1 else None
-                    is_promoted = m_data.get("promoted", True)
+                    is_promoted = m_data.get("promoted", False)  # Finding #84: Fail-closed default
             except Exception as ex_m:
                 log_event("WARNING", f"[SignalEvaluator Warning] Failed reading manifest {manifest_path}: {ex_m}")
 
@@ -174,7 +211,9 @@ class SignalEvaluator:
                 "holdout_mcc": holdout_mcc,
                 "holdout_bal_acc": holdout_bal_acc,
                 "holdout_ci95_low": holdout_ci95_low,
-                "is_promoted": is_promoted
+                "is_promoted": is_promoted,
+                "is_degenerate": is_degenerate,
+                "deg_reason": deg_reason
             }
             with self.state_lock:
                 while len(self.models_by_interval) >= self.max_cache_size:
@@ -247,9 +286,10 @@ class SignalEvaluator:
                     "timestamp": time.time()
                 }
                 with self.state_lock:
-                    self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = denied_entry
+                    self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = denied_entry
+                    self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = denied_entry
                     if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
-                        self.bot_state[f"latest_prediction_{tf_key}"] = denied_entry
+                        self.bot_state[f"latest_prediction_bg_{tf_key}"] = denied_entry
                 return
 
             # Lazy model evaluation
@@ -292,9 +332,10 @@ class SignalEvaluator:
                         "timestamp": time.time()
                     }
                     with self.state_lock:
-                        self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = neut_pred
+                        self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = neut_pred
+                        self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = neut_pred
                         if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
-                            self.bot_state[f"latest_prediction_{tf_key}"] = neut_pred
+                            self.bot_state[f"latest_prediction_bg_{tf_key}"] = neut_pred
 
                 # Fail-closed: unmeasured models (no cv_metrics) must not trade
                 if mcc_val is None:
@@ -359,9 +400,28 @@ class SignalEvaluator:
                     actual_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(interval, close_price, atr_val, tp_m)
 
                     if str(interval) in ["15", "30", "60"]:
-                        actual_sl_m = max(1.25, sl_m)
+                        import trade_calculators
+                        atr_norm_val = (atr_val / max(1e-6, close_price))
+                        struct_sl, _, _ = trade_calculators.calculate_adaptive_structural_stop(
+                            df_recent=df,
+                            entry_price=close_price,
+                            direction="Bullish",
+                            atr_val=atr_val,
+                            regime=str(regime_str),
+                            volatility=atr_norm_val,
+                            cfg_sl_mult=float(sl_m),
+                            interval=str(interval)
+                        )
+                        resolved_sl_dist = abs(close_price - struct_sl)
+                        actual_sl_m = resolved_sl_dist / max(1e-6, atr_val)
                     else:
-                        actual_sl_m = sl_m * risk_engine.get_timeframe_stop_multiplier(str(interval))
+                        import database
+                        tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(str(interval))
+                        sl_multiplier_adj = sl_m * tf_sl_mult
+                        resolved_sl_dist = risk_engine.calculate_final_stop_distance(
+                            close_price, atr_val, symbol, df=df, gmm_multiplier=sl_multiplier_adj, database_module=database, interval=str(interval)
+                        )
+                        actual_sl_m = resolved_sl_dist / max(1e-6, atr_val)
 
                     # H-4: compute round-trip cost from TCM using per-symbol ADV from df.
                     # df loaded at line 125; tail(96) × 15m bars ≈ 24h volume.
@@ -392,7 +452,8 @@ class SignalEvaluator:
                     # Low-Timeframe Chop Gate: on 15m/30m, quiet market chop (ADX < 22.0) requires +5% higher conviction to avoid fee churn
                     ltf_chop_penalty = 0.05 if (str(interval) in ["15", "30"] and adx_cur < 22.0) else 0.0
                     
-                    eval_threshold = round(min(0.55, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle) + ltf_chop_penalty), 4)
+                    # Finding #89: Remove arbitrary 0.55 cap so high required economic thresholds properly bite
+                    eval_threshold = round(max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle) + ltf_chop_penalty, 4)
 
                     from ensemble import resolve_direction
                     _top_trend, _top_conf = resolve_direction(probs)
@@ -412,22 +473,27 @@ class SignalEvaluator:
 
                     gate_conf = calibrated_conf if calibrated_conf is not None else raw_conf
                     if _top_trend in ["Bullish", "Bearish"] and gate_conf >= eval_threshold:
-                        # Governance Holdout & CV Metric Validation
+                        # Governance Holdout & CV Metric Validation (Findings #84 & #87)
                         from config import TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, MODEL_GOVERNANCE
-                        min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
-                        min_h_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+                        min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", 0.035))
+                        min_h_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", 0.355))
                         m_hmcc = models.get("holdout_mcc")
                         m_hbal = models.get("holdout_bal_acc")
                         m_hci = models.get("holdout_ci95_low")
                         m_prom = models.get("is_promoted")
+                        is_deg = models.get("is_degenerate", False)
+                        deg_reason = models.get("deg_reason", "")
 
-                        if m_hmcc is not None and m_hmcc < min_h_mcc:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout MCC ({m_hmcc:.4f}) < floor ({min_h_mcc:.4f}). Neutral.")
+                        if is_deg:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m manifest degenerate ({deg_reason}). Neutral.")
                             direction = "Neutral"
-                        elif m_hbal is not None and m_hbal < min_h_bal:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout BalAcc ({m_hbal:.4f}) < floor ({min_h_bal:.4f}). Neutral.")
+                        elif m_hmcc is None or float(m_hmcc) < min_h_mcc:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout MCC ({m_hmcc}) < floor ({min_h_mcc:.4f}) or missing. Neutral.")
                             direction = "Neutral"
-                        elif m_hci is not None and m_hci < -0.05:
+                        elif m_hbal is None or float(m_hbal) < min_h_bal:
+                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout BalAcc ({m_hbal}) < floor ({min_h_bal:.4f}) or missing. Neutral.")
+                            direction = "Neutral"
+                        elif m_hci is not None and float(m_hci) < -0.05:
                             log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout CI95 lower bound ({m_hci:.4f}) < -0.05. Neutral.")
                             direction = "Neutral"
                         elif m_prom is False:
@@ -511,13 +577,9 @@ class SignalEvaluator:
                     with self.state_lock:
                         self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = pred_entry
                         self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = pred_entry
-                        if f"latest_prediction_{symbol}_{tf_key}" not in self.bot_state:
-                            self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = pred_entry
                         if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
                             self.bot_state[f"latest_prediction_bg_{tf_key}"] = pred_entry
                             self.bot_state[f"evaluator_prediction_{tf_key}"] = pred_entry
-                            if f"latest_prediction_{tf_key}" not in self.bot_state:
-                                self.bot_state[f"latest_prediction_{tf_key}"] = pred_entry
                         
                         history = self.bot_state.get("prediction_history", [])
                         if isinstance(history, list):
@@ -632,9 +694,10 @@ class SignalEvaluator:
                         "calibrator_ece": 0.080,
                         "is_fallback": True
                     }
-                    self.bot_state[f"latest_prediction_{symbol}_{tf_key}"] = fallback_dict
+                    self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = fallback_dict
+                    self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = fallback_dict
                     if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
-                        self.bot_state[f"latest_prediction_{tf_key}"] = fallback_dict
+                        self.bot_state[f"latest_prediction_bg_{tf_key}"] = fallback_dict
                     history = self.bot_state.get("prediction_history", [])
                     if isinstance(history, list):
                         c_ts = int(time.time() * 1000)
@@ -688,7 +751,7 @@ class SignalEvaluator:
             # Update Confluence Results for UI
             self.update_confluence_results(tf_key, df, symbol)
             with self.state_lock:
-                sig_src = self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}", {}).get("signal_source", "UNKNOWN")
+                sig_src = self.bot_state.get(f"latest_prediction_bg_{symbol}_{tf_key}", self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}", {})).get("signal_source", "UNKNOWN")
             print(f"[SignalEvaluator] Evaluated {interval}m ({symbol}): Regime={regime_str}, Direction={direction}, Source={sig_src}, ADX={adx_val:.1f}")
 
         except Exception as e:
@@ -715,7 +778,7 @@ class SignalEvaluator:
         
         # Pred info & external data lookup
         with self.state_lock:
-            pred_info = dict(self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}", {}))
+            pred_info = dict(self.bot_state.get(f"latest_prediction_bg_{symbol}_{tf_key}", self.bot_state.get(f"latest_prediction_{symbol}_{tf_key}", {})))
             ofi = self.bot_state.get("latest_ofi")
             fg_raw = last_row.get("fear_greed")
             fg_val = float(fg_raw) if (fg_raw is not None and not pd.isna(pd.to_numeric(fg_raw, errors="coerce"))) else None

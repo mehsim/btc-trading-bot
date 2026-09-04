@@ -2160,10 +2160,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 is_distribution_shifted = is_label_schema_diff or is_population_shift
                 mcc_tol = float(champ_manifest.get("governance_policy", {}).get("mcc_regression_tolerance", 0.010)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.010
 
-                # Finding #126: Check effective-sample convention alignment
-                champ_convention = champ_manifest.get("effective_n_convention") if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else None
+                # Finding #126 & #82: Check effective-sample convention alignment
+                champ_convention = champ_manifest.get("effective_n_convention", "legacy_single_symbol_v1") if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else None
                 if champ_convention and champ_convention != "lookahead_x_nsymbols_v2":
-                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Requiring absolute quality floors.")
+                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Refusing relative delta comparison across effective-sample convention gap; enforcing strict absolute quality floors.")
+                    champ_mcc_val = None
                     is_distribution_shifted = True
 
                 # Finding #134: MDE 80% Power Gate
@@ -2348,7 +2349,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         pf_baseline=pf_champ,
                         pf_candidate=chal_pf,
                         p_value=_p,
-                        num_trials=n_optuna_trials_val
+                        num_trials=int(n_optuna_trials_val + len([m for m in model_registry.models.get("Archived", []) if isinstance(m, dict) and m.get("model_name") == f"ensemble_{name}_{interval}"]))
                     )
                     if not stat_eval.get("approved_for_production", False):
                         print(f"  [Statistical Validation Gate] REJECTED: Failed production release gates: {stat_eval.get('gate_details')}")
@@ -2630,18 +2631,32 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
 
+        reg_slot_name = f"ensemble_{name}_{interval}"
+        reg_metrics = {
+            "val_accuracy": float(chal_acc) if chal_acc is not None else 0.0,
+            "val_mae": float(chal_mae) if 'chal_mae' in locals() and chal_mae is not None else 0.0,
+            "cv_mcc": float(chal_mcc_mean) if chal_mcc_mean is not None else 0.0,
+            "holdout_mcc": float(holdout_mcc) if holdout_mcc is not None else 0.0,
+            "holdout_resolved_mcc": float(holdout_resolved_mcc) if ('holdout_resolved_mcc' in locals() and holdout_resolved_mcc is not None) else 0.0,
+            "holdout_effective_n": float(eff_n_val) if ('eff_n_val' in locals() and eff_n_val is not None) else 0.0,
+            "mde_80pct": float(chal_mde) if ('chal_mde' in locals() and chal_mde is not None) else 0.0,
+            "profit_factor": float(chal_pf) if chal_pf is not None else 0.0,
+            "brier": float(chal_brier) if ('chal_brier' in locals() and chal_brier is not None) else 0.0,
+            "ece": float(chal_ece) if ('chal_ece' in locals() and chal_ece is not None) else 0.0,
+        }
+
         if should_save:
             model_registry.register_model(
                 run_id=f"train_{interval}m_{name}_{int(time.time())}",
-                model_name=f"ensemble_{name}_{interval}",
-                metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
+                model_name=reg_slot_name,
+                metrics=reg_metrics,
                 stage="Production"
             )
         else:
             model_registry.register_model(
                 run_id=f"train_{interval}m_{name}_{int(time.time())}",
-                model_name=f"ensemble_{name}_{interval}",
-                metrics={"val_accuracy": chal_acc, "val_mae": chal_mae},
+                model_name=reg_slot_name,
+                metrics=reg_metrics,
                 stage="Rejected"
             )
 

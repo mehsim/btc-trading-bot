@@ -43,12 +43,12 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
         import ensemble
         orig_get_history = signal_evaluator.get_history
         orig_denied = ensemble.is_model_slot_denied
-        signal_evaluator.get_history = lambda symbol, interval, limit: df
+        signal_evaluator.get_history = lambda symbol, interval, limit, **kwargs: df
         ensemble.is_model_slot_denied = lambda slot: False
 
         try:
             self.evaluator.evaluate_interval("BTCUSDT", "15")
-            pred = self.bot_state.get("latest_prediction_15m") or self.bot_state.get("latest_prediction_15")
+            pred = self.bot_state.get("latest_prediction_bg_15m") or self.bot_state.get("latest_prediction_15m") or self.bot_state.get("latest_prediction_15")
             self.assertIsNotNone(pred)
             self.assertEqual(pred.get("signal_source"), "RULE_BASED_FALLBACK")
             self.assertTrue(pred.get("is_fallback"))
@@ -106,12 +106,12 @@ class TestSignalEvaluatorFallback(unittest.TestCase):
         import ensemble
         orig_get_history = signal_evaluator.get_history
         orig_denied = ensemble.is_model_slot_denied
-        signal_evaluator.get_history = lambda symbol, interval, limit: df
+        signal_evaluator.get_history = lambda symbol, interval, limit, **kwargs: df
         ensemble.is_model_slot_denied = lambda slot: False
 
         try:
             self.evaluator.evaluate_interval("BTCUSDT", "15")
-            pred = self.bot_state.get("latest_prediction_15m") or self.bot_state.get("latest_prediction_15")
+            pred = self.bot_state.get("latest_prediction_bg_15m") or self.bot_state.get("latest_prediction_15m") or self.bot_state.get("latest_prediction_15")
             self.assertIsNotNone(pred)
             self.assertEqual(pred.get("signal_source"), "ML_ENSEMBLE")
             self.assertFalse(pred.get("is_fallback"))
