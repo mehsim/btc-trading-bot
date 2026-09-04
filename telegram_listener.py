@@ -255,7 +255,7 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
             calibrated_conf=1.0
         )
 
-        df_raw = get_history(symbol=sym, interval=iv, limit=100)
+        df_raw = get_history(symbol=sym, interval=iv, limit=300)
         if df_raw is None or len(df_raw) < 10:
             rec.outcome = "REJECTED"
             rec.reject_reason = "Failed to fetch market data"
@@ -314,8 +314,17 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
         position_size_usd = 2.0
         rec.position_size_usd = position_size_usd
 
-        # Evaluate pre-trade risk checklist
+        # Evaluate pre-trade risk checklist and concurrent position limits
+        import config
         active_trades_list = [t for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in (bot_state.get(f"active_trade_{tf_k}", []) if bot_state else [])]
+        max_concurrent = getattr(config, "MAX_CONCURRENT_POSITIONS", 3)
+        if len(active_trades_list) >= max_concurrent:
+            rec.outcome = "REJECTED"
+            rec.reject_reason = f"Max concurrent positions reached ({len(active_trades_list)} >= {max_concurrent})"
+            rec.reason_code = ReasonCode.MAX_CONCURRENT_POSITIONS
+            write_decision(rec)
+            return f"❌ Order Rejected: Max concurrent positions limit ({max_concurrent}) reached."
+
         df_dict = {sym: df}
         passed_checklist, checklist_msg, dd_mult, capped_size = risk_engine.evaluate_pre_trade_checklist(
             sym, position_size_usd, final_lev, active_trades_list, bot_state or {}, df_dict, interval=str(iv), direction=ml_trend, journal=rec
@@ -328,6 +337,25 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
             return f"❌ Order Rejected by Risk Engine: {checklist_msg}"
 
         position_size_usd = min(position_size_usd, capped_size)
+
+        # Enforce ExecutionValidator
+        from execution_validator import ExecutionValidator
+        ev = ExecutionValidator(max_portfolio_heat=getattr(config, "MAX_PORTFOLIO_HEAT", 0.35))
+        ev_valid, ev_msg = ev.validate_order(
+            symbol=sym,
+            direction=ml_trend,
+            entry_price=final_entry,
+            stop_loss_price=final_sl,
+            take_profit_price=final_tp,
+            position_size_usd=position_size_usd
+        )
+        if not ev_valid:
+            rec.outcome = "REJECTED"
+            rec.reject_reason = f"Execution validation failed: {ev_msg}"
+            rec.reason_code = ReasonCode.EXECUTION_VALIDATION_FAILED
+            write_decision(rec)
+            return f"❌ Order Rejected by Execution Validator: {ev_msg}"
+
         set_bybit_leverage(sym, final_lev)
 
         leveraged_size = position_size_usd * final_lev
@@ -370,7 +398,8 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
                     "leverage": final_lev,
                     "position_size_usd": position_size_usd,
                     "qty": float(qty_str),
-                    "confidence": 1.0,
+                    "confidence": 0.50,
+                    "is_manual": True,
                     "regime": "MANUAL",
                     "entry_time": int(time.time() * 1000),
                     "end_time": time.time() + (int(iv) * 60 * 10),
@@ -607,7 +636,7 @@ def start_telegram_command_listener(bot_state, bot_state_lock, active_trades_loc
                         cb_from_id = str(cb_query.get("from", {}).get("id"))
                         cb_data = str(cb_query.get("data", ""))
 
-                        is_cb_auth = bool(allowed_chat_ids and (cb_chat_id in allowed_chat_ids or cb_from_id in allowed_chat_ids))
+                        is_cb_auth = bool(allowed_chat_ids and cb_from_id in allowed_chat_ids)
                         if not is_cb_auth:
                             print(f"[Telegram Security] Unauthorized callback attempt: chat_id {cb_chat_id}, from_id {cb_from_id}")
                             execute_telegram_api_call("answerCallbackQuery", {

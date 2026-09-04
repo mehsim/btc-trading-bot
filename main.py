@@ -2194,7 +2194,9 @@ def run_flask():
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5001))
-    flask_host = os.environ.get("FLASK_HOST", "0.0.0.0")
+    allow_pub = os.environ.get("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1")
+    default_host = "0.0.0.0" if allow_pub else "127.0.0.1"  # nosec B104
+    flask_host = os.environ.get("FLASK_HOST", default_host)
     sys.stderr.write(f"[Flask] Starting server on {flask_host}:{port}...\n")
     sys.stderr.flush()
     try:
@@ -4562,18 +4564,24 @@ def sync_active_positions_from_bybit():
                             import sqlite3
                             con = database.get_db_connection()
                             cur = con.cursor()
+                            expected_dir_alt = "Long" if direction == "Bullish" else "Short"
+                            min_recov_ts = time.time() - (86400 * 2)
                             cur.execute("""
-                                SELECT interval, calibrated_conf, direction FROM decision_journal 
+                                SELECT interval, calibrated_conf, direction, ts FROM decision_journal 
                                 WHERE symbol = ? AND outcome = 'EXECUTED' 
+                                  AND (direction = ? OR direction = ?)
+                                  AND ts >= ?
                                 ORDER BY ts DESC LIMIT 1
-                            """, (symbol,))
+                            """, (symbol, direction, expected_dir_alt, min_recov_ts))
                             exec_row = cur.fetchone()
                             con.close()
                             if exec_row:
-                                tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-                                matched_tf = tf_map_inv.get(str(exec_row[0]), "4h")
-                                matched_confidence = float(exec_row[1] or 0.50)
-                                print(f"[Crash Recovery] Matched executed journal record for {symbol}: {matched_tf} ({exec_row[0]}m), conf={matched_confidence*100:.2f}%")
+                                matched_row_dir = str(exec_row[2])
+                                if matched_row_dir in (direction, expected_dir_alt):
+                                    tf_map_inv = {"5": "5m", "15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                                    matched_tf = tf_map_inv.get(str(exec_row[0]), "4h")
+                                    matched_confidence = float(exec_row[1] or 0.50)
+                                    print(f"[Crash Recovery] Matched executed journal record for {symbol} ({matched_row_dir}): {matched_tf} ({exec_row[0]}m), conf={matched_confidence*100:.2f}%")
                         except Exception as e_rec:
                             log_event("WARNING", f"Failed to query decision_journal for recovery: {e_rec}")
                             for p in reversed(bot_state.get("prediction_history", [])):
@@ -7224,6 +7232,13 @@ def main():
                     async_spawned = False
                     exp_edge_bps = None
                     exp_r_val = None
+                    cost_bps = None
+                    position_size_usd = None
+                    leverage_val = None
+                    tcm_cost_bps = None
+                    mhi_val = None
+                    wallet_exceeded = False
+                    bybit_success = False
                     try:
                     
                         latest_candle = df.iloc[-1]
@@ -7937,7 +7952,7 @@ def main():
                             bot_state["drift_p_val"] = drift_p
 
                             # Compute rolling 30-trade symbol Sharpe
-                            sym_trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol]
+                            sym_trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol][-30:]
                             if len(sym_trades) >= 5:
                                 sym_pnls = [float(t.get("pnl_usd", 0.0)) for t in sym_trades]
                                 from trade_calculators import calculate_rolling_sharpe
@@ -7957,6 +7972,7 @@ def main():
                             )
                             mhi_val = mhi_res.get("mhi_score", 90.0)
                             bot_state["mhi_score"] = mhi_val
+                            rec.mhi_score = float(mhi_val)
                             for k_suffix in [str(tf), str(iv)]:
                                 bot_state[f"mhi_{k_suffix}"] = mhi_val
                                 bot_state[f"mhi_{symbol}_{k_suffix}"] = mhi_val
@@ -8385,33 +8401,35 @@ def main():
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
 
                             if status_msg == "Pending":
+                                current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and hasattr(bot_state, "get") else 3.5
+                                u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and hasattr(bot_state, "get") else 0.04
+                                rec.spread_bp = current_spread_bps
+                                
+                                # Expected R:R of the target setup relative to minimum floor across all intervals
+                                _iv_cfg = bot_state.get("optimized_timeframe_config", {}).get(str(iv), {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
+                                _iv_base = TIMEFRAME_CONFIG.get(str(iv), {"sl_mult": 0.9, "tp_mult_ranging": 1.4, "tp_mult_trending": 1.8})
+                                _iv_sl = float(_iv_cfg.get("sl_mult", _iv_base.get("sl_mult", 0.9)))
+                                adx_regime_threshold = float(getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {}).get(str(iv), 28.0))
+                                _iv_tp = float(_iv_cfg.get("tp_mult_trending" if latest_candle.get("ADX", 0.0) >= adx_regime_threshold else "tp_mult_ranging", 1.4))
+                                exp_r_val = float(_iv_tp / max(1e-6, _iv_sl))
+                                rec.expected_rr = exp_r_val
+
+                                # Estimate per-symbol 24h ADV from candle volume * price
+                                _bars_24h = max(10, round(1440 / max(1, int(iv))))
+                                _adv_usd = float(df["volume"].tail(_bars_24h).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
+                                _current_bal_eval = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 80.0
+                                _order_usd = float(bot_state.get("position_size_usd") or max(5.1, min(_current_bal_eval * 10.0, _est_notional if '_est_notional' in locals() else _current_bal_eval * 0.25))) if "bot_state" in globals() and hasattr(bot_state, "get") else 1000.0
+                                tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
+                                rec.round_trip_cost_bp = float(tcm_cost_bps)
+                                exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
+                                rec.expected_value = float(exp_edge_bps)
+                                rec.gate("cost", value=float(tcm_cost_bps), passed=bool(exp_edge_bps > 0))
+
                                 if str(iv) == "15":
                                     vol_series = df["volume"] if (df is not None and "volume" in df.columns) else None
                                     vol_20th = float(vol_series.quantile(0.20)) if (vol_series is not None and len(vol_series.dropna()) >= 20) else 0.0
                                     curr_vol = float(latest_candle.get("volume", 0.0))
                                     mean_atr_24h = float(df["ATR_norm"].mean()) if (df is not None and "ATR_norm" in df.columns and len(df) >= 20) else atr_norm_val
-                                    current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and hasattr(bot_state, "get") else 3.5
-                                    u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and hasattr(bot_state, "get") else 0.04
-                                    rec.spread_bp = current_spread_bps
-                                    
-                                    # Expected R:R of the target setup relative to minimum floor
-                                    _15m_cfg = bot_state.get("optimized_timeframe_config", {}).get("15", {}) if "bot_state" in globals() and hasattr(bot_state, "get") else {}
-                                    _15m_base = TIMEFRAME_CONFIG.get("15", {"sl_mult": 0.9, "tp_mult_ranging": 1.4, "tp_mult_trending": 1.8})
-                                    _15m_sl = float(_15m_cfg.get("sl_mult", _15m_base.get("sl_mult", 0.9)))
-                                    adx_regime_threshold = float(getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {}).get("15", 28.0))
-                                    _15m_tp = float(_15m_cfg.get("tp_mult_trending" if latest_candle.get("ADX", 0.0) >= adx_regime_threshold else "tp_mult_ranging", 1.4))
-                                    exp_r_val = float(_15m_tp / max(1e-6, _15m_sl))
-                                    rec.expected_rr = exp_r_val
-
-                                    # C-2: estimate per-symbol 24h ADV from candle volume * price
-                                    _adv_usd = float(df["volume"].tail(96).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
-                                    _current_bal_15m = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 80.0
-                                    _order_usd = float(bot_state.get("position_size_usd") or max(5.1, min(_current_bal_15m * 10.0, _est_notional if '_est_notional' in locals() else _current_bal_15m * 0.25))) if "bot_state" in globals() and hasattr(bot_state, "get") else 1000.0
-                                    tcm_cost_bps = transaction_cost_model.estimate_transaction_cost(order_size_usd=_order_usd, volume_24h_usd=_adv_usd, is_maker=True).get("total_cost_bps", 5.0)
-                                    rec.round_trip_cost_bp = float(tcm_cost_bps)
-                                    exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
-                                    rec.expected_value = float(exp_edge_bps)
-                                    rec.gate("cost", value=float(tcm_cost_bps), passed=bool(exp_edge_bps > 0))
 
                                     # Adaptive spread limit: 5.0 bps for BTC/ETH, 8.0 for major alts, 15.0 for others
                                     if symbol in ["BTCUSDT", "ETHUSDT"]:
@@ -9469,9 +9487,11 @@ def main():
                             rec.expected_rr = float(exp_r_val)
                         if 'cost_bps' in locals() and rec.round_trip_cost_bp is None:
                             rec.round_trip_cost_bp = float(cost_bps)
-                        if 'position_size_usd' in locals() and rec.position_size_usd is None:
+                        if 'mhi_val' in locals() and mhi_val is not None and rec.mhi_score is None:
+                            rec.mhi_score = float(mhi_val)
+                        if 'position_size_usd' in locals() and position_size_usd is not None and rec.position_size_usd is None:
                             rec.position_size_usd = float(position_size_usd)
-                        if 'leverage_val' in locals() and rec.leverage is None:
+                        if 'leverage_val' in locals() and leverage_val is not None and rec.leverage is None:
                             rec.leverage = float(leverage_val)
                         rec.snapshot(
                             status_msg=status_msg,
@@ -9479,7 +9499,8 @@ def main():
                             expected_rr=rec.expected_rr,
                             round_trip_cost_bp=rec.round_trip_cost_bp,
                             position_size_usd=rec.position_size_usd,
-                            leverage=rec.leverage
+                            leverage=rec.leverage,
+                            mhi_score=rec.mhi_score
                         )
 
                         if not async_spawned:
@@ -9487,8 +9508,12 @@ def main():
                                 rec.outcome = "EXECUTED"
                             elif status_msg.startswith("REJECTED"):
                                 rec.outcome = "REJECTED"
-                            elif rec.outcome == "ERROR":
-                                pass  # Preserve genuine runtime exception outcome
+                            elif status_msg.startswith("Skipped") or status_msg in ("Abstain", "Pending"):
+                                rec.outcome = "SKIPPED"
+                            elif rec.outcome == "APPROVED":
+                                rec.outcome = "EXECUTED" if placed else "SKIPPED"
+                            elif rec.outcome == "ERROR" and status_msg in ("Traded", ""):
+                                pass
                             else:
                                 rec.outcome = "SKIPPED"
                             write_decision(rec)

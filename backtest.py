@@ -101,7 +101,7 @@ PARTITION_FEATURES = [
 ]
 
 
-def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.40, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=0.002, interval="60", pessimistic_mode=True, rule_feature=None, return_trades=False):
+def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_confidence=0.40, use_regressor_fee_check=True, require_trend_alignment=True, fee_rate=FEE_RATE, interval="60", pessimistic_mode=True, rule_feature=None, return_trades=False):
     df = df.reset_index(drop=True)
     trades = []
     equity_compounded = 100.0
@@ -780,7 +780,7 @@ def run_backtest():
             min_confidence=cfg["min_confidence"],
             use_regressor_fee_check=cfg["use_regressor_fee_check"],
             require_trend_alignment=cfg["require_trend_alignment"],
-            fee_rate=0.002,
+            fee_rate=FEE_RATE,
             interval=INTERVAL,
             pessimistic_mode=True,
             rule_feature=RULE_FEATURE,
@@ -807,7 +807,7 @@ def run_backtest():
             min_confidence=cfg["min_confidence"],
             use_regressor_fee_check=cfg["use_regressor_fee_check"],
             require_trend_alignment=cfg["require_trend_alignment"],
-            fee_rate=0.002,
+            fee_rate=FEE_RATE,
             interval=INTERVAL,
             pessimistic_mode=False,
             rule_feature=RULE_FEATURE
@@ -910,11 +910,13 @@ def run_backtest():
         def train_window_models(train_df):
             try:
                 numeric_cols = train_df.select_dtypes(include=[np.number]).columns
-                feat_cols = [c for c in numeric_cols if c not in [
+                excluded_cols = {
                     "timestamp", "open", "high", "low", "close", "volume",
+                    "open_btc", "high_btc", "low_btc", "close_btc", "volume_btc",
                     "target_trend", "target_price", "target_price_change", "target_direction", "future_ret",
-                    "sample_weight"
-                ]]
+                    "sample_weight", "datetime", "index"
+                }
+                feat_cols = [c for c in numeric_cols if c not in excluded_cols and not c.startswith("future_")]
                 if not feat_cols or len(train_df) < 100:
                     return None
                 

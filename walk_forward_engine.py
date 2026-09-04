@@ -127,6 +127,7 @@ def run_walk_forward_backtest(
 
         trade_returns = []
         sl_fracs = []
+        sim_error = None
         if callable(sim_fn_to_use):
             try:
                 sim_res = sim_fn_to_use(test_df)
@@ -147,9 +148,11 @@ def run_walk_forward_backtest(
                         for t in trades_extracted if isinstance(t, dict)
                     ]
                     sl_fracs = [float(t.get("sl_frac", 0.01)) for t in trades_extracted if isinstance(t, dict)]
-            except Exception:
+            except Exception as _sim_err:
+                log_event("ERROR", f"[Walk-Forward Engine] Simulation exception for window: {_sim_err}")
                 trade_returns = []
                 sl_fracs = []
+                sim_error = str(_sim_err)
                 
         if trade_returns:
             arr_ret = np.array(trade_returns)
@@ -199,7 +202,7 @@ def run_walk_forward_backtest(
             "window_start": _get_ts(test_df.iloc[0]),
             "window_end": _get_ts(test_df.iloc[-1]),
             "trades": len(trade_returns),
-            "status": "completed" if len(trade_returns) > 0 else "no_trades",
+            "status": "error" if sim_error else ("completed" if len(trade_returns) > 0 else "no_trades"),
             "evaluation_type": "refitted_walk_forward" if window_is_refitted else "rolling_window_replay",
             "is_refitted": window_is_refitted,
             "win_rate": win_rate,

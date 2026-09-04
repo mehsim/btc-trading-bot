@@ -166,14 +166,18 @@ def require_ip_whitelist(f):
     def decorated_function(*args, **kwargs):
         allowed_ips = get_secure_env("ALLOWED_DASHBOARD_IPS", "").strip()
         trusted_proxies = [ip.strip() for ip in get_secure_env("TRUSTED_PROXIES", "").split(",") if ip.strip()]
-        if request.remote_addr in trusted_proxies and request.headers.get("X-Forwarded-For"):
-            client_ip = request.headers.get("X-Forwarded-For").split(",")[0].strip()
+        
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            client_ip = xff.split(",")[0].strip()
+            via_proxy = True
         else:
             client_ip = request.remote_addr
+            via_proxy = False
 
-        # Local loopback access
+        # Local loopback access — ONLY if client IP is genuinely loopback and request is not external through reverse proxy
         trust_loopback = get_secure_env("DASHBOARD_TRUST_LOOPBACK", "true").lower() in ("true", "1")
-        if trust_loopback and client_ip in ["127.0.0.1", "::1", "localhost"]:
+        if trust_loopback and not via_proxy and client_ip in ["127.0.0.1", "::1", "localhost"] and request.remote_addr in ["127.0.0.1", "::1", "localhost"]:
             return f(*args, **kwargs)
 
         # If IP whitelist is configured, enforce it (supports '*' for all or comma-separated IPs)
@@ -385,6 +389,7 @@ def load_history(bot_state):
 
 
 @dashboard_bp.route("/")
+@require_ip_whitelist
 def index():
     return render_template("index.html")
 
@@ -1679,13 +1684,26 @@ def _get_walk_forward_folds():
             if windows and isinstance(windows, list) and len(windows) > 0:
                 extracted = []
                 for idx, w in enumerate(windows[:10]):
+                    trades = int(w.get("trades", 0))
+                    w_status = str(w.get("status", "")).lower()
+                    is_refitted = w.get("is_refitted", True)
+
                     wr = float(w.get("win_rate", 0.0))
                     dd = float(w.get("max_drawdown", 0.0))
                     ret = float(w.get("cum_return", 0.0))
                     pf = float(w.get("profit_factor", 0.0))
                     raw_sharpe = w.get("sharpe_ratio", w.get("sharpe"))
                     sharpe = round(float(raw_sharpe), 2) if raw_sharpe is not None else "N/A"
-                    status = "PASS" if ret >= 0 and dd < 15 else ("WARNING" if ret > -10 and dd < 25 else "FAIL")
+
+                    if w_status == "error":
+                        status = "ERROR"
+                    elif w_status == "no_trades" or trades == 0:
+                        status = "NO_DATA"
+                    elif is_refitted is False:
+                        status = "UNREFITTED"
+                    else:
+                        status = "PASS" if ret >= 0 and dd < 15 else ("WARNING" if ret > -10 and dd < 25 else "FAIL")
+
                     extracted.append({
                         "fold": f"Fold {idx+1}",
                         "pf": pf,

@@ -112,7 +112,7 @@ def test_finding_212_lookahead_block_length_and_gate_1_walk_forward():
     # Gate 1 walk-forward refits stacked EnsembleClassifier
     assert "_w_m = EnsembleClassifier(" in src
     assert "_w_m.fit(" in src
-    assert "_roundtrip_fee = 0.0010" in src or "0.0010" in src
+    assert "_roundtrip_fee = max(0.0011" in src or "_roundtrip_fee = 0.0010" in src or "0.0010" in src
     assert "mean_expectancy_r" in src and ">= 0.0" in src
     assert "mean_profit_factor" in src and ">= 1.0" in src
 

@@ -2298,8 +2298,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 _t_preds = _w_m.predict(_t_X)
                                 _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
                                 _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
+                                from config import TAKER_FEE_PCT
+                                _roundtrip_fee = max(0.0011, float(TAKER_FEE_PCT) * 2.0)  # Taker fee roundtrip
                                 _w_trades = []
-                                _roundtrip_fee = 0.0010  # 10 bps roundtrip fee & slippage deduction
                                 for _p_d, _p_r in zip(_t_preds, _t_prices):
                                     if _p_d == 2:  # Bullish long
                                         _w_trades.append({"net_return": float(_p_r) - _roundtrip_fee, "sl_frac": 0.01})

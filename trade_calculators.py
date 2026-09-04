@@ -278,11 +278,11 @@ def calculate_replay_statistics(
             ann_factor = float(np.sqrt(candles_per_year))
             annualized_return = ending_return * min(52.0, (candles_per_year / max(1.0, float(total_trades))))
         except Exception:
-            ann_factor = float(np.sqrt(252.0))
-            annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
+            ann_factor = 1.0
+            annualized_return = ending_return
     else:
-        ann_factor = float(np.sqrt(252.0))
-        annualized_return = ending_return * (252.0 / max(1.0, float(total_trades)))
+        ann_factor = 1.0
+        annualized_return = ending_return
 
     sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * ann_factor if pct_std > 0 else 0.0
     sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * ann_factor if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
@@ -292,7 +292,8 @@ def calculate_replay_statistics(
     calmar_ratio = annualized_return / safe_dd
 
     # Calculate SQN, Ulcer Index, MAR Ratio, and Gain-to-Pain
-    sqn = (np.sqrt(total_trades) * expectancy_r / (np.std(r_multiples) + 1e-8)) if len(r_multiples) > 1 and np.std(r_multiples) > 0 else 0.0
+    std_r_mult = float(np.std(r_multiples, ddof=1)) if len(r_multiples) > 1 else 0.0
+    sqn = (np.sqrt(total_trades) * expectancy_r / (std_r_mult + 1e-8)) if len(r_multiples) > 1 and std_r_mult > 0 else 0.0
     ulcer_index = float(np.sqrt(np.mean(dd_curve ** 2))) if len(dd_curve) > 0 else 0.0
     mar_ratio = annualized_return / safe_dd
     gain_to_pain = (gross_gains / max(1e-8, gross_losses)) if gross_losses > 0 else (10.0 if gross_gains > 0 else 0.0)
@@ -315,12 +316,12 @@ def calculate_replay_statistics(
     }
 
 def calculate_sqn(returns_list: list, risk_usd: float = 1.0) -> float:
-    """Calculates System Quality Number: sqrt(N) * Mean(R) / StdDev(R)."""
+    """Calculates System Quality Number: sqrt(N) * Mean(R) / StdDev(R) with ddof=1."""
     if not returns_list or len(returns_list) < 2:
         return 0.0
     arr = np.array(returns_list, dtype=float)
     r_mult = arr / max(1e-8, risk_usd)
-    std_r = float(np.std(r_mult))
+    std_r = float(np.std(r_mult, ddof=1))
     if std_r <= 0:
         return 0.0
     return float(round(np.sqrt(len(arr)) * np.mean(r_mult) / std_r, 2))
