@@ -377,35 +377,28 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         tp_multiplier_adjusted *= session_factor
 
         # (c) Walk-Forward Unified Target Resolution
-        from trade_calculators import UnifiedTargetGenerator
-        tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
-            interval=str(interval), entry_price=entry_price,
-            atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
+        # (c) Walk-Forward Unified Target Resolution (Finding #91 / Finding #159 Parity)
+        from trade_calculators import resolve_trade_geometry
+        geom = resolve_trade_geometry(
+            entry_price=entry_price,
+            direction=ml_trend,
+            interval=str(interval),
+            atr_dollars=atr_dollars,
+            base_sl_multiplier=sl_multiplier,
+            base_tp_multiplier=tp_multiplier_adjusted,
+            df=df.iloc[:i+1] if hasattr(df, "iloc") else None,
+            symbol="BTCUSDT",
+            regime="Trending" if is_trending_state else "Ranging",
+            volatility=atr_norm,
+            database_module=None
         )
-
-        # (d) Timeframe-Adaptive Stop Loss Multiplier (aligned with live risk_engine.py:221) (Finding #138)
-        import risk_engine
-        tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(str(interval))
-        sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
-        sl_dist = sl_multiplier_adjusted * atr_dollars
-        tp_dist = tp_m * atr_dollars
-
-        # S-01: Timeframe-Adaptive Minimum Stop Loss Floor
-        min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
-        min_sl_pct = min_sl_cfg.get(str(interval), min_sl_cfg.get("default", 0.008))
-        min_sl_dist = entry_price * min_sl_pct
-        target_rr = tp_m / max(1e-9, sl_multiplier_adjusted)
-        if sl_dist < min_sl_dist:
-            sl_dist = min_sl_dist
-            tp_dist = sl_dist * target_rr
+        stop_loss = geom["stop_loss_price"]
+        take_profit = geom["take_profit_price"]
+        sl_dist = geom["sl_dist"]
+        tp_dist = geom["tp_dist"]
+        sl_multiplier_adjusted = geom["sl_multiplier_adjusted"]
+        tp_m = geom["tp_multiplier_adjusted"]
         _sl_frac = sl_dist / max(1e-9, entry_price)
-
-        if ml_trend == "Bullish":
-            stop_loss = entry_price - sl_dist
-            take_profit = entry_price + tp_dist
-        else:
-            stop_loss = entry_price + sl_dist
-            take_profit = entry_price - tp_dist
 
         # Post-floor economic gate (mirrors live production abort with REALIZED_RR_HAIRCUT)
         from trade_calculators import passes_economic_gate

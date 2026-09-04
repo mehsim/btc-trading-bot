@@ -1243,6 +1243,107 @@ def scale_leverage_for_fixed_risk(
     return scaled_lev, is_valid
 
 
+def resolve_trade_geometry(
+    entry_price: float,
+    direction: str,
+    interval: str,
+    atr_dollars: float,
+    base_sl_multiplier: float,
+    base_tp_multiplier: float,
+    df: Optional[pd.DataFrame] = None,
+    symbol: str = "BTCUSDT",
+    regime: str = "Trending",
+    volatility: Optional[float] = None,
+    database_module=None
+) -> Dict[str, Any]:
+    """
+    Finding #159 (Finding #91): Single shared canonical trade geometry resolver
+    for both live execution (main.py) and simulation (backtest.py).
+
+    1. Harmonic interval routing:
+       - 15m, 30m, 60m: Adaptive structural stops with swing window & recency guard.
+       - 120m, 240m, 360m: Timeframe multiplier + AutoStopFloor & WickBuffer.
+    2. R:R Preservation:
+       - Maintains target R:R = base_tp_multiplier / max(1e-6, base_sl_multiplier).
+       - When floor, structural swing, or wick buffer expands sl_dist,
+         rescales tp_dist = max(base_tp_multiplier * atr_dollars, sl_dist * target_rr)
+         preventing silent live R:R degradation.
+    """
+    import config
+    import risk_engine
+
+    iv_str = str(interval)
+    is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]
+    target_rr = base_tp_multiplier / max(1e-6, base_sl_multiplier)
+
+    # Unified TP Multiplier resolution
+    resolved_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
+        interval=iv_str,
+        entry_price=entry_price,
+        atr_dollars=atr_dollars,
+        base_tp_m=base_tp_multiplier
+    )
+    base_tp_dist = resolved_tp_m * atr_dollars
+
+    struct_meta = None
+    if iv_str in ["15", "30", "60"] and df is not None and not df.empty:
+        vol = volatility if volatility is not None else (atr_dollars / max(1e-6, entry_price))
+        struct_sl, struct_sl_dist_pct, struct_meta = calculate_adaptive_structural_stop(
+            df_recent=df,
+            entry_price=entry_price,
+            direction=direction,
+            atr_val=atr_dollars,
+            regime=regime,
+            volatility=vol,
+            cfg_sl_mult=base_sl_multiplier,
+            interval=iv_str
+        )
+        stop_loss_price = struct_sl
+        sl_dist = abs(entry_price - stop_loss_price)
+        sl_multiplier_adjusted = sl_dist / max(1e-6, atr_dollars)
+    else:
+        tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv_str)
+        sl_multiplier_adjusted = base_sl_multiplier * tf_sl_mult
+        sl_dist = risk_engine.calculate_final_stop_distance(
+            entry_price,
+            atr_dollars,
+            symbol,
+            df=df,
+            gmm_multiplier=sl_multiplier_adjusted,
+            database_module=database_module,
+            interval=iv_str
+        )
+        if is_long:
+            stop_loss_price = entry_price - sl_dist
+        else:
+            stop_loss_price = entry_price + sl_dist
+
+    # Floor-aware R:R preservation: rescale tp_dist if stop distance expanded
+    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+    min_sl_pct = float(min_sl_cfg.get(iv_str, min_sl_cfg.get("default", 0.008)))
+    min_sl_dist = entry_price * min_sl_pct
+    if sl_dist < min_sl_dist:
+        sl_dist = min_sl_dist
+        stop_loss_price = (entry_price - sl_dist) if is_long else (entry_price + sl_dist)
+
+    # R:R Preservation (Finding #91): preserve target R:R so floor doesn't degrade live payoff ratio
+    tp_dist = max(base_tp_dist, sl_dist * target_rr)
+    take_profit_price = (entry_price + tp_dist) if is_long else (entry_price - tp_dist)
+    tp_multiplier_adjusted = tp_dist / max(1e-6, atr_dollars)
+
+    return {
+        "stop_loss_price": float(stop_loss_price),
+        "take_profit_price": float(take_profit_price),
+        "sl_dist": float(sl_dist),
+        "tp_dist": float(tp_dist),
+        "sl_multiplier_adjusted": float(sl_multiplier_adjusted),
+        "tp_multiplier_adjusted": float(tp_multiplier_adjusted),
+        "target_rr": float(target_rr),
+        "struct_meta": struct_meta,
+        "struct_sl_dist_pct": float((sl_dist / max(1.0, entry_price)) * 100.0) if struct_meta is not None else None
+    }
+
+
 class TransactionCostModel:
     """
     Transaction Cost Model (TCM).

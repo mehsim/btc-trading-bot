@@ -558,16 +558,25 @@ def save_completed_trade(trade) -> bool:
                 conn.close()
                 return True
 
-            if entry_p is not None and exit_p is not None and exit_ts:
-                c2 = conn.execute("""
-                    SELECT trade_id FROM completed_trades 
-                    WHERE symbol = ? AND abs(exit_time - ?) < 60.0 
-                      AND abs(entry_price - ?) / max(1.0, entry_price) < 0.005 
-                      AND abs(exit_price - ?) / max(1.0, exit_price) < 0.005;
-                """, (sym, exit_ts, entry_p, exit_p))
-                if c2.fetchone():
-                    conn.close()
-                    return True
+            if exit_ts and sym:
+                if entry_p is not None and exit_p is not None:
+                    c2 = conn.execute("""
+                        SELECT trade_id FROM completed_trades 
+                        WHERE symbol = ? AND abs(exit_time - ?) < 60.0 
+                          AND abs(entry_price - ?) / max(1.0, entry_price) < 0.005 
+                          AND abs(exit_price - ?) / max(1.0, exit_price) < 0.005;
+                    """, (sym, exit_ts, entry_p, exit_p))
+                    if c2.fetchone():
+                        conn.close()
+                        return True
+                else:
+                    c2 = conn.execute("""
+                        SELECT trade_id FROM completed_trades 
+                        WHERE symbol = ? AND abs(exit_time - ?) < 5.0;
+                    """, (sym, exit_ts))
+                    if c2.fetchone():
+                        conn.close()
+                        return True
 
             try:
                 cur = conn.execute("""
@@ -595,8 +604,9 @@ def save_completed_trade(trade) -> bool:
                 ))
                 conn.commit()
                 success = bool(cur.rowcount == 1)
-            except sqlite3.IntegrityError:
-                success = True
+            except sqlite3.IntegrityError as ie:
+                log_event("WARNING", f"[Database Deduplication] IntegrityError inserting trade {t_id} (non-insert handled): {ie}")
+                success = False
         except Exception as e:
             try:
                 conn.rollback()

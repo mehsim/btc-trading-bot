@@ -15,44 +15,53 @@ import trade_calculators
 
 def assert_shared_constants_aligned():
     """Validates that key governance and risk constants match across train.py, config.py, and risk_limits.py."""
-    # 1. Cross-module verification: Compare config.py vs train.py constants
+    # 1. Cross-module verification: Compare config.py vs on-disk model manifests
     try:
-        import train
-        # Check ADX regime thresholds alignment
-        cfg_adx = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
-        train_adx = getattr(train, "REGIME_ADX_ENTER_BY_INTERVAL", {})
-        intervals = getattr(config, "SUPPORTED_INTERVALS", ["15", "30", "60", "120", "240", "360"])
-        for iv in intervals:
-            iv_str = str(iv)
-            if iv_str in cfg_adx and iv_str in train_adx:
-                if cfg_adx[iv_str] != train_adx[iv_str]:
-                    raise ValueError(f"[Config Verifier M-2 Error] ADX enter threshold mismatch for {iv_str}m: config ({cfg_adx[iv_str]}) vs train ({train_adx[iv_str]})")
-
-        # Check on-disk model manifests' recorded barrier geometry against live config
         import glob
         import json
         cfg_tf = getattr(config, "TIMEFRAME_CONFIG", {})
+        cfg_adx = getattr(config, "REGIME_ADX_ENTER_BY_INTERVAL", {})
         manifest_paths = glob.glob("ensemble_*_manifest.json")
         for m_path in manifest_paths:
+            # Check champion manifests (skip challenger / backup)
+            if "_challenger" in m_path or "_backup" in m_path:
+                continue
             try:
                 with open(m_path, "r", encoding="utf-8") as mf:
                     m_data = json.load(mf)
                 b_cfg = m_data.get("barrier_config")
                 if b_cfg and isinstance(b_cfg, dict):
-                    # extract interval suffix from filename (e.g. ensemble_trending_trend_15_manifest.json)
                     base_parts = os.path.basename(m_path).replace("_manifest.json", "").split("_")
                     if len(base_parts) >= 4:
                         iv_key = base_parts[-1]
-                        if iv_key in cfg_tf:
+                        # Only check trend models which govern directional entry barrier geometry
+                        if "trend" in base_parts and iv_key in cfg_tf:
                             live_c = cfg_tf[iv_key]
-                            for b_key in ["lookahead", "sl_mult"]:
+                            # Finding #161 (Finding #93): Strictly verify all barrier parameters
+                            for b_key in ["lookahead", "sl_mult", "tp_mult_trending", "tp_mult_ranging"]:
                                 if b_key in b_cfg and b_key in live_c:
-                                    if abs(float(b_cfg[b_key]) - float(live_c[b_key])) > 0.05:
-                                        log_event("WARNING", f"[Config Verifier] Manifest {m_path} {b_key} ({b_cfg[b_key]}) differs from live config ({live_c[b_key]})")
+                                    diff = abs(float(b_cfg[b_key]) - float(live_c[b_key]))
+                                    if diff > 0.05:
+                                        raise ValueError(
+                                            f"[Config Verifier M-2 Error] Barrier divergence in {m_path} for {b_key}: "
+                                            f"manifest ({b_cfg[b_key]}) vs live config ({live_c[b_key]}) > 0.05 tolerance"
+                                        )
+                            # ADX verification: manifest recorded ADX threshold vs live config
+                            if "regime_adx_enter" in b_cfg and iv_key in cfg_adx:
+                                adx_diff = abs(float(b_cfg["regime_adx_enter"]) - float(cfg_adx[iv_key]))
+                                if adx_diff > 0.05:
+                                    raise ValueError(
+                                        f"[Config Verifier M-2 Error] ADX enter threshold divergence in {m_path}: "
+                                        f"manifest ({b_cfg['regime_adx_enter']}) vs live config ({cfg_adx[iv_key]})"
+                                    )
+            except ValueError:
+                raise
             except Exception as ex_m:
                 log_event("WARNING", f"[Config Verifier] Skipping manifest check for {m_path}: {ex_m}")
-    except ImportError as imp_err:
-        log_event("WARNING", f"[Config Verifier] Skipping train.py import comparison: {imp_err}")
+    except ValueError:
+        raise
+    except Exception as ex_gen:
+        log_event("WARNING", f"[Config Verifier] Manifest comparison notice: {ex_gen}")
 
     # 2. Source-level scan on train.py to catch hardcoded literal threshold comparisons
     train_py_path = "train.py"

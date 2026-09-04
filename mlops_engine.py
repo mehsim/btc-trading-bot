@@ -419,13 +419,21 @@ def load_production_model_from_registry(interval: str, regime: str, live_feature
                 run = client.get_run(mv.run_id)
                 served_hash = run.data.tags.get("feature_contract_hash")
 
-                if live_features and served_hash:
-                    import hashlib
-                    live_hash = hashlib.sha256(",".join(live_features).encode("utf-8")).hexdigest()[:12]
-                    if served_hash != live_hash:
-                        err_msg = f"[Model Governance] Feature contract mismatch for {name} ({served_hash} != {live_hash}) — refusing to serve"
-                        log_event("CRITICAL", err_msg)
-                        raise FeatureContractMismatchError(err_msg)
+                if not live_features or not served_hash:
+                    err_msg = (
+                        f"[Model Governance] Refusing to serve {name}: missing contract metadata "
+                        f"(live_features={'present' if live_features else 'missing'}, "
+                        f"served_hash={'present' if served_hash else 'missing'})"
+                    )
+                    log_event("CRITICAL", err_msg)
+                    raise FeatureContractMismatchError(err_msg)
+
+                import hashlib
+                live_hash = hashlib.sha256(",".join(live_features).encode("utf-8")).hexdigest()[:12]
+                if served_hash != live_hash:
+                    err_msg = f"[Model Governance] Feature contract mismatch for {name} ({served_hash} != {live_hash}) — refusing to serve"
+                    log_event("CRITICAL", err_msg)
+                    raise FeatureContractMismatchError(err_msg)
 
                 model = mlflow.xgboost.load_model(f"models:/{name}/Production")
                 version_str = f"{name}:{mv.version}"

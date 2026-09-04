@@ -728,7 +728,8 @@ class JointRiskBudgetAllocator:
         database_module = None,
         mcc_val: Optional[float] = None,
         stop_distance: Optional[float] = None,
-        target_distance: Optional[float] = None
+        target_distance: Optional[float] = None,
+        interval: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Jointly optimizes (stop_distance, target_distance, position_size, capital_at_risk, expected_utility).
@@ -756,7 +757,8 @@ class JointRiskBudgetAllocator:
                 symbol=symbol,
                 df=df_completed,
                 gmm_multiplier=1.5 * stop_exp,
-                database_module=database_module
+                database_module=database_module,
+                interval=str(interval or "60")
             )
             stop_dist = max(base_stop_dist, entry_price * 0.005) # Minimum 0.5% stop floor
         stop_distance = stop_dist

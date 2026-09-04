@@ -45,6 +45,7 @@ def test_chase_loop_deducts_partial_fills():
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
          patch("main.get_chase_limit_price", return_value=50000.0), \
+         patch("main.get_bybit_bid_ask", return_value=(50000.0, 50000.0, 50000.0)), \
          patch("main.place_bybit_limit_order", side_effect=mock_place_limit), \
          patch("main.wait_for_order_fill", side_effect=[False, True]), \
          patch("main.cancel_bybit_order", return_value={"retCode": 0}), \

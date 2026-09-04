@@ -121,11 +121,14 @@ def get_bybit_time_offset() -> int:
     return 0
 
 
-def _update_latency(start_time: float):
+def _update_latency(start_time: float, endpoint: str = "bybit_api", status_code: int = 200, error_type: Optional[str] = None):
     try:
-        lat_ms = max(5, int((time.time() - start_time) * 1000))
+        dur = max(0.001, time.time() - start_time)
+        lat_ms = max(5, int(dur * 1000))
         from state_manager import state_manager
         state_manager["last_api_latency_ms"] = lat_ms
+        from api_telemetry import global_api_telemetry
+        global_api_telemetry.record_call(endpoint, dur, status_code=status_code, error_type=error_type)
     except Exception as ex_bybit_client:
         log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
 
@@ -178,7 +181,7 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
             status, res = future.result(timeout=10)
-            _update_latency(t_start)
+            _update_latency(t_start, endpoint=endpoint, status_code=status)
             if status == 200:
                 return res
             else:
@@ -194,15 +197,18 @@ def bybit_post_request(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]
             return {"retCode": -1, "retMsg": f"Connection Error: {ex_bybit_client}"}
 
 
-def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, Any]:
+def bybit_get_request(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     api_key = get_secure_env("BYBIT_API_KEY", "").strip()
     api_secret = get_secure_env("BYBIT_API_SECRET", "").strip()
 
     if not api_key or not api_secret:
         return {"retCode": -1, "retMsg": "API keys missing"}
         
-    query_string = urllib.parse.urlencode(query_params)
-    url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
+    import urllib.parse
+    params_str = urllib.parse.urlencode(params) if params else ""
+    url = f"{BYBIT_BASE_URL}{endpoint}"
+    if params_str:
+        url += f"?{params_str}"
     
     async def do_get(url, headers):
         proxy_dict = get_bybit_proxies()
@@ -226,7 +232,7 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
             timestamp = str(int(time.time() * 1000) + offset)
             recv_window = "5000"
             
-            val_str = timestamp + api_key + recv_window + query_string
+            val_str = timestamp + api_key + recv_window + params_str
             sign = hmac.new(api_secret.encode("utf-8"), val_str.encode("utf-8"), hashlib.sha256).hexdigest()
             
             headers = {
@@ -239,7 +245,7 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
             _ensure_async_loop()
             future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
             status, res = future.result(timeout=10)
-            _update_latency(t_start)
+            _update_latency(t_start, endpoint=endpoint, status_code=status)
             if status == 200:
                 return res
             else:
@@ -256,10 +262,17 @@ def bybit_get_request(endpoint: str, query_params: Dict[str, Any]) -> Dict[str, 
 
 
 def execute_bybit_order_ws_or_rest(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    import uuid
-    if endpoint == "/v5/order/create" and "orderLinkId" not in payload:
-        payload["orderLinkId"] = f"cl_{payload.get('symbol', 'generic')}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
-        
+    # Finding #132 & Finding #170 (#100): Pre-submission Idempotency check
+    if endpoint == "/v5/order/create":
+        from order_state_machine import generate_client_order_id, idempotency_cache
+        if "orderLinkId" not in payload:
+            payload["orderLinkId"] = generate_client_order_id(payload.get("symbol", "generic"), payload.get("side", "Buy"))
+        order_link_id = str(payload["orderLinkId"])[:36]
+        if idempotency_cache.is_duplicate(order_link_id):
+            log_event("WARNING", f"[Idempotency Block] Duplicate order rejected by IdempotencyCache: {order_link_id}")
+            return {"retCode": 10001, "retMsg": f"Duplicate order blocked by client idempotency: {order_link_id}"}
+        idempotency_cache.add(order_link_id)
+
     symbol = payload.get("symbol", "GENERIC")
     sym_lock = get_symbol_order_lock(symbol)
     with sym_lock:
@@ -349,9 +362,9 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
     tif_str = "PostOnly" if post_only else ("GTC" if order_type_str == "Limit" else "IOC")
     
     # B15 Idempotency Nonce: Unique client order link ID to prevent double-fill race conditions on retries
-    import uuid
     if not order_link_id:
-        order_link_id = f"BOT_{symbol}_{side[:1]}_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+        from order_state_machine import generate_client_order_id
+        order_link_id = generate_client_order_id(symbol, side)
     
     payload = {
         "category": "linear",
@@ -361,7 +374,7 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
         "qty": format_bybit_qty(symbol, qty),
         "timeInForce": tif_str,
         "positionIdx": 0,
-        "orderLinkId": order_link_id
+        "orderLinkId": str(order_link_id)[:36]
     }
     if price is not None:
         payload["price"] = format_bybit_price(symbol, price)
@@ -696,14 +709,22 @@ def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
     while True:
         try:
             bal = get_real_bybit_balance_cached(force=True)
-            if isinstance(bal, (int, float)) and bal > 0 and bot_state:
+            if isinstance(bal, (int, float)) and bal > 0 and bot_state is not None:
+                now_ts = time.time()
                 if bot_state_lock:
                     with bot_state_lock:
                         bot_state["wallet_balance"] = bal
                         bot_state["live_balance"] = bal
+                        bot_state["last_balance_sync_ts"] = now_ts
                 else:
                     bot_state["wallet_balance"] = bal
                     bot_state["live_balance"] = bal
+                    bot_state["last_balance_sync_ts"] = now_ts
+                try:
+                    from state_manager import state_manager
+                    state_manager["last_balance_sync_ts"] = now_ts
+                except Exception as ex_sm:
+                    log_event("WARNING", f"state_manager balance sync notice: {ex_sm}")
         except Exception as ex_bybit_client:
             log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
         time.sleep(5)

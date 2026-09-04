@@ -4,6 +4,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from logger import log_event
 
 
 PAIN_FEEDBACK_FILE = "pain_feedback_state.json"
@@ -33,7 +34,7 @@ class PainFeedbackLoop:
                 print(f"[PainFeedbackLoop] Error saving state file: {e}")
 
     def register_pain_trade(self, symbol, entry_price, exit_price, take_profit, current_floor, interval=None):
-        """Raise min floor for this (symbol, interval) pair due to a pain trade."""
+        """Raise min floor for this (symbol, interval) pair due to pain trades."""
         if not entry_price or entry_price == 0:
             return
             
@@ -44,7 +45,20 @@ class PainFeedbackLoop:
         new_floor = max(0.005, min(new_floor, 0.020))  # Hard cap at 2.0%, min 0.5%
         
         key = f"{symbol}_{interval}" if interval else symbol
+        now_t = time.time()
         with pain_lock:
+            if not hasattr(self, "pain_events"):
+                self.pain_events = {}
+            ev_list = self.pain_events.setdefault(key, [])
+            ev_list = [t for t in ev_list if now_t - t < 7 * 86400]
+            ev_list.append(now_t)
+            self.pain_events[key] = ev_list
+
+            # Minimum sample size requirement: require at least 2 pain events to widen floor
+            if len(ev_list) < 2:
+                log_event("INFO", f"[PainFeedbackLoop] Pain event recorded for {key} (n={len(ev_list)}/2 required to widen floor).")
+                return
+
             self.adjustments[key] = {
                 'symbol': symbol,
                 'interval': interval,
@@ -52,10 +66,10 @@ class PainFeedbackLoop:
                 'adjusted_floor': new_floor,
                 'applied_at': datetime.now(timezone.utc).isoformat(),
                 'decay_days': 7,
-                'reason': f"Pain trade ({interval}m): stopped at {adverse_move:.2%}, reversed to TP"
+                'reason': f"Pain trade ({interval}m, n={len(ev_list)}): stopped at {adverse_move:.2%}, reversed to TP"
             }
             self.save_state()
-        print(f"[PainFeedbackLoop ALERT] Raised {key} min floor from {current_floor:.2%} to {new_floor:.2%} (Decay: 7 days)")
+        print(f"[PainFeedbackLoop ALERT] Raised {key} min floor from {current_floor:.2%} to {new_floor:.2%} (n={len(ev_list)}, Decay: 7 days)")
 
     def get_effective_floor(self, symbol, interval=None):
         """Get floor with pain adjustment applied, decayed over time."""
@@ -121,6 +135,7 @@ class PainFeedbackLoop:
                     trade_id = p.get('trade_id')
                     
                     hit_tp_after_exit = False
+                    kline_fetch_failed = False
                     if fetch_kline_func and take_profit > 0:
                         try:
                             try:
@@ -146,15 +161,18 @@ class PainFeedbackLoop:
                                         hit_tp_after_exit = min_low <= take_profit
                         except Exception as kerr:
                             print(f"[PainFeedbackLoop] Error fetching post-exit klines for {symbol}: {kerr}")
+                            kline_fetch_failed = True
 
-
-                    if hit_tp_after_exit:
-                        import config
-                        interval_str = str(p.get('interval') or '15')
-                        current_floor = config.MIN_SL_PCT_CONFIG.get(interval_str, 0.005)
-                        self.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor, interval=interval_str)
-                        
-                    database_module.delete_pending_pain_check(trade_id)
+                    if kline_fetch_failed:
+                        log_event("WARNING", f"[PainFeedbackLoop] Skipping deletion of pending pain check {trade_id} due to kline fetch error.")
+                    else:
+                        if hit_tp_after_exit:
+                            import config
+                            interval_str = str(p.get('interval') or '15')
+                            current_floor = config.MIN_SL_PCT_CONFIG.get(interval_str, 0.005)
+                            self.register_pain_trade(symbol, entry_price, exit_price, take_profit, current_floor, interval=interval_str)
+                            
+                        database_module.delete_pending_pain_check(trade_id)
         except Exception as e:
             print(f"[PainFeedbackLoop] Error in verify_pending_pain_trades: {e}")
 

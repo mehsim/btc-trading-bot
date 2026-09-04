@@ -269,7 +269,8 @@ def test_finding_133_pain_feedback_interval_aware():
     baseline_15 = config.MIN_SL_PCT_CONFIG.get("15", 0.005)
     baseline_240 = config.MIN_SL_PCT_CONFIG.get("240", 0.012)
 
-    # Register pain for 15m
+    # Register pain for 15m (requires >= 2 events per Finding #98)
+    loop.register_pain_trade("BTCUSDT", entry_price=50000.0, exit_price=49600.0, take_profit=51000.0, current_floor=baseline_15, interval="15")
     loop.register_pain_trade("BTCUSDT", entry_price=50000.0, exit_price=49600.0, take_profit=51000.0, current_floor=baseline_15, interval="15")
     
     eff_15 = loop.get_effective_floor("BTCUSDT", interval="15")

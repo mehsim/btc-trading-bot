@@ -54,7 +54,7 @@ def test_high_conviction_portfolio_heat_ladder():
         portfolio_heat=0.25,
         mhi_score=90.0,
         stop_distance=2.0,
-        target_distance=4.0
+        target_distance=15.0
     )
     
     # 2) High conviction (0.58) uses 40% ceiling -> heat_ratio = 25/40 = 0.625, budget factor = 0.375
@@ -69,7 +69,7 @@ def test_high_conviction_portfolio_heat_ladder():
         portfolio_heat=0.25,
         mhi_score=90.0,
         stop_distance=2.0,
-        target_distance=4.0
+        target_distance=15.0
     )
     
     assert res_high["execution_permitted"] is True

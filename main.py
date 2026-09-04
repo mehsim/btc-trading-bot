@@ -65,16 +65,20 @@ from bybit_client import (
     get_real_bybit_balance_cached,
     get_all_bybit_positions,
     place_bybit_order,
+    place_bybit_limit_order,
+    place_bybit_taker_ioc_order,
+    cancel_bybit_order,
+    get_bybit_order_details,
     format_bybit_price,
     get_instrument_specs,
     get_bybit_time_offset,
+    get_symbol_order_lock,
     execute_bybit_order_ws_or_rest,
     get_orderbook_imbalance as bybit_get_orderbook_imbalance
 )
 from confluence_engine import check_pre_trade_confluence
 from telegram_bot import send_telegram_alert, execute_telegram_api_call
 from telegram_listener import run_manual_confluence_report, start_telegram_command_listener
-from websocket_client import init_bybit_websocket_listeners, get_ws_status
 from dashboard_routes import dashboard_bp
 from risk_limits import assert_risk_governance_invariants
 from config_verifier import assert_shared_constants_aligned
@@ -263,7 +267,6 @@ POSITION_SYNC_IDLE_INTERVAL_SECS = float(os.environ.get("POSITION_SYNC_IDLE_INTE
 
 import config
 from config import TIMEFRAME_CONFIG
-import trading_engine
 from strategy_health_engine import strategy_health_engine
 
 
@@ -1256,83 +1259,10 @@ def get_bybit_min_qty_step(symbol):
         _instrument_info_cache[symbol] = (fallback_step, now_t + 300.0)
     return fallback_step
 
-_symbol_order_locks = {}
-_symbol_order_locks_mutex = threading.Lock()
-
-def get_symbol_order_lock(symbol: str) -> threading.Lock:
-    sym = str(symbol).upper().strip() if symbol else "GENERIC"
-    with _symbol_order_locks_mutex:
-        if sym not in _symbol_order_locks:
-            _symbol_order_locks[sym] = threading.Lock()
-        return _symbol_order_locks[sym]
-
-def execute_bybit_order_ws_or_rest(endpoint, payload):
-    # C7: Add unique clientOrderId (orderLinkId) for request deduplication (Finding #132)
-    if endpoint == "/v5/order/create":
-        from order_state_machine import generate_client_order_id, idempotency_cache
-        if "orderLinkId" not in payload:
-            payload["orderLinkId"] = generate_client_order_id(payload.get("symbol", "generic"), payload.get("side", "Buy"))
-        else:
-            idempotency_cache.add(str(payload["orderLinkId"])[:36])
-        
-    symbol = payload.get("symbol", "GENERIC")
-    sym_lock = get_symbol_order_lock(symbol)
-    
-    with sym_lock:
-        # Direct atomic REST API request (avoids 2.0s stall on private subscription stream)
-        return bybit_post_request(endpoint, payload)
 
 
 
-def place_bybit_order(symbol, side, qty, price=None, sl=None, tp=None, reduce_only=False, order_type="Market", order_link_id=None):
-    # C1: Configurable order type & price bound slippage control
-    order_type_str = "Limit" if (order_type == "Limit" and price is not None) else "Market"
-    from order_state_machine import generate_client_order_id, idempotency_cache
-    link_id = order_link_id or generate_client_order_id(symbol, side)
-    idempotency_cache.add(str(link_id)[:36])
-    payload = {
-        "category": "linear",
-        "symbol": symbol,
-        "side": side,
-        "orderType": order_type_str,
-        "qty": str(qty),
-        "timeInForce": "GTC" if order_type_str == "Limit" else "IOC",
-        "positionIdx": 0,
-        "orderLinkId": str(link_id)[:36]
-    }
-    if price is not None:
-        payload["price"] = format_bybit_price(symbol, price)
-    if reduce_only:
-        payload["reduceOnly"] = True
-    if sl:
-        payload["stopLoss"] = format_bybit_price(symbol, sl)
-    if tp:
-        payload["takeProfit"] = format_bybit_price(symbol, tp)
-        
-    res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
-    return res
 
-
-def get_bybit_order_details(symbol, order_id):
-    params = {
-        "category": "linear",
-        "symbol": symbol,
-        "orderId": order_id
-    }
-    # 1. Try active/realtime orders first
-    res = bybit_get_request("/v5/order/realtime", params)
-    if res.get("retCode") == 0:
-        orders = res.get("result", {}).get("list", [])
-        if orders:
-            return orders[0]
-            
-    # 2. Fall back to order history
-    res = bybit_get_request("/v5/order/history", params)
-    if res.get("retCode") == 0:
-        orders = res.get("result", {}).get("list", [])
-        if orders:
-            return orders[0]
-    return None
 
 def wait_for_order_fill(symbol, order_id, timeout_sec=2.0):
     """
@@ -1357,22 +1287,7 @@ def wait_for_order_fill(symbol, order_id, timeout_sec=2.0):
         time.sleep(0.2)
     return False, last_status, cum_qty, avg_price
 
-def cancel_bybit_order(symbol, order_id):
-    cancel_payload = {
-        "category": "linear",
-        "symbol": symbol,
-        "orderId": order_id
-    }
-    res = execute_bybit_order_ws_or_rest("/v5/order/cancel", cancel_payload)
-    if isinstance(res, dict) and res.get("retCode") == 110001:
-        # Finding #159: Order does not exist (already filled or cancelled) - handle idempotently
-        return {
-            "retCode": 0,
-            "retMsg": "OK (Order already closed/cancelled - idempotent)",
-            "result": {"orderId": order_id, "status": "DeemedCancelled"},
-            "idempotent": True
-        }
-    return res
+
 
 def bybit_get_request(endpoint, query_params):
     import time
@@ -1646,48 +1561,7 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         print(f"[Bybit API Error] Failed to update Take Profit for {symbol}: {res.get('retMsg')}")
         return False
 
-def place_bybit_limit_order(symbol, side, qty, price, sl=None, tp=None, reduce_only=False, post_only=False, **kwargs):
-    payload = {
-        "category": "linear",
-        "symbol": symbol,
-        "side": side,
-        "orderType": "Limit",
-        "qty": str(qty),
-        "price": format_bybit_price(symbol, price),
-        "timeInForce": "PostOnly" if post_only else "GTC",
-        "positionIdx": 0
-    }
-    if "order_link_id" in kwargs and kwargs["order_link_id"]:
-        payload["orderLinkId"] = str(kwargs["order_link_id"])[:36]
-    if reduce_only:
-        payload["reduceOnly"] = True
-    if sl:
-        payload["stopLoss"] = format_bybit_price(symbol, sl)
-    if tp:
-        payload["takeProfit"] = format_bybit_price(symbol, tp)
-    res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
-    return res
 
-def place_bybit_taker_ioc_order(symbol, side, qty, sl=None, tp=None, reduce_only=False, **kwargs):
-    payload = {
-        "category": "linear",
-        "symbol": symbol,
-        "side": side,
-        "orderType": "Market",
-        "qty": str(qty),
-        "timeInForce": "IOC",
-        "positionIdx": 0
-    }
-    if "order_link_id" in kwargs and kwargs["order_link_id"]:
-        payload["orderLinkId"] = str(kwargs["order_link_id"])[:36]
-    if reduce_only:
-        payload["reduceOnly"] = True
-    if sl:
-        payload["stopLoss"] = format_bybit_price(symbol, sl)
-    if tp:
-        payload["takeProfit"] = format_bybit_price(symbol, tp)
-    res = execute_bybit_order_ws_or_rest("/v5/order/create", payload)
-    return res
 
 def emergency_flatten_position(symbol, opp_side, qty_str, max_retries=3):
     """
@@ -2390,6 +2264,7 @@ def load_model_weights(iv):
         from mlops_engine import load_production_model_from_registry
 
         # 1. Trending Classifier
+        models_by_interval[iv]["trending"]["trend"] = None
         from config import MODEL_SLOT_DENYLIST
         if f"trending_{iv}" in MODEL_SLOT_DENYLIST:
             log_event("WARNING", f"[Model Slot Denylist] Skipping load for denied model slot 'trending_{iv}' (Fail-Closed Abstain).")
@@ -2437,6 +2312,7 @@ def load_model_weights(iv):
                 log_event("WARNING", f"[Model Load Warning] Failed to load {prefixes['trending_meta']}: {e}")
 
         # 4. Ranging Classifier & Regressor (Loaded when dynamic regime routing is enabled)
+        models_by_interval[iv]["ranging"]["trend"] = None
         from config import ENABLE_DYNAMIC_REGIME_ROUTING, DYNAMIC_REGIME_ROUTING_INTERVALS
         is_ranging_enabled_for_iv = ENABLE_DYNAMIC_REGIME_ROUTING or (str(iv) in DYNAMIC_REGIME_ROUTING_INTERVALS)
         if is_ranging_enabled_for_iv and f"ranging_{iv}" not in MODEL_SLOT_DENYLIST:
@@ -5000,7 +4876,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         
         if is_extreme_volatility:
             print(f"[{symbol} {iv}m API] Volatility Spiked! Z-score: {vol_z_score:.2f} > 3.0. Placing Taker IOC order immediately...")
-            order_res = place_bybit_taker_ioc_order(symbol, side, qty_str, sl=stop_loss_price, tp=take_profit_price)
+            from order_state_machine import generate_client_order_id
+            ioc_order_link_id = generate_client_order_id(symbol, side, interval=str(iv), candle_ts=int(latest_completed_ts))
+            order_res = place_bybit_taker_ioc_order(symbol, side, qty_str, sl=stop_loss_price, tp=take_profit_price, order_link_id=ioc_order_link_id)
             if order_res.get("retCode") == 0:
                 bybit_order_id = order_res.get("result", {}).get("orderId")
                 bybit_success = True
@@ -5487,6 +5365,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "confidence": float(calibrated_confidence),
             "qty": float(actual_qty),
             "original_qty": float(actual_qty),
+            "notional_usd": round(float(actual_qty) * float(entry_price), 2),
+            "stop_loss_pct": round(abs(float(entry_price) - float(stop_loss_price)) / max(1.0, float(entry_price)), 6),
             "fill_pct": round((actual_qty / raw_qty) * 100.0, 2) if raw_qty > 0 else 100.0,
             "oversized": bool(is_oversized)
         }
@@ -5848,7 +5728,7 @@ def main():
                     current_adx = bot_state.get(f"adx_{tf}", 20.0)
                     trailing_multiplier = exit_manager.compute_trailing_multiplier(active_trade, tf, current_adx)
 
-                min_pct_floor = risk_engine.auto_stop_floor.get_floor(active_symbol, database_module=database) if hasattr(risk_engine, 'auto_stop_floor') else volatility_clusterer.get_symbol_break_even_floor(active_symbol)
+                min_pct_floor = risk_engine.auto_stop_floor.get_floor(active_symbol, database_module=database, interval=str(iv)) if hasattr(risk_engine, 'auto_stop_floor') else volatility_clusterer.get_symbol_break_even_floor(active_symbol)
                 be_mult = mfe_be_trigger.get_trigger_multiple(active_symbol, timeframe=str(iv))
                 trade_leverage = float(active_trade.get("leverage", 1.0))
                 required_be_dist = compute_be_trigger_distance(atr_dollars, trade_leverage, iv, be_mult, entry_price, min_pct_floor)
@@ -7187,9 +7067,16 @@ def main():
                 time.sleep(10)
                 return
 
-            # Finding #121: Production Circuit Breaker System Health Check
-            api_latency_ms = float(state_manager.get("last_api_latency_ms", bot_state.get("last_api_latency_ms", 100.0)) or 100.0)
-            bal_sync_ts = float(bot_state.get("last_balance_sync_ts", time.time()) or time.time())
+            # Finding #121 & Finding #166 (#96): Production Circuit Breaker System Health Check
+            raw_lat = state_manager.get("last_api_latency_ms", bot_state.get("last_api_latency_ms"))
+            api_latency_ms = float(raw_lat) if raw_lat is not None else 100.0
+
+            raw_bal_ts = bot_state.get("last_balance_sync_ts")
+            bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else (time.time() - 3600.0)
+
+            raw_inf = bot_state.get("last_inference_latency_ms")
+            inference_lat_ms = float(raw_inf) if raw_inf is not None else 50.0
+
             db_healthy = True
             try:
                 with database.db_lock:
@@ -7203,14 +7090,16 @@ def main():
                 exchange_latency_ms=api_latency_ms,
                 last_balance_sync_ts=bal_sync_ts,
                 db_healthy=db_healthy,
-                inference_latency_ms=float(bot_state.get("last_inference_latency_ms", 50.0) or 50.0)
+                inference_latency_ms=inference_lat_ms
             )
             if not sh_ok:
                 log_event("WARNING", f"[TRADING_LOOP] System Health Circuit Breaker Triggered ({sh_reason}) — halting signal evaluation.")
                 time.sleep(5)
                 return
         except Exception as ex_cb:
-            log_event("WARNING", f"[TRADING_LOOP] Circuit breaker check exception: {ex_cb}")
+            log_event("CRITICAL", f"[TRADING_LOOP] Circuit breaker check exception (failing closed): {ex_cb}")
+            time.sleep(5)
+            return
 
         just_opened_symbols = set()  # Symbols opened this cycle — block duplicates regardless of Bybit sync latency
         for symbol, iv in check_queue:
@@ -7590,6 +7479,7 @@ def main():
                             else:
                                 ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
                         
+                            t_inf_start = time.time()
                             try:
                                 pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
                                 pred_change = pred_pct * float(latest_candle["close"])
@@ -7603,6 +7493,14 @@ def main():
                                     probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
                                     conformal_unc_score = 0.0
                                     conformal_is_uncertain = False
+
+                                # Finding #166 (Finding #96): Record live model inference latency
+                                inf_lat_ms = (time.time() - t_inf_start) * 1000.0
+                                bot_state["last_inference_latency_ms"] = inf_lat_ms
+                                try:
+                                    state_manager["last_inference_latency_ms"] = inf_lat_ms
+                                except Exception as ex_inf:
+                                    log_event("WARNING", f"state_manager latency notice: {ex_inf}")
                             except Exception as pred_err:
                                 import traceback
                                 err_msg = f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] {type(pred_err).__name__}: {pred_err}"
@@ -7812,44 +7710,31 @@ def main():
                                 session_factor = 0.98
                             tp_multiplier_adjusted *= session_factor
 
-                            resolved_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
-                                interval=str(iv), entry_price=entry_close,
-                                atr_dollars=atr_dollars, base_tp_m=tp_multiplier_adjusted
+                            # Finding #159 (Finding #91): Single shared canonical trade geometry resolver
+                            geom = trade_calculators.resolve_trade_geometry(
+                                entry_price=entry_close,
+                                direction=ml_trend,
+                                interval=str(iv),
+                                atr_dollars=atr_dollars,
+                                base_sl_multiplier=float(cfg.get("sl_mult", sl_multiplier)),
+                                base_tp_multiplier=tp_multiplier_adjusted,
+                                df=df_completed,
+                                symbol=symbol,
+                                regime=regime_name,
+                                volatility=atr_norm_val,
+                                database_module=database
                             )
-                            tp_change = resolved_tp_m * atr_dollars
-
-                            # Stop Loss Resolution
+                            stop_loss_price = geom["stop_loss_price"]
+                            take_profit_price = geom["take_profit_price"]
+                            resolved_sl_dist = geom["sl_dist"]
+                            tp_change = geom["tp_dist"]
+                            sl_multiplier_adjusted = geom["sl_multiplier_adjusted"]
+                            resolved_sl_m = sl_multiplier_adjusted
+                            resolved_tp_m = geom["tp_multiplier_adjusted"]
+                            tp_multiplier_adjusted = resolved_tp_m
+                            struct_meta = geom["struct_meta"]
+                            struct_sl_dist_pct = geom["struct_sl_dist_pct"]
                             scaled_lev = None
-                            struct_sl_dist_pct = None
-                            struct_meta = None
-                            if str(iv) in ["15", "30", "60"]:
-                                struct_sl, struct_sl_dist_pct, struct_meta = trade_calculators.calculate_adaptive_structural_stop(
-                                    df_recent=df_completed,
-                                    entry_price=entry_close,
-                                    direction=ml_trend,
-                                    atr_val=atr_dollars,
-                                    regime=regime_name,
-                                    volatility=atr_norm_val,
-                                    cfg_sl_mult=float(cfg.get("sl_mult", 1.0)),
-                                    interval=str(iv)
-                                )
-                                stop_loss_price = struct_sl
-                                resolved_sl_dist = abs(entry_close - stop_loss_price)
-                                sl_multiplier_adjusted = resolved_sl_dist / max(1e-6, atr_dollars)
-                            else:
-                                tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv)
-                                sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
-                                resolved_sl_dist = risk_engine.calculate_final_stop_distance(
-                                    entry_close, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database, interval=str(iv)
-                                )
-                                if ml_trend == "Bullish":
-                                    stop_loss_price = entry_close - resolved_sl_dist
-                                else:
-                                    stop_loss_price = entry_close + resolved_sl_dist
-
-                            resolved_sl_m = resolved_sl_dist / max(1e-6, atr_dollars)
-                            sl_multiplier_adjusted = resolved_sl_m
-                            take_profit_price = (entry_close + tp_change) if ml_trend == "Bullish" else (entry_close - tp_change)
 
                             # Economic Break-Even Threshold (p*) based on exact resolved order geometry
                             _bars_per_day = max(1, round(1440 / max(1, int(iv))))
@@ -8762,7 +8647,7 @@ def main():
                                             else:
                                                 cvar_95 = CVAR_FALLBACK
                                             
-                                            # Finding #141: Daily loss budget tracking accumulator
+                                            # Finding #141 & Finding #160 (#92): Daily loss budget tracking accumulator
                                             now_utc = datetime.now(timezone.utc)
                                             start_of_day_ts = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
                                             realized_loss_today = 0.0
@@ -8775,25 +8660,43 @@ def main():
                                                         if pnl_val < 0.0:
                                                             realized_loss_today += abs(pnl_val)
                                             except Exception as ex_dt:
-                                                log_event("WARNING", f"Error computing realized loss today: {ex_dt}")
+                                                log_event("CRITICAL", f"Error computing realized loss today (failing closed): {ex_dt}")
+                                                realized_loss_today = current_bal * DAILY_LOSS_BUDGET_FRAC
 
                                             open_risk_usd = 0.0
                                             try:
-                                                for _tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"]:
+                                                for _tf_k in ["15m", "30m", "1h", "2h", "4h", "6h", "15", "30", "60", "120", "240", "360"]:
                                                     for _op in bot_state.get(f"active_trade_{_tf_k}", []):
-                                                        _p_sz = float(_op.get("position_size_usd", 0.0))
-                                                        _p_sl_pct = float(_op.get("stop_loss_pct", 0.01))
-                                                        open_risk_usd += (_p_sz * _p_sl_pct)
+                                                        _p_entry = float(_op.get("entry_price", 0.0))
+                                                        _p_sl = float(_op.get("stop_loss", 0.0))
+                                                        _p_qty = float(_op.get("qty", 0.0))
+                                                        if _p_entry > 0 and _p_sl > 0 and _p_qty > 0:
+                                                            open_risk_usd += abs(_p_entry - _p_sl) * _p_qty
+                                                        else:
+                                                            _p_sz = float(_op.get("position_size_usd", 0.0))
+                                                            _p_lev = float(_op.get("leverage", 1.0))
+                                                            _p_sl_pct = float(_op.get("stop_loss_pct", 0.01))
+                                                            open_risk_usd += (_p_sz * _p_lev * _p_sl_pct)
                                             except Exception as ex_or:
                                                 log_event("WARNING", f"Error computing open risk: {ex_or}")
+                                                open_risk_usd += (current_bal * 0.02)
 
                                             daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
                                             remaining_daily_budget = max(0.0, daily_loss_budget - realized_loss_today - open_risk_usd)
                                             max_cvar_notional = remaining_daily_budget / (cvar_95 + 1e-8)
                                             log_event("INFO", f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Daily Budget: ${daily_loss_budget:.2f} (Realized Loss: ${realized_loss_today:.2f}, Open Risk: ${open_risk_usd:.2f}, Remaining: ${remaining_daily_budget:.2f}) -> Max Notional Allowed: ${max_cvar_notional:.2f}")
                                         except Exception as cvar_err:
-                                            log_event("WARNING", f"[CVaR Error] {cvar_err}")
-                                            max_cvar_notional = target_notional_usd
+                                            log_event("CRITICAL", f"[CVaR Error] {cvar_err} — failing closed")
+                                            max_cvar_notional = 0.0
+                                            remaining_daily_budget = 0.0
+
+                                        # Finding #160 (Finding #92): Explicit rejection on exhausted daily loss budget
+                                        if remaining_daily_budget <= 0.0 or max_cvar_notional <= 0.0:
+                                            abstain_reason = f"DAILY_LOSS_BUDGET_EXHAUSTED (Realized: ${realized_loss_today:.2f} + Open: ${open_risk_usd:.2f} >= Budget: ${daily_loss_budget:.2f})"
+                                            log_event("WARNING", f"[{symbol} {iv}m] Skipped: {abstain_reason}")
+                                            rec.reject_reason = abstain_reason
+                                            all_pass = False
+                                            continue
 
                                         golden_mult = float(getattr(config, "GOLDEN_HOUR_MULTIPLIER", 1.0))
                                         if is_golden_hour and golden_mult > 1.0:

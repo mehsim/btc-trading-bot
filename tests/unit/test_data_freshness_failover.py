@@ -40,7 +40,7 @@ def test_get_history_warm_cache_failover_to_binance():
     
     # Binance returns fresh candles
     binance_candles = [
-        [now_ms - 1800000, 50000, 50100, 49900, 50050, 10.0, 0, 500000.0],
+        [now_ms - 3600000, 50000, 50100, 49900, 50050, 10.0, 0, 500000.0],
         [now_ms, 50050, 50200, 50000, 50150, 12.0, 0, 600000.0],
     ]
     
