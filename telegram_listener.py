@@ -211,7 +211,7 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
         from core import add_features
         from bybit_client import place_bybit_taker_ioc_order, format_bybit_qty, set_bybit_leverage, get_bybit_min_qty_step
         from trade_calculators import assert_valid_geometry
-        from risk_engine import risk_engine
+        import risk_engine
         from decision_journal import DecisionRecord, write_decision, ReasonCode
         import database
         import uuid

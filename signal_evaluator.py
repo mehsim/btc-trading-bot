@@ -352,7 +352,7 @@ class SignalEvaluator:
 
                     from config import TIMEFRAME_CONFIG, MIN_EVAL_THRESHOLD_FLOOR
                     from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, get_realized_rr_haircut
-                    from risk_engine import risk_engine
+                    import risk_engine
                     cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                     tp_m = cfg.get("tp_mult_trending", 1.85) if "Trending" in regime else cfg.get("tp_mult_ranging", 1.15)
                     sl_m = cfg.get("sl_mult", 0.8)
