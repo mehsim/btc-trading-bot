@@ -96,6 +96,15 @@ def assert_shared_constants_aligned():
         if lookahead < 4:
             raise ValueError(f"[Config Verifier] Invalid lookahead for {iv}m: lookahead ({lookahead}) < 4")
 
+    # 5. Verify MIN_SL_PCT_CONFIG has valid floors for all supported intervals (Finding #53)
+    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+    for req_iv in ["15", "30", "60", "120", "240", "360"]:
+        if req_iv not in min_sl_cfg:
+            raise ValueError(f"[Config Verifier Finding #53] Missing timeframe floor for {req_iv}m in MIN_SL_PCT_CONFIG")
+        val = float(min_sl_cfg[req_iv])
+        if val <= 0.0 or val > 0.05:
+            raise ValueError(f"[Config Verifier Finding #53] Invalid MIN_SL_PCT_CONFIG value for {req_iv}m: {val}")
+
     risk_limits.assert_risk_governance_invariants()
     log_event("INFO", "✅ [Config Verifier M-2] All cross-file train.py vs config.py constants strictly verified.")
     return True

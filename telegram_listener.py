@@ -341,64 +341,81 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
                 qty_val = math.ceil(5.1 / (final_entry * step)) * step
                 qty_str = format_bybit_qty(sym, qty_val)
 
-        order_res = place_bybit_taker_ioc_order(sym, side, qty_str, sl=final_sl, tp=final_tp)
-        if order_res.get("retCode") == 0:
-            bybit_order_id = order_res.get("result", {}).get("orderId")
-            
-            tf_map_inv = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
-            tf_key = tf_map_inv.get(iv, f"{iv}m")
-            trade_uuid = str(uuid.uuid4())
-            trade_id_str = f"{sym}_{trade_uuid}"
-            trade_record = {
-                "trade_id": trade_id_str,
-                "bybit_order_id": bybit_order_id,
-                "symbol": sym,
-                "direction": ml_trend,
-                "entry_price": final_entry,
-                "predicted_price": final_entry,
-                "stop_loss": final_sl,
-                "take_profit": final_tp,
-                "leverage": final_lev,
-                "position_size_usd": position_size_usd,
-                "qty": float(qty_str),
-                "confidence": 1.0,
-                "regime": "MANUAL",
-                "entry_time": int(time.time() * 1000),
-                "end_time": time.time() + (int(iv) * 60 * 10),
-                "atr_dollars": atr_dollars
-            }
+        try:
+            import main
+            with getattr(main, "active_execution_lock", threading.Lock()):
+                if hasattr(main, "active_execution_symbols"):
+                    main.active_execution_symbols.add(sym)
+        except Exception:
+            pass
 
-            lock_to_use = active_trades_lock if active_trades_lock is not None else (bot_state_lock if bot_state_lock else threading.Lock())
-            with lock_to_use:
-                key = f"active_trade_{tf_key}"
-                curr_list = bot_state.get(key, []) if bot_state else []
-                if not isinstance(curr_list, list):
-                    curr_list = []
-                curr_list.append(trade_record)
-                if bot_state:
-                    bot_state[key] = curr_list
-                database.save_active_trades(tf_key, curr_list)
+        try:
+            order_res = place_bybit_taker_ioc_order(sym, side, qty_str, sl=final_sl, tp=final_tp)
+            if order_res.get("retCode") == 0:
+                bybit_order_id = order_res.get("result", {}).get("orderId")
+                
+                tf_map_inv = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h", "360": "6h"}
+                tf_key = tf_map_inv.get(iv, f"{iv}m")
+                trade_uuid = str(uuid.uuid4())
+                trade_id_str = f"{sym}_{trade_uuid}"
+                trade_record = {
+                    "trade_id": trade_id_str,
+                    "bybit_order_id": bybit_order_id,
+                    "symbol": sym,
+                    "direction": ml_trend,
+                    "entry_price": final_entry,
+                    "predicted_price": final_entry,
+                    "stop_loss": final_sl,
+                    "take_profit": final_tp,
+                    "leverage": final_lev,
+                    "position_size_usd": position_size_usd,
+                    "qty": float(qty_str),
+                    "confidence": 1.0,
+                    "regime": "MANUAL",
+                    "entry_time": int(time.time() * 1000),
+                    "end_time": time.time() + (int(iv) * 60 * 10),
+                    "atr_dollars": atr_dollars
+                }
 
-            rec.outcome = "EXECUTED"
-            rec.trade_id = trade_id_str
-            write_decision(rec)
+                lock_to_use = active_trades_lock if active_trades_lock is not None else (bot_state_lock if bot_state_lock else threading.Lock())
+                with lock_to_use:
+                    key = f"active_trade_{tf_key}"
+                    curr_list = bot_state.get(key, []) if bot_state else []
+                    if not isinstance(curr_list, list):
+                        curr_list = []
+                    curr_list.append(trade_record)
+                    if bot_state:
+                        bot_state[key] = curr_list
+                    database.save_active_trades(tf_key, curr_list)
 
-            return (
-                f"🟢 *MANUAL TRADE EXECUTED SUCCESSFULLY*\n\n"
-                f"• *Asset*: `{sym}` ({tf_key})\n"
-                f"• *Direction*: `{ml_trend}`\n"
-                f"• *Entry Price*: `${final_entry:.4f}`\n"
-                f"• *Stop Loss*: `${final_sl:.4f}`\n"
-                f"• *Take Profit*: `${final_tp:.4f}`\n"
-                f"• *Leverage*: `{final_lev:.1f}x` | *Margin*: `${position_size_usd:.2f}`\n"
-                f"• *Bybit Order ID*: `{bybit_order_id}`"
-            )
-        else:
-            rec.outcome = "REJECTED"
-            rec.reject_reason = order_res.get("retMsg", "Order rejected by Bybit")
-            rec.reason_code = ReasonCode.EXECUTION_VALIDATION_FAILED
-            write_decision(rec)
-            return f"🔴 *Manual Trade Execution Failed*: {order_res.get('retMsg')}"
+                rec.outcome = "EXECUTED"
+                rec.trade_id = trade_id_str
+                write_decision(rec)
+
+                return (
+                    f"🟢 *MANUAL TRADE EXECUTED SUCCESSFULLY*\n\n"
+                    f"• *Asset*: `{sym}` ({tf_key})\n"
+                    f"• *Direction*: `{ml_trend}`\n"
+                    f"• *Entry Price*: `${final_entry:.4f}`\n"
+                    f"• *Stop Loss*: `${final_sl:.4f}`\n"
+                    f"• *Take Profit*: `${final_tp:.4f}`\n"
+                    f"• *Leverage*: `{final_lev:.1f}x` | *Margin*: `${position_size_usd:.2f}`\n"
+                    f"• *Bybit Order ID*: `{bybit_order_id}`"
+                )
+            else:
+                rec.outcome = "REJECTED"
+                rec.reject_reason = order_res.get("retMsg", "Order rejected by Bybit")
+                rec.reason_code = ReasonCode.EXECUTION_VALIDATION_FAILED
+                write_decision(rec)
+                return f"🔴 *Manual Trade Execution Failed*: {order_res.get('retMsg')}"
+        finally:
+            try:
+                import main
+                with getattr(main, "active_execution_lock", threading.Lock()):
+                    if hasattr(main, "active_execution_symbols"):
+                        main.active_execution_symbols.discard(sym)
+            except Exception:
+                pass
 
     except Exception as ex:
         return f"🔴 *Manual Trade Error*: {str(ex)}"

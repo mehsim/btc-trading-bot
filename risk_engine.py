@@ -40,10 +40,11 @@ class AutoStopFloor:
                             required_floors.append(adv * 1.2)
                     if required_floors:
                         opt_floor = float(np.percentile(required_floors, 75))
-                        return max(0.005, min(opt_floor, 0.020))
+                        cfg_flr = float(config.MIN_SL_PCT_CONFIG.get(str(interval), config.MIN_SL_PCT_CONFIG.get("default", 0.008)))
+                        return max(cfg_flr, min(opt_floor, 0.020))
             except Exception as e:
                 print(f"[risk_engine] Warning computing floor for {symbol}: {e}")
-        return config.MIN_SL_PCT_CONFIG.get(str(interval), 0.005)
+        return float(config.MIN_SL_PCT_CONFIG.get(str(interval), config.MIN_SL_PCT_CONFIG.get("default", 0.008)))
 
     def get_floor(self, symbol, database_module=None, interval=None):
         pain_adjusted = pain_feedback.get_effective_floor(symbol, interval=interval)
@@ -58,18 +59,17 @@ class WickBufferCalculator:
     def get_buffer_distance(self, entry_price: float, df: Optional[pd.DataFrame] = None) -> float:
         if df is None or df.empty or len(df) < 10:
             return entry_price * 0.004
-        
+            
         wick_pcts = []
-        recent_df = df.tail(self.lookback_bars)
-        for _, bar in recent_df.iterrows():
-            body_top = max(bar['open'], bar['close'])
-            body_bottom = min(bar['open'], bar['close'])
-            close_p = bar['close'] if bar['close'] > 0 else 1.0
-            
-            upper_wick = (bar['high'] - body_top) / close_p
-            lower_wick = (body_bottom - bar['low']) / close_p
-            wick_pcts.extend([upper_wick, lower_wick])
-            
+        for idx in range(max(0, len(df) - self.lookback_bars), len(df)):
+            row = df.iloc[idx]
+            o, h, l, c = row['open'], row['high'], row['low'], row['close']
+            body_size = abs(c - o)
+            total_range = h - l
+            if total_range > 0:
+                wick_size = total_range - body_size
+                wick_pcts.append(wick_size / entry_price)
+                
         if not wick_pcts:
             return entry_price * 0.004
             
@@ -80,9 +80,11 @@ class WickBufferCalculator:
 auto_stop_floor = AutoStopFloor()
 wick_buffer_calc = WickBufferCalculator()
 
-def calculate_final_stop_distance(entry_price: float, atr_dollar: float, symbol: str, df: Optional[pd.DataFrame] = None, gmm_multiplier: float = 1.5, database_module=None) -> float:
+def calculate_final_stop_distance(entry_price: float, atr_dollar: float, symbol: str, df: Optional[pd.DataFrame] = None, gmm_multiplier: float = 1.5, database_module=None, interval: Optional[str] = None) -> float:
     atr_stop = gmm_multiplier * atr_dollar
-    min_floor_pct = auto_stop_floor.get_floor(symbol, database_module=database_module)
+    min_floor_pct = auto_stop_floor.get_floor(symbol, database_module=database_module, interval=interval)
+    cfg_floor_pct = float(config.MIN_SL_PCT_CONFIG.get(str(interval), config.MIN_SL_PCT_CONFIG.get("default", 0.008))) if interval else 0.005
+    min_floor_pct = max(min_floor_pct, cfg_floor_pct)
     min_floor_dist = entry_price * min_floor_pct
     wick_dist = wick_buffer_calc.get_buffer_distance(entry_price, df=df)
     
@@ -141,12 +143,23 @@ def compute_conservative_kelly(
     geom_p_star = 1.0 / (b_ratio + 1.0)
 
     realized_wr = None
+    p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
     if trade_history and len(trade_history) >= 10:
         win_count = sum(1 for t in trade_history if float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or t.get("success"))
         realized_wr = float(win_count) / float(len(trade_history))
+        p_hat = min(p_hat, realized_wr)
         # Finding #38: Geometry gate - if expected win rate cannot clear order geometry break-even, fail closed
         if min(float(calibrated_confidence), realized_wr) <= geom_p_star:
             return 0.0
+
+    # Trade geometry Quarter-Kelly (Finding #52)
+    if p_hat <= geom_p_star:
+        return 0.0
+    q_kelly_geom = max(0.0, 0.25 * (p_hat * (b_ratio + 1.0) - 1.0) / b_ratio)
+    if q_kelly_geom <= 0.0:
+        return 0.0
+
+    if trade_history and len(trade_history) >= 10:
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
             timeframe=str(interval),
             min_trades=10,
@@ -158,7 +171,8 @@ def compute_conservative_kelly(
                 # Finding #163 & #71: Measured negative or zero empirical edge -> Fail-closed! Abstain (0.0)
                 # instead of falling through to confidence-based prior.
                 return 0.0
-            kelly_val = float(emp_kelly)
+            # Finding #52: Empirical Kelly cannot exceed trade geometry Quarter-Kelly
+            kelly_val = min(float(emp_kelly), q_kelly_geom)
             if QUALITY_SIZING.get("enabled", True) and mcc_val is not None:
                 ref_mcc = float(QUALITY_SIZING.get("reference_mcc", 0.15))
                 flr = float(QUALITY_SIZING.get("floor", 0.35))
@@ -166,17 +180,6 @@ def compute_conservative_kelly(
                 quality_mult = float(np.clip(q, flr, 1.0))
                 kelly_val *= quality_mult
             return kelly_val
-            
-    p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
-    if realized_wr is not None:
-        p_hat = min(p_hat, realized_wr)
-
-    # Pure Quarter-Kelly formula using calibrated model probability:
-    # Full Kelly: f* = (p * (b + 1) - 1) / b
-    # Requires p_hat > 1 / (b + 1) to produce positive edge; otherwise returns 0.0 (Finding #94, #71, #49)
-    p_star = geom_p_star
-    if p_hat <= p_star:
-        return 0.0
 
     raw_kelly = max(0.0, (p_hat * (b_ratio + 1.0) - 1.0) / b_ratio)
     scaled_kelly = 0.25 * raw_kelly
@@ -341,7 +344,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
         log_event("WARNING", f"[Portfolio Correlation Guard] Candidate {symbol} missing candle data in df_dict — applying conservative fallback prior (0.80).")
         return 0.80
     corr_cfg = getattr(config, "CORRELATION_WINDOW_CONFIG", {})
-    lookback = corr_cfg.get(str(interval)) or corr_cfg.get("default", 20)
+    lookback = corr_cfg.get(str(interval), corr_cfg.get("default", 20))
     
     target_s = _get_returns_series(df_dict[symbol])
     if target_s is None or len(target_s) < lookback:
@@ -365,7 +368,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
 
             if pos_symbol not in df_dict or not isinstance(df_dict[pos_symbol], pd.DataFrame):
                 log_event("WARNING", f"[Portfolio Correlation Guard] Position {pos_symbol} missing from df_dict — assuming conservative correlation (0.80).")
-                effective_corr = 0.80 * net_mult
+                effective_corr = 0.80 if net_mult > 0 else 0.0  # Finding #58: Missing data must never credit hedge
                 max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
                 has_valid_comparison = True
                 continue
@@ -373,7 +376,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
             other_s = _get_returns_series(df_dict[pos_symbol])
             if other_s is None or len(other_s) < lookback:
                 log_event("WARNING", f"[Portfolio Correlation Guard] Position {pos_symbol} history too short — assuming conservative correlation (0.80).")
-                effective_corr = 0.80 * net_mult
+                effective_corr = 0.80 if net_mult > 0 else 0.0  # Finding #58: Short history must never credit hedge
                 max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
                 has_valid_comparison = True
                 continue
@@ -394,7 +397,7 @@ def calculate_portfolio_correlation(symbol: str, open_positions: list, df_dict: 
                     max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
                     has_valid_comparison = True
             else:
-                effective_corr = 0.80 * net_mult
+                effective_corr = 0.80 if net_mult > 0 else 0.0  # Finding #58: Missing overlap must never credit hedge
                 max_corr = effective_corr if max_corr is None else max(max_corr, effective_corr)
                 has_valid_comparison = True
                     

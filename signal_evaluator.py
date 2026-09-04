@@ -40,9 +40,7 @@ def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
         bot_state.get(f"latest_prediction_{symbol}_240") or
         bot_state.get(f"latest_prediction_240m_{symbol}") or
         bot_state.get(f"latest_prediction_bg_{symbol}_4h") or
-        bot_state.get(f"evaluator_prediction_{symbol}_4h") or
-        bot_state.get("latest_prediction_4h") or
-        bot_state.get("latest_prediction_240m")
+        bot_state.get(f"evaluator_prediction_{symbol}_4h")
     )
     macro_dir = "Neutral"
     macro_conf = 0.50
@@ -50,7 +48,7 @@ def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
         macro_dir = str(macro_pred.get("direction", "Neutral"))
         macro_conf = float(macro_pred.get("calibrated_confidence") or macro_pred.get("confidence") or 0.50)
         
-    macro_adx = float(bot_state.get(f"adx_{symbol}_4h") or bot_state.get("adx_4h") or 25.0)
+    macro_adx = float(bot_state.get(f"adx_{symbol}_4h") or (bot_state.get("adx_4h") if symbol == "BTCUSDT" else None) or 25.0)
     is_trending = macro_adx >= 25.0
     
     return {

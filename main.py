@@ -610,10 +610,20 @@ from state_manager import state_manager as bot_state
 def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
     print(f"[EMERGENCY KILL SWITCH] Triggered! Reason: {reason}")
     bot_state["bot_running"] = False
-    send_telegram_alert(f"🚨 *EMERGENCY KILL SWITCH ACTIVATED* 🚨\n• Reason: `{reason}`\n• Action: Halting bot & closing open positions at market.")
+    database.set_setting("bot_running", "False")
+    
+    cancel_success = True
+    close_success = True
+    errors = []
+
     try:
+        from bybit_client import bybit_post_request, get_all_bybit_positions, TRADE_MODE
         if TRADE_MODE != "simulation":
-            bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
+            res_cancel = bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
+            if isinstance(res_cancel, dict) and res_cancel.get("retCode") != 0:
+                cancel_success = False
+                errors.append(f"Cancel failed: {res_cancel.get('retMsg', 'Unknown error')}")
+            
             positions = get_all_bybit_positions()
             for p in (positions or []):
                 sym = p.get("symbol")
@@ -621,7 +631,7 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
                 side = p.get("side")
                 if sz > 0 and sym:
                     close_side = "Sell" if side == "Buy" else "Buy"
-                    bybit_post_request("/v5/order/create", {
+                    res_close = bybit_post_request("/v5/order/create", {
                         "category": "linear",
                         "symbol": sym,
                         "side": close_side,
@@ -630,8 +640,23 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
                         "timeInForce": "IOC",
                         "reduceOnly": True
                     })
+                    if isinstance(res_close, dict) and res_close.get("retCode") != 0:
+                        close_success = False
+                        errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
     except Exception as err:
+        errors.append(str(err))
+        cancel_success = False
+        close_success = False
         print(f"[Kill Switch Error] Failed executing emergency close: {err}")
+
+    status_msg = f"🚨 *EMERGENCY KILL SWITCH ACTIVATED* 🚨\n• Reason: `{reason}`\n• Action: Bot halted."
+    if errors:
+        status_msg += f"\n• Errors encountered: {'; '.join(errors)}"
+    else:
+        status_msg += "\n• Working orders cancelled and open positions closed at market."
+
+    send_telegram_alert(status_msg)
+    return cancel_success and close_success, errors
 
 from functools import wraps
 import hmac
@@ -4018,7 +4043,7 @@ def get_funding_rate(symbol=SYMBOL):
                         _funding_rate_cache[symbol] = (rate_val, now_t + 60.0)
                     return rate_val
     except Exception as e:
-        print(f"Error fetching funding rate: {e}")
+        log_event("WARNING", f"Error fetching funding rate: {e}")
     return 0.0
 
 def get_rolling_correlation(symbol_a: str, symbol_b: str, interval: str = "60", window: int = 30) -> float:
@@ -4989,6 +5014,27 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             _abort_async("Signal TTL expired during chase with 0 fills")
                             return
 
+                if chase > 0:
+                    c_bid, c_ask, c_last = get_bybit_bid_ask(symbol)
+                    c_mid = (c_bid + c_ask) / 2.0 if (c_bid is not None and c_ask is not None and c_bid > 0 and c_ask > 0) else (c_last if c_last and c_last > 0 else 0.0)
+                    if c_mid <= 0:
+                        log_event("WARNING", f"[{symbol} {iv}m API] Live price unavailable before chase {chase+1}. Aborting remaining chase.")
+                        if filled_so_far > 0:
+                            bybit_success = True
+                        break
+                    # Immediate Trigger Invariant check (Finding #55)
+                    if (ml_trend == "Bullish" and c_mid <= stop_loss_price) or (ml_trend == "Bearish" and c_mid >= stop_loss_price):
+                        log_event("WARNING", f"[{symbol} {iv}m API] Live price ({c_mid:.2f}) breached stop ({stop_loss_price:.2f}) before chase {chase+1}. Aborting chase.")
+                        if filled_so_far > 0:
+                            bybit_success = True
+                        break
+                    # Adverse drift check (Finding #55)
+                    if abs(c_mid - entry_price) > max(0.25 * atr_dollars, entry_price * 0.0025):
+                        log_event("WARNING", f"[{symbol} {iv}m API] Live price drifted adversely ({c_mid:.2f} vs entry {entry_price:.2f}) before chase {chase+1}. Aborting chase.")
+                        if filled_so_far > 0:
+                            bybit_success = True
+                        break
+
                 remaining_qty = max(0.0, raw_qty - filled_so_far)
                 if remaining_qty <= 0:
                     bybit_success = True
@@ -5139,10 +5185,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         exec_order_id = last_exec.get("orderId")
                         if (exec_order_id and exec_order_id in chase_order_ids) or (exec_id and exec_id in recorded_chase_exec_ids):
                             print(f"[{symbol} {iv}m API] Recent fill ({exec_id}) belongs to chase order already recorded. Skipping duplicate accumulation.")
-                            bybit_success = True
+                            # Finding #56: Only set bybit_success if actually filled target threshold
+                            if filled_so_far >= (0.95 * raw_qty):
+                                bybit_success = True
                         else:
                             print(f"[{symbol} {iv}m API] Unrecorded recent fill ({exec_id}) detected right before IOC fallback. Skipping duplicate IOC.")
-                            bybit_success = True
                             fill_px = float(last_exec.get("execPrice", entry_price))
                             raw_fill_q = float(last_exec.get("execQty", remaining_qty))
                             fill_q = min(raw_fill_q, max(0.0, raw_qty - filled_so_far))
@@ -5153,34 +5200,85 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                     recorded_chase_exec_ids.add(exec_id)
                             actual_qty = filled_so_far
                             entry_price = weighted_sum_px / max(1e-9, filled_so_far)
-                    else:
-                        print(f"[{symbol} {iv}m API] Limit Maker chasing exhausted. Executing fallback Taker IOC for remaining {ioc_qty_str}...")
-                        order_res = place_bybit_taker_ioc_order(symbol, side, ioc_qty_str, sl=stop_loss_price, tp=take_profit_price)
-                        if order_res.get("retCode") == 0:
-                            bybit_order_id = order_res.get("result", {}).get("orderId")
-                            bybit_success = True
-                            time.sleep(0.5)
-                            order_details = get_bybit_order_details(symbol, bybit_order_id)
-                            if order_details:
-                                fill_px = float(order_details.get("avgPrice", entry_price))
-                                fill_q = float(order_details.get("cumExecQty", floored_ioc))
-                            else:
-                                fill_exec = get_bybit_last_execution(symbol)
-                                fill_px = float(fill_exec.get("execPrice", entry_price)) if fill_exec else entry_price
-                                fill_q = float(fill_exec.get("execQty", floored_ioc)) if fill_exec else floored_ioc
-                            
-                            filled_so_far += fill_q
-                            weighted_sum_px += (fill_q * fill_px)
-                            actual_qty = filled_so_far
-                            entry_price = weighted_sum_px / max(1e-9, filled_so_far)
-                        else:
-                            print(f"[{symbol} {iv}m API ERROR] Fallback Taker IOC order failed: {order_res.get('retMsg')}")
+                            if filled_so_far >= (0.95 * raw_qty):
+                                bybit_success = True
+
+                    if not bybit_success:
+                        # Recalculate remaining IOC quantity after execution checks
+                        rem_ioc = max(0.0, raw_qty - filled_so_far)
+                        floored_ioc = math.floor(rem_ioc / step_q + 1e-9) * step_q if step_q > 0 else rem_ioc
+                        ioc_qty_str = format_bybit_qty(symbol, floored_ioc)
+                        
+                        # Finding #55: Re-verify fresh price and Immediate Trigger Invariant before IOC
+                        ioc_bid, ioc_ask, ioc_last = get_bybit_bid_ask(symbol)
+                        ioc_mid = (ioc_bid + ioc_ask) / 2.0 if (ioc_bid is not None and ioc_ask is not None and ioc_bid > 0 and ioc_ask > 0) else (ioc_last if ioc_last and ioc_last > 0 else 0.0)
+                        ioc_aborted = False
+                        if ioc_mid <= 0:
+                            log_event("WARNING", f"[{symbol} {iv}m API] Live price unavailable before fallback IOC. Aborting IOC.")
+                            ioc_aborted = True
+                        elif (ml_trend == "Bullish" and ioc_mid <= stop_loss_price) or (ml_trend == "Bearish" and ioc_mid >= stop_loss_price):
+                            log_event("WARNING", f"[{symbol} {iv}m API] Live price ({ioc_mid:.2f}) breached stop ({stop_loss_price:.2f}) before fallback IOC. Aborting IOC.")
+                            ioc_aborted = True
+                        elif abs(ioc_mid - entry_price) > max(0.25 * atr_dollars, entry_price * 0.0025):
+                            log_event("WARNING", f"[{symbol} {iv}m API] Live price drifted adversely ({ioc_mid:.2f} vs entry {entry_price:.2f}) before fallback IOC. Aborting IOC.")
+                            ioc_aborted = True
+
+                        if ioc_aborted:
                             if filled_so_far > 0:
                                 actual_qty = filled_so_far
                                 entry_price = weighted_sum_px / max(1e-9, filled_so_far)
                                 bybit_success = True
                             else:
                                 bybit_success = False
+                        else:
+                            print(f"[{symbol} {iv}m API] Limit Maker chasing exhausted. Executing fallback Taker IOC for remaining {ioc_qty_str}...")
+                            # Finding #54: Deterministic order_link_id for IOC
+                            ioc_order_link_id = f"ioc_{symbol[:5]}_{iv}_{int(latest_completed_ts//1000)}"[:36]
+                            order_res = place_bybit_taker_ioc_order(symbol, side, ioc_qty_str, sl=stop_loss_price, tp=take_profit_price, order_link_id=ioc_order_link_id)
+                            if order_res.get("retCode") == 0:
+                                bybit_order_id = order_res.get("result", {}).get("orderId")
+                                bybit_success = True
+                                time.sleep(0.5)
+                                order_details = get_bybit_order_details(symbol, order_id=bybit_order_id, order_link_id=ioc_order_link_id)
+                                if order_details:
+                                    fill_px = float(order_details.get("avgPrice", entry_price))
+                                    fill_q = float(order_details.get("cumExecQty", floored_ioc))
+                                else:
+                                    fill_exec = get_bybit_last_execution(symbol)
+                                    fill_px = float(fill_exec.get("execPrice", entry_price)) if fill_exec else entry_price
+                                    fill_q = float(fill_exec.get("execQty", floored_ioc)) if fill_exec else floored_ioc
+                                
+                                filled_so_far += fill_q
+                                weighted_sum_px += (fill_q * fill_px)
+                                actual_qty = filled_so_far
+                                entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                            else:
+                                print(f"[{symbol} {iv}m API ERROR] Fallback Taker IOC order failed: {order_res.get('retMsg')}")
+                                # Finding #54: Realtime reconciliation via orderLinkId
+                                try:
+                                    time.sleep(0.3)
+                                    recon_details = get_bybit_order_details(symbol, order_link_id=ioc_order_link_id)
+                                    if recon_details:
+                                        r_status = recon_details.get("orderStatus")
+                                        r_cum = float(recon_details.get("cumExecQty", 0.0))
+                                        r_px = float(recon_details.get("avgPrice", entry_price))
+                                        r_oid = recon_details.get("orderId")
+                                        if r_cum > 0:
+                                            filled_so_far += r_cum
+                                            weighted_sum_px += (r_cum * r_px)
+                                            bybit_order_id = r_oid
+                                            bybit_success = True
+                                            log_event("INFO", f"[{symbol} {iv}m API] Reconciled IOC fill ({r_cum}) via orderLinkId {ioc_order_link_id}")
+                                        if r_status in ["New", "PartiallyFilled"]:
+                                            cancel_bybit_order(symbol, r_oid)
+                                except Exception as _rec_err:
+                                    log_event("WARNING", f"[{symbol} {iv}m API] IOC reconciliation error: {_rec_err}")
+                                if filled_so_far > 0:
+                                    actual_qty = filled_so_far
+                                    entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                                    bybit_success = True
+                                else:
+                                    bybit_success = False
                         
         min_fill_pct = getattr(config, "MIN_ACCEPTABLE_FILL_PCT", 0.60)
         if raw_qty > 0 and actual_qty > 0:
@@ -6322,7 +6420,8 @@ def main():
                     scaled_out_pnl = float(active_trade.get("scaled_out_pnl", 0.0))
                     
                     if TRADE_MODE != "simulation" and bybit_realized_pnl is not None:
-                        total_pnl = round(bybit_realized_pnl, 2)
+                        # Finding #60: Bybit closed-pnl excludes settled funding payments; deduct funding_cost
+                        total_pnl = round(bybit_realized_pnl - funding_cost, 2)
                         realized_pnl = round(total_pnl - scaled_out_pnl, 2)
                         net_return_pct = (realized_pnl / position_size_usd) * 100.0 if position_size_usd > 0 else 0.0
                         total_net_return_pct = round((total_pnl / original_size) * 100.0, 4)
@@ -6983,10 +7082,22 @@ def main():
                 real_bal_val = get_real_bybit_balance_cached()
                 if isinstance(real_bal_val, (int, float)) and real_bal_val > 0:
                     curr_equity = float(real_bal_val)
-            if curr_equity > float(bot_state.get("peak_balance", 0.0)):
+            peak_bal = float(bot_state.get("peak_balance", 0.0) or 0.0)
+            if curr_equity > peak_bal:
                 bot_state["peak_balance"] = curr_equity
-        except Exception:
-            pass
+                peak_bal = curr_equity
+
+            # Finding #57: Hard 20% drawdown breach triggers emergency kill switch
+            if peak_bal > 0:
+                dd_pct = (peak_bal - curr_equity) / peak_bal
+                max_dd_limit = getattr(config, "HARD_MAX_DRAWDOWN_LIMIT", 0.20)
+                if dd_pct >= max_dd_limit:
+                    log_event("CRITICAL", f"[TRADING_LOOP] Hard Drawdown Limit Breached: {dd_pct*100:.1f}% >= {max_dd_limit*100:.1f}% (Peak: ${peak_bal:.2f}, Current: ${curr_equity:.2f}). Triggering emergency kill switch.")
+                    trigger_emergency_kill_switch(f"Hard 20% Drawdown Limit Breached ({dd_pct*100:.1f}%)")
+                    time.sleep(10)
+                    return
+        except Exception as _ex_dd:
+            log_event("WARNING", f"[TRADING_LOOP] Drawdown evaluation exception: {_ex_dd}")
 
         # Circuit Breaker Halt Guard (Micro-Trading Run Scoped)
         try:
@@ -7194,10 +7305,11 @@ def main():
                             for k_suffix in [str(tf), str(iv)]:
                                 bot_state[f"regime_{symbol}_{k_suffix}"] = regime
                                 bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
-                                bot_state[f"regime_{k_suffix}"] = regime
-                                bot_state[f"adx_{k_suffix}"] = adx_regime
                                 bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
-                                bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
+                                if symbol == "BTCUSDT" or symbol == bot_state.get("active_symbol", "BTCUSDT"):
+                                    bot_state[f"regime_{k_suffix}"] = regime
+                                    bot_state[f"adx_{k_suffix}"] = adx_regime
+                                    bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                             continue
                         if not any(_tf.get(_r, {}).get("trend") for _r in ("trending", "ranging")):
                             load_model_weights(iv)
@@ -7219,10 +7331,11 @@ def main():
                                 for k_suffix in [str(tf), str(iv)]:
                                     bot_state[f"regime_{symbol}_{k_suffix}"] = regime
                                     bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
-                                    bot_state[f"regime_{k_suffix}"] = regime
-                                    bot_state[f"adx_{k_suffix}"] = adx_regime
                                     bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
-                                    bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
+                                    if symbol == "BTCUSDT" or symbol == bot_state.get("active_symbol", "BTCUSDT"):
+                                        bot_state[f"regime_{k_suffix}"] = regime
+                                        bot_state[f"adx_{k_suffix}"] = adx_regime
+                                        bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                                 continue
 
                         if iv in models_by_interval:
@@ -7341,10 +7454,11 @@ def main():
                                 for k_suffix in [str(tf), str(iv)]:
                                     bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
                                     bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
-                                    bot_state[f"regime_{k_suffix}"] = regime_name
-                                    bot_state[f"adx_{k_suffix}"] = adx_regime
                                     bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
-                                    bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
+                                    if symbol == "BTCUSDT" or symbol == bot_state.get("active_symbol", "BTCUSDT"):
+                                        bot_state[f"regime_{k_suffix}"] = regime_name
+                                        bot_state[f"adx_{k_suffix}"] = adx_regime
+                                        bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                                 continue
                             
                             # C-1: Preserve strict train/serve feature distribution consistency
@@ -7533,10 +7647,11 @@ def main():
                             for k_suffix in [str(tf), str(iv)]:
                                 bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
                                 bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
-                                bot_state[f"regime_{k_suffix}"] = regime_name
-                                bot_state[f"adx_{k_suffix}"] = adx_regime
                                 bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
-                                bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
+                                if symbol == "BTCUSDT" or symbol == bot_state.get("active_symbol", "BTCUSDT"):
+                                    bot_state[f"regime_{k_suffix}"] = regime_name
+                                    bot_state[f"adx_{k_suffix}"] = adx_regime
+                                    bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
 
                             # F-1: Observe MCC Leverage Qualification status at prediction time
                             mcc_thresh = getattr(config, "MCC_LEVERAGE_QUALIFICATION_THRESHOLD", 0.15)
@@ -7641,7 +7756,8 @@ def main():
                                     atr_val=atr_dollars,
                                     regime=regime_name,
                                     volatility=atr_norm_val,
-                                    cfg_sl_mult=float(cfg.get("sl_mult", 1.0))
+                                    cfg_sl_mult=float(cfg.get("sl_mult", 1.0)),
+                                    interval=str(iv)
                                 )
                                 stop_loss_price = struct_sl
                                 resolved_sl_dist = abs(entry_close - stop_loss_price)
@@ -7650,7 +7766,7 @@ def main():
                                 tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv)
                                 sl_multiplier_adjusted = sl_multiplier * tf_sl_mult
                                 resolved_sl_dist = risk_engine.calculate_final_stop_distance(
-                                    entry_close, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database
+                                    entry_close, atr_dollars, symbol, df=df_completed, gmm_multiplier=sl_multiplier_adjusted, database_module=database, interval=str(iv)
                                 )
                                 if ml_trend == "Bullish":
                                     stop_loss_price = entry_close - resolved_sl_dist
@@ -7722,8 +7838,8 @@ def main():
                                 
                             htf_decay_threshold_penalty = 0.0
                             if str(iv) == "15" and ml_trend in ["Bullish", "Bearish"]:
-                                pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get("latest_prediction_30m") or {}
-                                pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get("latest_prediction_1h") or {}
+                                pred_30m_dict = bot_state.get(f"latest_prediction_{symbol}_30m") or bot_state.get(f"latest_prediction_{symbol}_30") or {}
+                                pred_60m_dict = bot_state.get(f"latest_prediction_{symbol}_1h") or bot_state.get(f"latest_prediction_{symbol}_60m") or bot_state.get(f"latest_prediction_{symbol}_60") or {}
 
                                 now_time_sec = time.time()
                                 for pred_dict, label in [(pred_30m_dict, "30m"), (pred_60m_dict, "1h")]:
@@ -8123,7 +8239,7 @@ def main():
                                     bot_state[f"latest_prediction_{symbol}_{k_suffix}"]["threshold_base"] = economic_base_threshold
                                     bot_state[f"latest_prediction_{symbol}_{k_suffix}"]["threshold_adjustments"] = adjustments_applied
                                     bot_state[f"latest_prediction_{symbol}_{k_suffix}"]["dynamic_threshold"] = dynamic_conf_threshold
-                                if f"latest_prediction_{k_suffix}" in bot_state and isinstance(bot_state[f"latest_prediction_{k_suffix}"], dict):
+                                if (symbol == "BTCUSDT" or symbol == bot_state.get("active_symbol", "BTCUSDT")) and f"latest_prediction_{k_suffix}" in bot_state and isinstance(bot_state[f"latest_prediction_{k_suffix}"], dict):
                                     bot_state[f"latest_prediction_{k_suffix}"]["threshold_base"] = economic_base_threshold
                                     bot_state[f"latest_prediction_{k_suffix}"]["threshold_adjustments"] = adjustments_applied
                                     bot_state[f"latest_prediction_{k_suffix}"]["dynamic_threshold"] = dynamic_conf_threshold
@@ -8417,7 +8533,7 @@ def main():
                                             MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC,
                                             CVAR_TAIL_PERCENTILE, CVAR_FALLBACK, DAILY_LOSS_BUDGET_FRAC
                                         )
-                                        _latest_pred = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{tf}") or bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{tf}", {})
+                                        _latest_pred = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{tf}") or {}
                                         _mcc_val = _latest_pred.get("manifest_mcc") if isinstance(_latest_pred, dict) else None
 
                                         executed_sl_dist = abs(entry_price - stop_loss_price)
@@ -8724,15 +8840,45 @@ def main():
                                             new_tp_price = adjusted_struct["tp_price"]
                                             leverage_val = adjusted_struct["leverage"]
 
-                                            # Reconcile geometry: If validate_trade_structure widened stop or capped TP, verify economic gate still passes
+                                            # Reconcile geometry: If validate_trade_structure widened stop or capped TP, verify economic gate and recompute Kelly (Finding #52, #60)
                                             if abs(new_stop_price - orig_sl_price) > 1e-6 or abs(new_tp_price - orig_tp_price) > 1e-6:
                                                 from trade_calculators import passes_economic_gate, calculate_required_p
-                                                if not passes_economic_gate(entry=entry_price, tp=new_tp_price, sl=new_stop_price, conf=calibrated_confidence):
-                                                    _req_p = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price)
+                                                fr_struct = get_funding_rate(symbol)
+                                                cfg_lookahead = TIMEFRAME_CONFIG.get(str(iv), {}).get("lookahead", 10)
+                                                horizon_hours_struct = (float(iv) * float(cfg_lookahead)) / 60.0
+                                                exp_funding_struct = max(0.0, (fr_struct if ml_trend == "Bullish" else -fr_struct) * (horizon_hours_struct / 8.0))
+                                                if not passes_economic_gate(entry=entry_price, tp=new_tp_price, sl=new_stop_price, conf=calibrated_confidence, expected_funding_frac=exp_funding_struct):
+                                                    _req_p = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price, expected_funding_frac=exp_funding_struct)
                                                     print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Adjusted trade structure fails economic gate (requires {_req_p:.3f} > conf {calibrated_confidence:.3f}). Aborting entry.")
                                                     status_msg = "Skipped (Adjusted Structure Fails Economic Gate)"
                                                     continue
-                                                p_star = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price)
+                                                p_star = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price, expected_funding_frac=exp_funding_struct)
+
+                                                # Finding #52: Recompute Kelly with post-sanitizer geometry
+                                                post_sl_m = abs(entry_price - new_stop_price) / max(1e-6, atr_dollars)
+                                                post_tp_m = abs(new_tp_price - entry_price) / max(1e-6, atr_dollars)
+                                                re_scaled_kelly = risk_engine.compute_conservative_kelly(
+                                                    calibrated_confidence=calibrated_confidence,
+                                                    tp_multiplier=post_tp_m,
+                                                    sl_multiplier=post_sl_m,
+                                                    interval=str(iv),
+                                                    trade_history=bot_state.get("trade_history", []),
+                                                    mcc_val=_mcc_val,
+                                                    haircut=realized_haircut,
+                                                    atr_norm=atr_norm_val
+                                                )
+                                                if re_scaled_kelly <= 0.0:
+                                                    log_event("INFO", f"[{symbol} {iv}m] Recomputed Kelly non-positive ({re_scaled_kelly:.4f}) post-sanitizer — abstaining from entry.")
+                                                    status_msg = "Skipped (Kelly Edge <= 0 Post-Sanitizer)"
+                                                    rec.reason_code = ReasonCode.KELLY_EDGE_NON_POSITIVE
+                                                    continue
+                                                new_f_clamped = min(MAX_POSITION_BALANCE_FRAC, re_scaled_kelly)
+                                                if f_clamped > 0:
+                                                    target_notional_usd = target_notional_usd * (new_f_clamped / f_clamped)
+                                                scaled_kelly = re_scaled_kelly
+                                                f_clamped = new_f_clamped
+                                                rec.kelly_effective = float(scaled_kelly)
+
                                             take_profit_price = new_tp_price
 
                                             # Proportional stop-adjustment to preserve all upstream risk budgets (Joint Allocator, Covariance, Vol Regime, Learning Engine, CVaR)
@@ -8774,7 +8920,7 @@ def main():
                                             position_size_usd = min(available_margin, raw_target_margin)
 
                                             # Pre-Trade Signal Guard Check
-                                            pred_info = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{iv}m") or bot_state.get(f"latest_prediction_{iv}") or bot_state.get(f"latest_prediction_{iv}m") or {}
+                                            pred_info = bot_state.get(f"latest_prediction_{symbol}_{iv}") or bot_state.get(f"latest_prediction_{symbol}_{iv}m") or {}
                                             if pred_info.get("is_fallback", False) or pred_info.get("signal_source") in ["RULE_BASED_FALLBACK", "UNSET"]:
                                                 position_size_usd *= 0.50
                                                 print(f"[{symbol} {iv}m Signal Guard] Rule-based fallback signal detected: Applied 50% position sizing penalty.")
@@ -8997,16 +9143,37 @@ def main():
                                             
                                                 if post_floor_pass and all_pass and not wallet_exceeded:
                                                     from trade_calculators import passes_economic_gate, calculate_required_p
-                                                    if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence):
-                                                        final_sl_dist = abs(entry_price - stop_loss_price)
-                                                        final_tp_dist = abs(take_profit_price - entry_price)
-                                                        final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
-                                                        _req_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
-                                                        log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {_req_p:.3f}. Aborting entry.")
-                                                        status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
+                                                    # Finding #52: Recompute Kelly with post-floor SL
+                                                    final_sl_m = abs(entry_price - stop_loss_price) / max(1e-6, atr_dollars)
+                                                    final_tp_m = abs(take_profit_price - entry_price) / max(1e-6, atr_dollars)
+                                                    re_scaled_kelly_final = risk_engine.compute_conservative_kelly(
+                                                        calibrated_confidence=calibrated_confidence,
+                                                        tp_multiplier=final_tp_m,
+                                                        sl_multiplier=final_sl_m,
+                                                        interval=str(iv),
+                                                        trade_history=bot_state.get("trade_history", []),
+                                                        mcc_val=_mcc_val,
+                                                        haircut=realized_haircut,
+                                                        atr_norm=atr_norm_val
+                                                    )
+                                                    if re_scaled_kelly_final <= 0.0:
+                                                        log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced Kelly edge to non-positive ({re_scaled_kelly_final:.4f}). Aborting entry.")
+                                                        status_msg = "Skipped (Kelly Edge <= 0 Post-Floor)"
                                                         post_floor_pass = False
                                                     else:
-                                                        p_star = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
+                                                        rec.kelly_effective = float(re_scaled_kelly_final)
+                                                        fr_pf = get_funding_rate(symbol)
+                                                        exp_funding_pf = max(0.0, (fr_pf if ml_trend == "Bullish" else -fr_pf) * (duration_seconds / 3600.0 / 8.0))
+                                                        if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, conf=calibrated_confidence, expected_funding_frac=exp_funding_pf):
+                                                            final_sl_dist = abs(entry_price - stop_loss_price)
+                                                            final_tp_dist = abs(take_profit_price - entry_price)
+                                                            final_rr = (final_tp_dist / max(1e-9, final_sl_dist))
+                                                            _req_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, expected_funding_frac=exp_funding_pf)
+                                                            log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {_req_p:.3f}. Aborting entry.")
+                                                            status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
+                                                            post_floor_pass = False
+                                                        else:
+                                                            p_star = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price, expected_funding_frac=exp_funding_pf)
                                             
                                                 if not post_floor_pass or not all_pass:
                                                     wallet_exceeded = True

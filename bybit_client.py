@@ -341,7 +341,7 @@ def get_bybit_min_qty_step(symbol: str) -> tuple:
         return mins.get(symbol, 0.001), steps.get(symbol, 0.001)
 
 
-def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market", post_only: bool = False) -> Dict[str, Any]:
+def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market", post_only: bool = False, order_link_id: Optional[str] = None) -> Dict[str, Any]:
     if post_only and not reduce_only:
         return place_bybit_maker_chase_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp)
         
@@ -350,7 +350,8 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
     
     # B15 Idempotency Nonce: Unique client order link ID to prevent double-fill race conditions on retries
     import uuid
-    order_link_id = f"BOT_{symbol}_{side[:1]}_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    if not order_link_id:
+        order_link_id = f"BOT_{symbol}_{side[:1]}_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
     
     payload = {
         "category": "linear",
@@ -375,15 +376,20 @@ def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float]
 
 
 def place_bybit_limit_order(symbol: str, side: str, qty: float, price: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, post_only: bool = False, **kwargs) -> Dict[str, Any]:
-    return place_bybit_order(symbol=symbol, side=side, qty=qty, price=price, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Limit", post_only=post_only)
+    return place_bybit_order(symbol=symbol, side=side, qty=qty, price=price, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Limit", post_only=post_only, order_link_id=kwargs.get("order_link_id"))
 
 
-def place_bybit_taker_ioc_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, **kwargs) -> Dict[str, Any]:
-    return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Market", post_only=False)
+def place_bybit_taker_ioc_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_link_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=reduce_only, order_type="Market", post_only=False, order_link_id=order_link_id)
 
 
-def get_bybit_order_details(symbol: str, order_id: str) -> Dict[str, Any]:
-    res = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderId": order_id})
+def get_bybit_order_details(symbol: str, order_id: Optional[str] = None, order_link_id: Optional[str] = None) -> Dict[str, Any]:
+    params = {"category": "linear", "symbol": symbol}
+    if order_id:
+        params["orderId"] = str(order_id)
+    if order_link_id:
+        params["orderLinkId"] = str(order_link_id)
+    res = bybit_get_request("/v5/order/realtime", params)
     if isinstance(res, dict) and res.get("retCode") == 0:
         orders = res.get("result", {}).get("list", [])
         if orders:

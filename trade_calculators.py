@@ -140,24 +140,26 @@ def get_realized_rr_haircut(
     return float(default_haircut)
 
 
-def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> float:
+def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> float:
     """
-    Computes required break-even probability accounting for realistic execution costs and target realization.
-    Formula: p* = (sl_frac + cost_frac) / (sl_frac + (tp_frac * realized_rr_haircut))
+    Computes required break-even probability accounting for realistic execution costs, target realization,
+    and adverse funding over expected holding horizon (Finding #60).
+    Formula: p* = (sl_frac + cost_frac + expected_funding_frac) / (sl_frac + (tp_frac * realized_rr_haircut))
     """
     sl_dist = abs(entry - sl)
     tp_dist = abs(tp - entry)
     sl_frac = sl_dist / max(1e-9, entry)
     tp_frac = (tp_dist / max(1e-9, entry)) * realized_rr_haircut
-    return (sl_frac + cost_frac) / max(1e-9, (sl_frac + tp_frac))
+    total_cost_frac = cost_frac + max(0.0, float(expected_funding_frac or 0.0))
+    return (sl_frac + total_cost_frac) / max(1e-9, (sl_frac + tp_frac))
 
-def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT) -> bool:
+def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: float = 0.0006, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> bool:
     """
     Evaluates whether calibrated confidence meets the required win rate for the given entry, TP, and SL,
-    accounting for realistic execution costs and target realization.
+    accounting for realistic execution costs, target realization, and adverse funding.
     Returns True if conf >= required_p, False otherwise.
     """
-    required_p = calculate_required_p(entry, tp, sl, cost_frac=cost_frac, realized_rr_haircut=realized_rr_haircut)
+    required_p = calculate_required_p(entry, tp, sl, cost_frac=cost_frac, realized_rr_haircut=realized_rr_haircut, expected_funding_frac=expected_funding_frac)
     return conf >= required_p
 
 MAX_RR_RATIO = {
@@ -1131,13 +1133,15 @@ def calculate_adaptive_structural_stop(
     atr_val: float,
     regime: str = "Trending",
     volatility: float = 0.015,
-    cfg_sl_mult: Optional[float] = None
+    cfg_sl_mult: Optional[float] = None,
+    interval: Optional[str] = None
 ) -> Tuple[float, float, Dict[str, Any]]:
     """
     Refining 3 & 4: Adaptive Swing Window & Fresh Pivot Recency Guard.
     Window length: Trending (8-10 bars), Ranging (5 bars), High Vol (12 bars).
     Fallback to ATR floor if pivot is >12 bars old.
     Honors cfg_sl_mult to prevent live divergence from model training label geometry (Finding #84).
+    Enforces timeframe MIN_SL_PCT_CONFIG (Finding #53).
     Returns: (stop_loss, sl_distance_pct, metadata)
     """
     regime_upper = str(regime).upper()
@@ -1165,7 +1169,18 @@ def calculate_adaptive_structural_stop(
 
     # Refinement 4: Recency Guard & Brownian Noise Clearance Envelope
     recency_passed = bars_ago <= 12
-    noise_floor_pct = 0.002 if cfg_sl_mult is not None else 0.005
+    if interval is not None:
+        import config
+        iv_clean = str(interval).lower().strip().replace("m", "").replace("h", "")
+        if str(interval).lower().endswith("h"):
+            try:
+                iv_clean = str(int(iv_clean) * 60)
+            except ValueError:
+                pass
+        min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+        noise_floor_pct = float(min_sl_cfg.get(iv_clean, min_sl_cfg.get("default", 0.008)))
+    else:
+        noise_floor_pct = 0.002 if cfg_sl_mult is not None else 0.005
     min_noise_dist = max(effective_mult * atr_val, entry_price * noise_floor_pct)
     if is_long:
         structural_sl = swing_price - (0.25 * atr_val) if recency_passed else (entry_price - (effective_mult + 0.25) * atr_val)
