@@ -117,7 +117,8 @@ def compute_conservative_kelly(
     interval: str = "15",
     trade_history: Optional[list] = None,
     mcc_val: Optional[float] = None,
-    haircut: Optional[float] = None
+    haircut: Optional[float] = None,
+    atr_norm: Optional[float] = None
 ) -> float:
     """
     Computes conservative Kelly fraction for trading loop.
@@ -127,15 +128,25 @@ def compute_conservative_kelly(
     """
     import numpy as np
     from kelly_tracker import global_kelly_tracker
-    from config import QUALITY_SIZING
-    
     from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
     haircut = haircut if haircut is not None else getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
     
+    # Compute effective geometry & payoff ratio in consistent units (Finding #49 / #38)
+    eff_tp = float(tp_multiplier) * haircut
+    eff_sl = max(1e-6, float(sl_multiplier))
+    roundtrip_cost = 0.0010
+    atr_norm_val = atr_norm if atr_norm is not None else getattr(config, "TARGET_VOLATILITY_ATR", 0.005)
+    cost_in_atr = roundtrip_cost / max(1e-4, float(atr_norm_val))
+    b_ratio = max(0.01, (eff_tp - cost_in_atr) / eff_sl)
+    geom_p_star = 1.0 / (b_ratio + 1.0)
+
     realized_wr = None
     if trade_history and len(trade_history) >= 10:
         win_count = sum(1 for t in trade_history if float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or t.get("success"))
         realized_wr = float(win_count) / float(len(trade_history))
+        # Finding #38: Geometry gate - if expected win rate cannot clear order geometry break-even, fail closed
+        if min(float(calibrated_confidence), realized_wr) <= geom_p_star:
+            return 0.0
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
             timeframe=str(interval),
             min_trades=10,
@@ -160,16 +171,10 @@ def compute_conservative_kelly(
     if realized_wr is not None:
         p_hat = min(p_hat, realized_wr)
 
-    # Apply 0.80 realized haircut and deduct 0.10% roundtrip fee from payoff ratio (Finding #99)
-    eff_tp = float(tp_multiplier) * haircut
-    eff_sl = max(1e-6, float(sl_multiplier))
-    roundtrip_cost = 0.0010
-    b_ratio = max(0.01, (eff_tp - roundtrip_cost) / eff_sl)
-    
     # Pure Quarter-Kelly formula using calibrated model probability:
     # Full Kelly: f* = (p * (b + 1) - 1) / b
-    # Requires p_hat > 1 / (b + 1) to produce positive edge; otherwise returns 0.0 (Finding #94, #71)
-    p_star = 1.0 / (b_ratio + 1.0)
+    # Requires p_hat > 1 / (b + 1) to produce positive edge; otherwise returns 0.0 (Finding #94, #71, #49)
+    p_star = geom_p_star
     if p_hat <= p_star:
         return 0.0
 

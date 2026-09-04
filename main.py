@@ -1509,10 +1509,20 @@ def update_bybit_stop_loss(symbol, sl_price, active_trade=None, current_sl_snaps
         print(f"[Bybit API] Stop Loss update skipped for {symbol}: Position size is 0.")
         return False
         
+    now_t = time.time()
     live_price = bot_state.get(f"live_price_{symbol}")
     price_ts = bot_state.get(f"live_price_ts_{symbol}", 0.0)
-    if live_price is None or (price_ts > 0.0 and (time.time() - price_ts > 30.0)):
-        live_price = get_fallback_price(symbol)
+    if live_price is None or price_ts <= 0.0 or (now_t - price_ts > 30.0):
+        fresh_price = get_fallback_price(symbol)
+        if fresh_price is not None:
+            live_price = fresh_price
+            bot_state[f"live_price_{symbol}"] = fresh_price
+            bot_state[f"live_price_ts_{symbol}"] = now_t
+            price_ts = now_t
+
+    if live_price is None or price_ts <= 0.0 or (now_t - price_ts > 30.0):
+        print(f"[Bybit API] Stop Loss update skipped for {symbol}: Live price unavailable or stale (age {now_t - price_ts:.1f}s) and fallback failed.")
+        return False
         
     if active_trade:
         current_sl = float(current_sl_snapshot) if current_sl_snapshot is not None else float(active_trade.get("stop_loss", 0.0))
@@ -1577,10 +1587,16 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
         print(f"[Bybit API] Take Profit update skipped for {symbol}: Position size is 0.")
         return False
         
+    now_t = time.time()
     live_price = bot_state.get(f"live_price_{symbol}")
     price_ts = bot_state.get(f"live_price_ts_{symbol}", 0.0)
-    if live_price is None or (price_ts > 0.0 and (time.time() - price_ts > 30.0)):
-        live_price = get_fallback_price(symbol)
+    if live_price is None or price_ts <= 0.0 or (now_t - price_ts > 30.0):
+        fresh_price = get_fallback_price(symbol)
+        if fresh_price is not None:
+            live_price = fresh_price
+            bot_state[f"live_price_{symbol}"] = fresh_price
+            bot_state[f"live_price_ts_{symbol}"] = now_t
+            price_ts = now_t
         
     if live_price is not None:
         if side == "Buy" or side == "Long":  # Long position: Take Profit must be > current price
@@ -2448,15 +2464,15 @@ def load_model_weights(iv):
             eff_tp = live_tp * haircut
             roundtrip_cost = 0.0010
             p_star = (live_sl + roundtrip_cost) / (eff_tp + live_sl)
-            if not is_calibrator_viable(cal_obj, min_required_p_star=p_star):
-                msg = f"Calibrator '{cal_file}' achievable probability ceiling cannot reach break-even p* ({p_star:.4f}) under live R:R."
+            if not is_calibrator_viable(cal_obj, min_required_p_star=p_star, require_target_def=True):
+                msg = f"Calibrator '{cal_file}' achievable probability ceiling cannot reach break-even p* ({p_star:.4f}) under live R:R or lacks required target_definition."
                 log_event("CRITICAL", f"[Calibrator Non-Viable] {msg} Slot set to None (Fail-Closed).")
                 send_telegram_alert(f"🚨 *CALIBRATOR NON-VIABLE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
                 return False
 
             target_def = cal_obj.get("target_definition")
-            if target_def and target_def not in ["triple_barrier_exact", "triple_barrier"]:
-                msg = f"Calibrator '{cal_file}' target definition '{target_def}' is incompatible with live execution engine."
+            if not target_def or target_def not in ["triple_barrier_exact", "triple_barrier"]:
+                msg = f"Calibrator '{cal_file}' target definition '{target_def}' is missing or incompatible with live execution engine."
                 log_event("CRITICAL", f"[Calibrator Target Incompatible] {msg} Slot set to None (Fail-Closed).")
                 return False
 
@@ -4169,25 +4185,29 @@ def load_initial_prices():
                     val_str = ticker.get("lastPrice")
                     if val_str:
                         val = float(val_str)
+                        now_init = time.time()
                         bot_state[f"live_price_{sym}"] = val
+                        bot_state[f"live_price_ts_{sym}"] = now_init
                         found_symbols.add(sym)
                         if sym == "BTCUSDT":
                             live_price = val
                             bot_state["live_price"] = val
-                            last_ws_update_time = time.time()
-                            bot_state["last_update"] = last_ws_update_time
+                            bot_state["last_rest_price_time"] = now_init
+                            bot_state["last_update"] = now_init
         
         # Fall back to external sources (Binance/Coinbase) for any missing symbols (e.g. LINKUSDT on testnet)
         for sym in SUPPORTED_SYMBOLS:
             if sym not in found_symbols:
                 val = get_fallback_price(sym)
                 if val is not None:
+                    now_fb = time.time()
                     bot_state[f"live_price_{sym}"] = val
+                    bot_state[f"live_price_ts_{sym}"] = now_fb
                     if sym == "BTCUSDT" and live_price is None:
                         live_price = val
                         bot_state["live_price"] = val
-                        last_ws_update_time = time.time()
-                        bot_state["last_update"] = last_ws_update_time
+                        bot_state["last_rest_price_time"] = now_fb
+                        bot_state["last_update"] = now_fb
 
         # Pre-warm instrument precision cache to ensure 0-latency live order paths
         for sym in SUPPORTED_SYMBOLS:
@@ -4536,7 +4556,7 @@ def sync_active_positions_from_bybit():
                                     _low = _df_r["low"].astype(float)
                                     _cp = _df_r["close"].astype(float).shift(1)
                                     _tr = pd.concat([_high - _low, (_high - _cp).abs(), (_low - _cp).abs()], axis=1).max(axis=1)
-                                    _a = float(_tr.rolling(14).mean().dropna().iloc[-1])
+                                    _a = float(_tr.ewm(alpha=1.0/14.0, adjust=False).mean().dropna().iloc[-1])
                                 if _a > 0:
                                     calc_atr = _a
                         except Exception as _e:
@@ -4546,9 +4566,12 @@ def sync_active_positions_from_bybit():
                             calc_atr = abs(avg_price - sl_price) / max(0.1, recov_sl_mult) if sl_price > 0 else 0.015 * avg_price
                             log_event("WARNING", f"[{symbol}] Recovery ATR inverted from stop ({recov_sl_mult:.2f}x TF multiplier) — may be inaccurate")
 
-                        if calc_atr > 0.05 * avg_price or calc_atr == 0:
+                        if calc_atr is None or calc_atr <= 0:
                             calc_atr = 0.015 * avg_price
                             log_event("WARNING", f"[{symbol}] ATR unavailable in recovery — using 1.5% fallback ({calc_atr:.4f})")
+                        elif calc_atr > 0.05 * avg_price:
+                            calc_atr = 0.05 * avg_price
+                            log_event("INFO", f"[{symbol}] Recovery ATR clamped to 5% ceiling ({calc_atr:.4f})")
                         
                         # Sanitize TP and SL on recovery
                         if tp_price == 0.0:
@@ -5354,7 +5377,7 @@ def main():
             fallback = get_fallback_price()
             if fallback is not None:
                 live_price = fallback
-                last_ws_update_time = time.time()
+                bot_state["last_rest_price_time"] = time.time()
             else:
                 time.sleep(2)
         time.sleep(0.5)
@@ -5418,12 +5441,12 @@ def main():
         # 1. Health check & current price update (Adaptive to save proxy bandwidth)
         # Rely on background run_fallback_price_updater. Only query directly if live_price is None
         # or has not been updated in over 10 minutes (600s) as a fail-safe.
-        if live_price is None or (current_time - last_ws_update_time > 30.0):
+        if live_price is None or (current_time - last_ws_update_time > 30.0 and current_time - bot_state.get("last_rest_price_time", 0.0) > 30.0):
             fallback_price = get_fallback_price()
             if fallback_price is not None:
                 print(f"[{get_pkt_time().strftime('%H:%M:%S')}] WebSocket/Fallback price is stale or disconnected. Fetching price: {fallback_price:.2f}")
                 live_price = fallback_price
-                last_ws_update_time = current_time
+                bot_state["last_rest_price_time"] = current_time
             
         current_price = live_price
         if current_price is None:
@@ -5483,15 +5506,21 @@ def main():
             updated_trades = []
             for active_trade in active_trades_list:
                 active_symbol = active_trade.get("symbol", "BTCUSDT")
+                now_exit = time.time()
                 symbol_price = bot_state.get(f"live_price_{active_symbol}")
                 symbol_price_ts = bot_state.get(f"live_price_ts_{active_symbol}", 0.0)
-                if symbol_price is None or (time.time() - symbol_price_ts > 30.0):
+                if symbol_price is None or symbol_price_ts <= 0.0 or (now_exit - symbol_price_ts > 30.0):
                     fresh_price = get_fallback_price(active_symbol)
                     if fresh_price is not None:
                         symbol_price = fresh_price
                         bot_state[f"live_price_{active_symbol}"] = fresh_price
-                        bot_state[f"live_price_ts_{active_symbol}"] = time.time()
-                if symbol_price is None:
+                        bot_state[f"live_price_ts_{active_symbol}"] = now_exit
+                        symbol_price_ts = now_exit
+                    else:
+                        log_event("WARNING", f"[{active_symbol}] Live price stale (age {now_exit - symbol_price_ts:.1f}s) and fallback unavailable. Abstaining from exit evaluation.")
+                        updated_trades.append(active_trade)
+                        continue
+                if symbol_price is None or symbol_price_ts <= 0.0 or (now_exit - symbol_price_ts > 30.0):
                     updated_trades.append(active_trade)
                     continue
                 current_price = symbol_price
@@ -5924,13 +5953,13 @@ def main():
                 atr_ratio_val = 1.0
                 df_recent_pos = get_history(symbol=active_symbol, interval=str(iv), limit=100)
                 if df_recent_pos is not None and not df_recent_pos.empty and len(df_recent_pos) >= 20:
-                    if "ATR_norm" not in df_recent_pos.columns:
+                    if "ATR_norm" not in df_recent_pos.columns or "ATR" not in df_recent_pos.columns:
                         high_s = df_recent_pos["high"].astype(float)
                         low_s = df_recent_pos["low"].astype(float)
                         close_s = df_recent_pos["close"].astype(float)
                         prev_close_s = close_s.shift(1)
                         tr_s = pd.concat([high_s - low_s, (high_s - prev_close_s).abs(), (low_s - prev_close_s).abs()], axis=1).max(axis=1)
-                        atr_s = tr_s.rolling(14).mean()
+                        atr_s = tr_s.ewm(alpha=1.0/14.0, adjust=False).mean()
                         df_recent_pos["ATR"] = atr_s
                         df_recent_pos["ATR_norm"] = atr_s / close_s.replace(0, np.nan)
                     df_norm_clean = df_recent_pos["ATR_norm"].dropna()
@@ -5991,6 +6020,14 @@ def main():
                     avg_vol = float(df_recent_pos["volume"].iloc[-20:].mean()) if (df_recent_pos is not None and "volume" in df_recent_pos.columns and len(df_recent_pos) >= 5) else 120.0
                     curr_atr_val = None
                     if df_recent_pos is not None and not df_recent_pos.empty:
+                        if ("ATR" not in df_recent_pos.columns or "ATR_norm" not in df_recent_pos.columns) and len(df_recent_pos) >= 2:
+                            high_s = df_recent_pos["high"].astype(float)
+                            low_s = df_recent_pos["low"].astype(float)
+                            close_s = df_recent_pos["close"].astype(float)
+                            prev_close_s = close_s.shift(1)
+                            tr_s = pd.concat([high_s - low_s, (high_s - prev_close_s).abs(), (low_s - prev_close_s).abs()], axis=1).max(axis=1)
+                            df_recent_pos["ATR"] = tr_s.ewm(alpha=1.0/14.0, adjust=False).mean()
+                            df_recent_pos["ATR_norm"] = df_recent_pos["ATR"] / close_s.replace(0, np.nan)
                         if "ATR" in df_recent_pos.columns and len(df_recent_pos["ATR"].dropna()) > 0:
                             curr_atr_val = float(df_recent_pos["ATR"].dropna().iloc[-1])
                         elif "ATR_norm" in df_recent_pos.columns and "close" in df_recent_pos.columns and len(df_recent_pos["ATR_norm"].dropna()) > 0:
@@ -6826,7 +6863,10 @@ def main():
                 if not is_up_to_date_val:
                     return sym, interval_val, df_raw_val, None
                 
+                raw_attrs = dict(getattr(df_raw_val, "attrs", {}))
                 df_target_val = df_completed_val.copy()
+                if "is_synthetic" in df_raw_val.columns and "is_synthetic" not in df_target_val.columns:
+                    df_target_val["is_synthetic"] = df_raw_val["is_synthetic"].iloc[:-1].values
                 if sym != "BTCUSDT":
                     df_btc_val = btc_hist_cache.get(interval_val)
                     if df_btc_val is not None and len(df_btc_val) > 0:
@@ -6846,6 +6886,11 @@ def main():
                 else:
                     df_target_val = merge_derivatives_sentiment_features(df_target_val, symbol=sym, interval=interval_val)
                 df_feat_val = add_features(df_target_val, symbol=sym, interval=interval_val)
+                if df_feat_val is not None and not df_feat_val.empty:
+                    for k, v in raw_attrs.items():
+                        df_feat_val.attrs[k] = v
+                    if "is_synthetic" in df_target_val.columns and "is_synthetic" not in df_feat_val.columns:
+                        df_feat_val["is_synthetic"] = df_target_val["is_synthetic"]
                 
                 return sym, interval_val, df_raw_val, df_feat_val
  
@@ -7005,22 +7050,26 @@ def main():
                         latest_candle = df.iloc[-1]
                         
                         # S-3 Data Continuity Guard: Refuse evaluation if candle series has unserviceable gaps (> 3 bars)
+                        synthetic_count = int(df["is_synthetic"].sum()) if "is_synthetic" in df.columns else int(getattr(df, "attrs", {}).get("synthetic_bar_count", 0))
                         gap_exceeded = False
                         max_g = 0
-                        if getattr(df, "attrs", {}).get("gap_exceeded", False):
+                        if getattr(df, "attrs", {}).get("gap_exceeded", False) or synthetic_count > 5:
                             gap_exceeded = True
-                            max_g = df.attrs.get("max_consecutive_synthetic_bars", 0)
+                            max_g = max(int(getattr(df, "attrs", {}).get("max_consecutive_synthetic_bars", 0)), synthetic_count)
                         elif "timestamp" in df.columns and len(df) > 1:
                             expected_step_ms = int(iv) * 60 * 1000
                             ts_diffs = df["timestamp"].diff().dropna()
                             max_diff = ts_diffs.max() if len(ts_diffs) > 0 else expected_step_ms
-                            if max_diff > expected_step_ms * 3.5:
-                                gap_exceeded = True
+                            if max_diff > expected_step_ms * 1.5:
                                 max_g = int(round(max_diff / expected_step_ms)) - 1
+                                if max_diff > expected_step_ms * 3.5:
+                                    gap_exceeded = True
+                        if not gap_exceeded and synthetic_count > 0:
+                            max_g = max(max_g, synthetic_count)
                         
                         if gap_exceeded:
-                            print(f"[{symbol} {iv}m Gap Guard] Window contains {max_g} consecutive missing bars (> 3). Abstaining from signal evaluation (Fail-Closed).")
-                            log_event("WARNING", f"[{symbol} {iv}m] Unserviceable gap ({max_g} bars) in candle history — abstaining (Fail-Closed)")
+                            print(f"[{symbol} {iv}m Gap Guard] Window contains {max_g} consecutive missing bars (> 3) or {synthetic_count} synthetic bars (> 5). Abstaining from signal evaluation (Fail-Closed).")
+                            log_event("WARNING", f"[{symbol} {iv}m] Unserviceable gap ({max_g} bars, synthetic: {synthetic_count}) in candle history — abstaining (Fail-Closed)")
                             continue
                     
                         from data_quality_engine import DataQualityEngine
@@ -7040,15 +7089,18 @@ def main():
                         if "_mdq_monitor" not in bot_state:
                             bot_state["_mdq_monitor"] = MarketDataQualityMonitor()
                         mdq = bot_state["_mdq_monitor"]
+                        with _time_offset_lock:
+                            srv_offset = _cached_time_offset
                         mdq_res = mdq.evaluate_feed_health(
                             last_candle_timestamp=float(latest_completed_ts / 1000.0),
-                            server_time_ms=float(now_ms),
+                            server_time_ms=float(now_ms + srv_offset),
                             client_time_ms=float(now_ms),
                             ws_connected=bool(ws_connected),
                             interval_sec=float(int(iv) * 60)
                         )
-                        if mdq_res.get("tier") == "RED":
-                            log_event("WARNING", f"[{symbol} {iv}m MDQ] Feed health RED: {mdq_res.get('reasons')}. Abstaining.")
+                        if mdq_res.get("health_tier") == "RED" or mdq_res.get("tier") == "RED" or not mdq_res.get("trading_allowed", True):
+                            reasons_str = mdq_res.get("reasons") or mdq_res.get("feed_status")
+                            log_event("WARNING", f"[{symbol} {iv}m MDQ] Feed health RED: {reasons_str}. Abstaining.")
                             continue
                     
                         # Dynamic Regime Routing based on GMM Unsupervised Classifier
@@ -7602,7 +7654,7 @@ def main():
                             # but never cap below effective_base (which would loosen the model's baseline gating)
                             effective_base = max(float(economic_base_threshold), float(base_cfg_thresh))
                             max_conf_cap = max(effective_base, 0.50 if str(iv) in ["15", "30", "60"] else 0.55)
-                            dynamic_conf_threshold = min(max_conf_cap, dynamic_conf_threshold)
+                            dynamic_conf_threshold = max(effective_base, min(max_conf_cap, dynamic_conf_threshold))
 
                             # Calculate live market microstructure spread in bps
                             _bid_px = float(latest_candle.get("bid", latest_candle.get("close", 100.0)))
@@ -7951,8 +8003,8 @@ def main():
 
                             # Bound final threshold relative to economic base
                             from config import MAX_THRESHOLD_UPLIFT
-                            effective_base = max(economic_base_threshold, base_cfg_thresh)
-                            max_allowed_threshold = min(0.65, effective_base + MAX_THRESHOLD_UPLIFT)
+                            effective_base = max(float(economic_base_threshold), float(base_cfg_thresh))
+                            max_allowed_threshold = max(effective_base, min(0.65, effective_base + MAX_THRESHOLD_UPLIFT))
                             dynamic_conf_threshold = float(round(max(effective_base, min(max_allowed_threshold, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
@@ -8280,7 +8332,8 @@ def main():
                                             interval=str(iv),
                                             trade_history=bot_state.get("trade_history", []),
                                             mcc_val=_mcc_val,
-                                            haircut=realized_haircut
+                                            haircut=realized_haircut,
+                                            atr_norm=atr_norm_val
                                         )
                                         rec.kelly_effective = float(scaled_kelly)
                                     
@@ -8555,19 +8608,22 @@ def main():
                                             if struct_log != "OK":
                                                 print(f"[{symbol} {iv}m Pre-Flight Audit] {struct_log}")
 
+                                            orig_sl_price = stop_loss_price
+                                            orig_tp_price = take_profit_price
                                             new_stop_price = adjusted_struct["stop_price"]
-                                            take_profit_price = adjusted_struct["tp_price"]
+                                            new_tp_price = adjusted_struct["tp_price"]
                                             leverage_val = adjusted_struct["leverage"]
 
                                             # Reconcile geometry: If validate_trade_structure widened stop or capped TP, verify economic gate still passes
-                                            if abs(new_stop_price - stop_loss_price) > 1e-6 or abs(take_profit_price - adjusted_struct["tp_price"]) > 1e-6:
+                                            if abs(new_stop_price - orig_sl_price) > 1e-6 or abs(new_tp_price - orig_tp_price) > 1e-6:
                                                 from trade_calculators import passes_economic_gate, calculate_required_p
-                                                if not passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=new_stop_price, conf=calibrated_confidence):
-                                                    _req_p = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=new_stop_price)
+                                                if not passes_economic_gate(entry=entry_price, tp=new_tp_price, sl=new_stop_price, conf=calibrated_confidence):
+                                                    _req_p = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price)
                                                     print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Adjusted trade structure fails economic gate (requires {_req_p:.3f} > conf {calibrated_confidence:.3f}). Aborting entry.")
                                                     status_msg = "Skipped (Adjusted Structure Fails Economic Gate)"
                                                     continue
-                                                p_star = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=new_stop_price)
+                                                p_star = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price)
+                                            take_profit_price = new_tp_price
 
                                             # Proportional stop-adjustment to preserve all upstream risk budgets (Joint Allocator, Covariance, Vol Regime, Learning Engine, CVaR)
                                             new_stop_loss_frac = max(0.002, abs(entry_price - new_stop_price) / max(1e-9, entry_price))
@@ -8776,10 +8832,27 @@ def main():
                                                         status_msg = "Skipped (Insufficient Free Margin for Min Order)"
                                                         wallet_exceeded = True
                                                     else:
-                                                        stop_loss_price = new_sl_price
-                                                        position_size_usd = min(available_margin, final_val)
-                                                        is_oversized_trade = True
-                                                        print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Applied noise-clearance SL (${new_stop_dist:.4f}) with total risk ${scaled_risk_usd:.2f}.")
+                                                        if new_stop_dist > original_stop_dist + 1e-4:
+                                                            from trade_calculators import passes_economic_gate, calculate_required_p
+                                                            re_sl_m = new_stop_dist / max(1e-6, atr_dollars)
+                                                            re_eff_tp = resolved_tp_m * realized_haircut
+                                                            re_p_star = re_sl_m / max(1e-6, (re_eff_tp + re_sl_m))
+                                                            re_cost_adj = (cost_bps / 1e4) / max(1e-6, (re_eff_tp + re_sl_m) * max(1e-4, atr_norm_val))
+                                                            re_gate_threshold = float(round(re_p_star + re_cost_adj, 4))
+                                                            econ_pass = passes_economic_gate(entry=entry_price, tp=take_profit_price, sl=new_sl_price, conf=calibrated_confidence)
+                                                            req_p_val = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=new_sl_price)
+                                                            if calibrated_confidence < max(re_gate_threshold, req_p_val) or not econ_pass:
+                                                                log_event("WARNING", f"[{symbol} {iv}m Min Order Risk] REJECTED: Widened min-order stop fails economic break-even gate (requires {max(re_gate_threshold, req_p_val):.3f} > conf {calibrated_confidence:.3f}). Aborting entry.")
+                                                                status_msg = "Skipped (Widened Stop Below Economic Break-Even)"
+                                                                wallet_exceeded = True
+                                                            else:
+                                                                p_star = req_p_val
+
+                                                        if not wallet_exceeded:
+                                                            stop_loss_price = new_sl_price
+                                                            position_size_usd = min(available_margin, final_val)
+                                                            is_oversized_trade = True
+                                                            print(f"[{symbol} {iv}m API] Enforced minimum order value (${scaled_notional:.2f}). Applied noise-clearance SL (${new_stop_dist:.4f}) with total risk ${scaled_risk_usd:.2f}.")
 
                                                 # Priority 3: Balance Guard - If margin exceeds 90% of free available margin, reject trade.
                                                 required_margin = (qty_val * entry_price) / max(1e-8, leverage_val)
@@ -8807,6 +8880,8 @@ def main():
                                                         log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced R:R to {final_rr:.2f}; calibrated confidence {calibrated_confidence:.3f} < required threshold {_req_p:.3f}. Aborting entry.")
                                                         status_msg = f"Skipped (Post-Floor R:R {final_rr:.2f} Econ Fail)"
                                                         post_floor_pass = False
+                                                    else:
+                                                        p_star = calculate_required_p(entry=entry_price, tp=take_profit_price, sl=stop_loss_price)
                                             
                                                 if not post_floor_pass or not all_pass:
                                                     wallet_exceeded = True

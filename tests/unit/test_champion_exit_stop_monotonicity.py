@@ -83,7 +83,7 @@ def test_update_bybit_stop_loss_rejects_widening_via_snapshot():
     }
 
     # Attempt to widen SL to 100058 while current snapshot is 100400.0
-    with patch("main.bot_state", {"live_price_BTCUSDT": 100750.0}), \
+    with patch("main.bot_state", {"live_price_BTCUSDT": 100750.0, "live_price_ts_BTCUSDT": time.time()}), \
          patch("main.bybit_post_request") as mock_post:
 
         result = main.update_bybit_stop_loss(
@@ -107,7 +107,7 @@ def test_update_bybit_stop_loss_accepts_tighter_sl():
         "target_stop_state": "TRAILING"
     }
 
-    with patch("main.bot_state", {"live_price_BTCUSDT": 101000.0}), \
+    with patch("main.bot_state", {"live_price_BTCUSDT": 101000.0, "live_price_ts_BTCUSDT": time.time()}), \
          patch("main.bybit_post_request", return_value={"retCode": 0}) as mock_post:
 
         result = main.update_bybit_stop_loss(

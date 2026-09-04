@@ -160,7 +160,11 @@ class BetaCalibrator:
         return bc
 
 
-def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: Optional[float] = None) -> bool:
+def is_calibrator_viable(
+    calibrator_data: Optional[Dict],
+    min_required_p_star: Optional[float] = None,
+    require_target_def: bool = False
+) -> bool:
     """
     Checks if a calibrator dictionary represents a viable, non-degenerate probability map
     whose achievable ceiling exceeds the fee-inclusive break-even p*.
@@ -172,6 +176,8 @@ def is_calibrator_viable(calibrator_data: Optional[Dict], min_required_p_star: O
     if calibrator_data.get("is_fitted") is False:
         return False
     target_def = calibrator_data.get("target_definition")
+    if require_target_def and not target_def:
+        return False
     if target_def and target_def not in ["triple_barrier_exact", "triple_barrier"]:
         return False
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):

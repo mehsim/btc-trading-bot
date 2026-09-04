@@ -634,6 +634,7 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1, fail_if_st
                     merged_df["low"] = merged_df["low"].fillna(merged_df["close"])
                     merged_df["volume"] = merged_df["volume"].fillna(0.0)
                     final_df = merged_df.iloc[-target_count:].reset_index(drop=True)
+                    final_df["is_synthetic"] = merged_df["is_synthetic"].iloc[-target_count:].reset_index(drop=True).astype(bool)
                     is_gap_exceeded = bool(synthetic_count > 5)
                     final_df.attrs["is_discontinuous"] = is_gap_exceeded
                     final_df.attrs["gap_exceeded"] = is_gap_exceeded
@@ -650,6 +651,9 @@ def get_history(symbol="BTCUSDT", interval="15", limit=1000, pages=1, fail_if_st
             final_df.attrs["gap_exceeded"] = False
             final_df.attrs["synthetic_bar_count"] = 0
             final_df.attrs["max_consecutive_synthetic_bars"] = 0
+
+    if "is_synthetic" not in final_df.columns:
+        final_df["is_synthetic"] = False
 
     now_ms = time.time() * 1000.0
     latest_ts = float(final_df["timestamp"].iloc[-1]) if not final_df.empty else 0.0
@@ -979,6 +983,7 @@ def get_fear_and_greed_history():
 def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol="BTCUSDT"):
     """Merge pre-fetched OI, funding, F&G, and BTC DataFrames into df without making live REST calls.
     Mirrors the complete merge logic of merge_derivatives_sentiment_features for use in the parallel fetch pipeline."""
+    _saved_attrs = dict(getattr(df, "attrs", {}))
     if df.empty:
         df["open_interest"] = 0.0
         df["funding_rate"] = 0.0
@@ -986,6 +991,8 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
         df["btc_close"] = 0.0
         df["btc_volume"] = 0.0
         df["btc_rsi"] = 50.0
+        for _k, _v in _saved_attrs.items():
+            df.attrs[_k] = _v
         return df
 
     df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype("int64")
@@ -1067,14 +1074,19 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
     df["btc_volume"] = df["btc_volume"].ffill().fillna(df["volume"])
     df["btc_rsi"] = df["btc_rsi"].ffill().fillna(50.0)
     
+    for _k, _v in _saved_attrs.items():
+        df.attrs[_k] = _v
     return df
 
 
 def merge_derivatives_sentiment_features(df, symbol, interval):
+    _saved_attrs = dict(getattr(df, "attrs", {}))
     if df.empty:
         df["open_interest"] = 0.0
         df["funding_rate"] = 0.0
         df["fear_greed"] = 50.0
+        for _k, _v in _saved_attrs.items():
+            df.attrs[_k] = _v
         return df
 
     df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype("int64")
@@ -1183,6 +1195,8 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
     df["btc_volume"] = df["btc_volume"].ffill().fillna(df["volume"])
     df["btc_rsi"] = df["btc_rsi"].ffill().fillna(50.0)
     
+    for _k, _v in _saved_attrs.items():
+        df.attrs[_k] = _v
     return df
 
 def classify_market_regime(df_history: pd.DataFrame, interval: Optional[str] = None) -> str:

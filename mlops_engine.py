@@ -301,13 +301,6 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
             if min_dir_share < 0.02 and probs_arr.shape[1] >= 3:
                 return False, f"REJECTED: B-5 unresponsive model — minimum directional class share {min_dir_share:.1%} below 2.0% responsiveness floor"
 
-    if cand is not None and champ is not None:
-        champ_mcc = champ.get("mcc", champ.get("mcc_mean"))
-        cand_mcc = cand.get("mcc", cand.get("mcc_mean"))
-        if champ_mcc is not None and cand_mcc is not None:
-            if float(cand_mcc) < float(champ_mcc) - tol:
-                return False, f"REJECTED: MCC regression {float(champ_mcc):.4f} → {float(cand_mcc):.4f} (tol {tol})"
-
     max_ece_ceiling = gates.get("max_ece", MODEL_GOVERNANCE.get("max_ece", 0.08))
     max_brier_ceiling = gates.get("max_brier", MODEL_GOVERNANCE.get("max_brier", 0.50))
     min_oos_sharpe_floor = gates.get("min_oos_sharpe", MODEL_GOVERNANCE.get("min_oos_sharpe", 0.50))

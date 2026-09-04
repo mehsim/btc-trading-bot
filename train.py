@@ -1715,6 +1715,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 "min_bin_support": MIN_BIN,
                 "is_fitted": bool(bc.is_fitted),
                 "is_fallback": bool(not bc.is_fitted),
+                "target_definition": "triple_barrier_exact",
                 "barrier_geometry": {
                     "tp_mult_trending": float(cfg_iv.get("tp_mult_trending", 1.85)),
                     "tp_mult_ranging": float(cfg_iv.get("tp_mult_ranging", 1.40)),
@@ -2362,7 +2363,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 champ_eval = {"mcc": champ_mcc_val or 0.0, "balanced_accuracy": 0.33, "model_hash": champ_manifest.get("git_sha", "unknown")} if (champion_exists and not contract_stale) else None
                 promoted, p_reason = promote_if_better(reg_name, challenger_version=challenger_ver, cand=cand_eval, champ=champ_eval)
                 if not promoted:
-                    if is_distribution_shifted and "MCC regression" in str(p_reason):
+                    is_pure_mcc_regression = str(p_reason).startswith("REJECTED: MCC regression")
+                    abs_floors_met = (
+                        float(chal_brier) <= 0.50 and
+                        float(chal_sharpe) >= 0.50 and
+                        (locals().get("chal_mcc_min") is None or float(locals().get("chal_mcc_min")) >= 0.0)
+                    )
+                    if is_distribution_shifted and is_pure_mcc_regression and abs_floors_met:
                         print(f"  [MLOps Promotion Gate] Champion MCC regression forgiven under distribution shift: {p_reason}")
                     else:
                         print(f"  [MLOps Promotion Gate] Promotion REJECTED: {p_reason}")

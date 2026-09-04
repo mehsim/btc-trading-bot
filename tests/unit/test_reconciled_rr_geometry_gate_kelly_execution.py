@@ -41,7 +41,9 @@ def test_gate_kelly_execution_rr_geometry_reconciliation():
         calibrated_confidence=p_star,
         tp_multiplier=effective_tp_m,
         sl_multiplier=resolved_sl_m,
-        interval="15"
+        interval="15",
+        haircut=1.0,
+        atr_norm=atr_norm
     )
     assert kelly_at_p_star == 0.0
 
@@ -50,7 +52,9 @@ def test_gate_kelly_execution_rr_geometry_reconciliation():
         calibrated_confidence=p_star - 0.05,
         tp_multiplier=effective_tp_m,
         sl_multiplier=resolved_sl_m,
-        interval="15"
+        interval="15",
+        haircut=1.0,
+        atr_norm=atr_norm
     )
     assert kelly_below_p_star == 0.0
 
@@ -59,7 +63,9 @@ def test_gate_kelly_execution_rr_geometry_reconciliation():
         calibrated_confidence=p_star + 0.10,
         tp_multiplier=effective_tp_m,
         sl_multiplier=resolved_sl_m,
-        interval="15"
+        interval="15",
+        haircut=1.0,
+        atr_norm=atr_norm
     )
     assert kelly_above_p_star > 0.0
 

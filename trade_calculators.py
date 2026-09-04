@@ -901,13 +901,14 @@ def calculate_covariance_multiplier(new_symbol, new_direction, bot_state=None):
         from data import get_history
         df_vol = get_history(symbol=new_symbol, interval="60", limit=30)
         if df_vol is not None and not df_vol.empty and len(df_vol) >= 15:
-            if "ATR_norm" not in df_vol.columns:
+            if "ATR_norm" not in df_vol.columns or "ATR" not in df_vol.columns:
                 high_s = df_vol["high"].astype(float)
                 low_s = df_vol["low"].astype(float)
                 close_s = df_vol["close"].astype(float)
                 prev_close_s = close_s.shift(1)
                 tr_s = pd.concat([high_s - low_s, (high_s - prev_close_s).abs(), (low_s - prev_close_s).abs()], axis=1).max(axis=1)
-                atr_s = tr_s.rolling(14).mean()
+                atr_s = tr_s.ewm(alpha=1.0/14.0, adjust=False).mean()
+                df_vol["ATR"] = atr_s
                 df_vol["ATR_norm"] = atr_s / close_s.replace(0, np.nan)
             df_norm_clean = df_vol["ATR_norm"].dropna()
             if len(df_norm_clean) > 0:

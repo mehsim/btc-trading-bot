@@ -128,12 +128,14 @@ class MarketDataQualityMonitor:
             "sequence_gaps": self.sequence_gap_count,
             "duplicate_messages": self.duplicate_count,
             "health_tier": self.current_tier,
+            "tier": self.current_tier,
             "raw_tier": raw_tier,
             "feed_trend": feed_trend, # IMPROVING, STABLE, DETERIORATING
             "trading_allowed": self.current_tier != "RED",
             "decay_factor": decay_factor,
             "transition_count": len(self.transition_log),
-            "feed_status": "HEALTHY" if self.current_tier == "GREEN" else ("DEGRADED" if self.current_tier != "RED" else "CRITICAL")
+            "feed_status": "HEALTHY" if self.current_tier == "GREEN" else ("DEGRADED" if self.current_tier != "RED" else "CRITICAL"),
+            "reasons": [self.transition_log[-1]["reason"]] if self.transition_log else [f"Feed status: {self.current_tier}"]
         }
 
     def apply_explainable_confidence_decay(

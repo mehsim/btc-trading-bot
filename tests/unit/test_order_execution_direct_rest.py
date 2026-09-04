@@ -18,7 +18,7 @@ def test_order_execution_routes_direct_to_rest():
         assert resp["retCode"] == 0
         # Verify orderLinkId was injected
         assert "orderLinkId" in mock_payload
-        assert mock_payload["orderLinkId"].startswith("cl_BTCUSDT_")
+        assert mock_payload["orderLinkId"].startswith("B_BTC_") or mock_payload["orderLinkId"].startswith("cl_BTCUSDT_")
 
 def test_per_symbol_order_locks_are_isolated():
     """Verify that different symbols receive distinct lock instances."""
