@@ -413,18 +413,59 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             i += 1
             continue
 
+        # Conservative Kelly edge gate & sizing (mirrors live risk_engine)
+        import risk_engine
+        from config import MIN_POSITION_BALANCE_FRAC, MAX_POSITION_BALANCE_FRAC
+        scaled_kelly = risk_engine.compute_conservative_kelly(
+            calibrated_confidence=calibrated_confidence,
+            tp_multiplier=tp_dist / max(1e-6, sl_dist),
+            sl_multiplier=1.0,
+            interval=str(interval),
+            trade_history=trades[-30:] if trades else [],
+            mcc_val=0.10,
+            haircut=0.28,
+            atr_norm=atr_norm
+        )
+        if scaled_kelly <= 0.0:
+            i += 1
+            continue
+        position_frac = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
+
         # Look up to lookahead candles
         lookahead = OVERRIDE_LOOKAHEAD if OVERRIDE_LOOKAHEAD is not None else cfg.get("lookahead", 10)
-        
+
         start_step = 1 if pessimistic_mode else 1
         exit_price = df.iloc[min(i + lookahead, total_candles - 1)]["close"]
         exit_reason = "Timer Elapsed"
         candles_elapsed = lookahead
 
+        # Scale-Out Configuration (mirrors live main.py:5885-5920)
+        from config import SCALE_OUT_CONFIG
+        scale_out_portion = SCALE_OUT_CONFIG.get("position_portion", 0.50)
+        adx_val = float(df.iloc[i].get("ADX", 25.0))
+        if str(interval) in ["240", "360"]:
+            scale_out_mult = 1.60 if adx_val >= 35.0 else (1.20 if adx_val < 22.0 else 1.40)
+        elif str(interval) in ["60", "120"]:
+            scale_out_mult = 1.40 if adx_val >= 35.0 else (1.00 if adx_val < 22.0 else 1.20)
+        else:
+            scale_out_mult = 1.20 if adx_val >= 35.0 else (0.80 if adx_val < 22.0 else 1.00)
+        scale_out_target = entry_price + (scale_out_mult * atr_dollars) if ml_trend == "Bullish" else entry_price - (scale_out_mult * atr_dollars)
+        half_closed = False
+        scale_out_price = None
+
         # Trailing Stop & Break-Even Tracking (mirrors live exit_manager.py)
+        from exit_manager import compute_dynamic_trail_params
+        profit_hurdle_dist, min_trail_buffer = compute_dynamic_trail_params(
+            iv=str(interval),
+            tf=str(interval),
+            entry_price=entry_price,
+            atr_dollars=atr_dollars,
+            current_adx=adx_val,
+            regime="Trending" if is_trending_state else "Ranging"
+        )
         curr_sl = stop_loss
         be_activated = False
-        trail_hurdle = sl_dist * 1.0  # 1R profit hurdle to activate break-even / trailing
+        trail_hurdle = profit_hurdle_dist
 
         for step in range(start_step, lookahead + 1):
             if i + step >= total_candles:
@@ -443,10 +484,16 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                     exit_reason = "Take Profit"
                     candles_elapsed = step
                     break
+                # Scale-out check before full TP
+                if not half_closed and high >= scale_out_target:
+                    half_closed = True
+                    scale_out_price = scale_out_target
+                    be_activated = True
+                    curr_sl = max(curr_sl, entry_price + (fee_rate * 2.0 * entry_price))
                 # Ratchet break-even and trailing stop forward
                 if high >= entry_price + trail_hurdle:
                     be_activated = True
-                    new_trail_sl = max(entry_price + (fee_rate * 2.0 * entry_price), high - sl_dist)
+                    new_trail_sl = max(entry_price + (fee_rate * 2.0 * entry_price), high - max(sl_dist, min_trail_buffer))
                     if new_trail_sl > curr_sl:
                         curr_sl = new_trail_sl
             else:
@@ -460,26 +507,34 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                     exit_reason = "Take Profit"
                     candles_elapsed = step
                     break
+                # Scale-out check before full TP
+                if not half_closed and low <= scale_out_target:
+                    half_closed = True
+                    scale_out_price = scale_out_target
+                    be_activated = True
+                    curr_sl = min(curr_sl, entry_price - (fee_rate * 2.0 * entry_price))
                 # Ratchet break-even and trailing stop forward
                 if low <= entry_price - trail_hurdle:
                     be_activated = True
-                    new_trail_sl = min(entry_price - (fee_rate * 2.0 * entry_price), low + sl_dist)
+                    new_trail_sl = min(entry_price - (fee_rate * 2.0 * entry_price), low + max(sl_dist, min_trail_buffer))
                     if new_trail_sl < curr_sl:
                         curr_sl = new_trail_sl
 
-        if ml_trend == "Bullish":
-            gross_return = (exit_price - entry_price) / entry_price
+        fee_cost = (2.0 * fee_rate) if pessimistic_mode else (fee_rate + ((atr_norm * 0.05) if atr_norm is not None else 0.0005))
+        if half_closed and scale_out_price is not None:
+            gross_ret_so = (scale_out_price - entry_price) / entry_price if ml_trend == "Bullish" else (entry_price - scale_out_price) / entry_price
+            net_ret_so = gross_ret_so - fee_cost
+            gross_ret_rem = (exit_price - entry_price) / entry_price if ml_trend == "Bullish" else (entry_price - exit_price) / entry_price
+            net_ret_rem = gross_ret_rem - fee_cost
+            net_return = (scale_out_portion * net_ret_so) + ((1.0 - scale_out_portion) * net_ret_rem)
+            gross_return = (scale_out_portion * gross_ret_so) + ((1.0 - scale_out_portion) * gross_ret_rem)
         else:
-            gross_return = (entry_price - exit_price) / entry_price
-            
-        if pessimistic_mode:
-            # Full round-trip fee (entry + exit). Spread was already charged at fill time on entry_price
-            total_trading_cost = 2.0 * fee_rate
-            net_return = gross_return - total_trading_cost
-        else:
-            vol_slippage = (atr_norm * 0.05) if atr_norm is not None else 0.0005
-            net_return = gross_return - fee_rate - vol_slippage
-        
+            if ml_trend == "Bullish":
+                gross_return = (exit_price - entry_price) / entry_price
+            else:
+                gross_return = (entry_price - exit_price) / entry_price
+            net_return = gross_return - fee_cost
+
         # Deduct 8h perpetual funding rate for holds >= 8 hours
         try:
             iv_num = int(str(interval).replace("m", "").replace("h", "0")) if str(interval).isdigit() else 60
@@ -488,9 +543,10 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         hours_held = (candles_elapsed * iv_num) / 60.0
         funding_cost = (hours_held / 8.0) * 0.0001 if hours_held >= 8.0 else 0.0
         net_return = net_return - funding_cost
-        
-        equity_compounded = equity_compounded * (1.0 + net_return)
-        equity_simple += net_return
+
+        equity_trade_return = position_frac * net_return
+        equity_compounded = equity_compounded * (1.0 + equity_trade_return)
+        equity_simple += equity_trade_return
 
         peak_equity = max(peak_equity, equity_compounded)
         current_drawdown = (peak_equity - equity_compounded) / max(1e-9, peak_equity)
@@ -521,10 +577,13 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             "take_profit": float(take_profit),
             "tp_m": float(tp_m),
             "candles_elapsed": int(candles_elapsed),
-            "exit_reason": str(exit_reason),
+            "exit_reason": str(exit_reason) + (" (Scale-Out)" if half_closed else ""),
             "exit_price": float(exit_price),
             "gross_return": float(gross_return),
             "net_return": float(net_return),
+            "equity_return": float(equity_trade_return),
+            "position_frac": float(position_frac),
+            "half_closed": half_closed,
             "sl_frac": float(_sl_frac),
             "symbol": sym_name,
             "interval": str(interval),
@@ -819,7 +878,9 @@ def run_backtest():
             wins_p = int(round((win_rate_p / 100.0) * t_count_p))
             ci_l, ci_u = wilson_score_interval(wins_p, t_count_p)
             pess_wr_str = f"{win_rate_p:.1f}% [{ci_l*100:.1f}%, {ci_u*100:.1f}%] (n={t_count_p})"
-            if t_count_p < 784:
+            if t_count_p < 100:
+                pess_wr_str += " [INSUFFICIENT_SAMPLE: n<100]"
+            elif t_count_p < 784:
                 pess_wr_str += " [n<784]"
         else:
             pess_wr_str = "N/A"

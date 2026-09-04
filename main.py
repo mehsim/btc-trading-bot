@@ -1765,13 +1765,27 @@ def get_chase_limit_price(symbol, side, chase, entry_price):
             return max(bid + (spread * 0.05), ask - step)
     return float(entry_price)
 
-def get_bybit_last_execution(symbol):
-    res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "limit": 1})
+def get_bybit_last_execution(symbol, order_id=None):
+    params = {"category": "linear", "symbol": symbol, "limit": 1}
+    if order_id:
+        params["orderId"] = str(order_id)
+    res = bybit_get_request("/v5/execution/list", params)
     if res.get("retCode") == 0:
         exec_list = res.get("result", {}).get("list", [])
         if exec_list:
             return exec_list[0]
     return None
+
+def get_bybit_order_executions(symbol, order_id=None, order_link_id=None):
+    params = {"category": "linear", "symbol": symbol, "limit": 10}
+    if order_id:
+        params["orderId"] = str(order_id)
+    if order_link_id:
+        params["orderLinkId"] = str(order_link_id)
+    res = bybit_get_request("/v5/execution/list", params)
+    if res.get("retCode") == 0:
+        return res.get("result", {}).get("list", [])
+    return []
 
 def get_real_bybit_balance():
     api_key = os.getenv("BYBIT_API_KEY", "").strip()
@@ -2497,7 +2511,8 @@ def load_model_weights(iv):
             cal_sl = float(b_geom.get("sl_mult", live_sl))
             cal_lh = int(b_geom.get("lookahead", live_lh))
 
-            if abs(cal_tp - live_tp) > 0.20 or abs(cal_sl - live_sl) > 0.15 or abs(cal_lh - live_lh) > 2:
+            # Finding #76: Tighten tolerances to ensure high-fidelity barrier calibration
+            if abs(cal_tp - live_tp) > 0.10 or abs(cal_sl - live_sl) > 0.05 or abs(cal_lh - live_lh) > 1:
                 msg = f"Calibrator '{cal_file}' barrier geometry (TP={cal_tp:.2f}, SL={cal_sl:.2f}, LH={cal_lh}) diverges from active TIMEFRAME_CONFIG (TP={live_tp:.2f}, SL={live_sl:.2f}, LH={live_lh})."
                 log_event("CRITICAL", f"[Calibrator Barrier Divergence] {msg} Slot set to None (Fail-Closed).")
                 send_telegram_alert(f"🚨 *CALIBRATOR BARRIER DIVERGENCE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
@@ -4993,12 +5008,23 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 order_details = get_bybit_order_details(symbol, bybit_order_id)
                 if order_details:
                     entry_price = float(order_details.get("avgPrice", entry_price))
-                    actual_qty = float(order_details.get("cumExecQty", raw_qty))
+                    actual_qty = float(order_details.get("cumExecQty", 0.0))
                 else:
-                    fill_exec = get_bybit_last_execution(symbol)
-                    if fill_exec:
-                        entry_price = float(fill_exec.get("execPrice", entry_price))
-                    actual_qty = raw_qty
+                    # Finding #77: Query execution list specifically for bybit_order_id on API read failure
+                    execs = get_bybit_order_executions(symbol, order_id=bybit_order_id) if bybit_order_id else []
+                    if execs:
+                        fill_q = sum(float(x.get("execQty", 0.0)) for x in execs)
+                        sum_val = sum(float(x.get("execQty", 0.0)) * float(x.get("execPrice", entry_price)) for x in execs)
+                        actual_qty = fill_q
+                        if fill_q > 0:
+                            entry_price = sum_val / fill_q
+                    else:
+                        pos_dict = get_all_bybit_positions()
+                        sym_pos = pos_dict.get(symbol, {}) if isinstance(pos_dict, dict) else {}
+                        pos_qty = float(sym_pos.get("size", 0.0))
+                        actual_qty = min(pos_qty, raw_qty) if pos_qty > 0 else 0.0
+                if actual_qty <= 0.0:
+                    bybit_success = False
             else:
                 print(f"[{symbol} {iv}m API ERROR] Taker IOC order failed: {order_res.get('retMsg')}")
         else:
@@ -5196,8 +5222,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             # Finding #56: Only set bybit_success if actually filled target threshold
                             if filled_so_far >= (0.95 * raw_qty):
                                 bybit_success = True
-                        else:
-                            print(f"[{symbol} {iv}m API] Unrecorded recent fill ({exec_id}) detected right before IOC fallback. Skipping duplicate IOC.")
+                        elif exec_order_id and exec_order_id in chase_order_ids:
+                            print(f"[{symbol} {iv}m API] Unrecorded recent chase fill ({exec_id}) for order ({exec_order_id}) detected right before IOC fallback. Skipping duplicate IOC.")
                             fill_px = float(last_exec.get("execPrice", entry_price))
                             raw_fill_q = float(last_exec.get("execQty", remaining_qty))
                             fill_q = min(raw_fill_q, max(0.0, raw_qty - filled_so_far))
@@ -5210,6 +5236,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             entry_price = weighted_sum_px / max(1e-9, filled_so_far)
                             if filled_so_far >= (0.95 * raw_qty):
                                 bybit_success = True
+                        else:
+                            # Finding #78: Foreign execution detected (not in chase_order_ids). Do NOT credit foreign fill to this bot order.
+                            log_event("INFO", f"[{symbol} {iv}m API] Foreign/unrelated execution ({exec_id}, orderId={exec_order_id}) detected right before IOC fallback. Ignoring foreign fill.")
 
                     if not bybit_success:
                         # Recalculate remaining IOC quantity after execution checks
@@ -5250,16 +5279,28 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                 order_details = get_bybit_order_details(symbol, order_id=bybit_order_id, order_link_id=ioc_order_link_id)
                                 if order_details:
                                     fill_px = float(order_details.get("avgPrice", entry_price))
-                                    fill_q = float(order_details.get("cumExecQty", floored_ioc))
+                                    fill_q = float(order_details.get("cumExecQty", 0.0))
                                 else:
-                                    fill_exec = get_bybit_last_execution(symbol)
-                                    fill_px = float(fill_exec.get("execPrice", entry_price)) if fill_exec else entry_price
-                                    fill_q = float(fill_exec.get("execQty", floored_ioc)) if fill_exec else floored_ioc
+                                    # Finding #77: Query execution list specifically for bybit_order_id on API read failure
+                                    ioc_execs = get_bybit_order_executions(symbol, order_id=bybit_order_id, order_link_id=ioc_order_link_id)
+                                    if ioc_execs:
+                                        fill_q = sum(float(x.get("execQty", 0.0)) for x in ioc_execs)
+                                        sum_v = sum(float(x.get("execQty", 0.0)) * float(x.get("execPrice", entry_price)) for x in ioc_execs)
+                                        fill_px = (sum_v / fill_q) if fill_q > 0 else entry_price
+                                    else:
+                                        pos_dict = get_all_bybit_positions()
+                                        sym_pos = pos_dict.get(symbol, {}) if isinstance(pos_dict, dict) else {}
+                                        current_pos_size = float(sym_pos.get("size", 0.0))
+                                        pos_delta = max(0.0, current_pos_size - filled_so_far)
+                                        fill_q = min(pos_delta, floored_ioc)
+                                        fill_px = entry_price
                                 
                                 filled_so_far += fill_q
                                 weighted_sum_px += (fill_q * fill_px)
                                 actual_qty = filled_so_far
                                 entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                                if filled_so_far <= 0.0:
+                                    bybit_success = False
                             else:
                                 print(f"[{symbol} {iv}m API ERROR] Fallback Taker IOC order failed: {order_res.get('retMsg')}")
                                 # Finding #54: Realtime reconciliation via orderLinkId
@@ -7491,37 +7532,45 @@ def main():
                             _exp_names = get_model_feature_names(active_model_trend)
                             if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
                                 _features_to_use = _exp_names
-                                if isinstance(latest_candle_weighted, pd.Series):
-                                    X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=_exp_names)
-                                else:
-                                    X_live_full = latest_candle_weighted.reindex(columns=_exp_names)
-
-                                # Finding #162: Disallow blind 0.0 zero-filling of missing model features
-                                missing_model_features = [col for col in _exp_names if col not in latest_candle_weighted.index or pd.isna(X_live_full[col].iloc[0])]
-                                if missing_model_features:
-                                    log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
-                                    write_decision(
-                                        symbol=symbol,
-                                        interval=iv,
-                                        action="ABSTAIN",
-                                        reason_code=ReasonCode.PREDICTION_ERROR,
-                                        notes=f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
-                                    )
-                                    continue
                             elif feat_list is not None:
                                 _features_to_use = feat_list
-                                _avail = [f for f in _features_to_use if f in latest_candle_weighted.index]
-                                X_live_full = latest_candle_weighted[_avail].to_frame().T if isinstance(latest_candle_weighted[_avail], pd.Series) else latest_candle_weighted[_avail]
                             else:
                                 from core import features as master_features
                                 _features_to_use = master_features
-                                _avail = [f for f in _features_to_use if f in latest_candle_weighted.index]
-                                X_live_full = latest_candle_weighted[_avail].to_frame().T if isinstance(latest_candle_weighted[_avail], pd.Series) else latest_candle_weighted[_avail]
 
-                            # Coerce all columns to float64 before inference.
-                            X_live_full = X_live_full.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+                            if isinstance(latest_candle_weighted, pd.Series):
+                                X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=_features_to_use)
+                            else:
+                                X_live_full = latest_candle_weighted.reindex(columns=_features_to_use)
 
-                            X_live = _slice_model_input(active_model_trend, X_live_full)
+                            # Finding #80: Coerce all columns to float64 before checking for missing values/NaNs
+                            X_live_full = X_live_full.apply(pd.to_numeric, errors="coerce")
+
+                            # Finding #80 & #162: Disallow blind 0.0 zero-filling across all feature branches
+                            missing_model_features = [col for col in _features_to_use if col not in latest_candle_weighted.index or pd.isna(X_live_full[col].iloc[0])]
+                            if missing_model_features:
+                                log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
+                                write_decision(
+                                    symbol=symbol,
+                                    interval=iv,
+                                    action="ABSTAIN",
+                                    reason_code=ReasonCode.PREDICTION_ERROR,
+                                    notes=f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
+                                )
+                                continue
+
+                            try:
+                                X_live = _slice_model_input(active_model_trend, X_live_full)
+                            except Exception as ex_slice:
+                                log_event("WARNING", f"[{symbol} {iv}m] Feature slice failed: {ex_slice}. Abstaining (fail-closed).")
+                                write_decision(
+                                    symbol=symbol,
+                                    interval=iv,
+                                    action="ABSTAIN",
+                                    reason_code=ReasonCode.PREDICTION_ERROR,
+                                    notes=f"Feature slice failed: {ex_slice}"
+                                )
+                                continue
 
                             # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
                             if str(iv) == "15":
@@ -7897,13 +7946,19 @@ def main():
                             max_conf_cap = max(effective_base, 0.50 if str(iv) in ["15", "30", "60"] else 0.55)
                             dynamic_conf_threshold = max(effective_base, min(max_conf_cap, dynamic_conf_threshold))
 
-                            # Calculate live market microstructure spread in bps
-                            _bid_px = float(latest_candle.get("bid", latest_candle.get("close", 100.0)))
-                            _ask_px = float(latest_candle.get("ask", latest_candle.get("close", 100.0)))
-                            if _ask_px > _bid_px > 0:
-                                current_spread_bps = round(((_ask_px - _bid_px) / ((_ask_px + _bid_px) / 2.0)) * 10000.0, 2)
+                            # Finding #79: Calculate live market microstructure spread in bps via real top-of-book orderbook
+                            ob_data = get_orderbook_imbalance_and_spread(symbol)
+                            ob_spread = ob_data.get("spread", 0.0) if isinstance(ob_data, dict) else 0.0
+                            if ob_spread > 0.0:
+                                current_spread_bps = round(float(ob_spread * 10000.0), 2)
                             else:
-                                current_spread_bps = round(float(cost_bps / 2.0), 2)
+                                _bid_px = float(latest_candle.get("bid", 0.0))
+                                _ask_px = float(latest_candle.get("ask", 0.0))
+                                if _ask_px > _bid_px > 0:
+                                    current_spread_bps = round(((_ask_px - _bid_px) / ((_ask_px + _bid_px) / 2.0)) * 10000.0, 2)
+                                else:
+                                    current_spread_bps = round(float(cost_bps / 2.0), 2)
+                            bot_state[f"current_spread_bps_{symbol}"] = current_spread_bps
                             bot_state["current_spread_bps"] = current_spread_bps
 
                             # Finding #129: Compute Composite Uncertainty (U_ensemble + U_market) with distinct predictions and matching weights
@@ -8401,7 +8456,7 @@ def main():
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High ensemble disagreement / conformal uncertainty score ({conformal_unc_score:.3f}).")
 
                             if status_msg == "Pending":
-                                current_spread_bps = float(bot_state.get("current_spread_bps", 3.5)) if "bot_state" in globals() and hasattr(bot_state, "get") else 3.5
+                                current_spread_bps = float(bot_state.get(f"current_spread_bps_{symbol}", bot_state.get("current_spread_bps", 3.5))) if "bot_state" in globals() and hasattr(bot_state, "get") else 3.5
                                 u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and hasattr(bot_state, "get") else 0.04
                                 rec.spread_bp = current_spread_bps
                                 

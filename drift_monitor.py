@@ -15,6 +15,12 @@ class DriftMonitor:
         ece = calculate_ece()
         
         if not trades:
+            try:
+                from state_manager import state_manager
+                state_manager["last_ece"] = float(ece)
+            except Exception as ex:
+                from logger import log_event
+                log_event("WARNING", f"Could not record last_ece to state_manager: {ex}")
             return {
                 "ece": ece,
                 "rolling_brier_50": 0.0,

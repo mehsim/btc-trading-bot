@@ -985,25 +985,28 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
     Mirrors the complete merge logic of merge_derivatives_sentiment_features for use in the parallel fetch pipeline."""
     _saved_attrs = dict(getattr(df, "attrs", {}))
     if df.empty:
-        df["open_interest"] = 0.0
-        df["funding_rate"] = 0.0
-        df["fear_greed"] = 50.0
-        df["btc_close"] = 0.0
-        df["btc_volume"] = 0.0
-        df["btc_rsi"] = 50.0
+        df["open_interest"] = np.nan
+        df["funding_rate"] = np.nan
+        df["fear_greed"] = np.nan
+        df["btc_close"] = np.nan
+        df["btc_volume"] = np.nan
+        df["btc_rsi"] = np.nan
+        df.attrs["stale_derivatives_feeds"] = True
         for _k, _v in _saved_attrs.items():
             df.attrs[_k] = _v
         return df
 
     df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce").fillna(0).astype("int64")
 
+    stale_derivatives = False
     if df_oi is not None and not df_oi.empty:
         df_oi = df_oi.copy()
         df_oi["timestamp"] = pd.to_numeric(df_oi["timestamp"], errors="coerce").fillna(0).astype("int64")
         df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
     else:
-        df["open_interest"] = 0.0
+        df["open_interest"] = np.nan
+        stale_derivatives = True
 
     if df_funding is not None and not df_funding.empty:
         df_funding = df_funding.copy()
@@ -1011,7 +1014,8 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
         df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
     else:
-        df["funding_rate"] = 0.0
+        df["funding_rate"] = np.nan
+        stale_derivatives = True
 
     if df_fng is not None and not df_fng.empty:
         df_fng = df_fng.copy()
@@ -1019,15 +1023,19 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
         df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_fng, on="timestamp", direction="backward")
     else:
-        df["fear_greed"] = 50.0
+        df["fear_greed"] = np.nan
+        stale_derivatives = True
+
+    if stale_derivatives:
+        df.attrs["stale_derivatives_feeds"] = True
 
     # Calculate OI momentum and sanitize inf values (mirrors merge_derivatives_sentiment_features)
-    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan)
+    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).replace([np.inf, -np.inf], np.nan)
     df["oi_change_pct"] = df["oi_change_1h"]
-    df["oi_price_divergence"] = np.sign(df["close"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)) * np.sign(df["oi_change_pct"])
-    df["funding_pctile"] = df["funding_rate"].rolling(720, min_periods=24).rank(pct=True).fillna(0.5)
-    df["funding_roc"] = df["funding_rate"].diff().fillna(0.0)
+    df["oi_price_divergence"] = np.sign(df["close"].pct_change().replace([np.inf, -np.inf], np.nan)) * np.sign(df["oi_change_pct"])
+    df["funding_pctile"] = df["funding_rate"].rolling(720, min_periods=24).rank(pct=True)
+    df["funding_roc"] = df["funding_rate"].diff()
 
     # Merge BTCUSDT Correlation Features
     if symbol != "BTCUSDT":
@@ -1061,15 +1069,16 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
         df["btc_rsi"] = df["btc_rsi"].fillna(50.0)
 
     # Clean up NaNs using forward-fill ONLY to eliminate look-ahead leakage
-    df["open_interest"] = df["open_interest"].ffill().fillna(0.0)
-    df["funding_rate"] = df["funding_rate"].ffill().fillna(0.0)
-    df["fear_greed"] = df["fear_greed"].ffill().fillna(50.0)
-    df["oi_change_1h"] = df["oi_change_1h"].ffill().fillna(0.0)
-    df["oi_change_4h"] = df["oi_change_4h"].ffill().fillna(0.0)
-    df["oi_change_pct"] = df["oi_change_pct"].ffill().fillna(0.0)
-    df["oi_price_divergence"] = df["oi_price_divergence"].ffill().fillna(0.0)
-    df["funding_pctile"] = df["funding_pctile"].ffill().fillna(0.5)
-    df["funding_roc"] = df["funding_roc"].ffill().fillna(0.0)
+    # Missing feeds remain NaN without fabricating synthetic 0.0 or 50.0
+    df["open_interest"] = df["open_interest"].ffill()
+    df["funding_rate"] = df["funding_rate"].ffill()
+    df["fear_greed"] = df["fear_greed"].ffill()
+    df["oi_change_1h"] = df["oi_change_1h"].ffill()
+    df["oi_change_4h"] = df["oi_change_4h"].ffill()
+    df["oi_change_pct"] = df["oi_change_pct"].ffill()
+    df["oi_price_divergence"] = df["oi_price_divergence"].ffill()
+    df["funding_pctile"] = df["funding_pctile"].ffill()
+    df["funding_roc"] = df["funding_roc"].ffill()
     df["btc_close"] = df["btc_close"].ffill().fillna(df["close"])
     df["btc_volume"] = df["btc_volume"].ffill().fillna(df["volume"])
     df["btc_rsi"] = df["btc_rsi"].ffill().fillna(50.0)
@@ -1082,9 +1091,10 @@ def _merge_cached_derivatives(df, df_oi, df_funding, df_fng, df_btc=None, symbol
 def merge_derivatives_sentiment_features(df, symbol, interval):
     _saved_attrs = dict(getattr(df, "attrs", {}))
     if df.empty:
-        df["open_interest"] = 0.0
-        df["funding_rate"] = 0.0
-        df["fear_greed"] = 50.0
+        df["open_interest"] = np.nan
+        df["funding_rate"] = np.nan
+        df["fear_greed"] = np.nan
+        df.attrs["stale_derivatives_feeds"] = True
         for _k, _v in _saved_attrs.items():
             df.attrs[_k] = _v
         return df
@@ -1112,13 +1122,15 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
         log_event("WARNING", f"data notice: {ex_data}")
         df_fng = pd.DataFrame(columns=["timestamp", "fear_greed"])
 
+    stale_derivatives = False
     # Merge open interest
     if not df_oi.empty:
         df_oi["timestamp"] = pd.to_numeric(df_oi["timestamp"], errors="coerce").fillna(0).astype("int64")
         df_oi = df_oi.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_oi, on="timestamp", direction="backward")
     else:
-        df["open_interest"] = 0.0
+        df["open_interest"] = np.nan
+        stale_derivatives = True
 
     # Merge funding rate
     if not df_funding.empty:
@@ -1126,7 +1138,8 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
         df_funding = df_funding.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_funding, on="timestamp", direction="backward")
     else:
-        df["funding_rate"] = 0.0
+        df["funding_rate"] = np.nan
+        stale_derivatives = True
 
     # Merge fear and greed
     if not df_fng.empty:
@@ -1134,15 +1147,19 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
         df_fng = df_fng.sort_values("timestamp").reset_index(drop=True)
         df = pd.merge_asof(df, df_fng, on="timestamp", direction="backward")
     else:
-        df["fear_greed"] = 50.0
+        df["fear_greed"] = np.nan
+        stale_derivatives = True
+
+    if stale_derivatives:
+        df.attrs["stale_derivatives_feeds"] = True
         
     # Calculate OI momentum and sanitize inf values
-    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df["oi_change_1h"] = df["open_interest"].pct_change(periods=1).replace([np.inf, -np.inf], np.nan)
+    df["oi_change_4h"] = df["open_interest"].pct_change(periods=4).replace([np.inf, -np.inf], np.nan)
     df["oi_change_pct"] = df["oi_change_1h"]
-    df["oi_price_divergence"] = np.sign(df["close"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)) * np.sign(df["oi_change_pct"])
-    df["funding_pctile"] = df["funding_rate"].rolling(720, min_periods=24).rank(pct=True).fillna(0.5)
-    df["funding_roc"] = df["funding_rate"].diff().fillna(0.0)
+    df["oi_price_divergence"] = np.sign(df["close"].pct_change().replace([np.inf, -np.inf], np.nan)) * np.sign(df["oi_change_pct"])
+    df["funding_pctile"] = df["funding_rate"].rolling(720, min_periods=24).rank(pct=True)
+    df["funding_roc"] = df["funding_rate"].diff()
     
     # Merge BTCUSDT Correlation Features
     if symbol != "BTCUSDT":
@@ -1182,15 +1199,16 @@ def merge_derivatives_sentiment_features(df, symbol, interval):
         df["btc_rsi"] = df["btc_rsi"].fillna(50.0)
 
     # Clean up NaNs using forward-fill ONLY to eliminate look-ahead leakage
-    df["open_interest"] = df["open_interest"].ffill().fillna(0.0)
-    df["funding_rate"] = df["funding_rate"].ffill().fillna(0.0)
-    df["fear_greed"] = df["fear_greed"].ffill().fillna(50.0)
-    df["oi_change_1h"] = df["oi_change_1h"].ffill().fillna(0.0)
-    df["oi_change_4h"] = df["oi_change_4h"].ffill().fillna(0.0)
-    df["oi_change_pct"] = df["oi_change_pct"].ffill().fillna(0.0)
-    df["oi_price_divergence"] = df["oi_price_divergence"].ffill().fillna(0.0)
-    df["funding_pctile"] = df["funding_pctile"].ffill().fillna(0.5)
-    df["funding_roc"] = df["funding_roc"].ffill().fillna(0.0)
+    # Missing feeds remain NaN without fabricating synthetic 0.0 or 50.0
+    df["open_interest"] = df["open_interest"].ffill()
+    df["funding_rate"] = df["funding_rate"].ffill()
+    df["fear_greed"] = df["fear_greed"].ffill()
+    df["oi_change_1h"] = df["oi_change_1h"].ffill()
+    df["oi_change_4h"] = df["oi_change_4h"].ffill()
+    df["oi_change_pct"] = df["oi_change_pct"].ffill()
+    df["oi_price_divergence"] = df["oi_price_divergence"].ffill()
+    df["funding_pctile"] = df["funding_pctile"].ffill()
+    df["funding_roc"] = df["funding_roc"].ffill()
     df["btc_close"] = df["btc_close"].ffill().fillna(df["close"])
     df["btc_volume"] = df["btc_volume"].ffill().fillna(df["volume"])
     df["btc_rsi"] = df["btc_rsi"].ffill().fillna(50.0)

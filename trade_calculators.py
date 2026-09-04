@@ -309,6 +309,7 @@ def calculate_replay_statistics(
         "recovery_factor": float(recovery_factor),
         "max_drawdown_pct": float(max_drawdown),
         "ending_return_pct": float(ending_return),
+        "sizing_basis": "fractional" if is_fractional else "dollar_notional",
         "sqn": float(round(sqn, 2)),
         "ulcer_index": float(round(ulcer_index, 2)),
         "mar_ratio": float(round(mar_ratio, 2)),

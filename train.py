@@ -976,21 +976,26 @@ def train_models(interval=INTERVAL, pages=PAGES):
         try:
             _trials = globals().get("OPTUNA_TRIALS", 30)
             print(f"\n--- Running Optuna pre-study ({_trials} trials) to optimize Triple-Barrier Multipliers ---")
-            df_tune = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=min(pages, 4))
+            df_tune = get_history(symbol="BTCUSDT", interval=interval, limit=1000, pages=pages)
             if df_tune is not None and len(df_tune) > 100:
                 df_tune["close_btc"] = df_tune["close"]
                 df_tune = merge_derivatives_sentiment_features(df_tune, symbol="BTCUSDT", interval=interval)
                 df_tune = add_features(df_tune)
                 
-                # Finding #165: Strictly isolate triple barrier multiplier tuning to pre-holdout slice
+                # Finding #74: Strictly isolate triple barrier multiplier tuning to pre-holdout slice
                 import config
                 from config import HOLDOUT_FRACTION, TIMEFRAME_CONFIG
                 _h_frac = getattr(config, "HOLDOUT_FRACTION", 0.15)
                 _p_len = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 12))
                 _split = int(len(df_tune) * (1.0 - _h_frac))
-                df_tune_train = df_tune.iloc[:max(50, _split - _p_len)].copy().reset_index(drop=True)
+                holdout_cutoff_ts = int(df_tune.iloc[_split]["timestamp"])
+                df_tune_train = df_tune[df_tune["timestamp"] < holdout_cutoff_ts].iloc[:max(50, _split - _p_len)].copy().reset_index(drop=True)
                 best_barriers = tune_triple_barrier_multipliers(df_tune_train, interval, n_trials=_trials)
                 if best_barriers:
+                    best_barriers["tuned_at"] = datetime.now(timezone.utc).isoformat()
+                    best_barriers["tuning_cutoff_timestamp"] = holdout_cutoff_ts
+                    best_barriers["n_trials"] = _trials
+                    best_barriers["sample_count"] = len(df_tune_train)
                     OPTIMIZED_BARRIERS = best_barriers
                     with open(_barriers_cache, "w") as f:
                         json.dump(best_barriers, f, indent=2)
@@ -2037,8 +2042,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         print(f"  ℹ️ [Champion Retention Notice] Evaluation was on sub-population {SUPPORTED_SYMBOLS}. Skipping auto-denial for full-population champion '{name}_{interval}'.")
                         log_event("INFO", f"[Champion Retention Notice] Sub-population test for {name}_{interval}, auto-denial skipped.")
 
-                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc:
-                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
                     should_save = False
                 elif chal_acc > champ_acc:
                     should_save = True
@@ -2048,8 +2053,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     should_save = False
             except Exception as eval_err:
                 print(f"  [Champion-Challenger Warning] Error during champion hold-out evaluation: {eval_err}. Evaluating challenger against absolute governance floors.")
-                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc:
-                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
                     should_save = False
                 else:
                     print(f"  [Champion-Challenger] PASSED: Challenger cleared absolute governance floors.")
@@ -2062,8 +2067,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
             _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
 
-            if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc:
-                print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+            if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc:
+                print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
                 should_save = False
             elif champ_manifest_mcc is not None:
                 champ_mcc_baseline = float(champ_manifest_mcc)
@@ -2117,6 +2122,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
             elif holdout_mcc < min_holdout_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC ({holdout_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
                 should_save = False
+            elif holdout_resolved_mcc < min_holdout_mcc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout Resolved MCC ({holdout_resolved_mcc:.4f}) below out-of-sample floor ({min_holdout_mcc_floor})")
+                should_save = False
             elif holdout_mcc_ci_low < 0.0:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout MCC 95% CI lower bound ({holdout_mcc_ci_low:.4f}) < 0 — fails non-negative lower bound requirement.")
                 should_save = False
@@ -2125,6 +2133,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 should_save = False
             elif chal_acc < min_holdout_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Holdout balanced accuracy ({chal_acc:.4f}) below out-of-sample floor ({min_holdout_bal_acc_floor}) — at or near chance")
+                should_save = False
+            elif holdout_resolved_balacc < min_holdout_bal_acc_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Holdout resolved balanced accuracy ({holdout_resolved_balacc:.4f}) below out-of-sample floor ({min_holdout_bal_acc_floor}) — at or near chance")
                 should_save = False
             else:
                 champ_cv_mcc = champ_manifest.get("cv_metrics", {}).get("mcc", {}) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else {}
@@ -2165,7 +2176,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if is_distribution_shifted:
                     shift_reason = f"neutral shift ({champ_neutral_pct:.1f}% -> {chal_neutral_pct:.1f}%)" if is_label_schema_diff else f"regime sample population shift ({champ_n_train} -> {chal_n_train} samples, {sample_count_ratio:.2f}x)"
                     print(f"  [Predictive Floor Gate] Regime/population shift detected ({shift_reason}). Enforcing absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}, Holdout MCC={holdout_mcc:.4f} >= {min_holdout_mcc_floor}, Holdout BalAcc={chal_acc:.4f} >= {min_holdout_bal_acc_floor}).")
-                    if chal_mcc_mean < min_mcc_floor or holdout_mcc < min_holdout_mcc_floor or chal_acc < min_holdout_bal_acc_floor:
+                    if chal_mcc_mean < min_mcc_floor or holdout_mcc < min_holdout_mcc_floor or chal_acc < min_holdout_bal_acc_floor or holdout_resolved_mcc < min_holdout_mcc_floor or holdout_resolved_balacc < min_holdout_bal_acc_floor:
                         print(f"  [Predictive Floor Gate] REJECTED: Challenger fails absolute quality floor under distribution shift.")
                         should_save = False
                 elif champ_mcc_val is not None and chal_mcc_mean < (champ_mcc_val - mcc_tol):
@@ -2327,7 +2338,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
                     stat_eval = stat_validator.evaluate_8_release_gates(
                         walk_forward_pass=wf_pass,
-                        out_of_sample_pass=(holdout_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor),
+                        out_of_sample_pass=(holdout_mcc >= 0.0 and holdout_resolved_mcc >= 0.0 and chal_acc >= min_holdout_bal_acc_floor and holdout_resolved_balacc >= min_holdout_bal_acc_floor),
                         ece_calibration_pct=ece_pct,
                         psi_drift_score=psi_score,
                         shadow_trades_count=shadow_cnt,
@@ -2539,6 +2550,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     manifest_data["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4) if chal_bal_acc_mean is not None else None
                     manifest_data["profit_factor"] = round(float(chal_pf), 4) if chal_pf is not None else None
                     manifest_data["holdout_mcc"] = round(float(holdout_mcc), 4) if holdout_mcc is not None else None
+                    manifest_data["holdout_resolved_mcc"] = round(float(holdout_resolved_mcc), 4) if ('holdout_resolved_mcc' in locals() and holdout_resolved_mcc is not None) else None
+                    manifest_data["holdout_resolved_balacc"] = round(float(holdout_resolved_balacc), 4) if ('holdout_resolved_balacc' in locals() and holdout_resolved_balacc is not None) else None
                     manifest_data["holdout_sharpe"] = round(float(chal_sharpe), 4) if chal_sharpe is not None else None
                     if "metrics" not in manifest_data or not isinstance(manifest_data["metrics"], dict):
                         manifest_data["metrics"] = {}
@@ -2546,6 +2559,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     manifest_data["metrics"]["balanced_accuracy"] = manifest_data["manifest_bal_acc"]
                     manifest_data["metrics"]["profit_factor"] = manifest_data["profit_factor"]
                     manifest_data["metrics"]["holdout_mcc"] = manifest_data["holdout_mcc"]
+                    manifest_data["metrics"]["holdout_resolved_mcc"] = manifest_data["holdout_resolved_mcc"]
+                    manifest_data["metrics"]["holdout_resolved_balacc"] = manifest_data["holdout_resolved_balacc"]
                     manifest_data["metrics"]["holdout_sharpe"] = manifest_data["holdout_sharpe"]
                     manifest_data["metrics"]["uniqueness_ratio"] = uniq_ratio_val
                     manifest_data["metrics"]["effective_sample_size"] = eff_n_val
@@ -2567,7 +2582,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
-                if should_save and chal_brier is not None and chal_ece is not None and holdout_mcc >= 0.0:
+                if should_save and chal_brier is not None and chal_ece is not None and holdout_mcc >= 0.0 and holdout_resolved_mcc >= 0.0:
                     with open(manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
 
@@ -2593,6 +2608,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     chal_manifest["manifest_bal_acc"] = round(float(chal_bal_acc_mean), 4) if chal_bal_acc_mean is not None else None
                     chal_manifest["profit_factor"] = round(float(chal_pf), 4) if chal_pf is not None else None
                     chal_manifest["holdout_mcc"] = round(float(holdout_mcc), 4) if holdout_mcc is not None else None
+                    chal_manifest["holdout_resolved_mcc"] = round(float(holdout_resolved_mcc), 4) if ('holdout_resolved_mcc' in locals() and holdout_resolved_mcc is not None) else None
+                    chal_manifest["holdout_resolved_balacc"] = round(float(holdout_resolved_balacc), 4) if ('holdout_resolved_balacc' in locals() and holdout_resolved_balacc is not None) else None
                     chal_manifest["holdout_sharpe"] = round(float(chal_sharpe), 4) if chal_sharpe is not None else None
                     if "metrics" not in chal_manifest or not isinstance(chal_manifest["metrics"], dict):
                         chal_manifest["metrics"] = {}
@@ -2600,6 +2617,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     chal_manifest["metrics"]["balanced_accuracy"] = chal_manifest["manifest_bal_acc"]
                     chal_manifest["metrics"]["profit_factor"] = chal_manifest["profit_factor"]
                     chal_manifest["metrics"]["holdout_mcc"] = chal_manifest["holdout_mcc"]
+                    chal_manifest["metrics"]["holdout_resolved_mcc"] = chal_manifest["holdout_resolved_mcc"]
+                    chal_manifest["metrics"]["holdout_resolved_balacc"] = chal_manifest["holdout_resolved_balacc"]
                     chal_manifest["metrics"]["holdout_sharpe"] = chal_manifest["holdout_sharpe"]
                 chal_manifest.pop("hmac_signature", None)
                 chal_canonical = json.dumps(chal_manifest, sort_keys=True, default=_json_safe).encode("utf-8")
