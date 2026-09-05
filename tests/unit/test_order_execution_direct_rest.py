@@ -7,7 +7,8 @@ def test_order_execution_routes_direct_to_rest():
     """Verify execute_bybit_order_ws_or_rest calls bybit_post_request directly with zero WS timeout latency."""
     mock_payload = {"symbol": "BTCUSDT", "side": "Buy", "qty": "0.01"}
     
-    with patch("main.bybit_post_request", return_value={"retCode": 0, "result": {"orderId": "test_123"}}) as mock_post:
+    with patch("bybit_client.bybit_post_request", return_value={"retCode": 0, "result": {"orderId": "test_123"}}) as mock_post, \
+         patch("main.bybit_post_request", mock_post):
         start_time = time.time()
         resp = execute_bybit_order_ws_or_rest("/v5/order/create", mock_payload)
         elapsed = time.time() - start_time

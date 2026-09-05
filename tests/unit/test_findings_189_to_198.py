@@ -187,10 +187,10 @@ def test_finding_25_challenger_manifest_initializers():
 # Finding #26: ExecutionValidator portfolio heat ceiling & atr_norm scaling
 # ---------------------------------------------------------------------------
 def test_finding_26_execution_validator_heat_and_atr_norm():
-    """Finding #26: ExecutionValidator default heat is 0.35 and atr_norm scales dynamic impact."""
+    """Finding #26 & R41: ExecutionValidator default heat is 0.20 and atr_norm scales dynamic impact."""
     ev = ExecutionValidator()
-    assert ev.max_portfolio_heat == 0.35
-    assert config.MAX_PORTFOLIO_HEAT == 0.35
+    assert ev.max_portfolio_heat == 0.20
+    assert config.MAX_PORTFOLIO_HEAT == 0.20
 
     # Test portfolio heat rejection
     valid, msg = ev.validate_order(
@@ -202,7 +202,7 @@ def test_finding_26_execution_validator_heat_and_atr_norm():
         position_size_usd=100.0,
         live_price=60000.0,
         top_book_depth_usd=50000.0,
-        portfolio_heat=0.36,  # > 0.35
+        portfolio_heat=0.21,  # > 0.20
     )
     assert valid is False
     assert "portfolio heat" in msg.lower()
@@ -221,12 +221,11 @@ def test_finding_26_execution_validator_heat_and_atr_norm():
         live_price=60000.0,
         top_book_depth_usd=25000.0,
         portfolio_heat=0.10,
-        atr_norm=0.01,
+        atr_norm=0.01
     )
     assert valid_norm_vol is False
 
-    # Under high volatility (atr_norm=0.03), dynamic_max_impact scales to 2.0%
-    # With position_size_usd=350, estimated_impact = 1.4% <= 2.0% -> accepted
+    # Under high volatility (atr_norm=0.02), dynamic_max_impact = 2.0% -> approved
     valid_high_vol, _ = ev.validate_order(
         symbol="BTCUSDT",
         direction="Bullish",
@@ -237,13 +236,13 @@ def test_finding_26_execution_validator_heat_and_atr_norm():
         live_price=60000.0,
         top_book_depth_usd=25000.0,
         portfolio_heat=0.10,
-        atr_norm=0.03,
+        atr_norm=0.02
     )
     assert valid_high_vol is True
 
 
 # ---------------------------------------------------------------------------
-# Finding #27 & #29: Realized R:R haircut alignment and size normalization
+# Finding #27 & #29: Realized RR Haircut & Size Normalization
 # ---------------------------------------------------------------------------
 def test_finding_27_29_realized_rr_haircut_and_size_normalization():
     """Finding #27 & #29: Haircut is 0.28 everywhere; empirical RR is size-normalized."""
@@ -251,24 +250,27 @@ def test_finding_27_29_realized_rr_haircut_and_size_normalization():
 
     # Under haircut = 0.28 and tp=2.0, sl=1.0, eff_tp is 0.56, so p* is 64.14%
     # With confidence 0.60 <= 0.6414, Kelly correctly abstains (returns 0.0)
-    kelly_low = risk_engine.compute_conservative_kelly(
-        calibrated_confidence=0.60,
-        tp_multiplier=2.0,
-        sl_multiplier=1.0,
-        interval="15",
-        trade_history=[],
-    )
-    assert kelly_low == 0.0, "Low confidence below break-even p* under 0.28 haircut must fail closed to 0.0"
+    with patch.object(risk_engine.global_kelly_tracker, "compute_kelly_fraction", return_value=None):
+        kelly_low = risk_engine.compute_conservative_kelly(
+            calibrated_confidence=0.60,
+            tp_multiplier=2.0,
+            sl_multiplier=1.0,
+            interval="15",
+            trade_history=[],
+            cost_bps=0.0
+        )
+        assert kelly_low == 0.0, "Low confidence below break-even p* under 0.28 haircut must fail closed to 0.0"
 
-    # With confidence 0.75 > 0.6414, Kelly produces positive allocation
-    kelly_high = risk_engine.compute_conservative_kelly(
-        calibrated_confidence=0.75,
-        tp_multiplier=2.0,
-        sl_multiplier=1.0,
-        interval="15",
-        trade_history=[],
-    )
-    assert kelly_high > 0.0
+        # With confidence 0.75 > 0.6414, Kelly produces positive allocation
+        kelly_high = risk_engine.compute_conservative_kelly(
+            calibrated_confidence=0.75,
+            tp_multiplier=2.0,
+            sl_multiplier=1.0,
+            interval="15",
+            trade_history=[],
+            cost_bps=0.0
+        )
+        assert kelly_high > 0.0
 
     # Test trade_calculators estimate_empirical_realized_rr size-normalization
     # Provide trades with asymmetric position sizes to verify size distortion is eliminated

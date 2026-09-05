@@ -2084,9 +2084,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc or chal_brier is None or chal_ece is None:
                     print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}% or unmeasured holdout metrics).")
                     should_save = False
-                else:
+                elif should_save:
                     print(f"  [Champion-Challenger] PASSED: Challenger cleared absolute governance floors.")
                     should_save = True
+                else:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger was previously flagged non-viable; preserving should_save=False (Fail-Closed).")
         else:
             print(f"  [Champion-Challenger] No live champion model available for {name.upper()}. Evaluating against governance floors and baseline.")
             champ_manifest_mcc = champ_manifest.get("holdout_mcc", champ_manifest.get("cv_metrics", {}).get("mcc", {}).get("mean")) if isinstance(champ_manifest, dict) else None
@@ -2188,12 +2190,11 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 is_distribution_shifted = is_label_schema_diff or is_population_shift
                 mcc_tol = float(champ_manifest.get("governance_policy", {}).get("mcc_regression_tolerance", 0.010)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.010
 
-                # Finding #126 & #82: Check effective-sample convention alignment
+                # Finding #126 & #82 & R35: Check effective-sample convention alignment
                 champ_convention = champ_manifest.get("effective_n_convention", "legacy_single_symbol_v1") if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else None
-                if champ_convention and champ_convention != "lookahead_x_nsymbols_v2":
-                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Refusing relative delta comparison across effective-sample convention gap; enforcing strict absolute quality floors.")
-                    champ_mcc_val = None
-                    is_distribution_shifted = True
+                is_convention_mismatch = bool(champ_convention and champ_convention != "lookahead_x_nsymbols_v2")
+                if is_convention_mismatch:
+                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Enforcing strict absolute floors and direct MCC comparison.")
 
                 # Finding #134: MDE 80% Power Gate
                 _n_eff_holdout = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
@@ -2313,12 +2314,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             )
                             pf_champ = float(champ_stats.get("profit_factor", 0.95))
                             pf_champ = float(np.clip(pf_champ, 0.80, 2.50))
-                    elif champion_exists and not contract_stale and "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
-                        pf_champ = float(champ_manifest.get("profit_factor", 0.95))
+                    elif champion_exists and not contract_stale and "champ_manifest" in locals() and isinstance(champ_manifest, dict) and champ_manifest.get("profit_factor") is not None:
+                        try:
+                            pf_champ = float(champ_manifest.get("profit_factor"))
+                        except (ValueError, TypeError):
+                            pf_champ = 0.95
 
                     _real_optuna_trials = int(_EXECUTED_OPTUNA_TRIALS) if '_EXECUTED_OPTUNA_TRIALS' in globals() else 0
                     _barrier_trials = int(_trials) if ('_trials' in locals() and _trials is not None) else 0
-                    n_optuna_trials_val = max(_real_optuna_trials, _barrier_trials, 30)
+                    # Finding R32: True hyperparameter search budget is 180 trials (6 optimizers x 30 trials per regime)
+                    n_optuna_trials_val = max(_real_optuna_trials, _barrier_trials, 180)
 
                     # Gate 1: Walk-Forward Validation using true rolling refit callback
                     wf_pass = False
@@ -2343,14 +2348,33 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 _t_preds = _w_m.predict(_t_X)
                                 _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
                                 _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
-                                from config import TAKER_FEE_PCT
+                                from config import TAKER_FEE_PCT, TIMEFRAME_CONFIG
                                 _roundtrip_fee = max(0.0011, float(TAKER_FEE_PCT) * 2.0)  # Taker fee roundtrip
+                                _tf_cfg = TIMEFRAME_CONFIG.get(str(interval), {})
+                                _sl_mult_v = float(_tf_cfg.get("sl_mult", 0.8))
+                                _tp_mult_v = float(_tf_cfg.get("tp_mult_trending", 1.5))
+                                _lookahead_bars = int(_tf_cfg.get("lookahead", 10))
                                 _w_trades = []
-                                for _p_d, _p_r in zip(_t_preds, _t_prices):
-                                    if _p_d == 2:  # Bullish long
-                                        _w_trades.append({"net_return": float(_p_r) - _roundtrip_fee, "sl_frac": 0.01})
-                                    elif _p_d == 0:  # Bearish short
-                                        _w_trades.append({"net_return": -float(_p_r) - _roundtrip_fee, "sl_frac": 0.01})
+                                _i = 0
+                                _n_bars = len(_t_preds)
+                                while _i < _n_bars:
+                                    _p_d = _t_preds[_i]
+                                    if _p_d in (0, 2):
+                                        _p_r = float(_t_prices[_i])
+                                        _dir_sign = 1.0 if _p_d == 2 else -1.0
+                                        _raw_ret = _p_r * _dir_sign
+                                        _sl_thresh = -max(0.005, _sl_mult_v * 0.01)
+                                        _tp_thresh = max(0.008, _tp_mult_v * 0.01)
+                                        if _raw_ret <= _sl_thresh:
+                                            _net_ret = _sl_thresh - _roundtrip_fee
+                                        elif _raw_ret >= _tp_thresh:
+                                            _net_ret = _tp_thresh - _roundtrip_fee
+                                        else:
+                                            _net_ret = _raw_ret - _roundtrip_fee
+                                        _w_trades.append({"net_return": _net_ret, "sl_frac": abs(_sl_thresh)})
+                                        _i += max(1, _lookahead_bars)
+                                    else:
+                                        _i += 1
                                 return {"trades": _w_trades}
                             return _wf_sim_fn
 
@@ -2363,7 +2387,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 step_bars=min(400, max(100, int(len(_df_for_wf) * 0.15))),
                                 train_fn=_wf_train_fn
                             )
-                            wf_pass = bool(_w_res.get("status") == "success" and _w_res.get("mean_expectancy_r", -1.0) >= 0.0 and _w_res.get("mean_profit_factor", 0.0) >= 1.0)
+                            # Finding R62: Enforce minimum trade count and active windows
+                            _tot_wf_trades = sum(len(w.get("trades", [])) for w in _w_res.get("windows", [])) if "windows" in _w_res else _w_res.get("total_trades", 0)
+                            _active_wf_windows = len([w for w in _w_res.get("windows", []) if len(w.get("trades", [])) > 0])
+                            wf_pass = bool(
+                                _w_res.get("status") == "success" and
+                                _active_wf_windows >= 2 and
+                                _tot_wf_trades >= 10 and
+                                _w_res.get("mean_expectancy_r", -1.0) >= 0.0 and
+                                _w_res.get("mean_profit_factor", 0.0) >= 1.0
+                            )
                         else:
                             wf_pass = False  # Fail-closed if insufficient walk-forward data
                     except Exception as _wf_ex:
@@ -2507,8 +2540,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_mcc": round(holdout_mcc, 4),
             "holdout_resolved_mcc": round(holdout_resolved_mcc, 4) if 'holdout_resolved_mcc' in locals() else None,
             "holdout_resolved_balacc": round(holdout_resolved_balacc, 4) if 'holdout_resolved_balacc' in locals() else None,
-            "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, cv.lookahead)), 2),
-            "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, cv.lookahead)))), 4),
+            "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, _lookahead_bl if '_lookahead_bl' in locals() else (cv.lookahead * len(SUPPORTED_SYMBOLS)))), 2),
+            "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, _lookahead_bl if '_lookahead_bl' in locals() else (cv.lookahead * len(SUPPORTED_SYMBOLS)))))), 4),
             "holdout_mcc_ci95": [round(float(holdout_mcc_ci_low), 4), round(float(holdout_mcc_ci_high), 4)],
             "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
             "holdout_brier": round(chal_brier, 4) if (chal_brier is not None and chal_brier != 0.99) else None,
@@ -2629,8 +2662,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()
 
                 if should_save and chal_brier is not None and chal_ece is not None and holdout_mcc >= 0.0 and holdout_resolved_mcc >= 0.0:
-                    with open(manifest_path, "w") as mf:
+                    _tmp_manifest_path = f"{manifest_path}.tmp"
+                    with open(_tmp_manifest_path, "w") as mf:
                         json.dump(manifest_data, mf, indent=2, default=_json_safe)
+                    os.replace(_tmp_manifest_path, manifest_path)
 
                 # H-2 MLOps sidecar: record challenger evaluation metrics regardless of promotion status
                 chal_manifest = dict(manifest_data)
@@ -2669,8 +2704,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 chal_manifest.pop("hmac_signature", None)
                 chal_canonical = json.dumps(chal_manifest, sort_keys=True, default=_json_safe).encode("utf-8")
                 chal_manifest["hmac_signature"] = hmac.new(hmac_key, chal_canonical, hashlib.sha256).hexdigest()
-                with open(challenger_manifest_path, "w") as cmf:
+                _tmp_chal_path = f"{challenger_manifest_path}.tmp"
+                with open(_tmp_chal_path, "w") as cmf:
                     json.dump(chal_manifest, cmf, indent=2, default=_json_safe)
+                os.replace(_tmp_chal_path, challenger_manifest_path)
             except Exception as ex_man:
                 log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
 
@@ -2686,8 +2723,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_effective_n": float(eff_n_val) if ('eff_n_val' in locals() and eff_n_val is not None) else 0.0,
             "mde_80pct": float(chal_mde) if ('chal_mde' in locals() and chal_mde is not None) else 0.0,
             "profit_factor": float(chal_pf) if chal_pf is not None else 0.0,
-            "brier": float(chal_brier) if ('chal_brier' in locals() and chal_brier is not None) else 0.0,
-            "ece": float(chal_ece) if ('chal_ece' in locals() and chal_ece is not None) else 0.0,
+            "brier": float(chal_brier) if ('chal_brier' in locals() and chal_brier is not None) else 1.0,
+            "ece": float(chal_ece) if ('chal_ece' in locals() and chal_ece is not None) else 1.0,
         }
 
         if should_save:
@@ -2713,8 +2750,17 @@ def train_models(interval=INTERVAL, pages=PAGES):
         _u_pct = bull_pct if 'bull_pct' in locals() else 0.0
         _tot_samples = n_total if 'n_total' in locals() else (len(y_trend) if 'y_trend' in locals() else 0)
 
-        _status_title = "✅ *MODEL TRAINED & PROMOTED*" if should_save else ("⚠️ *CONTRACT OVERRIDE PROMOTED*" if not compatible else "⏭️ *CHAMPION RETAINED*")
-        _status_badge = "PROMOTED PRODUCTION" if (should_save or not compatible) else "CHAMPION REJECTED"
+        # Finding R64: Accurate promotion status badge
+        if should_save:
+            _status_title = "⚠️ *CONTRACT OVERRIDE PROMOTED*" if not compatible else "✅ *MODEL TRAINED & PROMOTED*"
+            _status_badge = "PROMOTED PRODUCTION"
+        else:
+            _status_title = "⚠️ *CONTRACT STALE - REJECTED*" if (not compatible and champion_exists) else "⏭️ *CHAMPION RETAINED*"
+            _status_badge = "CHAMPION REJECTED" if champion_exists else "COLD START FAILED"
+
+        _brier_disp = f"{chal_brier:.4f}" if ('chal_brier' in locals() and chal_brier is not None) else "N/A"
+        _ece_disp = f"{chal_ece:.4f}" if ('chal_ece' in locals() and chal_ece is not None) else "N/A"
+        _mae_disp = f"${chal_mae:.4f}" if ('chal_mae' in locals() and chal_mae is not None) else "N/A"
 
         _tg_alert(
             f"{_status_title}\n"
@@ -2724,8 +2770,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             f"📈 *Validation Metrics*:\n"
             f"  • CV MCC Mean: `{chal_mcc_mean:.4f}` (Min: `{chal_mcc_min:.4f}`)\n"
             f"  • Holdout Accuracy: `{chal_acc*100:.1f}%`\n"
-            f"  • Holdout MAE: `${chal_mae:.4f}`\n"
-            f"  • Brier Score: `{chal_brier:.4f}` | ECE: `{chal_ece:.4f}`\n\n"
+            f"  • Holdout MAE: `{_mae_disp}`\n"
+            f"  • Brier Score: `{_brier_disp}` | ECE: `{_ece_disp}`\n\n"
             f"📦 *Feature Contract*:\n"
             f"  • Feature Count: `{_n_feats} features`\n"
             f"  • Contract Hash: `{_f_hash}`\n\n"

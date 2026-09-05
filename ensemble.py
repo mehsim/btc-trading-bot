@@ -967,7 +967,7 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
 
     from config import is_manifest_degenerate
     is_deg, deg_reason = is_manifest_degenerate(m_data)
-    if is_deg and os.environ.get("ALLOW_SENTINEL_MODELS") != "1":
+    if is_deg:
         raise RuntimeError(
             f"[Model Governance Quality Error] Model '{prefix}' has degenerate manifest ({deg_reason}). Model refused loading (Fail-Closed)."
         )

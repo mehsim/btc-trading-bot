@@ -12,7 +12,7 @@ class ExecutionValidator:
         self,
         min_rr_ratio: Optional[float] = None,
         max_market_impact_pct: Optional[float] = None,
-        max_portfolio_heat: float = 0.35
+        max_portfolio_heat: float = 0.20
     ):
         self.min_rr_ratio = min_rr_ratio
         self.max_market_impact_pct = max_market_impact_pct
@@ -77,7 +77,7 @@ class ExecutionValidator:
         live_price: float,
         top_book_depth_usd: float = 50000.0,
         portfolio_heat: float = 0.0,
-        max_portfolio_heat: float = 0.35,
+        max_portfolio_heat: Optional[float] = None,
         atr_norm: float = 0.01
     ) -> Tuple[bool, str]:
         """
@@ -89,7 +89,9 @@ class ExecutionValidator:
         dynamic_max_impact = self.max_market_impact_pct if self.max_market_impact_pct is not None else float(
             max(0.005, min(0.05, 0.02 * (top_book_depth_usd / 50000.0) * vol_scale))
         )
-        dynamic_max_heat = self.max_portfolio_heat if self.max_portfolio_heat is not None else max_portfolio_heat
+        dynamic_max_heat = max_portfolio_heat if max_portfolio_heat is not None else (
+            self.max_portfolio_heat if self.max_portfolio_heat is not None else 0.20
+        )
 
         if entry_price <= 0 or stop_loss_price <= 0 or take_profit_price <= 0:
             return False, f"Invalid prices: Entry={entry_price}, SL={stop_loss_price}, TP={take_profit_price}"

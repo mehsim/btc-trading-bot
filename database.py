@@ -728,9 +728,26 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
             except Exception as ex_init_cols:
                 log_event("WARNING", f"database notice updating initial/size columns: {ex_init_cols}")
             
-            # Step 2: Delete from active_trades
-            clean_tf = str(tf).replace("m", "")
-            conn.execute("DELETE FROM active_trades WHERE trade_id = ? OR (symbol = ? AND replace(tf, 'm', '') = ?);", (t_id, symbol, clean_tf))
+            # Finding R39: Canonical timeframe mapping covering both minute ('60') and key ('1h') forms
+            tf_str = str(tf).strip().lower()
+            tf_num = tf_str.replace("m", "").replace("h", "")
+            try:
+                mins = int(tf_num) * (60 if "h" in tf_str else 1)
+            except Exception:
+                mins = 60
+            clean_tf = str(mins)
+            tf_forms = list({
+                clean_tf,
+                f"{mins}m",
+                f"{mins // 60}h" if mins >= 60 and mins % 60 == 0 else f"{mins}m",
+                tf_str,
+                tf_str.replace("m", ""),
+            })
+            placeholders = ",".join("?" for _ in tf_forms)
+            conn.execute(
+                f"DELETE FROM active_trades WHERE trade_id = ? OR (symbol = ? AND tf IN ({placeholders}));",
+                [t_id, symbol] + tf_forms
+            )
             
             # Step 3: Pending pain check if applicable
             if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:

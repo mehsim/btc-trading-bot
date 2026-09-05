@@ -332,6 +332,9 @@ PORTFOLIO_UTILITY_POLICY: dict = {
     "runner_boost_multiplier": 1.20,
 }
 
+# Finding R41: Canonical portfolio heat ceiling
+MAX_PORTFOLIO_HEAT: float = 0.20
+
 
 
 # H-1: Per-timeframe Kelly rolling window (max trades, last N calendar days).
@@ -373,7 +376,7 @@ MODEL_SELECTION = {
 MIN_ORDER_VALUE_USDT = 5.1
 MAX_SCALED_RISK_CAP_RATIO = 1.10  # 110% hard cap on approved risk when order size is scaled up
 MAX_DIRECTIONAL_RATIO = 0.80      # 80% notional directional concentration cap relative to equity (Finding #98)
-MAX_PORTFOLIO_HEAT = 0.35          # 35% hard ceiling on total portfolio heat / margin utilization (Finding #26)
+MAX_PORTFOLIO_HEAT = 0.20          # 20% hard ceiling on total portfolio heat / margin utilization (Finding R41)
 REALIZED_RR_HAIRCUT = 0.28        # Haircut applied to nominal reward-to-risk ratio for Kelly calculations (Findings #27, #29)
 
 INTERVAL_MAX_POSITION_PCT = {
@@ -474,6 +477,11 @@ TIMEFRAME_CONFIG = {
     }
 }
 
+# Finding R43: Preserve immutable snapshot of committed config literals before auto-sync
+import copy
+COMMITTED_TIMEFRAME_CONFIG: dict = copy.deepcopy(TIMEFRAME_CONFIG)
+REJECTED_BARRIER_FILES: set = set()
+
 # Auto-sync TIMEFRAME_CONFIG with optimized_barriers_{tf}.json with strict validation and logging
 import sys
 for _tf in list(TIMEFRAME_CONFIG.keys()):
@@ -494,6 +502,7 @@ for _tf in list(TIMEFRAME_CONFIG.keys()):
                         f"[TIMEFRAME_CONFIG Warning] Rejecting inverted barrier file {_opt_path}: "
                         f"tp_mult_trending ({_tp_trending}) < tp_mult_ranging ({_tp_ranging}). Preserving committed config.\n"
                     )
+                    REJECTED_BARRIER_FILES.add(_opt_path)
                     continue
 
                 if _sl_mult < 0.3 or _tp_ranging < 0.5 or _lookahead < 4:
@@ -501,6 +510,7 @@ for _tf in list(TIMEFRAME_CONFIG.keys()):
                         f"[TIMEFRAME_CONFIG Warning] Rejecting invalid barrier bounds in {_opt_path}: "
                         f"sl={_sl_mult}, tp_r={_tp_ranging}, lookahead={_lookahead}. Preserving committed config.\n"
                     )
+                    REJECTED_BARRIER_FILES.add(_opt_path)
                     continue
 
                 _old_tp_t = TIMEFRAME_CONFIG[_tf].get("tp_mult_trending")

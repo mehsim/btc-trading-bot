@@ -1,4 +1,4 @@
-from typing import Optional, Any
+from typing import Optional, Any, Union
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -105,6 +105,38 @@ def format_bybit_qty(symbol: str, qty: float) -> str:
         log_event("DEBUG", f"format_bybit_qty fallback: {exc}")
         from bybit_client import format_bybit_qty as _bc_fmt_qty
         return _bc_fmt_qty(symbol, qty)
+
+
+def filter_unprocessed_active_trades(active_trades_list: list) -> list:
+    """Filter out active trades that have been closed and already processed for exits."""
+    if not isinstance(active_trades_list, list):
+        active_trades_list = [] if active_trades_list is None else [active_trades_list]
+    return [
+        t for t in active_trades_list
+        if isinstance(t, dict)
+        and not (t.get("bybit_closed") and t.get("exit_processed", False))
+        and not (t.get("closed") and t.get("exit_processed", False))
+    ]
+
+
+def compute_max_allowed_candle_age(iv: Union[str, int]) -> float:
+    """Production formula for maximum candle freshness tolerance in seconds."""
+    return min(900.0, max(300.0, int(iv) * 60 * 0.25))
+
+
+def check_live_feature_integrity(latest_candle_weighted, features_to_use):
+    """
+    Finding #80 & #162: Disallow blind 0.0 zero-filling across all feature branches.
+    Returns (X_live_full, missing_model_features).
+    """
+    if isinstance(latest_candle_weighted, pd.Series):
+        X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=features_to_use)
+    else:
+        X_live_full = latest_candle_weighted.reindex(columns=features_to_use)
+
+    X_live_full = X_live_full.apply(pd.to_numeric, errors="coerce")
+    missing_model_features = [col for col in features_to_use if col not in latest_candle_weighted.index or pd.isna(X_live_full[col].iloc[0])]
+    return X_live_full, missing_model_features
 
 
 def map_status_to_reason_code(msg: str) -> Optional[str]:
@@ -629,22 +661,26 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
                 errors.append(f"Cancel failed: {res_cancel.get('retMsg', 'Unknown error')}")
             
             positions = get_all_bybit_positions()
-            for p in (positions or []):
-                sym = p.get("symbol")
-                sz = float(p.get("size", "0"))
-                side = p.get("side")
-                if sz > 0 and sym:
-                    close_side = "Sell" if side == "Buy" else "Buy"
-                    res_close = place_bybit_taker_ioc_order(
-                        symbol=sym,
-                        side=close_side,
-                        qty=sz,
-                        reduce_only=True,
-                        order_link_id=f"kill_{sym}_{int(time.time()*1000)}"[:36]
-                    )
-                    if isinstance(res_close, dict) and res_close.get("retCode") != 0:
-                        close_success = False
-                        errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
+            if positions is None:
+                close_success = False
+                errors.append("Failed to query open positions from Bybit API (API error or timeout)")
+            else:
+                for p in positions:
+                    sym = p.get("symbol")
+                    sz = float(p.get("size", "0"))
+                    side = p.get("side")
+                    if sz > 0 and sym:
+                        close_side = "Sell" if side == "Buy" else "Buy"
+                        res_close = place_bybit_taker_ioc_order(
+                            symbol=sym,
+                            side=close_side,
+                            qty=sz,
+                            reduce_only=True,
+                            order_link_id=f"kill_{sym}_{int(time.time()*1000)}"[:36]
+                        )
+                        if isinstance(res_close, dict) and res_close.get("retCode") != 0:
+                            close_success = False
+                            errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
     except Exception as err:
         errors.append(str(err))
         cancel_success = False
@@ -1948,25 +1984,24 @@ import joblib
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 
 # Startup Barrier Drift Assertion: Compare TIMEFRAME_CONFIG against optimized_barriers_*.json and active manifests
-from config import TIMEFRAME_CONFIG
+from config import TIMEFRAME_CONFIG, COMMITTED_TIMEFRAME_CONFIG, REJECTED_BARRIER_FILES
 for _iv in ["15", "30", "60", "120", "240"]:
     _opt_path = f"optimized_barriers_{_iv}.json"
     if os.path.exists(_opt_path):
+        if _opt_path in REJECTED_BARRIER_FILES:
+            log_event("WARNING", f"[Startup Barrier Audit] {_opt_path} was rejected by config geometric/bound validation; preserving committed config.")
+            continue
         try:
             with open(_opt_path, "r") as _of:
                 _ob = json.load(_of)
+            _committed = COMMITTED_TIMEFRAME_CONFIG.get(_iv, {})
             _cfg = TIMEFRAME_CONFIG.get(_iv, {})
             for _k in ["tp_mult_trending", "tp_mult_ranging", "sl_mult", "lookahead"]:
-                if _k in _ob and _k in _cfg:
-                    _diff = abs(float(_ob[_k]) - float(_cfg[_k]))
-                    if _diff > 1e-9:
-                        raise RuntimeError(
-                            f"[Startup Drift Error] TIMEFRAME_CONFIG['{_iv}']['{_k}'] ({_cfg[_k]}) "
-                            f"diverges from {_opt_path} ({_ob[_k]}) by {_diff:.2e} > 1e-9. Boot aborted."
-                        )
+                if _k in _ob and _k in _committed:
+                    _drift = abs(float(_ob[_k]) - float(_committed[_k]))
+                    if _drift > 1e-9:
+                        log_event("INFO", f"[Startup Barrier Override] {_iv}m {_k} overridden by {_opt_path}: {_committed[_k]} -> {_ob[_k]}")
         except Exception as _e:
-            if isinstance(_e, RuntimeError):
-                raise
             log_event("WARNING", f"[Startup Barrier Audit] Could not verify {_opt_path}: {_e}")
 
     # Finding #15: Cross-check against active manifest barrier_config (non-tautological)
@@ -4664,6 +4699,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     atr_sl_dist = atr_dollars * sl_multiplier_adjusted
     min_sl_dist = max(atr_dollars * 1.0, entry_price * min_sl_pct)
     raw_sl_dist = abs(entry_price - stop_loss_price) if stop_loss_price is not None else atr_sl_dist
+    # Finding R48: Pre-order minimum-stop floor enforcement
+    effective_sl_dist = max(raw_sl_dist, min_sl_dist)
+    if stop_loss_price is not None:
+        stop_loss_price = (entry_price - effective_sl_dist) if ml_trend == "Bullish" else (entry_price + effective_sl_dist)
     
     # 1. Live Exchange Position Guard
     try:
@@ -5166,6 +5205,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
         if bybit_success:
             # Preserve approved pre-flight stop loss and take profit distances, anchored from actual fill entry price
             sl_dist = pre_sl_dist if 'pre_sl_dist' in locals() and pre_sl_dist > 0 else (abs(entry_price - stop_loss_price) if stop_loss_price is not None else (sl_multiplier_adjusted * atr_dollars))
+            # Finding R48: Enforce minimum-stop floor before submitting to venue
+            if 'min_sl_dist' in locals() and min_sl_dist > 0:
+                sl_dist = max(sl_dist, float(min_sl_dist))
             tp_dist = pre_tp_dist if 'pre_tp_dist' in locals() and pre_tp_dist > 0 else (abs(take_profit_price - entry_price) if take_profit_price is not None else (tp_multiplier_adjusted * atr_dollars))
 
             stop_loss_price = (entry_price - sl_dist) if ml_trend == "Bullish" else (entry_price + sl_dist)
@@ -5281,6 +5323,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "end_time": float(time.time() + duration_seconds),
             "entry_time": int(time.time() * 1000),
             "atr_dollars": float(atr_dollars),
+            "entry_atr": float(atr_dollars),
             "highest_price": float(entry_price),
             "lowest_price": float(entry_price),
             "swing_low_3b": float(df_completed["low"].tail(3).min()) if (df_completed is not None and not df_completed.empty and "low" in df_completed.columns) else float(entry_price),
@@ -6412,12 +6455,16 @@ def main():
                         "bybit_scale_out_order_id": active_trade.get("bybit_scale_out_order_id"),
                         "pnl_source": pnl_source
                     }
-                    # Finding #102: Atomically persist trade closure to SQLite
+                    # Finding #102 & R50: Atomically persist trade closure to SQLite with verified return
+                    db_closed = False
                     try:
                         import database
-                        database.close_trade_atomically(completed_trade, tf=str(iv))
+                        db_closed = database.close_trade_atomically(completed_trade, tf=str(iv))
                     except Exception as ex_db_close:
                         log_event("WARNING", f"[DB Close Trade Atomically Warning] {ex_db_close}")
+                        db_closed = False
+                    if not db_closed:
+                        log_event("CRITICAL", f"[Database Close Failure] Atomic persistence failed/rolled back for {completed_trade.get('trade_id')} ({active_symbol} {iv}m).")
                     active_trade["exit_processed"] = True
                     with active_trades_lock:
                         bot_state["trade_history"].append(completed_trade)
@@ -7078,14 +7125,7 @@ def main():
             active_trade_key = f"active_trade_{tf}"
             with active_trades_lock:
                 active_trades_list = bot_state.get(active_trade_key, [])
-                if not isinstance(active_trades_list, list):
-                    active_trades_list = [] if active_trades_list is None else [active_trades_list]
-                active_trades_list = [
-                    t for t in active_trades_list
-                    if isinstance(t, dict)
-                    and not (t.get("bybit_closed") and t.get("exit_processed", False))
-                    and not (t.get("closed") and t.get("exit_processed", False))
-                ]
+                active_trades_list = filter_unprocessed_active_trades(active_trades_list)
                 bot_state[active_trade_key] = active_trades_list
                 
             if (symbol, iv) not in fetched_data:
@@ -7110,7 +7150,7 @@ def main():
                 interval_ms = int(iv) * 60 * 1000
                 candle_close_ms = latest_completed_ts + interval_ms
                 candle_age_sec = (now_ms - candle_close_ms) / 1000.0
-                max_allowed_age_sec = min(900.0, max(300.0, int(iv) * 60 * 0.25))
+                max_allowed_age_sec = compute_max_allowed_candle_age(iv)
 
                 if candle_age_sec > max_allowed_age_sec or candle_age_sec < -30.0:
                     log_event("INFO", f"[{symbol} {iv}m] Stale candle skipped: completed bar closed {candle_age_sec:.1f}s ago (max allowed: {max_allowed_age_sec:.1f}s). Skipping.")
@@ -7406,16 +7446,7 @@ def main():
                                 from core import features as master_features
                                 _features_to_use = master_features
 
-                            if isinstance(latest_candle_weighted, pd.Series):
-                                X_live_full = latest_candle_weighted.to_frame().T.reindex(columns=_features_to_use)
-                            else:
-                                X_live_full = latest_candle_weighted.reindex(columns=_features_to_use)
-
-                            # Finding #80: Coerce all columns to float64 before checking for missing values/NaNs
-                            X_live_full = X_live_full.apply(pd.to_numeric, errors="coerce")
-
-                            # Finding #80 & #162: Disallow blind 0.0 zero-filling across all feature branches
-                            missing_model_features = [col for col in _features_to_use if col not in latest_candle_weighted.index or pd.isna(X_live_full[col].iloc[0])]
+                            X_live_full, missing_model_features = check_live_feature_integrity(latest_candle_weighted, _features_to_use)
                             if missing_model_features:
                                 log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
                                 rec.outcome = "REJECTED"
@@ -7514,10 +7545,11 @@ def main():
                             if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
                                 from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
                                 if not is_calibrator_viable(calibrator):
-                                    log_event("WARNING", f"[{symbol} {iv}m] Calibrator failed viability check (Fail-Closed). Marking signal as fallback.")
+                                    log_event("WARNING", f"[{symbol} {iv}m] Calibrator failed viability check (Fail-Closed). Abstaining.")
                                     is_fallback_signal = True
                                     signal_source_type = "UNVIABLE_CALIBRATOR"
-                                    calibrated_confidence = 0.50
+                                    calibrated_confidence = 0.0
+                                    ml_trend = "Neutral"
                                 else:
                                     calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
                                     method_name = calibrator.get("scaling_method", "calibration")
@@ -7709,8 +7741,13 @@ def main():
                             _est_notional = (_current_bal * _max_risk_frac) / _est_stop_dist
                             _min_order = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
                             _order_usd = max(_min_order, _est_notional)
-                            _spread_bp = float(bot_state.get(f"spread_bp_{symbol}") or bot_state.get(f"current_spread_bps_{symbol}") or 1.5)
-                            _garch_sigma = float(bot_state.get(f"garch_sigma_{symbol}") or atr_norm_val or 0.015)
+                            if f"current_spread_bps_{symbol}" not in bot_state:
+                                _live_s_bp = bot_state.get(f"spread_bps_{symbol}", bot_state.get("current_spread_bps"))
+                                if _live_s_bp:
+                                    bot_state[f"current_spread_bps_{symbol}"] = float(_live_s_bp)
+                                    bot_state[f"spread_bp_{symbol}"] = float(_live_s_bp)
+                            _spread_bp = float(bot_state.get(f"spread_bp_{symbol}") or bot_state.get(f"current_spread_bps_{symbol}") or bot_state.get("current_spread_bps") or 1.5)
+                            _garch_sigma = float(bot_state.get(f"garch_sigma_{symbol}") or (atr_norm_val if atr_norm_val > 0 else 0.015))
                             _tcm = transaction_cost_model.estimate_transaction_cost(
                                 symbol=symbol,
                                 order_size_usd=_order_usd,
@@ -7886,7 +7923,7 @@ def main():
                             # Compute MHI score
                             from strategy_health_engine import strategy_health_engine
                             mhi_res = strategy_health_engine.compute_model_health_index(
-                                recent_pnls=[float(t.get("pnl_usd", 0.0)) for t in bot_state.get("trade_history", [])[-30:]],
+                                recent_pnls=[float(t.get("pnl_usd", 0.0)) for t in bot_state.get("trade_history", [])[-50:]],
                                 ece_score=float(bot_state.get("last_ece", 0.04)),
                                 brier_score=float(bot_state.get("last_brier_score", 0.15)),
                                 psi_score=float(bot_state.get("last_psi", 0.04)),

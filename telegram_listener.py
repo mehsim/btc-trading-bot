@@ -346,16 +346,18 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
 
         position_size_usd = min(position_size_usd, capped_size)
 
-        # Enforce ExecutionValidator
+        # Enforce ExecutionValidator (Finding R55: supply required live_price)
         from execution_validator import ExecutionValidator
-        ev = ExecutionValidator(max_portfolio_heat=getattr(config, "MAX_PORTFOLIO_HEAT", 0.35))
+        ev = ExecutionValidator(max_portfolio_heat=getattr(config, "MAX_PORTFOLIO_HEAT", 0.20))
+        current_live_px = float(bot_state.get(f"live_price_{sym}", final_entry)) if bot_state else final_entry
         ev_valid, ev_msg = ev.validate_order(
             symbol=sym,
             direction=ml_trend,
             entry_price=final_entry,
             stop_loss_price=final_sl,
             take_profit_price=final_tp,
-            position_size_usd=position_size_usd
+            position_size_usd=position_size_usd,
+            live_price=current_live_px
         )
         if not ev_valid:
             rec.outcome = "REJECTED"

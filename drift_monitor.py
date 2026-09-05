@@ -27,10 +27,21 @@ class DriftMonitor:
                 from logger import log_event
                 log_event("WARNING", f"[DriftMonitor] Error loading training baseline: {ex}")
 
-        # Reproducible empirical training baseline (calibrated XGBoost mean 0.52, std 0.08)
-        rng = np.random.RandomState(42)
-        base = rng.normal(loc=0.52, scale=0.08, size=max(50, n_samples))
-        return np.clip(base, 0.35, 0.75)
+        # Finding R67: Fallback to empirical trade experience confidences from database
+        try:
+            import sqlite3
+            import database
+            with sqlite3.connect(database.get_db_path()) as conn:
+                c = conn.cursor()
+                c.execute("SELECT confidence FROM completed_trades WHERE confidence > 0.1 LIMIT 100")
+                rows = [float(r[0]) for r in c.fetchall()]
+                if len(rows) >= 20:
+                    return np.array(rows, dtype=float)
+        except Exception:
+            pass
+
+        # Uniform baseline over viable confidence domain if no database records exist
+        return np.linspace(0.40, 0.70, max(50, n_samples))
 
     def evaluate_drift(self) -> Dict[str, Any]:
         trades = get_recent_experiences(limit=50)

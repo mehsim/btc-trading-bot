@@ -6,12 +6,11 @@ import main
 
 
 def test_sync_active_positions_fetches_inside_locks():
-    """Verify that sync_active_positions_from_bybit fetches get_all_bybit_positions while holding the locks."""
+    """Verify that sync_active_positions_from_bybit releases locks during network I/O (Finding #26)."""
     call_order = []
 
     def mock_get_positions():
-        # Check that active_execution_lock and active_trades_lock are held when fetching positions
-        # In Python RLock, _is_owned() tells if the current thread owns the lock
+        # Check that active_execution_lock and active_trades_lock are released when fetching positions (Finding #26)
         exec_locked = main.active_execution_lock._is_owned()
         trades_locked = main.active_trades_lock._is_owned()
         call_order.append(("fetch_positions", exec_locked, trades_locked))
@@ -33,7 +32,8 @@ def test_sync_active_positions_fetches_inside_locks():
 
     with patch("main.TRADE_MODE", "live"), \
          patch("main.get_all_bybit_positions", side_effect=mock_get_positions), \
-         patch("main.save_history", MagicMock()):
+         patch("main.save_history", MagicMock()), \
+         patch("bybit_client.bybit_get_request", return_value={"retCode": 0, "result": {}}):
 
         # Pre-seed active trade for 15m
         main.bot_state["active_trade_15m"] = [
@@ -53,8 +53,8 @@ def test_sync_active_positions_fetches_inside_locks():
         assert len(call_order) == 1
         name, exec_locked, trades_locked = call_order[0]
         assert name == "fetch_positions"
-        assert exec_locked is True
-        assert trades_locked is True
+        assert exec_locked is False
+        assert trades_locked is False
 
 
 def test_request_position_sync_debounced_worker():

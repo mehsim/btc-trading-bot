@@ -13,6 +13,8 @@ from unittest.mock import patch, MagicMock
 
 def test_finding_161_signal_loop_retains_unprocessed_exchange_closed_trades():
     """Finding #161: Signal loop must not drop exchange-closed trades before exit loop reconciliation."""
+    from main import filter_unprocessed_active_trades
+
     active_trades = [
         {"symbol": "SOLUSDT", "bybit_closed": True, "exit_processed": False, "pnl": -50.0},
         {"symbol": "BTCUSDT", "bybit_closed": False, "exit_processed": False, "pnl": 100.0},
@@ -21,13 +23,7 @@ def test_finding_161_signal_loop_retains_unprocessed_exchange_closed_trades():
         {"symbol": "XRPUSDT", "closed": True, "exit_processed": False, "pnl": 30.0},
     ]
 
-    # Filter logic matching main.py:6851
-    filtered = [
-        t for t in active_trades
-        if isinstance(t, dict)
-        and not (t.get("bybit_closed") and t.get("exit_processed", False))
-        and not (t.get("closed") and t.get("exit_processed", False))
-    ]
+    filtered = filter_unprocessed_active_trades(active_trades)
 
     symbols = [t["symbol"] for t in filtered]
     # Unprocessed trades must be retained so exit loop can record them
@@ -41,18 +37,20 @@ def test_finding_161_signal_loop_retains_unprocessed_exchange_closed_trades():
 
 def test_finding_162_live_inference_feature_reindex_shape_guard():
     """Finding #162: Live inference must not silently zero-fill missing model features."""
+    from main import check_live_feature_integrity
+
     expected_names = ["feature_a", "feature_b", "feature_c", "feature_d"]
     # Candle only has a and b; c and d are missing
     candle_series = pd.Series({"feature_a": 1.25, "feature_b": 0.85})
 
-    # Reindex without fill_value=0.0
-    X_live_full = candle_series.to_frame().T.reindex(columns=expected_names)
+    X_live_full, missing = check_live_feature_integrity(candle_series, expected_names)
 
-    # Missing features must be detected
-    missing = [col for col in expected_names if col not in candle_series.index or pd.isna(X_live_full[col].iloc[0])]
+    # Missing features must be detected and not zero-filled
     assert len(missing) == 2
     assert "feature_c" in missing
     assert "feature_d" in missing
+    assert pd.isna(X_live_full["feature_c"].iloc[0])
+    assert pd.isna(X_live_full["feature_d"].iloc[0])
 
 
 def test_finding_163_empirical_kelly_distinguishes_negative_edge():

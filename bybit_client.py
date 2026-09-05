@@ -404,6 +404,12 @@ def get_bybit_order_details(symbol: str, order_id: Optional[str] = None, order_l
         orders = res.get("result", {}).get("list", [])
         if orders:
             return orders[0]
+    # Finding R36: Fall back to authoritative order history if not in realtime window or rate-limited
+    hist_res = bybit_get_request("/v5/order/history", params)
+    if isinstance(hist_res, dict) and hist_res.get("retCode") == 0:
+        hist_orders = hist_res.get("result", {}).get("list", [])
+        if hist_orders:
+            return hist_orders[0]
     return {}
 
 

@@ -50,21 +50,23 @@ def test_live_order_execution_path_resolves_config():
     from unittest.mock import patch
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
+         patch("main.get_bybit_bid_ask", return_value=(50000.0, 50000.0, 50000.0)), \
          patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_123"}}), \
          patch("main.wait_for_order_fill", return_value=True), \
          patch("main.update_bybit_stop_loss", return_value=True), \
          patch("main.update_bybit_take_profit", return_value=True), \
          patch("main.get_bybit_order_details", return_value={"orderStatus": "Filled", "avgPrice": 50000.0, "cumExecQty": 0.02}), \
          patch("main.send_telegram_alert"), \
-         patch("main.sync_active_positions_from_bybit"):
+         patch("main.sync_active_positions_from_bybit"), \
+         patch("bybit_client.bybit_get_request", return_value={"retCode": 0, "result": {}}):
         
         import pandas as pd
         df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
         main._execute_bybit_trade_async_inner(
             symbol="BTCUSDT", iv="15", tf="15m", ml_trend="Bullish", leverage_val=10.0,
-            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49750.0,
-            take_profit_price=50500.0, position_size_usd=1000.0, kelly_fraction=0.1,
-            calibrated_confidence=0.8, ml_confidence=0.8, dynamic_conf_threshold=0.6,
+            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49700.0,
+            take_profit_price=51000.0, position_size_usd=1000.0, kelly_fraction=0.1,
+            calibrated_confidence=0.85, ml_confidence=0.85, dynamic_conf_threshold=0.6,
             latest_completed_ts=1700000000, latest_candle={"close": 50000.0, "ATR_norm": 0.005},
             pred_change=0.01, predicted_price=50500.0, atr_dollars=250.0,
             tp_multiplier_adjusted=2.0, sl_multiplier_adjusted=1.0, df_completed=df_mock,
@@ -85,31 +87,35 @@ def test_live_order_partial_fill_reversal():
     df_mock = pd.DataFrame({"ATR_norm": [0.005] * 30})
     mock_ioc = MagicMock(return_value={"retCode": 0, "result": {"orderId": "mock_ioc_123"}})
 
-    def mock_order_details(symbol, order_id=None):
+    def mock_order_details(symbol, order_id=None, **kwargs):
         if order_id == "mock_ioc_123":
             return {"orderStatus": "Filled", "avgPrice": 50000.0, "cumExecQty": 0.008}
         return {"orderStatus": "PartiallyFilled", "avgPrice": 50000.0, "cumExecQty": 0.008}
 
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
+         patch("main.get_bybit_bid_ask", return_value=(50000.0, 50000.0, 50000.0)), \
          patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_partial_123"}}), \
-         patch("main.wait_for_order_fill", return_value=True), \
+         patch("main.wait_for_order_fill", return_value=(False, "PartiallyFilled", 0.008, 50000.0)), \
          patch("main.get_bybit_order_details", side_effect=mock_order_details), \
+         patch("main.get_bybit_position", return_value={"size": "0.0"}), \
+         patch("main.get_bybit_last_execution", return_value=None), \
          patch("main.place_bybit_taker_ioc_order", mock_ioc), \
          patch("trading_engine.place_bybit_taker_ioc_order", mock_ioc), \
          patch("bybit_client.place_bybit_taker_ioc_order", mock_ioc), \
          patch("main.TRADE_MODE", "live"), \
          patch("trading_engine.TRADE_MODE", "live"), \
          patch("main.send_telegram_alert"), \
-         patch("main.sync_active_positions_from_bybit"):
+         patch("main.sync_active_positions_from_bybit"), \
+         patch("bybit_client.bybit_get_request", return_value={"retCode": 0, "result": {}}):
 
         main.bot_state["active_trades"] = [t for t in main.bot_state.get("active_trades", []) if t.get("trade_id") != "BTCUSDT_mock_partial_uuid"]
         
         main._execute_bybit_trade_async_inner(
             symbol="BTCUSDT", iv="15", tf="15m", ml_trend="Bullish", leverage_val=10.0,
-            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49750.0,
-            take_profit_price=50500.0, position_size_usd=1000.0, kelly_fraction=0.1,
-            calibrated_confidence=0.8, ml_confidence=0.8, dynamic_conf_threshold=0.6,
+            qty_str="0.02", raw_qty=0.02, entry_price=50000.0, stop_loss_price=49700.0,
+            take_profit_price=51000.0, position_size_usd=1000.0, kelly_fraction=0.1,
+            calibrated_confidence=0.85, ml_confidence=0.85, dynamic_conf_threshold=0.6,
             latest_completed_ts=1700000000, latest_candle={"close": 50000.0, "ATR_norm": 0.005},
             pred_change=0.01, predicted_price=50500.0, atr_dollars=250.0,
             tp_multiplier_adjusted=2.0, sl_multiplier_adjusted=1.0, df_completed=df_mock,
@@ -138,7 +144,8 @@ def test_place_bybit_limit_order_post_only_payload():
     from unittest.mock import patch
     import main
 
-    with patch("main.execute_bybit_order_ws_or_rest") as mock_exec:
+    with patch("bybit_client.execute_bybit_order_ws_or_rest") as mock_exec, \
+         patch("main.execute_bybit_order_ws_or_rest", mock_exec):
         mock_exec.return_value = {"retCode": 0, "result": {"orderId": "test_order_1"}}
         res = main.place_bybit_limit_order("BTCUSDT", "Buy", "0.01", 60000.0, post_only=True)
         assert mock_exec.called
@@ -146,7 +153,8 @@ def test_place_bybit_limit_order_post_only_payload():
         assert payload.get("timeInForce") == "PostOnly"
         assert payload.get("orderType") == "Limit"
 
-    with patch("main.execute_bybit_order_ws_or_rest") as mock_exec_gtc:
+    with patch("bybit_client.execute_bybit_order_ws_or_rest") as mock_exec_gtc, \
+         patch("main.execute_bybit_order_ws_or_rest", mock_exec_gtc):
         mock_exec_gtc.return_value = {"retCode": 0, "result": {"orderId": "test_order_2"}}
         res = main.place_bybit_limit_order("BTCUSDT", "Buy", "0.01", 60000.0, post_only=False)
         assert mock_exec_gtc.called

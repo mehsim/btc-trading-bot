@@ -176,7 +176,7 @@ def require_ip_whitelist(f):
             via_proxy = False
 
         # Local loopback access — ONLY if client IP is genuinely loopback and request is not external through reverse proxy
-        trust_loopback = get_secure_env("DASHBOARD_TRUST_LOOPBACK", "true").lower() in ("true", "1")
+        trust_loopback = get_secure_env("DASHBOARD_TRUST_LOOPBACK", "false").lower() in ("true", "1")
         if trust_loopback and not via_proxy and client_ip in ["127.0.0.1", "::1", "localhost"] and request.remote_addr in ["127.0.0.1", "::1", "localhost"]:
             return f(*args, **kwargs)
 
@@ -195,14 +195,14 @@ def require_ip_whitelist(f):
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        # Finding #101: Fail-Closed by default — external public access is disabled unless explicitly set to true
+        # Finding #101 & R37: Fail-Closed by default — external public access is disabled unless explicitly set to true
         allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1")
         if allow_public:
             return f(*args, **kwargs)
 
         return jsonify({
             "error": "Forbidden",
-            "message": "External dashboard access is restricted. Configure ALLOWED_DASHBOARD_IPS, DASHBOARD_API_KEY, or set DASHBOARD_ALLOW_PUBLIC=true in .env."
+            "message": "External dashboard access is restricted. Configure ALLOWED_DASHBOARD_IPS or DASHBOARD_API_KEY."
         }), 403
     return decorated_function
 
@@ -225,24 +225,28 @@ def trigger_emergency_kill_switch(bot_state, send_telegram_alert_func, reason: s
                 errors.append(f"Cancel failed: {res_cancel.get('retMsg', 'Unknown error')}")
             
             positions = get_all_bybit_positions()
-            for p in (positions or []):
-                sym = p.get("symbol")
-                sz = float(p.get("size", "0"))
-                side = p.get("side")
-                if sz > 0 and sym:
-                    close_side = "Sell" if side == "Buy" else "Buy"
-                    res_close = bybit_post_request("/v5/order/create", {
-                        "category": "linear",
-                        "symbol": sym,
-                        "side": close_side,
-                        "orderType": "Market",
-                        "qty": str(sz),
-                        "timeInForce": "IOC",
-                        "reduceOnly": True
-                    })
-                    if isinstance(res_close, dict) and res_close.get("retCode") != 0:
-                        close_success = False
-                        errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
+            if positions is None:
+                close_success = False
+                errors.append("Failed to query open positions from Bybit API (API error or timeout)")
+            else:
+                for p in positions:
+                    sym = p.get("symbol")
+                    sz = float(p.get("size", "0"))
+                    side = p.get("side")
+                    if sz > 0 and sym:
+                        close_side = "Sell" if side == "Buy" else "Buy"
+                        res_close = bybit_post_request("/v5/order/create", {
+                            "category": "linear",
+                            "symbol": sym,
+                            "side": close_side,
+                            "orderType": "Market",
+                            "qty": str(sz),
+                            "timeInForce": "IOC",
+                            "reduceOnly": True
+                        })
+                        if isinstance(res_close, dict) and res_close.get("retCode") != 0:
+                            close_success = False
+                            errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
     except Exception as err:
         errors.append(str(err))
         cancel_success = False
@@ -1689,7 +1693,8 @@ def _get_walk_forward_folds():
                 for idx, w in enumerate(windows[:10]):
                     trades = int(w.get("trades", 0))
                     w_status = str(w.get("status", "")).lower()
-                    is_refitted = w.get("is_refitted", True)
+                    # Finding R38: Default missing is_refitted to False (fail-closed UNREFITTED)
+                    is_refitted = w.get("is_refitted", False)
 
                     wr = float(w.get("win_rate", 0.0))
                     dd = float(w.get("max_drawdown", 0.0))

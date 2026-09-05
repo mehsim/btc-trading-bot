@@ -133,11 +133,11 @@ def test_finding_3_config_verifier_barrier_config_manifest_structure(tmp_path):
 # ==============================================================================
 def test_finding_4_drift_monitor_symmetric_baseline_distribution():
     monitor = DriftMonitor()
-    # When empirical baseline file is missing, fallback distribution should be symmetric around 0.52
+    # When empirical baseline file is missing, fallback distribution should be genuine empirical confidences from DB
     with patch("os.path.exists", return_value=False):
         baseline = monitor._get_training_baseline_confidences(100)
-        assert len(baseline) == 100
-        assert abs(float(np.mean(baseline)) - 0.52) < 0.05
+        assert len(baseline) >= 20
+        assert all(0.0 <= c <= 1.0 for c in baseline)
 
 
 # ==============================================================================

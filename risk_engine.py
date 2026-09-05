@@ -797,6 +797,7 @@ class JointRiskBudgetAllocator:
                 "position_size": 0.0,
                 "position_size_usd": 0.0,
                 "capital_at_risk": 0.0,
+                "kelly_fraction": 0.0,
                 "expected_edge": 0.0,
                 "expected_utility": 0.0,
                 "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"

@@ -44,7 +44,7 @@ def test_finding_81_mde_and_effective_n_governance():
     assert "holdout_mcc_mde_80pct" in dash_src
 
 
-# --- Finding #82: Effective-Sample Convention Mismatch ---
+# --- Finding #82 & R35: Effective-Sample Convention Mismatch ---
 def test_finding_82_effective_sample_convention_mismatch():
     with open("train.py", "r") as f:
         train_src = f.read()
@@ -52,8 +52,7 @@ def test_finding_82_effective_sample_convention_mismatch():
     # Legacy untagged champion defaults to legacy_single_symbol_v1
     assert "legacy_single_symbol_v1" in train_src
     assert 'champ_convention != "lookahead_x_nsymbols_v2"' in train_src
-    assert "champ_mcc_val = None" in train_src
-    assert "is_distribution_shifted = True" in train_src
+    assert "is_convention_mismatch = bool(" in train_src
 
 
 # --- Finding #83: Unified Round-Trip Transaction Cost Modeling ---

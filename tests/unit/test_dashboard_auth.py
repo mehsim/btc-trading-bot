@@ -16,8 +16,9 @@ def test_public_health_endpoint(client):
     data = response.get_json()
     assert data.get("status") == "ok"
 
-def test_public_status_endpoint(client):
-    """Verify GET /api/status is accessible without API key for frontend monitoring."""
+def test_public_status_endpoint(client, monkeypatch):
+    """Verify GET /api/status is accessible when DASHBOARD_TRUST_LOOPBACK is enabled for local monitoring."""
+    monkeypatch.setenv("DASHBOARD_TRUST_LOOPBACK", "true")
     response = client.get('/api/status')
     assert response.status_code == 200
 

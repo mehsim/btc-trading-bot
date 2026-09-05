@@ -25,6 +25,7 @@ def test_maker_chase_attaches_sl_and_tp_to_entry_order():
     mock_details = {"orderStatus": "Filled", "cumExecQty": "0.010", "avgPrice": "60000.0"}
     with patch("main.get_all_bybit_positions", return_value=[]), \
          patch("main.set_bybit_leverage", return_value=True), \
+         patch("main.get_bybit_bid_ask", return_value=(60000.0, 60000.0, 60000.0)), \
          patch("main.get_chase_limit_price", return_value=60000.0), \
          patch("main.place_bybit_limit_order", side_effect=mock_place_limit), \
          patch("main.wait_for_order_fill", return_value=True), \
@@ -33,7 +34,8 @@ def test_maker_chase_attaches_sl_and_tp_to_entry_order():
          patch("main.update_bybit_stop_loss", return_value=True), \
          patch("main.update_bybit_take_profit", return_value=True), \
          patch("main.send_telegram_alert"), \
-         patch("main.sync_active_positions_from_bybit"):
+         patch("main.sync_active_positions_from_bybit"), \
+         patch("bybit_client.bybit_get_request", return_value={"retCode": 0, "result": {}}):
 
         main._execute_bybit_trade_async_inner(
             symbol="BTCUSDT",
@@ -44,8 +46,8 @@ def test_maker_chase_attaches_sl_and_tp_to_entry_order():
             qty_str="0.010",
             raw_qty=0.010,
             entry_price=60000.0,
-            stop_loss_price=59700.0,
-            take_profit_price=60500.0,
+            stop_loss_price=59640.0,
+            take_profit_price=61000.0,
             position_size_usd=600.0,
             kelly_fraction=0.1,
             calibrated_confidence=0.85,
@@ -67,14 +69,14 @@ def test_maker_chase_attaches_sl_and_tp_to_entry_order():
     assert len(placed_limit_orders) >= 1
     first_order = placed_limit_orders[0]
     assert first_order["symbol"] == "BTCUSDT"
-    assert first_order["sl"] == 59700.0
-    assert first_order["tp"] == 60500.0
+    assert first_order["sl"] == 59640.0
+    assert first_order["tp"] == 61000.0
     assert first_order["post_only"] is True
 
 
 def test_place_bybit_limit_order_payload_contains_sl_and_tp():
     """Verify that place_bybit_limit_order translates sl and tp arguments into Bybit payload fields."""
-    with patch("main.execute_bybit_order_ws_or_rest") as mock_exec:
+    with patch("bybit_client.execute_bybit_order_ws_or_rest") as mock_exec:
         mock_exec.return_value = {"retCode": 0}
 
         main.place_bybit_limit_order(

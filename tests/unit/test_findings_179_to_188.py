@@ -135,11 +135,12 @@ def test_finding_13_bybit_request_retries_regenerate_timestamp_headers():
         return mock_fut
 
     with patch.dict(os.environ, {"BYBIT_API_KEY": "test_key", "BYBIT_API_SECRET": "test_secret"}), \
-         patch("main.get_bybit_time_offset", return_value=0), \
-         patch("main._ensure_async_loop", return_value=None), \
-         patch("main.asyncio.run_coroutine_threadsafe", side_effect=mock_run_threadsafe), \
-         patch("main.time.sleep", return_value=None):
-        res = main.bybit_post_request("/v5/order/create", {"category": "linear", "symbol": "BTCUSDT"})
+         patch("bybit_client.get_bybit_time_offset", return_value=0), \
+         patch("bybit_client._ensure_async_loop", return_value=None), \
+         patch("bybit_client.asyncio.run_coroutine_threadsafe", side_effect=mock_run_threadsafe), \
+         patch("bybit_client.time.sleep", return_value=None):
+        import bybit_client
+        res = bybit_client.bybit_post_request("/v5/order/create", {"category": "linear", "symbol": "BTCUSDT"})
         assert res is not None
         assert len(timestamps_seen) == 2
         # Verify timestamp was regenerated per attempt inside the loop
@@ -186,6 +187,7 @@ def test_finding_16_manifest_governance_floors_and_registry_stages():
 
     manifest = {
         "schema_version": 2,
+        "promoted": True,
         "holdout_mcc": 0.025,  # Below default floor 0.035
         "holdout_balanced_accuracy": 0.36,
         "feature_count": 10,

@@ -195,7 +195,7 @@ class ExitPolicyEngine:
             return "RANGING"
         if "STRONG" in r or ("HIGH VOL" in r and "TREND" in r) or (("TREND" in r) and float(adx_val) >= 30.0):
             return "STRONG_TREND"
-        if "TREND" in r or "MODERATE" in r or float(adx_val) >= 25.0:
+        if "TREND" in r or "MODERATE" in r:
             return "MODERATE_TREND"
         from logger import log_event
         log_event("WARNING", f"[Exit Policy Engine] Unrecognized regime '{regime}' (ADX={adx_val:.1f}). Falling back to RANGING.")

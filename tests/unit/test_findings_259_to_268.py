@@ -144,7 +144,7 @@ def test_finding_93_config_verifier_eliminates_self_comparison():
             "regime_adx_enter": 25.0
         }
     }
-    with patch("glob.glob", return_value=["ensemble_trending_trend_15_manifest.json"]), \
+    with patch("glob.glob", return_value=["ensemble_trending_trend_60_manifest.json"]), \
          patch("builtins.open", MagicMock()), \
          patch("json.load", return_value=divergent_manifest):
         with pytest.raises(ValueError, match="Barrier divergence"):

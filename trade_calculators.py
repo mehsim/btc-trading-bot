@@ -287,12 +287,16 @@ def calculate_replay_statistics(
         try:
             mins = float(str(interval).lower().replace("m", "").replace("h", "")) * (60.0 if "h" in str(interval).lower() else 1.0)
             candles_per_year = (365.25 * 24.0 * 60.0) / max(1.0, mins)
-            # Estimate calendar duration from trade count and interval instead of assuming 1 trade/candle
+            # Restore trade-count cap on annualisation factor (Finding R31)
+            capped_trades = min(candles_per_year, float(total_trades) * (candles_per_year / 1000.0))
+            ann_factor = float(np.sqrt(max(1.0, capped_trades)))
             est_days = max(1.0, (total_trades * mins) / (24.0 * 60.0))
-            est_years = est_days / 365.25
-            est_annual_trades = float(total_trades) / max(1e-4, est_years)
-            ann_factor = float(np.sqrt(min(candles_per_year, max(1.0, est_annual_trades))))
-            annualized_return = ending_return / max(1e-4, est_years)
+            est_years = max(est_days / 365.25, 1.0 / 365.25)
+            try:
+                val = (1.0 + max(-0.99, min(100.0, ending_return / 100.0))) ** min(52.0, (1.0 / est_years))
+                annualized_return = float((val - 1.0) * 100.0)
+            except (OverflowError, ValueError):
+                annualized_return = float(ending_return * min(52.0, (1.0 / est_years)))
         except Exception:
             ann_factor = 1.0
             annualized_return = ending_return

@@ -151,10 +151,9 @@ class StrategyHealthEngine:
 
         # 5-STAGE HYSTERESIS STATE MACHINE
         # Persistence rules prevent oscillation:
-        # PF < 0.90 over 30 trades -> DEGRADED
-        # PF > 1.15 over 50 trades -> FULL CAPITAL
-        persistent_degraded = (pf_val < 0.90 and trades_count >= 30)
-        persistent_full = (pf_val >= 1.15 and trades_count >= 50)
+        # Finding R53: Persistent full capital deployment reachable over rolling window
+        persistent_degraded = (pf_val < 0.90 and trades_count >= 20)
+        persistent_full = (pf_val >= 1.15 and trades_count >= 30)
 
         if mhi_score < 45.0:
             state = "CRITICAL"
@@ -248,7 +247,8 @@ class StrategyHealthEngine:
             max_dd = max(1e-4, float(np.max(drawdown)))
             net_profit = float(np.sum(pnls))
             raw_recovery_factor = max(0.0, net_profit / max_dd)
-            raw_calmar_ratio = max(0.0, (net_profit / max_dd) * (252.0 / max(1.0, float(trades_count)))) if net_profit > 0 else 0.0
+            # Finding R54: Honest Calmar ratio without treating trade counts as annual days
+            raw_calmar_ratio = max(0.0, net_profit / max_dd) if net_profit > 0 else 0.0
             
             if trades_count < 10:
                 w_emp = trades_count / 10.0

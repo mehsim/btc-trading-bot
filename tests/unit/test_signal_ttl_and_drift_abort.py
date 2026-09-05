@@ -151,7 +151,14 @@ def test_adverse_price_drift_aborts_bearish_order():
 
 
 def test_candle_freshness_check_logic():
-    """Verify candle freshness evaluation calculates age relative to candle close without bypass."""
+    """Verify candle freshness evaluation calculates age relative to candle close with production formula."""
+    from main import compute_max_allowed_candle_age
+
+    # Verify production thresholds across intervals
+    assert compute_max_allowed_candle_age("15") == 300.0
+    assert compute_max_allowed_candle_age("60") == 900.0
+    assert compute_max_allowed_candle_age("240") == 900.0
+
     now_ms = 1700000000000.0
     iv = "240"
     interval_ms = 240 * 60 * 1000  # 4 hours = 14,400,000 ms
@@ -160,12 +167,12 @@ def test_candle_freshness_check_logic():
     stale_completed_ts = now_ms - interval_ms - 7200000.0
     candle_close_ms = stale_completed_ts + interval_ms
     candle_age_sec = (now_ms - candle_close_ms) / 1000.0
-    max_allowed_age_sec = min(300.0, max(180.0, int(iv) * 60 * 0.15))
+    max_allowed_age_sec = compute_max_allowed_candle_age(iv)
 
     is_stale = candle_age_sec > max_allowed_age_sec or candle_age_sec < -30.0
     assert is_stale is True
     assert candle_age_sec == 7200.0
-    assert max_allowed_age_sec == 300.0
+    assert max_allowed_age_sec == 900.0
 
     # Fresh 240m candle that closed 45 seconds ago
     fresh_completed_ts = now_ms - interval_ms - 45000.0
@@ -175,3 +182,10 @@ def test_candle_freshness_check_logic():
     is_fresh_stale = fresh_age_sec > max_allowed_age_sec or fresh_age_sec < -30.0
     assert is_fresh_stale is False
     assert fresh_age_sec == 45.0
+
+    # Future candle outside -30s tolerance (clock desync)
+    future_completed_ts = now_ms - interval_ms + 45000.0
+    future_close_ms = future_completed_ts + interval_ms
+    future_age_sec = (now_ms - future_close_ms) / 1000.0
+    is_future_stale = future_age_sec > max_allowed_age_sec or future_age_sec < -30.0
+    assert is_future_stale is True

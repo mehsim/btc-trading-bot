@@ -146,7 +146,8 @@ class KellyTracker:
             n_boot = getattr(config, "KELLY_BOOTSTRAP_SAMPLES", 1000)
             boot_r = []
             rng = np.random.RandomState(42)
-            slippage_pct_scaled = avg_slippage * 100.0  # Scale fraction (e.g. 0.0005) to percentage points (0.05%)
+            is_fractional = bool(len(returns) > 0 and np.max(np.abs(returns)) <= 0.50)
+            slippage_pct_scaled = avg_slippage if is_fractional else (avg_slippage * 100.0)
             for _ in range(n_boot):
                 b_wins = rng.choice(wins, size=len(wins), replace=True)
                 b_loss = rng.choice(losses, size=len(losses), replace=True)
