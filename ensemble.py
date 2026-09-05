@@ -350,6 +350,8 @@ def _sanitize_probabilities(probs, default_classes: int = 3) -> np.ndarray:
     return probs / row_sums
 
 
+PurgedTimeSeriesSplit = PurgedEmbargoTimeSeriesSplit
+
 class EnsembleClassifier:
     """
     Blends XGBoost, LightGBM, and CatBoost classifiers using a Stacking Meta-Classifier
@@ -377,18 +379,24 @@ class EnsembleClassifier:
             try:
                 from sklearn.metrics import accuracy_score
                 from sklearn.linear_model import LogisticRegression
-                from sklearn.model_selection import StratifiedKFold, KFold
                 from sklearn.base import clone
 
                 n_samples = len(X_arr)
-                classes, counts = np.unique(y_arr, return_counts=True)
-                min_class_count = int(np.min(counts)) if len(counts) > 1 else 0
-                n_splits = min(5, max(2, min_class_count)) if min_class_count >= 2 else min(5, max(2, n_samples // 10))
-                
-                if min_class_count >= 2 and n_splits >= 2:
-                    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-                else:
-                    cv = KFold(n_splits=max(2, min(5, n_samples // 5)), shuffle=True, random_state=42)
+                lookahead_bars = int(getattr(self, "lookahead", 12))
+                n_splits = max(2, min(5, n_samples // 50))
+                cv = PurgedEmbargoTimeSeriesSplit(n_splits=n_splits, lookahead=lookahead_bars, embargo_pct=0.01)
+                splits = list(cv.split(X_arr, y_arr))
+                if not splits:
+                    # Chronological inner split fallback preserving temporal order and purging lookahead
+                    split_point = int(n_samples * 0.75)
+                    purge_end = min(n_samples, split_point + lookahead_bars)
+                    tr_idx = np.arange(split_point)
+                    val_idx = np.arange(purge_end, n_samples)
+                    if len(tr_idx) > 0 and len(val_idx) > 0:
+                        splits = [(tr_idx, val_idx)]
+                    else:
+                        mid = max(1, n_samples // 2)
+                        splits = [(np.arange(mid), np.arange(mid, n_samples))]
 
                 oof_xgb = np.zeros((n_samples, 3), dtype=float)
                 oof_lgb = np.zeros((n_samples, 3), dtype=float)
@@ -401,7 +409,7 @@ class EnsembleClassifier:
                         import copy
                         return copy.deepcopy(model)
 
-                for fold_tr_idx, fold_val_idx in cv.split(X_arr, y_arr):
+                for fold_tr_idx, fold_val_idx in splits:
                     fold_X_tr, fold_y_tr = X_arr[fold_tr_idx], y_arr[fold_tr_idx]
                     fold_X_val, fold_y_val = X_arr[fold_val_idx], y_arr[fold_val_idx]
                     fold_w_tr = sample_weight[fold_tr_idx] if sample_weight is not None else None
@@ -433,20 +441,33 @@ class EnsembleClassifier:
                     oof_lgb[fold_val_idx] = _align_prob3(p_l)
                     oof_cat[fold_val_idx] = _align_prob3(p_c)
 
+                # Accuracies and Meta-Features evaluated on valid out-of-fold predictions
+                val_mask = (np.sum(oof_xgb, axis=1) > 0) | (np.sum(oof_lgb, axis=1) > 0) | (np.sum(oof_cat, axis=1) > 0)
+                if np.sum(val_mask) >= 5:
+                    y_eval = y_arr[val_mask]
+                    oof_xgb_eval = oof_xgb[val_mask]
+                    oof_lgb_eval = oof_lgb[val_mask]
+                    oof_cat_eval = oof_cat[val_mask]
+                else:
+                    y_eval = y_arr
+                    oof_xgb_eval = oof_xgb
+                    oof_lgb_eval = oof_lgb
+                    oof_cat_eval = oof_cat
+
                 # Accuracies on pooled OOF predictions
-                acc_xgb = accuracy_score(y_arr, np.argmax(oof_xgb, axis=1))
-                acc_lgb = accuracy_score(y_arr, np.argmax(oof_lgb, axis=1))
-                acc_cat = accuracy_score(y_arr, np.argmax(oof_cat, axis=1))
+                acc_xgb = accuracy_score(y_eval, np.argmax(oof_xgb_eval, axis=1))
+                acc_lgb = accuracy_score(y_eval, np.argmax(oof_lgb_eval, axis=1))
+                acc_cat = accuracy_score(y_eval, np.argmax(oof_cat_eval, axis=1))
                 raw_w = np.array([acc_xgb, acc_lgb, acc_cat], dtype=float)
                 raw_w = np.maximum(0.01, raw_w - 0.33)
                 self.weights = (raw_w / np.sum(raw_w)).tolist()
 
                 # Create Meta-Feature Matrix [N, 9] (3 classes x 3 models)
-                X_meta = np.column_stack([oof_xgb, oof_lgb, oof_cat])
+                X_meta = np.column_stack([oof_xgb_eval, oof_lgb_eval, oof_cat_eval])
 
                 # Fit L2 Regularized Logistic Regression Stacking Meta-Classifier with balanced class weighting
                 meta_clf = LogisticRegression(solver='lbfgs', max_iter=200, random_state=42, class_weight='balanced')
-                meta_clf.fit(X_meta, y_arr)
+                meta_clf.fit(X_meta, y_eval)
                 self.meta_coef_ = meta_clf.coef_.tolist()
                 self.meta_intercept_ = meta_clf.intercept_.tolist()
                 self.meta_clf = meta_clf

@@ -261,15 +261,24 @@ class ExitPolicyEngine:
         # Volatility contraction must not pull break-even below scale-out distance,
         # and break-even must not move the stop to entry before scale-out executes.
         if not active_trade.get("break_even_triggered"):
-            effective_be_basis = max(entry_atr, atr_dollars)
+            effective_be_basis = entry_atr if entry_atr > 0 else atr_dollars
             be_dist = be_trigger_atr_mult * effective_be_basis
             if not half_closed and scale_out_pct > 0.0:
                 be_dist = max(be_dist, (scale_out_atr_mult * scale_out_atr_basis) + (0.10 * effective_be_basis))
             be_reached = (current_price >= entry_price + be_dist) if direction == "Bullish" else (current_price <= entry_price - be_dist)
             if be_reached:
                 be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
-                target_sl = (entry_price + be_buffer) if direction == "Bullish" else (entry_price - be_buffer)
-                is_tighter = (target_sl > stop_loss + 1e-4) if direction == "Bullish" else (target_sl < stop_loss - 1e-4)
+                if direction == "Bullish":
+                    raw_target_sl = entry_price + be_buffer
+                    # R17 Clamp: target_sl must never exceed current_price in low-ATR conditions
+                    target_sl = min(raw_target_sl, current_price - (0.05 * max(1e-6, atr_dollars)))
+                    is_tighter = target_sl > stop_loss + 1e-4
+                else:
+                    raw_target_sl = entry_price - be_buffer
+                    # R17 Clamp: target_sl must never fall below current_price in low-ATR conditions
+                    target_sl = max(raw_target_sl, current_price + (0.05 * max(1e-6, atr_dollars)))
+                    is_tighter = target_sl < stop_loss - 1e-4
+
                 if is_tighter:
                     updates["new_stop_loss"] = target_sl
                     stop_loss = target_sl

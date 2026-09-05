@@ -467,7 +467,8 @@ class SignalEvaluator:
                         if is_calibrator_viable(calibrator, min_required_p_star=p_star_req):
                             calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
                         else:
-                            calibrated_conf = float(raw_conf)
+                            calibrated_conf = 0.0
+                            log_event("WARNING", f"[{symbol} {interval}m] Calibrator non-viable for p*={p_star_req:.4f}. Abstaining fail-closed.")
                     else:
                         calibrated_conf = float(raw_conf)
 

@@ -391,17 +391,24 @@ def check_pre_trade_confluence(current_price, df_1h, ml_trend, news_sentiment, e
     score_threshold = 75.0
     traditional_approved = (not hard_gate_failed) and (score_pct >= score_threshold)
     is_ranging_regime = "ranging" in str(current_regime).lower()
-    pass_1h = results.get("1h_Trend", {}).get("pass", False)
+    has_1h_gate = "1h_Trend" in results
+    pass_1h = results["1h_Trend"].get("pass", False) if has_1h_gate else True
     pass_4h = results.get("4h_Trend", {}).get("pass", False)
 
     if is_soft_intraday or is_ranging_regime:
         # Neither ranging nor soft intraday may enter when BOTH 1h and 4h HTF structures oppose the signal
-        trend_gates_passed = not (not pass_1h and not pass_4h)
+        if has_1h_gate:
+            trend_gates_passed = not (not pass_1h and not pass_4h)
+        else:
+            trend_gates_passed = pass_4h
     else:
         pass_1d = results.get("1d_Trend", {}).get("pass", False)
-        trend_gates_passed = pass_1d and pass_4h and pass_1h
+        if has_1h_gate:
+            trend_gates_passed = pass_1d and pass_4h and pass_1h
+        else:
+            trend_gates_passed = pass_1d and pass_4h
 
-    if not pass_1h and not pass_4h:
+    if has_1h_gate and not pass_1h and not pass_4h:
         hard_gate_failed = True
         traditional_approved = False
 

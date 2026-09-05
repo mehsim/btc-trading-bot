@@ -1058,7 +1058,7 @@ def parse_proxy_url(proxy_url):
         auth = (parsed.username, parsed.password)
     return host, port, auth, proxy_type
 
-_cached_time_offset = None
+_cached_time_offset = 0.0
 _last_time_sync = 0.0
 _time_offset_lock = threading.Lock()
 
@@ -1088,14 +1088,17 @@ def get_bybit_time_offset():
                 offset = server_time - local_time
                 print(f"[Bybit API] Successfully synced time offset: {offset}ms")
                 with _time_offset_lock:
-                    _cached_time_offset = offset
+                    _cached_time_offset = float(offset)
                     _last_time_sync = time.time()
                 return offset
         except Exception as e:
             if attempt == 2:
                 print(f"[Bybit API Error] Failed to sync time after 3 attempts: {e}")
             time.sleep(1)
-    return 0
+    with _time_offset_lock:
+        if _cached_time_offset is None:
+            _cached_time_offset = 0.0
+    return 0.0
 
 def bybit_post_request(endpoint, payload):
     import bybit_client
@@ -1402,11 +1405,20 @@ def update_bybit_take_profit(symbol, tp_price, active_trade=None):
             bot_state[f"live_price_{symbol}"] = fresh_price
             bot_state[f"live_price_ts_{symbol}"] = now_t
             price_ts = now_t
+
+    if live_price is None or price_ts <= 0.0 or (now_t - price_ts > 30.0):
+        print(f"[Bybit API] Take Profit update skipped for {symbol}: Live price unavailable or stale (age {now_t - price_ts:.1f}s) and fallback failed.")
+        return False
         
     if live_price is not None:
         if side == "Buy" or side == "Long":  # Long position: Take Profit must be > current price
             if tp_price <= live_price:
                 log_event("WARNING", f"[{symbol}] TP {tp_price} <= price {live_price} on a long — skipped")
+                return False
+        else:  # Short position: Take Profit must be < current price
+            if tp_price >= live_price:
+                log_event("WARNING", f"[{symbol}] TP {tp_price} >= price {live_price} on a short — skipped")
+                return False
     payload = {
         "category": "linear",
         "symbol": symbol,
@@ -4781,8 +4793,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         if fill_q > 0:
                             entry_price = sum_val / fill_q
                     else:
-                        pos_dict = get_all_bybit_positions()
-                        sym_pos = pos_dict.get(symbol, {}) if isinstance(pos_dict, dict) else {}
+                        pos_res = get_bybit_position(symbol)
+                        if pos_res and isinstance(pos_res, dict):
+                            sym_pos = pos_res
+                        else:
+                            pos_list = get_all_bybit_positions()
+                            sym_pos = next((p for p in pos_list if isinstance(p, dict) and p.get("symbol") == symbol), {}) if isinstance(pos_list, list) else {}
                         pos_qty = float(sym_pos.get("size", 0.0))
                         actual_qty = min(pos_qty, raw_qty) if pos_qty > 0 else 0.0
                 if actual_qty <= 0.0:
@@ -5068,8 +5084,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                         sum_v = sum(float(x.get("execQty", 0.0)) * float(x.get("execPrice", entry_price)) for x in ioc_execs)
                                         fill_px = (sum_v / fill_q) if fill_q > 0 else entry_price
                                     else:
-                                        pos_dict = get_all_bybit_positions()
-                                        sym_pos = pos_dict.get(symbol, {}) if isinstance(pos_dict, dict) else {}
+                                        pos_res = get_bybit_position(symbol)
+                                        if pos_res and isinstance(pos_res, dict):
+                                            sym_pos = pos_res
+                                        else:
+                                            pos_list = get_all_bybit_positions()
+                                            sym_pos = next((p for p in pos_list if isinstance(p, dict) and p.get("symbol") == symbol), {}) if isinstance(pos_list, list) else {}
                                         current_pos_size = float(sym_pos.get("size", 0.0))
                                         pos_delta = max(0.0, current_pos_size - filled_so_far)
                                         fill_q = min(pos_delta, floored_ioc)
@@ -6132,10 +6152,23 @@ def main():
                         elif current_price <= take_profit:
                             exit_reason = "TAKE PROFIT HIT [SUCCESS]"
 
-                # Finding #90: Enforce label horizon expiration (end_time)
+                # Finding #90: Enforce label horizon expiration (end_time) with Level 10 Runner Extension
                 if not exit_reason and end_time > 0 and current_time >= end_time:
-                    exit_reason = "HORIZON_EXPIRY [LABEL_TIMEOUT]"
-                    log_event("INFO", f"[{active_symbol} {iv}m] Trade reached full label horizon ({countdown_str}). Programmatic close.")
+                    is_long_dir = direction in ["Bullish", "BUY", "LONG", "UP"]
+                    pnl_dist = (current_price - entry_price) if is_long_dir else (entry_price - current_price)
+                    risk_dist = abs(entry_price - stop_loss) if abs(entry_price - stop_loss) > 1e-6 else 1.0
+                    curr_r_val = round(pnl_dist / risk_dist, 2)
+                    decayed_exp_r = float(hierarchy_eval.get("decayed_expected_r", 0.0)) if isinstance(hierarchy_eval, dict) else 0.0
+                    is_runner_eligible = (
+                        curr_r_val >= 2.0 and
+                        decayed_exp_r >= 0.20 and
+                        "trend" in str(curr_regime).lower() and "trend" in str(entry_regime_val).lower()
+                    )
+                    if is_runner_eligible:
+                        log_event("INFO", f"[{active_symbol} {iv}m] Label horizon reached ({countdown_str}) but runner extension granted (PnL: +{curr_r_val:.1f}R, Exp R: {decayed_exp_r:.2f}R). Extending hold.")
+                    else:
+                        exit_reason = "HORIZON_EXPIRY [LABEL_TIMEOUT]"
+                        log_event("INFO", f"[{active_symbol} {iv}m] Trade reached full label horizon ({countdown_str}). Programmatic close.")
                 
                 if TRADE_MODE != "simulation":
                     if exit_reason is not None and not bybit_closed:
@@ -6350,6 +6383,7 @@ def main():
                         "exit_time": float(time.time()),
                         "interval": str(iv),
                         "direction": str(direction),
+                        "regime": str(active_trade.get("regime", "")),
                         "entry_price": float(entry_price),
                         "exit_price": float(actual_price),
                         "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
@@ -7384,26 +7418,20 @@ def main():
                             missing_model_features = [col for col in _features_to_use if col not in latest_candle_weighted.index or pd.isna(X_live_full[col].iloc[0])]
                             if missing_model_features:
                                 log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
-                                write_decision(
-                                    symbol=symbol,
-                                    interval=iv,
-                                    action="ABSTAIN",
-                                    reason_code=ReasonCode.PREDICTION_ERROR,
-                                    notes=f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
-                                )
+                                rec.outcome = "REJECTED"
+                                rec.reason_code = ReasonCode.PREDICTION_ERROR
+                                rec.reject_reason = f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
+                                write_decision(rec)
                                 continue
 
                             try:
                                 X_live = _slice_model_input(active_model_trend, X_live_full)
                             except Exception as ex_slice:
                                 log_event("WARNING", f"[{symbol} {iv}m] Feature slice failed: {ex_slice}. Abstaining (fail-closed).")
-                                write_decision(
-                                    symbol=symbol,
-                                    interval=iv,
-                                    action="ABSTAIN",
-                                    reason_code=ReasonCode.PREDICTION_ERROR,
-                                    notes=f"Feature slice failed: {ex_slice}"
-                                )
+                                rec.outcome = "REJECTED"
+                                rec.reason_code = ReasonCode.PREDICTION_ERROR
+                                rec.reject_reason = f"Feature slice failed: {ex_slice}"
+                                write_decision(rec)
                                 continue
 
                             # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
@@ -9068,13 +9096,19 @@ def main():
                                                             # Finding #47: Re-evaluate portfolio checklist against scaled-up final_val
                                                             if final_val > position_size_usd:
                                                                 try:
-                                                                    re_passed, re_msg, _, _ = risk_engine.evaluate_pre_trade_checklist(
+                                                                    re_passed, re_msg, re_dd_mult, re_capped_size = risk_engine.evaluate_pre_trade_checklist(
                                                                         symbol, final_val, leverage_val, active_trades_list, bot_state, df_dict, interval=str(iv), direction=ml_trend, journal=None
                                                                     )
                                                                     if not re_passed:
                                                                         log_event("WARNING", f"[{symbol} {iv}m Min Order Risk] Scaled up size (${final_val:.2f}) failed re-evaluated portfolio checklist: {re_msg}. Aborting entry.")
                                                                         status_msg = f"Skipped (Min Order Bump Checklist Fail: {re_msg})"
                                                                         wallet_exceeded = True
+                                                                    elif re_capped_size is not None and float(re_capped_size) < (final_val - 1e-4):
+                                                                        log_event("WARNING", f"[{symbol} {iv}m Min Order Risk] Scaled up size (${final_val:.2f}) exceeds risk limit cap (${float(re_capped_size):.2f}). Aborting entry.")
+                                                                        status_msg = f"Skipped (Min Order Bump Exceeds Cap: {re_msg})"
+                                                                        wallet_exceeded = True
+                                                                    else:
+                                                                        final_val = min(final_val, float(re_capped_size if re_capped_size is not None else final_val))
                                                                 except Exception as _chk_err:
                                                                     log_event("WARNING", f"[{symbol} {iv}m Min Order Risk] Checklist re-eval exception: {_chk_err}")
                                                                     wallet_exceeded = True

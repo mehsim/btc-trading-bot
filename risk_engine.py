@@ -689,27 +689,39 @@ class JointRiskBudgetAllocator:
         - 50.0 <= MHI <= 85.0: Continuous linear ramp from 0.0x to 0.25x Kelly
         - MHI > 85.0 (HEALTHY): Max 0.25x Kelly
         """
+        import time
         policy = getattr(config, "MHI_KELLY_POLICY", {
             "halt_below": 50.0,
             "resume_above": 53.0,
             "full_at": 85.0,
             "max_kelly": 0.25,
+            "halt_cooldown_seconds": 14400.0,
+            "probe_kelly": 0.05
         })
         halt_below = float(policy.get("halt_below", 50.0))
         resume_above = float(policy.get("resume_above", 53.0))
         full_at = float(policy.get("full_at", 85.0))
         max_kelly = float(policy.get("max_kelly", 0.25))
+        cooldown_seconds = float(policy.get("halt_cooldown_seconds", 14400.0))
+        now_ts = time.time()
 
         if not hasattr(self, "_mhi_halted"):
             self._mhi_halted = False
+            self._mhi_halt_time = 0.0
 
         if self._mhi_halted:
             if mhi_score >= resume_above:
                 self._mhi_halted = False
+                self._mhi_halt_time = 0.0
+            elif getattr(self, "_mhi_halt_time", 0.0) > 0.0 and (now_ts - self._mhi_halt_time) >= cooldown_seconds:
+                # Cooldown recovery probe: allow minimal exploratory allocation to escape absorbing deadlock
+                probe_frac = float(policy.get("probe_kelly", 0.05))
+                return min(probe_frac, max_kelly)
             else:
                 return 0.0
         elif mhi_score < halt_below:
             self._mhi_halted = True
+            self._mhi_halt_time = now_ts
             return 0.0
 
         span = max(1e-9, full_at - halt_below)
@@ -782,6 +794,11 @@ class JointRiskBudgetAllocator:
         if portfolio_heat >= 1.0 or max_kelly_frac <= 0.0 or avail_budget_factor <= 0.0:
             return {
                 "execution_permitted": False,
+                "position_size": 0.0,
+                "position_size_usd": 0.0,
+                "capital_at_risk": 0.0,
+                "expected_edge": 0.0,
+                "expected_utility": 0.0,
                 "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"
             }
 

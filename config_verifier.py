@@ -34,8 +34,8 @@ def assert_shared_constants_aligned():
                     base_parts = os.path.basename(m_path).replace("_manifest.json", "").split("_")
                     if len(base_parts) >= 4:
                         iv_key = base_parts[-1]
-                        # Only check trend models which govern directional entry barrier geometry
-                        if "trend" in base_parts and iv_key in cfg_tf:
+                        # Verify barrier parameters for directional trend models and price regressor models
+                        if ("trend" in base_parts or "price" in base_parts) and iv_key in cfg_tf:
                             live_c = cfg_tf[iv_key]
                             slot_key = f"{base_parts[1]}_{iv_key}"
                             is_denylisted = slot_key in getattr(config, "MODEL_SLOT_DENYLIST", []) or m_data.get("promoted") is False

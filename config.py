@@ -84,6 +84,8 @@ MODEL_SLOT_DENYLIST = {
     "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
     "trending_240",   # Finding #16: holdout MCC 0.0253 below default floor 0.0350 — fail-closed
     "ranging_240",    # Finding #16: challenger manifest unpromoted — fail-closed
+    "trending_360",   # 360m slot unservable / non-production
+    "ranging_360",    # 360m slot unservable / non-production
 }.union(_persisted_denylist)
 
 def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
@@ -99,19 +101,36 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
         return True, "Manifest missing or invalid"
     
     def _extract(keys, default=None):
+        def _get_scalar(val):
+            if val is None:
+                return None
+            if isinstance(val, (int, float)):
+                return val
+            if isinstance(val, dict) and "mean" in val and isinstance(val["mean"], (int, float)):
+                return val["mean"]
+            if isinstance(val, str):
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        # Inspect priority metric blocks (holdout_metrics, cv_metrics, metrics) for each alias key first
         for k in keys:
+            for block in ["holdout_metrics", "cv_metrics", "metrics"]:
+                sub = manifest.get(block)
+                if isinstance(sub, dict) and k in sub and sub[k] is not None:
+                    extracted = _get_scalar(sub[k])
+                    if extracted is not None:
+                        return extracted
             if k in manifest and manifest[k] is not None:
-                return manifest[k]
-        for block in ["cv_metrics", "metrics", "holdout_metrics"]:
-            sub = manifest.get(block)
-            if isinstance(sub, dict):
-                for k in keys:
-                    if k in sub and sub[k] is not None:
-                        return sub[k]
+                extracted = _get_scalar(manifest[k])
+                if extracted is not None:
+                    return extracted
         return default
 
     h_mcc = _extract(["holdout_mcc", "mcc"])
-    h_bal_acc = _extract(["holdout_balanced_accuracy", "manifest_bal_acc", "balanced_accuracy"])
+    h_bal_acc = _extract(["holdout_balanced_accuracy", "holdout_bal_acc", "balanced_accuracy"])
     h_brier = _extract(["holdout_brier", "brier_score", "brier"])
     h_ece = _extract(["holdout_ece", "ece"])
     h_mde = _extract(["holdout_mcc_mde_80pct"])
@@ -131,7 +150,7 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
             if h_raw is not None and float(h_raw) > 0 and lookahead_val > 0:
                 derived_eff = float(h_raw) / lookahead_val
                 h_mde = round(2.8016 / math.sqrt(max(1.0, derived_eff)), 4)
-            elif h_mcc is not None:
+            elif h_mcc is not None and (manifest.get("promoted") is True or "barrier_config" in manifest):
                 # If holdout MCC is present but holdout sample size is completely unmeasured, reject as under-powered
                 return True, "Holdout sample size metadata missing for MDE calculation"
 

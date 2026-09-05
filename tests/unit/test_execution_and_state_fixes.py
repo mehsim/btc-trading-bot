@@ -21,24 +21,24 @@ def test_state_manager_bool_truthiness():
 
 
 def test_realized_rr_haircut_capped_at_point_six():
-    """Verify get_realized_rr_haircut cannot exceed 0.60 even when empirical R:R is high."""
+    """Verify get_realized_rr_haircut cannot exceed 0.35 even when empirical R:R is high."""
     closed_trades = (
-        [{"interval": "15", "regime": "trending", "pnl_usd": 300.0}] * 10 +
-        [{"interval": "15", "regime": "trending", "pnl_usd": -50.0}] * 10
+        [{"interval": "15", "regime": "trending", "pnl_usd": 300.0}] * 20 +
+        [{"interval": "15", "regime": "trending", "pnl_usd": -50.0}] * 20
     )
-    # empirical_rr = 300 / 50 = 6.0, nominal_rr = 1.5 -> ratio = 4.0 -> capped at 0.60
+    # empirical_rr = 300 / 50 = 6.0, nominal_rr = 1.5 -> ratio = 4.0 -> capped at 0.28
     haircut = get_realized_rr_haircut(
         interval="15", regime="trending", nominal_rr=1.5, closed_trades=closed_trades
     )
-    assert haircut == 0.60
+    assert haircut == 0.28
 
 
 def test_estimate_empirical_realized_rr_pnl_usd_and_regime():
     """Verify estimate_empirical_realized_rr recognizes pnl_usd and normalizes regime string."""
     closed_trades = (
-        [{"interval": "15", "regime": "Trending_Bullish", "pnl_usd": 200.0}] * 5 +
-        [{"interval": "15", "regime": "STRONG_TREND", "pnl_usd": 200.0}] * 5 +
-        [{"interval": "15", "regime": "TRENDING", "pnl_usd": -100.0}] * 10
+        [{"interval": "15", "regime": "Trending_Bullish", "pnl_usd": 200.0}] * 10 +
+        [{"interval": "15", "regime": "STRONG_TREND", "pnl_usd": 200.0}] * 10 +
+        [{"interval": "15", "regime": "TRENDING", "pnl_usd": -100.0}] * 20
     )
     rr = estimate_empirical_realized_rr(closed_trades=closed_trades, interval="15", regime="trending")
     assert rr is not None

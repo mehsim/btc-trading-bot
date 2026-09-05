@@ -215,7 +215,8 @@ def init_db():
                 ("venue_closed_pnl", "REAL"), ("venue_qty", "REAL"), ("venue_entry_value", "REAL"),
                 ("intended_size_usd", "REAL"), ("initial_stop_loss", "REAL"), ("initial_take_profit", "REAL"),
                 ("initial_rr", "REAL"), ("kelly_size_usd", "REAL"), ("clamped_size_usd", "REAL"),
-                ("final_size_usd", "REAL"), ("mae", "REAL"), ("mfe", "REAL"), ("pnl_source", "TEXT")
+                ("final_size_usd", "REAL"), ("mae", "REAL"), ("mfe", "REAL"), ("pnl_source", "TEXT"),
+                ("regime", "TEXT")
             ]:
                 if col_name not in cols:
                     try:
@@ -567,22 +568,30 @@ def save_completed_trade(trade) -> bool:
                 conn.close()
                 return True
 
+            t_interval = str(trade.get("interval", "60")).replace("m", "").replace("h", "")
+            t_dir = str(trade.get("direction", "")).upper()
             if exit_ts and sym:
                 if entry_p is not None and exit_p is not None:
                     c2 = conn.execute("""
                         SELECT trade_id FROM completed_trades 
-                        WHERE symbol = ? AND abs(exit_time - ?) < 60.0 
-                          AND abs(entry_price - ?) / max(1.0, entry_price) < 0.005 
-                          AND abs(exit_price - ?) / max(1.0, exit_price) < 0.005;
-                    """, (sym, exit_ts, entry_p, exit_p))
+                        WHERE symbol = ?
+                          AND replace(replace(interval, 'm', ''), 'h', '') = ?
+                          AND UPPER(direction) = ?
+                          AND abs(exit_time - ?) < 15.0 
+                          AND abs(entry_price - ?) / max(1.0, entry_price) < 0.0005 
+                          AND abs(exit_price - ?) / max(1.0, exit_price) < 0.0005;
+                    """, (sym, t_interval, t_dir, exit_ts, entry_p, exit_p))
                     if c2.fetchone():
                         conn.close()
                         return True
                 else:
                     c2 = conn.execute("""
                         SELECT trade_id FROM completed_trades 
-                        WHERE symbol = ? AND abs(exit_time - ?) < 5.0;
-                    """, (sym, exit_ts))
+                        WHERE symbol = ?
+                          AND replace(replace(interval, 'm', ''), 'h', '') = ?
+                          AND UPPER(direction) = ?
+                          AND abs(exit_time - ?) < 5.0;
+                    """, (sym, t_interval, t_dir, exit_ts))
                     if c2.fetchone():
                         conn.close()
                         return True
@@ -590,13 +599,14 @@ def save_completed_trade(trade) -> bool:
             try:
                 cur = conn.execute("""
                     INSERT INTO completed_trades (
-                        trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                        trade_id, symbol, exit_time, interval, direction, regime, entry_price, exit_price,
                         change_pct, success, reason, position_size_usd, intended_size_usd, original_size, pnl_usd,
                         balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct,
                         venue_closed_pnl, venue_qty, venue_entry_value, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
                     t_id, sym, trade.get("exit_time"), trade.get("interval", "60"), trade.get("direction"),
+                    str(trade.get("regime", "")),
                     entry_p, exit_p,
                     round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
                     trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4),
@@ -665,16 +675,17 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
             # Step 1: Idempotent Insert/Update into completed_trades
             conn.execute("""
                 INSERT INTO completed_trades (
-                    trade_id, symbol, exit_time, interval, direction, entry_price, exit_price,
+                    trade_id, symbol, exit_time, interval, direction, regime, entry_price, exit_price,
                     change_pct, success, reason, position_size_usd, original_size, pnl_usd,
                     balance, leverage, confidence, take_profit, stop_loss, atr_dollars, fill_pct, raw_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(trade_id) DO UPDATE SET
                     exit_time=excluded.exit_time,
                     exit_price=excluded.exit_price,
                     change_pct=excluded.change_pct,
                     success=excluded.success,
                     reason=excluded.reason,
+                    regime=excluded.regime,
                     position_size_usd=excluded.position_size_usd,
                     original_size=excluded.original_size,
                     pnl_usd=excluded.pnl_usd,
@@ -682,6 +693,7 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
                     raw_data=excluded.raw_data;
             """, (
                 t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
+                str(trade.get("regime", "")),
                 round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
                 round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
                 trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),
