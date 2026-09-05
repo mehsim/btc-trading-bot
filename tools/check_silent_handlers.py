@@ -29,9 +29,12 @@ def _save_baseline(count: int) -> None:
             data = json.load(f)
     except Exception:
         pass
-    data["silent_handlers"] = count + 1  # measured + 1 tolerance
-    with open(_BASELINE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    current_bl = int(data.get("silent_handlers", count))
+    if count < current_bl:
+        data["silent_handlers"] = count
+        data["silent_handler_count"] = count
+        with open(_BASELINE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
 
 # Files to exclude (external libraries, build output, virtual environments, tooling)
 EXCLUDE_DIRS = {".venv", "venv", "build", "dist", ".git", ".pytest_cache", "node_modules", "mlartifacts", "tools"}
@@ -116,6 +119,9 @@ if __name__ == "__main__":
         print("   Narrow exception type or log the exception instead of swallowing it silently.")
         sys.exit(1)
     else:
-        _save_baseline(count)  # ratchet down: baseline becomes count+1
-        print(f"✅ OK: {count} silent handlers <= baseline {baseline}.")
+        if count < baseline:
+            _save_baseline(count)  # ratchet down: baseline becomes new lower count
+            print(f"✅ OK: {count} silent handlers < baseline {baseline}. Ratchet lowered to {count}.")
+        else:
+            print(f"✅ OK: {count} silent handlers == baseline {baseline}.")
         sys.exit(0)

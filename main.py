@@ -4703,6 +4703,22 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     effective_sl_dist = max(raw_sl_dist, min_sl_dist)
     if stop_loss_price is not None:
         stop_loss_price = (entry_price - effective_sl_dist) if ml_trend == "Bullish" else (entry_price + effective_sl_dist)
+
+    # Invariant: Rescale quantity if minimum stop floor widened the stop distance, preserving dollar risk
+    if effective_sl_dist > (raw_sl_dist + 1e-6) and raw_sl_dist > 0:
+        rescaled_raw_qty = raw_qty * (raw_sl_dist / effective_sl_dist)
+        rescaled_qty_str = format_bybit_qty(symbol, rescaled_raw_qty)
+        rescaled_val = float(rescaled_qty_str) if rescaled_qty_str else 0.0
+        min_order_value = float(getattr(config, "MIN_ORDER_VALUE_USD", 5.0))
+        if rescaled_val * entry_price < min_order_value:
+            log_event("WARNING", f"[{symbol} {iv}m Pre-Order Floor] Widening SL ({raw_sl_dist:.2f} -> {effective_sl_dist:.2f}) rescales qty below min notional (${min_order_value:.2f}). Aborting entry.")
+            _abort_async("Widened SL reduced order below min notional")
+            return
+        log_event("INFO", f"[{symbol} {iv}m Pre-Order Floor] Rescaled qty ({qty_str} -> {rescaled_qty_str}) for widened SL ({raw_sl_dist:.2f} -> {effective_sl_dist:.2f}) to maintain dollar risk invariant.")
+        raw_qty = rescaled_val
+        actual_qty = rescaled_val
+        qty_str = rescaled_qty_str
+        position_size_usd = (raw_qty * entry_price) / max(1.0, leverage_val)
     
     # 1. Live Exchange Position Guard
     try:
@@ -4858,12 +4874,14 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         print(f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting remaining chase iterations.")
                         if filled_so_far >= (0.95 * raw_qty):
                             bybit_success = True
-                        break
-                    else:
-                        log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase with 0 fills. Aborting order placement completely.")
-                        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired during chase.")
-                        _abort_async("Signal TTL expired during chase with 0 fills")
-                        return
+                            break
+                        elif filled_so_far > 0:
+                            break
+                        else:
+                            log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase with 0 fills. Aborting order placement completely.")
+                            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired during chase.")
+                            _abort_async("Signal TTL expired during chase with 0 fills")
+                            return
 
                 if chase > 0:
                     c_bid, c_ask, c_last = get_bybit_bid_ask(symbol)
@@ -5797,15 +5815,15 @@ def main():
                 half_closed = active_trade.get("half_closed", False)
                 trigger_scale_out = False
                 if not half_closed:
-                    if active_trade.get("scale_out_triggered"):
-                        trigger_scale_out = True
-                    elif active_trade.get("trade_id") in rebal_scale_set:
-                        trigger_scale_out = True
-                        print(f"[{active_symbol} {iv}m Portfolio Rebalance] Scale-out triggered by Portfolio Utility Optimizer.")
-                    elif TRADE_MODE != "simulation":
+                    if TRADE_MODE != "simulation":
                         trigger_scale_out = bybit_scaled_out
                     else:
-                        if direction == "Bullish" and current_price >= entry_price + scale_out_mult * atr_dollars:
+                        if active_trade.get("scale_out_triggered"):
+                            trigger_scale_out = True
+                        elif active_trade.get("trade_id") in rebal_scale_set:
+                            trigger_scale_out = True
+                            print(f"[{active_symbol} {iv}m Portfolio Rebalance] Scale-out triggered by Portfolio Utility Optimizer.")
+                        elif direction == "Bullish" and current_price >= entry_price + scale_out_mult * atr_dollars:
                             trigger_scale_out = True
                         elif direction == "Bearish" and current_price <= entry_price - scale_out_mult * atr_dollars:
                             trigger_scale_out = True
@@ -7913,9 +7931,9 @@ def main():
                             # Compute rolling 30-trade symbol Sharpe
                             sym_trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol][-30:]
                             if len(sym_trades) >= 5:
-                                sym_pnls = [float(t.get("pnl_usd", 0.0)) for t in sym_trades]
+                                sym_returns = [float(t.get("change_pct", (t.get("pnl_usd", 0.0) / max(1.0, float(t.get("original_size", t.get("position_size_usd", 1.0)))) * 100.0))) for t in sym_trades]
                                 from trade_calculators import calculate_rolling_sharpe
-                                sym_sharpe = round(float(calculate_rolling_sharpe(sym_pnls)), 2)
+                                sym_sharpe = round(float(calculate_rolling_sharpe(sym_returns)), 2)
                             else:
                                 sym_sharpe = 1.2
                             bot_state["symbol_sharpe"] = sym_sharpe

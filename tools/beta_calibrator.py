@@ -188,6 +188,13 @@ def is_calibrator_viable(
         return False
     if target_def and target_def not in ["triple_barrier_exact", "triple_barrier"]:
         return False
+    Ys = calibrator_data.get("y") or calibrator_data.get("y_thresholds", [])
+    if Ys and len(Ys) > 0:
+        max_y = max(Ys)
+        min_y = min(Ys)
+        if max_y <= 0.02 or (max_y - min_y) < 0.02:
+            return False
+
     if calibrator_data.get("scaling_method") == "beta_calibration" or ("a" in calibrator_data and "b" in calibrator_data):
         a_val = float(calibrator_data.get("a", 1.0))
         b_val = float(calibrator_data.get("b", 1.0))
@@ -196,18 +203,18 @@ def is_calibrator_viable(
             return False
         bc = BetaCalibrator.from_dict(calibrator_data)
         return bc.is_viable(min_required_p_star=min_required_p_star)
-    Ys = calibrator_data.get("y") or calibrator_data.get("y_thresholds", [])
+
     if Ys and len(Ys) > 0:
-        # Finding #23: Require minimum support for empirical isotonic step functions
-        if "min_bin_support" in calibrator_data or "min_support" in calibrator_data:
-            min_bin_support = int(calibrator_data.get("min_bin_support", calibrator_data.get("min_support", 0)))
-            if min_bin_support < 100:
-                return False
-        elif calibrator_data.get("fitting_sample_size", 0) > 0 and calibrator_data.get("fitting_sample_size", 0) < 5000:
+        # Finding #23 & R36: Require explicit minimum per-knot/bin support for empirical isotonic step functions
+        min_bin_support = calibrator_data.get("min_bin_support", calibrator_data.get("min_support"))
+        if min_bin_support is None:
             return False
-        max_y = max(Ys)
-        min_y = min(Ys)
-        if max_y <= 0.02 or (max_y - min_y) < 0.02:
+        try:
+            if int(min_bin_support) < 100:
+                return False
+        except (ValueError, TypeError):
+            return False
+        if calibrator_data.get("fitting_sample_size", 0) < 5000:
             return False
         if min_required_p_star is not None and max_y < min_required_p_star:
             return False

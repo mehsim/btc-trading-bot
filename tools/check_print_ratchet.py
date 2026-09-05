@@ -27,9 +27,12 @@ def _save_baseline(count: int) -> None:
             data = json.load(f)
     except Exception:
         pass
-    data["print_calls"] = count + 1  # measured + 1 tolerance
-    with open(_BASELINE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    current_bl = int(data.get("print_calls", count))
+    if count < current_bl:
+        data["print_calls"] = count
+        data["print_count"] = count
+        with open(_BASELINE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
 
 # Directories and files to EXCLUDE from the print ratchet (offline scripts where print is expected)
 EXCLUDE_DIRS = {
@@ -86,6 +89,9 @@ if __name__ == "__main__":
         print("   Use log_event() from logger.py instead of raw print() in runtime paths.")
         sys.exit(1)
     else:
-        _save_baseline(count)  # ratchet down: baseline becomes count+1
-        print(f"\u2705 OK: {count} print() calls <= baseline {baseline}.")
+        if count < baseline:
+            _save_baseline(count)  # ratchet down: baseline becomes new lower count
+            print(f"✅ OK: {count} print() calls < baseline {baseline}. Ratchet lowered to {count}.")
+        else:
+            print(f"✅ OK: {count} print() calls == baseline {baseline}.")
         sys.exit(0)

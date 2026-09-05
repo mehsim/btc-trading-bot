@@ -36,6 +36,7 @@ parser.add_argument("--lookahead", type=int, default=None, help="Override lookah
 parser.add_argument("--rule-feature", type=str, default=None, help="Direct decile rule mode on a single feature")
 parser.add_argument("--challenger", action="store_true", default=False, help="Evaluate newly trained challenger candidate models")
 parser.add_argument("--bypass-denylist", action="store_true", default=False, help="Bypass governance denylist check for historical backtesting")
+parser.add_argument("--output", type=str, default=None, help="Target JSON output path for backtest results")
 
 args, _ = parser.parse_known_args()
 INTERVAL = args.interval
@@ -50,6 +51,7 @@ OVERRIDE_LOOKAHEAD = args.lookahead
 RULE_FEATURE = args.rule_feature
 USE_CHALLENGER = args.challenger
 BYPASS_DENYLIST = args.bypass_denylist
+OUTPUT_FILE = args.output or ("backtest_results_challenger.json" if USE_CHALLENGER else "backtest_results.json")
 
 INTERVAL_SLIPPAGE = {
     "5": 0.0005,   # 0.05% base slippage for 5m
@@ -954,6 +956,7 @@ def run_backtest():
             ci_l, ci_u = 0.0, 0.0
             pess_wr_str = "N/A"
 
+        is_small_n = (0 < t_count_p < 100)
         results.append({
             "Scenario": name,
             "Trades": t_count_p,
@@ -963,6 +966,7 @@ def run_backtest():
             "Optimistic Return": f"{ret_o:+.2f}%" if t_count_o > 0 else "0.00%",
             "Pessimistic MDD": f"{mdd_p:.2f}%" if t_count_p > 0 else "N/A",
             "Pessimistic WinRate": pess_wr_str,
+            "Statistical Conclusion": "SUPPRESSED (Sample size n < 100 does not support per-symbol conclusion)" if is_small_n else ("STATISTICALLY_VALID" if t_count_p >= 784 else "LOW_POWER (100 <= n < 784)"),
             "_ci_l": ci_l,
             "_ci_u": ci_u
         })
@@ -1035,6 +1039,12 @@ def run_backtest():
     import json
     export_data = {
         "timestamp": datetime.now().isoformat(),
+        "is_refitted": False,
+        "provenance": {
+            "git_commit": getattr(config, "BOT_VERSION", "v2.6"),
+            "is_challenger": bool(USE_CHALLENGER),
+            "output_target": OUTPUT_FILE
+        },
         "scenarios": results_df.to_dict(orient="records"),
         "fee_sensitivity": fee_results
     }
@@ -1134,9 +1144,9 @@ def run_backtest():
         log_event("ERROR", "[Backtest Critical Error] Zero trades were generated across all test scenarios. Refusing to overwrite backtest_results.json with a misleading zero-trade 0.00% result.")
         raise RuntimeError("Zero-trade backtest generated across all scenarios. Backtest failed to produce valid trading signals.")
 
-    with open("backtest_results.json", "w") as f:
+    with open(OUTPUT_FILE, "w") as f:
         json.dump(export_data, f, indent=2)
-    print("[Backtest] Results exported to backtest_results.json successfully.")
+    print(f"[Backtest] Results exported to {OUTPUT_FILE} successfully.")
 
 if __name__ == "__main__":
     run_backtest()

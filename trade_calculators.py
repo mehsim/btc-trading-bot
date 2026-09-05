@@ -1341,7 +1341,7 @@ def resolve_trade_geometry(
     # Floor-aware R:R preservation: rescale tp_dist if stop distance expanded
     min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
     min_sl_pct = float(min_sl_cfg.get(iv_str, min_sl_cfg.get("default", 0.008)))
-    min_sl_dist = entry_price * min_sl_pct
+    min_sl_dist = max(atr_dollars * 1.0, entry_price * min_sl_pct)
     if sl_dist < min_sl_dist:
         sl_dist = min_sl_dist
         stop_loss_price = (entry_price - sl_dist) if is_long else (entry_price + sl_dist)

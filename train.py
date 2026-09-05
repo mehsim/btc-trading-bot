@@ -448,12 +448,14 @@ def add_triple_barrier_labels(df, interval):
         effective_sl_mult = sl_mult * tf_sl_mult
 
     global LAST_LABELING_BARRIER_CONFIG
+    cfg_min_tp = float(MIN_TARGET_ATR_MULT.get(iv_str, MIN_TARGET_ATR_MULT.get("default", 1.20)) if isinstance(MIN_TARGET_ATR_MULT, dict) else MIN_TARGET_ATR_MULT)
     LAST_LABELING_BARRIER_CONFIG = {
         "tp_mult_trending": tp_mult_trending,
         "tp_mult_ranging": tp_mult_ranging,
         "sl_mult": sl_mult,
         "effective_sl_mult": effective_sl_mult,
         "min_sl_pct": min_sl_pct,
+        "min_target_atr_mult": cfg_min_tp,
         "lookahead": lookahead
     }
         
@@ -2194,7 +2196,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 champ_convention = champ_manifest.get("effective_n_convention", "legacy_single_symbol_v1") if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else None
                 is_convention_mismatch = bool(champ_convention and champ_convention != "lookahead_x_nsymbols_v2")
                 if is_convention_mismatch:
-                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Enforcing strict absolute floors and direct MCC comparison.")
+                    print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Suppressing relative MCC comparison and enforcing strict absolute floors.")
+                    champ_mcc_val = None
 
                 # Finding #134: MDE 80% Power Gate
                 _n_eff_holdout = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
@@ -2203,11 +2206,15 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger holdout MCC ({holdout_mcc:.4f}) below 80% MDE ({chal_mde:.4f}) — underpowered.")
                     should_save = False
 
-                if is_distribution_shifted:
-                    shift_reason = f"neutral shift ({champ_neutral_pct:.1f}% -> {chal_neutral_pct:.1f}%)" if is_label_schema_diff else f"regime sample population shift ({champ_n_train} -> {chal_n_train} samples, {sample_count_ratio:.2f}x)"
-                    print(f"  [Predictive Floor Gate] Regime/population shift detected ({shift_reason}). Enforcing absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}, Holdout MCC={holdout_mcc:.4f} >= {min_holdout_mcc_floor}, Holdout BalAcc={chal_acc:.4f} >= {min_holdout_bal_acc_floor}).")
+                if is_distribution_shifted or is_convention_mismatch:
+                    shift_reason = (
+                        f"effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2)"
+                        if is_convention_mismatch
+                        else (f"neutral shift ({champ_neutral_pct:.1f}% -> {chal_neutral_pct:.1f}%)" if is_label_schema_diff else f"regime sample population shift ({champ_n_train} -> {chal_n_train} samples, {sample_count_ratio:.2f}x)")
+                    )
+                    print(f"  [Predictive Floor Gate] Regime/population/convention shift detected ({shift_reason}). Enforcing absolute quality floors (MCC={chal_mcc_mean:.4f} >= {min_mcc_floor}, Holdout MCC={holdout_mcc:.4f} >= {min_holdout_mcc_floor}, Holdout BalAcc={chal_acc:.4f} >= {min_holdout_bal_acc_floor}).")
                     if chal_mcc_mean < min_mcc_floor or holdout_mcc < min_holdout_mcc_floor or chal_acc < min_holdout_bal_acc_floor or holdout_resolved_mcc < min_holdout_mcc_floor or holdout_resolved_balacc < min_holdout_bal_acc_floor:
-                        print(f"  [Predictive Floor Gate] REJECTED: Challenger fails absolute quality floor under distribution shift.")
+                        print(f"  [Predictive Floor Gate] REJECTED: Challenger fails absolute quality floor under distribution/convention shift.")
                         should_save = False
                 elif champ_mcc_val is not None and chal_mcc_mean < (champ_mcc_val - mcc_tol):
                     print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) lower than Champion MCC ({champ_mcc_val:.4f} - tol {mcc_tol:.4f})")
@@ -2388,8 +2395,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 train_fn=_wf_train_fn
                             )
                             # Finding R62: Enforce minimum trade count and active windows
-                            _tot_wf_trades = sum(len(w.get("trades", [])) for w in _w_res.get("windows", [])) if "windows" in _w_res else _w_res.get("total_trades", 0)
-                            _active_wf_windows = len([w for w in _w_res.get("windows", []) if len(w.get("trades", [])) > 0])
+                            _w_trades_cnt = lambda w: (len(w.get("trades")) if isinstance(w.get("trades"), (list, tuple, dict)) else int(w.get("trades", 0)))
+                            _tot_wf_trades = sum(_w_trades_cnt(w) for w in _w_res.get("windows", [])) if "windows" in _w_res else int(_w_res.get("total_trades", 0))
+                            _active_wf_windows = len([w for w in _w_res.get("windows", []) if _w_trades_cnt(w) > 0])
                             wf_pass = bool(
                                 _w_res.get("status") == "success" and
                                 _active_wf_windows >= 2 and
@@ -2652,6 +2660,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     "tp_mult_trending": float(_bcfg.get("tp_mult_trending", 0.0)),
                     "tp_mult_ranging":  float(_bcfg.get("tp_mult_ranging", 0.0)),
                     "sl_mult":          float(_bcfg.get("sl_mult", 0.0)),
+                    "effective_sl_mult": float(_bcfg.get("effective_sl_mult", 0.0)),
+                    "min_sl_pct":       float(_bcfg.get("min_sl_pct", 0.0)),
+                    "min_target_atr_mult": float(_bcfg.get("min_target_atr_mult", 1.20)),
                     "lookahead":        int(_bcfg.get("lookahead", 0)),
                     "regime_adx_enter": float(REGIME_ADX_ENTER_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_ENTER)),
                     "regime_adx_exit":  float(REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)),

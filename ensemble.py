@@ -932,9 +932,18 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
         _pfx_interval = _pfx_parts[-1] if len(_pfx_parts) > 1 and _pfx_parts[-1].isdigit() else None
         if _pfx_interval:
             from config import REGIME_ADX_ENTER_BY_INTERVAL as _R_ADX_MAP, STRONG_TREND_ADX_ENTER as _ST_ADX_ENTER, REGIME_ADX_EXIT_BY_INTERVAL as _R_ADX_EXIT_MAP, STRONG_TREND_ADX_EXIT as _ST_ADX_EXIT
+            from config import MIN_SL_PCT_CONFIG as _MSL_MAP, MIN_TARGET_ATR_MULT as _MT_MAP
+            import risk_engine
             _live_cfg = dict(_TFC.get(_pfx_interval, {}))
             _live_cfg["regime_adx_enter"] = float(_R_ADX_MAP.get(str(_pfx_interval), _ST_ADX_ENTER))
             _live_cfg["regime_adx_exit"] = float(_R_ADX_EXIT_MAP.get(str(_pfx_interval), _ST_ADX_EXIT))
+            _sl_m = float(_live_cfg.get("sl_mult", 0.85))
+            if str(_pfx_interval) in ["5", "15", "30", "60"]:
+                _live_cfg["effective_sl_mult"] = min(_sl_m, 1.25)
+            else:
+                _live_cfg["effective_sl_mult"] = _sl_m * risk_engine.get_timeframe_stop_multiplier(str(_pfx_interval))
+            _live_cfg["min_sl_pct"] = float(_MSL_MAP.get(str(_pfx_interval), _MSL_MAP.get("default", 0.008)))
+            _live_cfg["min_target_atr_mult"] = float(_MT_MAP.get(str(_pfx_interval), _MT_MAP.get("default", 1.20)) if isinstance(_MT_MAP, dict) else _MT_MAP)
             _live_barriers = {k: _live_cfg[k] for k in _saved_barriers if k in _live_cfg}
             _mismatched = [k for k in _live_barriers if abs(float(_saved_barriers[k]) - float(_live_barriers[k])) > 1e-9]
             if _mismatched and os.environ.get("ALLOW_BARRIER_MISMATCH") != "1":
