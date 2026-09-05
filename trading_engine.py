@@ -1,7 +1,9 @@
 """
 trading_engine.py
 -----------------
-Core trade execution and async order placement engine for Bybit.
+DEPRECATION NOTICE: This module is maintained for backwards compatibility.
+Active execution logic and Bybit REST interactions have migrated directly to bybit_client.py
+and main.py execution coordinators. Do not add new features to this module.
 """
 
 import os

@@ -267,9 +267,9 @@ def run_statistical_governance_scheduler():
                         slot_trades_all = [t for t in all_trades if str(t.get("interval", "")) == iv]
                         n_total = len(slot_trades_all)
 
-                        # Finding #73: Evaluate KILL_CRITERIA across trailing sample of min_trades_kill (250)
+                        # Finding #73 / R8: Evaluate KILL_CRITERIA across trailing sample of min_trades_kill (250) (trades are ordered exit_time DESC)
                         if n_total >= min_trades_kill:
-                            eval_trades = slot_trades_all[-min_trades_kill:]
+                            eval_trades = slot_trades_all[:min_trades_kill]
                             n_eval = len(eval_trades)
                             pnls = [float(t.get("pnl_usd") or 0.0) for t in eval_trades]
                             confs = [float(t["confidence"]) for t in eval_trades if t.get("confidence") is not None and float(t.get("confidence")) > 0]
@@ -294,8 +294,8 @@ def run_statistical_governance_scheduler():
                                 _record_to_governance_denylist(f"trending_{iv}", reason=reason)
                                 _record_to_governance_denylist(f"ranging_{iv}", reason=reason)
 
-                        # Statistical validation matrix evaluation (minimum 100 trades)
-                        stat_sample = slot_trades_all[-min(n_total, 500):] if n_total >= 100 else []
+                        # Statistical validation matrix evaluation (minimum 100 trades, trailing up to 500)
+                        stat_sample = slot_trades_all[:min(n_total, 500)] if n_total >= 100 else []
                         if len(stat_sample) >= 100:
                             n_stat = len(stat_sample)
                             returns = [float(t.get("change_pct") or t.get("pnl_pct") or 0.0) for t in stat_sample]

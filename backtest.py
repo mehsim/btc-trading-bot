@@ -488,7 +488,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if scaled_kelly <= 0.0:
             i += 1
             continue
-        position_frac = min(MAX_POSITION_BALANCE_FRAC, max(MIN_POSITION_BALANCE_FRAC, scaled_kelly))
+        position_frac = min(MAX_POSITION_BALANCE_FRAC, scaled_kelly)
 
         # Look up to lookahead candles
         lookahead = OVERRIDE_LOOKAHEAD if OVERRIDE_LOOKAHEAD is not None else cfg.get("lookahead", 10)

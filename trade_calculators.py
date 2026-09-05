@@ -137,13 +137,13 @@ def get_realized_rr_haircut(
     """
     Computes empirical realized R:R haircut factor.
     If sufficient closed trades exist to estimate realized R:R and nominal_rr is provided,
-    calculates empirical_haircut = min(0.35, max(0.10, empirical_rr / nominal_rr)).
+    calculates empirical_haircut = min(0.28, max(0.10, empirical_rr / nominal_rr)).
     Otherwise, falls back to conservative default_haircut (0.28).
     """
     if nominal_rr is not None and nominal_rr > 0:
         emp_rr = estimate_empirical_realized_rr(closed_trades=closed_trades, interval=interval, regime=regime)
         if emp_rr is not None and emp_rr > 0:
-            return float(np.clip(emp_rr / nominal_rr, 0.10, 0.35))
+            return float(np.clip(emp_rr / nominal_rr, 0.10, 0.28))
 
     return float(default_haircut)
 
@@ -1439,7 +1439,7 @@ def get_canonical_round_trip_cost_bp(
         is_maker=is_maker,
         round_trip=True
     )
-    return float(res.get("total_cost_bp", 12.0))
+    return float(res.get("total_cost_bps", res.get("total_cost_bp", 12.0)))
 
 
 def calculate_break_even_stop(

@@ -37,23 +37,36 @@ def assert_shared_constants_aligned():
                         # Only check trend models which govern directional entry barrier geometry
                         if "trend" in base_parts and iv_key in cfg_tf:
                             live_c = cfg_tf[iv_key]
-                            # Finding #161 (Finding #93): Strictly verify all barrier parameters
+                            slot_key = f"{base_parts[1]}_{iv_key}"
+                            is_denylisted = slot_key in getattr(config, "MODEL_SLOT_DENYLIST", []) or m_data.get("promoted") is False
+                            # Finding #161 (Finding #93): Strictly verify all barrier parameters for active promoted slots
+                            has_divergence = False
                             for b_key in ["lookahead", "sl_mult", "tp_mult_trending", "tp_mult_ranging"]:
                                 if b_key in b_cfg and b_key in live_c:
                                     diff = abs(float(b_cfg[b_key]) - float(live_c[b_key]))
                                     if diff > 0.05:
-                                        raise ValueError(
-                                            f"[Config Verifier M-2 Error] Barrier divergence in {m_path} for {b_key}: "
-                                            f"manifest ({b_cfg[b_key]}) vs live config ({live_c[b_key]}) > 0.05 tolerance"
-                                        )
+                                        if is_denylisted:
+                                            log_event("WARNING", f"[Config Verifier] Barrier divergence in denylisted/unpromoted slot {m_path} ({b_key}: manifest {b_cfg[b_key]} vs live {live_c[b_key]}).")
+                                            has_divergence = True
+                                            break
+                                        else:
+                                            raise ValueError(
+                                                f"[Config Verifier M-2 Error] Barrier divergence in {m_path} for {b_key}: "
+                                                f"manifest ({b_cfg[b_key]}) vs live config ({live_c[b_key]}) > 0.05 tolerance"
+                                            )
+                            if has_divergence:
+                                continue
                             # ADX verification: manifest recorded ADX threshold vs live config
                             if "regime_adx_enter" in b_cfg and iv_key in cfg_adx:
                                 adx_diff = abs(float(b_cfg["regime_adx_enter"]) - float(cfg_adx[iv_key]))
                                 if adx_diff > 0.05:
-                                    raise ValueError(
-                                        f"[Config Verifier M-2 Error] ADX enter threshold divergence in {m_path}: "
-                                        f"manifest ({b_cfg['regime_adx_enter']}) vs live config ({cfg_adx[iv_key]})"
-                                    )
+                                    if is_denylisted:
+                                        log_event("WARNING", f"[Config Verifier] ADX divergence in denylisted/unpromoted slot {m_path}. Slot is denylisted.")
+                                    else:
+                                        raise ValueError(
+                                            f"[Config Verifier M-2 Error] ADX enter threshold divergence in {m_path}: "
+                                            f"manifest ({b_cfg['regime_adx_enter']}) vs live config ({cfg_adx[iv_key]})"
+                                        )
             except ValueError:
                 raise
             except Exception as ex_m:
@@ -119,7 +132,7 @@ def assert_shared_constants_aligned():
     return True
 
 
-def assert_manifest_live_parity(manifest_path: str, live_config: dict, tolerance: float = 0.05):
+def assert_manifest_live_parity(manifest_path: str, live_config: dict, tolerance: float = 0.05, allow_denylisted: bool = True):
     """
     Finding #3: Directly validates that an on-disk manifest barrier_config strictly aligns
     with live timeframe configuration parameters within tolerance.
@@ -127,6 +140,13 @@ def assert_manifest_live_parity(manifest_path: str, live_config: dict, tolerance
     import json
     with open(manifest_path, "r", encoding="utf-8") as mf:
         m_data = json.load(mf)
+    if allow_denylisted:
+        base_parts = os.path.basename(manifest_path).replace("_manifest.json", "").split("_")
+        if len(base_parts) >= 4:
+            slot_key = f"{base_parts[1]}_{base_parts[-1]}"
+            if slot_key in getattr(config, "MODEL_SLOT_DENYLIST", []) or m_data.get("promoted") is False:
+                log_event("INFO", f"[Config Verifier] Slot {slot_key} is denylisted/unpromoted — skipping assert_manifest_live_parity.")
+                return True
     b_cfg = m_data.get("barrier_config", m_data)
     for k in ["lookahead", "sl_mult", "tp_mult_trending", "tp_mult_ranging", "regime_adx_enter"]:
         if k in b_cfg and k in live_config:
@@ -136,3 +156,4 @@ def assert_manifest_live_parity(manifest_path: str, live_config: dict, tolerance
                     f"[Config Verifier Error] Manifest {manifest_path} {k} ({b_cfg[k]}) "
                     f"diverges from live config ({live_config[k]}) by {diff:.4f} > {tolerance}"
                 )
+    return True

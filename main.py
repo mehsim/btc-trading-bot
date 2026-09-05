@@ -621,7 +621,7 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
     errors = []
 
     try:
-        from bybit_client import bybit_post_request, get_all_bybit_positions, TRADE_MODE
+        from bybit_client import bybit_post_request, get_all_bybit_positions, place_bybit_taker_ioc_order, TRADE_MODE
         if TRADE_MODE != "simulation":
             res_cancel = bybit_post_request("/v5/order/cancel-all", {"category": "linear", "settleCoin": "USDT"})
             if isinstance(res_cancel, dict) and res_cancel.get("retCode") != 0:
@@ -635,15 +635,13 @@ def trigger_emergency_kill_switch(reason: str = "Manual Trigger"):
                 side = p.get("side")
                 if sz > 0 and sym:
                     close_side = "Sell" if side == "Buy" else "Buy"
-                    res_close = bybit_post_request("/v5/order/create", {
-                        "category": "linear",
-                        "symbol": sym,
-                        "side": close_side,
-                        "orderType": "Market",
-                        "qty": str(sz),
-                        "timeInForce": "IOC",
-                        "reduceOnly": True
-                    })
+                    res_close = place_bybit_taker_ioc_order(
+                        symbol=sym,
+                        side=close_side,
+                        qty=sz,
+                        reduce_only=True,
+                        order_link_id=f"kill_{sym}_{int(time.time()*1000)}"[:36]
+                    )
                     if isinstance(res_close, dict) and res_close.get("retCode") != 0:
                         close_success = False
                         errors.append(f"Close {sym} failed: {res_close.get('retMsg')}")
@@ -682,6 +680,7 @@ active_execution_lock = threading.RLock()
 active_execution_symbols = set()
 active_execution_notional = {}
 active_execution_margins = {}
+active_execution_risks = {}
 
 economic_calendar_cache = None
 last_calendar_fetch = 0.0
@@ -1099,76 +1098,8 @@ def get_bybit_time_offset():
     return 0
 
 def bybit_post_request(endpoint, payload):
-    import time
-    import hmac
-    import hashlib
-    
-    api_key = os.getenv("BYBIT_API_KEY", "").strip()
-    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
-    
-    if not api_key or not api_secret:
-        return {"retCode": -1, "retMsg": "API keys missing"}
-        
-    payload_str = json.dumps(payload)
-    url = f"{BYBIT_BASE_URL}{endpoint}"
-    
-    async def do_post(url, headers, json_data):
-        proxy_dict = get_bybit_proxies()
-        proxy_url = proxy_dict.get("https") or proxy_dict.get("http") if proxy_dict else None
-        timeout = aiohttp.ClientTimeout(total=8)
-        async with _aiohttp_session.post(url, headers=headers, json=json_data, proxy=proxy_url, timeout=timeout) as resp:
-            status = resp.status
-            try:
-                data = await resp.json()
-            except Exception:
-                text = await resp.text()
-                data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
-            
-            # Adaptive rate limiting dynamic sleep
-            try:
-                remaining = int(resp.headers.get("X-Bapi-Limit-Remaining", 100))
-                if remaining <= 5:
-                    print(f"[Rate Limiter Warning] Post remaining limit is low: {remaining}. Sleeping 1s...")
-                    await asyncio.sleep(1.0)
-            except Exception:
-                pass
-                
-            return status, data
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            offset = get_bybit_time_offset()
-            timestamp = str(int(time.time() * 1000) + offset)
-            recv_window = "5000"
-            val_str = timestamp + api_key + recv_window + payload_str
-            sign = hmac.new(
-                api_secret.encode("utf-8"),
-                val_str.encode("utf-8"),
-                hashlib.sha256
-            ).hexdigest()
-            headers = {
-                "X-BAPI-API-KEY": api_key,
-                "X-BAPI-SIGN": sign,
-                "X-BAPI-TIMESTAMP": timestamp,
-                "X-BAPI-RECV-WINDOW": recv_window,
-                "Content-Type": "application/json"
-            }
-            _ensure_async_loop()
-            future = asyncio.run_coroutine_threadsafe(do_post(url, headers, payload), _async_loop)
-            status, res = future.result(timeout=10)
-            if status == 200:
-                return res
-            else:
-                if status in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
-                    time.sleep(1 + attempt * 1.5)
-                    continue
-                return res if isinstance(res, dict) else {"retCode": status, "retMsg": str(res)}
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(1 + attempt * 1.5)
-                continue
-            return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+    import bybit_client
+    return bybit_client.bybit_post_request(endpoint, payload)
 
 def set_bybit_leverage(symbol, leverage):
     payload = {
@@ -1291,77 +1222,8 @@ def wait_for_order_fill(symbol, order_id, timeout_sec=2.0):
 
 
 def bybit_get_request(endpoint, query_params):
-    import time
-    import hmac
-    import hashlib
-    import urllib.parse
-    
-    api_key = os.getenv("BYBIT_API_KEY", "").strip()
-    api_secret = os.getenv("BYBIT_API_SECRET", "").strip()
-    
-    if not api_key or not api_secret:
-        return {"retCode": -1, "retMsg": "API keys missing"}
-        
-    query_string = urllib.parse.urlencode(query_params)
-    url = f"{BYBIT_BASE_URL}{endpoint}?{query_string}"
-    
-    async def do_get(url, headers):
-        proxy_dict = get_bybit_proxies()
-        proxy_url = proxy_dict.get("https") or proxy_dict.get("http") if proxy_dict else None
-        timeout = aiohttp.ClientTimeout(total=8)
-        async with _aiohttp_session.get(url, headers=headers, proxy=proxy_url, timeout=timeout) as resp:
-            status = resp.status
-            try:
-                data = await resp.json()
-            except Exception:
-                text = await resp.text()
-                data = {"retCode": status, "retMsg": f"HTTP Error: {text}"}
-            
-            # Adaptive rate limiting dynamic sleep
-            try:
-                remaining = int(resp.headers.get("X-Bapi-Limit-Remaining", 100))
-                if remaining <= 5:
-                    print(f"[Rate Limiter Warning] Get remaining limit is low: {remaining}. Sleeping 1s...")
-                    await asyncio.sleep(1.0)
-            except Exception:
-                pass
-                
-            return status, data
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            offset = get_bybit_time_offset()
-            timestamp = str(int(time.time() * 1000) + offset)
-            recv_window = "5000"
-            val_str = timestamp + api_key + recv_window + query_string
-            sign = hmac.new(
-                api_secret.encode("utf-8"),
-                val_str.encode("utf-8"),
-                hashlib.sha256
-            ).hexdigest()
-            headers = {
-                "X-BAPI-API-KEY": api_key,
-                "X-BAPI-SIGN": sign,
-                "X-BAPI-TIMESTAMP": timestamp,
-                "X-BAPI-RECV-WINDOW": recv_window,
-                "Content-Type": "application/json"
-            }
-            _ensure_async_loop()
-            future = asyncio.run_coroutine_threadsafe(do_get(url, headers), _async_loop)
-            status, res = future.result(timeout=10)
-            if status == 200:
-                return res
-            else:
-                if status in [402, 403, 429, 502, 503, 504] and attempt < max_retries - 1:
-                    time.sleep(1 + attempt * 1.5)
-                    continue
-                return res if isinstance(res, dict) else {"retCode": status, "retMsg": str(res)}
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(1 + attempt * 1.5)
-                continue
-            return {"retCode": -1, "retMsg": f"Connection Error: {e}"}
+    import bybit_client
+    return bybit_client.bybit_get_request(endpoint, query_params)
 
 def get_bybit_position(symbol):
     res = bybit_get_request("/v5/position/list", {"category": "linear", "symbol": symbol})
@@ -1705,64 +1567,12 @@ def get_real_bybit_balance():
     return 0.0
 
 def get_real_bybit_balance_cached(force=False):
-    global _cached_balance, _last_balance_fetch
-    now = time.time()
-    if force or (now - _last_balance_fetch > BALANCE_UPDATE_INTERVAL_SECS):
-        try:
-            val = get_real_bybit_balance()
-            with _balance_lock:
-                _cached_balance = val
-                _last_balance_fetch = now
-            bot_state["last_balance_sync_ts"] = now
-            state_manager.set("last_balance_sync_ts", now)
-            if isinstance(val, (int, float)) and val > 0:
-                bot_state["live_balance"] = val
-                bot_state["wallet_balance"] = val
-                if TRADE_MODE != "simulation":
-                    bot_state["simulated_balance"] = val
-        except Exception as e:
-            print(f"[Bybit Balance] Error in balance update (forced={force}): {e}")
-    with _balance_lock:
-        return _cached_balance
+    import bybit_client
+    return bybit_client.get_real_bybit_balance_cached(force=force)
 
 def run_bybit_balance_updater():
-    global _cached_balance, _last_balance_fetch
-    print("[Bybit Balance] Background updater thread started.")
-    # Fetch immediately at startup
-    now = time.time()
-    try:
-        val = get_real_bybit_balance()
-        with _balance_lock:
-            _cached_balance = val
-            _last_balance_fetch = now
-        bot_state["last_balance_sync_ts"] = now
-        state_manager.set("last_balance_sync_ts", now)
-        if isinstance(val, (int, float)) and val > 0:
-            bot_state["live_balance"] = val
-            bot_state["wallet_balance"] = val
-            if TRADE_MODE != "simulation":
-                bot_state["simulated_balance"] = val
-        print(f"[Bybit Balance] Startup background update success: {val}")
-    except Exception as e:
-        print(f"[Bybit Balance] Startup background update error: {e}")
-        
-    while True:
-        time.sleep(BALANCE_UPDATE_INTERVAL_SECS)  # Query Bybit balance periodically based on configuration
-        now_cycle = time.time()
-        try:
-            val = get_real_bybit_balance()
-            with _balance_lock:
-                _cached_balance = val
-                _last_balance_fetch = now_cycle
-            bot_state["last_balance_sync_ts"] = now_cycle
-            state_manager.set("last_balance_sync_ts", now_cycle)
-            if isinstance(val, (int, float)) and val > 0:
-                bot_state["live_balance"] = val
-                bot_state["wallet_balance"] = val
-                if TRADE_MODE != "simulation":
-                    bot_state["simulated_balance"] = val
-        except Exception as e:
-            print(f"[Bybit Balance] Error in background balance update: {e}")
+    import bybit_client
+    return bybit_client.run_bybit_balance_updater(bot_state=bot_state, bot_state_lock=bot_state_lock)
 
 
 
@@ -2155,10 +1965,14 @@ for _iv in ["15", "30", "60", "120", "240"]:
                 _mf_data = json.load(_mf_file)
             _barriers = _mf_data.get("barrier_config", {})
             _cfg = TIMEFRAME_CONFIG.get(_iv, {})
+            is_denylisted = f"trending_{_iv}" in getattr(config, "MODEL_SLOT_DENYLIST", []) or _mf_data.get("promoted") is False
             for _k in ["tp_mult_trending", "tp_mult_ranging", "sl_mult", "lookahead"]:
                 if _k in _barriers and _k in _cfg:
                     _diff = abs(float(_barriers[_k]) - float(_cfg[_k]))
                     if _diff > 0.05:
+                        if is_denylisted:
+                            log_event("WARNING", f"[Startup Barrier Audit] Divergence in denylisted/unpromoted slot {_mf_path} ({_k}: manifest {_barriers[_k]} vs live {_cfg[_k]}).")
+                            break
                         raise RuntimeError(
                             f"[Startup Drift Error] TIMEFRAME_CONFIG['{_iv}']['{_k}'] ({_cfg[_k]}) "
                             f"diverges from manifest {_mf_path} ({_barriers[_k]}) by {_diff:.4f} > 0.05. Boot aborted."
@@ -4792,6 +4606,8 @@ def execute_bybit_trade_async(*args, **kwargs):
             active_execution_symbols.discard(symbol)
             active_execution_margins.pop(symbol, None)
             active_execution_notional.pop(symbol, None)
+            active_execution_risks.pop(symbol, None)
+            bot_state["in_flight_risk_usd"] = sum(active_execution_risks.values())
 
 def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized=False, intended_size_usd=None, decision_ts=None, journal_rec=None):
 
@@ -7791,6 +7607,7 @@ def main():
                             entry_close = float(latest_candle["close"])
                             atr_dollars = float(latest_candle.get("ATR", entry_close * atr_norm_val))
                             is_ranging_regime = "Ranging" in str(regime_name)
+                            bot_state[f"garch_sigma_{symbol}"] = float(atr_norm_val) if atr_norm_val > 0 else 0.015
 
                             # 1. Resolve exact order execution geometry (TP and SL) before economic gate
                             from config import TIMEFRAME_CONFIG
@@ -7864,8 +7681,8 @@ def main():
                             _est_notional = (_current_bal * _max_risk_frac) / _est_stop_dist
                             _min_order = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
                             _order_usd = max(_min_order, _est_notional)
-                            _spread_bp = float(bot_state.get(f"spread_bp_{symbol}") or 1.5)
-                            _garch_sigma = float(bot_state.get(f"garch_sigma_{symbol}") or 0.015)
+                            _spread_bp = float(bot_state.get(f"spread_bp_{symbol}") or bot_state.get(f"current_spread_bps_{symbol}") or 1.5)
+                            _garch_sigma = float(bot_state.get(f"garch_sigma_{symbol}") or atr_norm_val or 0.015)
                             _tcm = transaction_cost_model.estimate_transaction_cost(
                                 symbol=symbol,
                                 order_size_usd=_order_usd,
@@ -7979,7 +7796,9 @@ def main():
                                 else:
                                     current_spread_bps = round(float(cost_bps / 2.0), 2)
                             bot_state[f"current_spread_bps_{symbol}"] = current_spread_bps
+                            bot_state[f"spread_bp_{symbol}"] = current_spread_bps
                             bot_state["current_spread_bps"] = current_spread_bps
+                            bot_state[f"garch_sigma_{symbol}"] = float(atr_norm_val) if 'atr_norm_val' in locals() and atr_norm_val > 0 else 0.015
 
                             # Finding #129: Compute Composite Uncertainty (U_ensemble + U_market) with distinct predictions and matching weights
                             from statistical_validation import statistical_validation
@@ -8507,7 +8326,7 @@ def main():
                                 _est_notional_eval = (_current_bal_eval * float(getattr(config, "MAX_RISK_PER_TRADE", 0.02))) / max(1e-4, _est_stop_dist_eval)
                                 _order_usd = max(_min_order_eval, _est_notional_eval)
                                 _spread_bp_eval = float(bot_state.get(f"spread_bp_{symbol}", current_spread_bps))
-                                _garch_sigma_eval = float(bot_state.get(f"garch_sigma_{symbol}") or 0.015)
+                                _garch_sigma_eval = float(bot_state.get(f"garch_sigma_{symbol}") or (atr_norm_val if 'atr_norm_val' in locals() and atr_norm_val > 0 else 0.015))
                                 _tcm_res = transaction_cost_model.estimate_transaction_cost(
                                     symbol=symbol,
                                     order_size_usd=_order_usd,
@@ -8811,18 +8630,19 @@ def main():
                                                 log_event("WARNING", f"Error computing open risk: {ex_or}")
                                                 open_risk_usd += (current_bal * 0.02)
 
+                                            in_flight_risk_usd = float(bot_state.get("in_flight_risk_usd", 0.0))
                                             daily_loss_budget = current_bal * DAILY_LOSS_BUDGET_FRAC
-                                            remaining_daily_budget = max(0.0, daily_loss_budget - realized_loss_today - open_risk_usd)
+                                            remaining_daily_budget = max(0.0, daily_loss_budget - realized_loss_today - open_risk_usd - in_flight_risk_usd)
                                             max_cvar_notional = remaining_daily_budget / (cvar_95 + 1e-8)
-                                            log_event("INFO", f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Daily Budget: ${daily_loss_budget:.2f} (Realized Loss: ${realized_loss_today:.2f}, Open Risk: ${open_risk_usd:.2f}, Remaining: ${remaining_daily_budget:.2f}) -> Max Notional Allowed: ${max_cvar_notional:.2f}")
+                                            log_event("INFO", f"[{iv}m CVaR Guard] 95% CVaR: {cvar_95*100:.2f}% | Daily Budget: ${daily_loss_budget:.2f} (Realized Loss: ${realized_loss_today:.2f}, Open Risk: ${open_risk_usd:.2f}, In-Flight: ${in_flight_risk_usd:.2f}, Remaining: ${remaining_daily_budget:.2f}) -> Max Notional Allowed: ${max_cvar_notional:.2f}")
                                         except Exception as cvar_err:
                                             log_event("CRITICAL", f"[CVaR Error] {cvar_err} — failing closed")
                                             max_cvar_notional = 0.0
                                             remaining_daily_budget = 0.0
 
-                                        # Finding #160 (Finding #92): Explicit rejection on exhausted daily loss budget
+                                        # Finding #160 (Finding #92 / Finding #44): Explicit rejection on exhausted daily loss budget including in-flight risk
                                         if remaining_daily_budget <= 0.0 or max_cvar_notional <= 0.0:
-                                            abstain_reason = f"DAILY_LOSS_BUDGET_EXHAUSTED (Realized: ${realized_loss_today:.2f} + Open: ${open_risk_usd:.2f} >= Budget: ${daily_loss_budget:.2f})"
+                                            abstain_reason = f"DAILY_LOSS_BUDGET_EXHAUSTED (Realized: ${realized_loss_today:.2f} + Open: ${open_risk_usd:.2f} + InFlight: ${in_flight_risk_usd:.2f} >= Budget: ${daily_loss_budget:.2f})"
                                             log_event("WARNING", f"[{symbol} {iv}m] Skipped: {abstain_reason}")
                                             rec.reject_reason = abstain_reason
                                             all_pass = False
@@ -9418,6 +9238,9 @@ def main():
                                                             active_execution_symbols.add(symbol)
                                                             active_execution_margins[symbol] = float(actual_margin_usd)
                                                             active_execution_notional[symbol] = float(actual_notional_val)
+                                                            intended_risk_usd = abs(float(entry_price) - float(stop_loss_price)) * float(actual_qty)
+                                                            active_execution_risks[symbol] = float(intended_risk_usd)
+                                                            bot_state["in_flight_risk_usd"] = sum(active_execution_risks.values())
                                                         threading.Thread(
                                                             target=execute_bybit_trade_async,
                                                             args=(symbol, iv, tf, ml_trend, leverage_val, qty_str, raw_qty, entry_price, stop_loss_price, take_profit_price, position_size_usd, kelly_fraction, calibrated_confidence, ml_confidence, dynamic_conf_threshold, latest_completed_ts, latest_candle, pred_change, predicted_price, atr_dollars, tp_multiplier_adjusted, sl_multiplier_adjusted, df_completed, trade_uuid, duration_seconds, active_trade_key, is_oversized_trade, original_kelly_size, decision_ts),

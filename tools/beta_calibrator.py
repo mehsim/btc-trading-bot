@@ -106,14 +106,20 @@ class BetaCalibrator:
         """
         Validates whether the calibrator is non-degenerate and economically viable.
         Returns False if shape parameters hit boundary floor (<= 0.02), if identity fallback
-        (a=1, b=1, c=0) was installed, or if max achievable output cannot exceed min_required_p_star.
+        (a=1, b=1, c=0) was installed, if response curve is flat/saturated ((p(0.99) - p(0.01)) < 0.02),
+        or if max achievable output cannot exceed min_required_p_star.
         """
         if not self.is_fitted or self.a <= 0.02 or self.b <= 0.02:
             return False
         if self.a == 1.0 and self.b == 1.0 and abs(self.c) < 1e-6:
             return False
+        # Finding R10: Reject flat/saturated calibrators
+        p_high = self.max_achievable_probability(0.99)
+        p_low = float(self.predict_proba(0.01))
+        if (p_high - p_low) < 0.02:
+            return False
         if min_required_p_star is not None:
-            if self.max_achievable_probability(0.99) < min_required_p_star:
+            if p_high < min_required_p_star:
                 return False
         return True
 

@@ -75,8 +75,6 @@ class PainFeedbackLoop:
         """Get floor with pain adjustment applied, decayed over time."""
         key = f"{symbol}_{interval}" if interval else symbol
         with pain_lock:
-            if key not in self.adjustments and symbol in self.adjustments:
-                key = symbol
             if key not in self.adjustments:
                 return None
             

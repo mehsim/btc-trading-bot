@@ -527,6 +527,11 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
     if limit_price is None:
         return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False, order_link_id=order_link_id)
 
+    if not order_link_id:
+        from order_state_machine import generate_client_order_id
+        order_link_id = generate_client_order_id(symbol, side)
+    eff_link_id = str(order_link_id)[:36]
+
     post_payload = {
         "category": "linear",
         "symbol": symbol,
@@ -535,10 +540,9 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         "qty": format_bybit_qty(symbol, qty),
         "price": format_bybit_price(symbol, limit_price),
         "timeInForce": "PostOnly",
-        "positionIdx": 0
+        "positionIdx": 0,
+        "orderLinkId": eff_link_id
     }
-    if order_link_id:
-        post_payload["orderLinkId"] = str(order_link_id)[:36]
     if sl:
         post_payload["stopLoss"] = format_bybit_price(symbol, sl)
     if tp:
@@ -547,9 +551,9 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
     res = execute_bybit_order_ws_or_rest("/v5/order/create", post_payload)
     if res.get("retCode") != 0:
         # Check if the order actually reached the venue before firing market order
-        if order_link_id:
+        if eff_link_id:
             try:
-                chk_post = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderLinkId": str(order_link_id)[:36]})
+                chk_post = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderLinkId": eff_link_id})
                 if chk_post.get("retCode") == 0 and chk_post.get("result", {}).get("list"):
                     return res
             except Exception as ex_chk:

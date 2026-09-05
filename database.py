@@ -282,9 +282,17 @@ def init_db():
                     stop_loss REAL,
                     exit_time REAL,
                     direction TEXT,
-                    reason TEXT
+                    reason TEXT,
+                    interval TEXT
                 );
             """)
+            try:
+                cursor.execute("PRAGMA table_info(pending_pain_checks);")
+                _ppc_cols = [c[1] for c in cursor.fetchall()]
+                if "interval" not in _ppc_cols:
+                    cursor.execute("ALTER TABLE pending_pain_checks ADD COLUMN interval TEXT;")
+            except Exception as _mig_err:
+                log_event("WARNING", f"[Database Migration] pending_pain_checks interval column: {_mig_err}")
             
             conn.commit()
             try:
@@ -475,17 +483,18 @@ def get_prediction_history(limit=500):
 
 def save_pending_pain_check(trade) -> bool:
     t_id = trade.get("trade_id") or f"{trade.get('symbol')}_{int(trade.get('exit_time', 0))}"
+    iv_val = str(trade.get("interval") or trade.get("tf") or "15").replace("m", "")
     with db_lock:
         conn = get_db_connection()
         try:
             conn.execute("""
                 INSERT OR REPLACE INTO pending_pain_checks (
-                    trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason, interval
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 t_id, trade.get("symbol"), trade.get("entry_price"), trade.get("exit_price"),
                 trade.get("take_profit"), trade.get("stop_loss"), trade.get("exit_time"),
-                trade.get("direction"), trade.get("reason")
+                trade.get("direction"), trade.get("reason"), iv_val
             ))
             conn.commit()
             return True
@@ -504,7 +513,7 @@ def get_pending_pain_checks():
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason FROM pending_pain_checks;")
+            cursor.execute("SELECT trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason, interval FROM pending_pain_checks;")
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         except Exception as e:
@@ -715,12 +724,13 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
             if "STOP LOSS" in reason_str or "BREAK-EVEN" in reason_str:
                 conn.execute("""
                     INSERT OR REPLACE INTO pending_pain_checks (
-                        trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        trade_id, symbol, entry_price, exit_price, take_profit, stop_loss, exit_time, direction, reason, interval
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
                     t_id, symbol, round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
                     round_monetary(trade.get("take_profit"), 4), round_monetary(trade.get("stop_loss"), 4),
-                    trade.get("exit_time"), trade.get("direction"), trade.get("reason")
+                    trade.get("exit_time"), trade.get("direction"), trade.get("reason"),
+                    clean_tf
                 ))
             
             conn.commit()

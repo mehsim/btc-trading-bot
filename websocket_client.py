@@ -2,7 +2,9 @@ from logger import log_event
 """
 websocket_client.py
 -------------------
-Bybit V5 public and private WebSocket connections, stream message handlers, and connection watchdog daemon.
+DEPRECATION NOTICE: This standalone WebSocket client is maintained for backwards compatibility.
+Real-time market data streaming and execution feeds are unified under bybit_client.py
+and ws_feed_manager.py. Do not introduce new dependencies on this module.
 """
 
 import os
