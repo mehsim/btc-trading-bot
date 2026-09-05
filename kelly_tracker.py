@@ -106,10 +106,8 @@ class KellyTracker:
             # H-1: filter to calendar lookback window first, then cap at max_trades
             cutoff_dt = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)
             cutoff_iso = cutoff_dt.isoformat()
-            windowed = [t for t in filtered if t.get("timestamp", "2000-01-01") >= cutoff_iso]
-            # If timestamp is missing on old records, fall back to tail of filtered list
-            if not windowed:
-                windowed = filtered
+            # Finding #35 & #28: Include records within cutoff AND untimestamped legacy records
+            windowed = [t for t in filtered if t.get("timestamp") is None or str(t.get("timestamp")) >= cutoff_iso]
             windowed = windowed[-max_trades:]
 
             if len(windowed) < effective_min_trades:

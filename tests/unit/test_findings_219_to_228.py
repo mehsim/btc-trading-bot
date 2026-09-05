@@ -78,7 +78,7 @@ def test_finding_220_post_sanitizer_kelly_and_empirical_clamp():
         tp_multiplier=2.5,
         sl_multiplier=1.0,
         interval="60",
-        trade_history=[],
+        trade_history=None,
         mcc_val=0.25,
         haircut=0.50,
         atr_norm=0.005

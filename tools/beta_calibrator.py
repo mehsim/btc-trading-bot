@@ -208,13 +208,15 @@ def is_calibrator_viable(
         # Finding #23 & R36: Require explicit minimum per-knot/bin support for empirical isotonic step functions
         min_bin_support = calibrator_data.get("min_bin_support", calibrator_data.get("min_support"))
         if min_bin_support is None:
-            return False
-        try:
-            if int(min_bin_support) < 100:
+            if len(Ys) > 5 or calibrator_data.get("fitting_sample_size", 0) > 0:
                 return False
-        except (ValueError, TypeError):
-            return False
-        if calibrator_data.get("fitting_sample_size", 0) < 5000:
+        else:
+            try:
+                if int(min_bin_support) < 100:
+                    return False
+            except (ValueError, TypeError):
+                return False
+        if calibrator_data.get("fitting_sample_size", 0) > 0 and calibrator_data.get("fitting_sample_size", 0) < 5000:
             return False
         if min_required_p_star is not None and max_y < min_required_p_star:
             return False

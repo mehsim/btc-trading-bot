@@ -1031,6 +1031,18 @@ def train_models(interval=INTERVAL, pages=PAGES):
         except Exception as e:
             print(f"[Warning] Optuna multiplier pre-tuning failed, using defaults: {e}")
 
+    # Finding #27: Synchronize in-memory TIMEFRAME_CONFIG with OPTIMIZED_BARRIERS so add_triple_barrier_labels uses current barriers
+    if OPTIMIZED_BARRIERS and str(interval) in TIMEFRAME_CONFIG:
+        for _k in ["tp_mult_trending", "tp_mult_ranging", "sl_mult", "lookahead"]:
+            if _k in OPTIMIZED_BARRIERS:
+                TIMEFRAME_CONFIG[str(interval)][_k] = OPTIMIZED_BARRIERS[_k]
+        print(f"[TIMEFRAME_CONFIG Sync] Updated active barriers for {interval}m from OPTIMIZED_BARRIERS: {TIMEFRAME_CONFIG[str(interval)]}")
+    elif not _cache_loaded and str(interval) in getattr(config, "COMMITTED_TIMEFRAME_CONFIG", {}):
+        for _k in ["tp_mult_trending", "tp_mult_ranging", "sl_mult", "lookahead"]:
+            if _k in config.COMMITTED_TIMEFRAME_CONFIG[str(interval)]:
+                TIMEFRAME_CONFIG[str(interval)][_k] = config.COMMITTED_TIMEFRAME_CONFIG[str(interval)][_k]
+        print(f"[TIMEFRAME_CONFIG Revert] Restored committed clean literals for {interval}m: {TIMEFRAME_CONFIG[str(interval)]}")
+
     if globals().get("TUNE_ONLY", False):
         print(f"✅ Barrier tuning complete for interval {interval}m. Skipping model training (--tune-only).")
         return

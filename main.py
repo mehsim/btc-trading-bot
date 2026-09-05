@@ -4699,10 +4699,17 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     atr_sl_dist = atr_dollars * sl_multiplier_adjusted
     min_sl_dist = max(atr_dollars * 1.0, entry_price * min_sl_pct)
     raw_sl_dist = abs(entry_price - stop_loss_price) if stop_loss_price is not None else atr_sl_dist
-    # Finding R48: Pre-order minimum-stop floor enforcement
+    # Finding R48 & #16: Pre-order minimum-stop floor enforcement with R:R preservation
     effective_sl_dist = max(raw_sl_dist, min_sl_dist)
     if stop_loss_price is not None:
         stop_loss_price = (entry_price - effective_sl_dist) if ml_trend == "Bullish" else (entry_price + effective_sl_dist)
+
+    # Invariant: Rescale take_profit_price if minimum stop floor widened the stop distance, preserving target R:R
+    if effective_sl_dist > (raw_sl_dist + 1e-6) and raw_sl_dist > 0 and take_profit_price is not None:
+        raw_tp_dist = abs(take_profit_price - entry_price)
+        target_rr = raw_tp_dist / raw_sl_dist
+        new_tp_dist = max(raw_tp_dist, effective_sl_dist * target_rr)
+        take_profit_price = (entry_price + new_tp_dist) if ml_trend == "Bullish" else (entry_price - new_tp_dist)
 
     # Invariant: Rescale quantity if minimum stop floor widened the stop distance, preserving dollar risk
     if effective_sl_dist > (raw_sl_dist + 1e-6) and raw_sl_dist > 0:
@@ -5221,12 +5228,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         bybit_success = False
 
         if bybit_success:
-            # Preserve approved pre-flight stop loss and take profit distances, anchored from actual fill entry price
             sl_dist = pre_sl_dist if 'pre_sl_dist' in locals() and pre_sl_dist > 0 else (abs(entry_price - stop_loss_price) if stop_loss_price is not None else (sl_multiplier_adjusted * atr_dollars))
-            # Finding R48: Enforce minimum-stop floor before submitting to venue
+            raw_sl_dist_pre = sl_dist
+            # Finding R48 & #16: Enforce minimum-stop floor before submitting to venue with R:R preservation
             if 'min_sl_dist' in locals() and min_sl_dist > 0:
                 sl_dist = max(sl_dist, float(min_sl_dist))
             tp_dist = pre_tp_dist if 'pre_tp_dist' in locals() and pre_tp_dist > 0 else (abs(take_profit_price - entry_price) if take_profit_price is not None else (tp_multiplier_adjusted * atr_dollars))
+            if sl_dist > (raw_sl_dist_pre + 1e-6) and raw_sl_dist_pre > 0:
+                target_rr_venue = tp_dist / raw_sl_dist_pre
+                tp_dist = max(tp_dist, sl_dist * target_rr_venue)
 
             stop_loss_price = (entry_price - sl_dist) if ml_trend == "Bullish" else (entry_price + sl_dist)
             take_profit_price = (entry_price + tp_dist) if ml_trend == "Bullish" else (entry_price - tp_dist)
@@ -6185,6 +6195,9 @@ def main():
                             if exit_trace and isinstance(exit_trace, dict):
                                 exit_trace["exit_quality_score"] = eqs_score
                             bot_state[f"latest_eqs_{active_symbol}_{iv}"] = eqs_score
+                            if eqs_mode == "active" and eqs_score < 40.0 and not exit_reason:
+                                exit_reason = f"EXIT_QUALITY_DEGRADED ({eqs_score:.1f} < 40.0)"
+                                log_event("WARNING", f"[{active_symbol} {iv}m] EQS active trigger: {exit_reason}. Marking trade for exit.")
                         except Exception as ex_eqs:
                             log_event("DEBUG", f"[{active_symbol} {iv}m] EQS evaluation notice: {ex_eqs}")
 
@@ -8882,7 +8895,7 @@ def main():
                                             new_tp_price = adjusted_struct["tp_price"]
                                             leverage_val = adjusted_struct["leverage"]
 
-                                            # Reconcile geometry: If validate_trade_structure widened stop or capped TP, verify economic gate and recompute Kelly (Finding #52, #60)
+                                            # Reconcile geometry: If validate_trade_structure widened stop or capped TP, verify economic gate and recompute Kelly (Finding #52, #60, #16, #26)
                                             if abs(new_stop_price - orig_sl_price) > 1e-6 or abs(new_tp_price - orig_tp_price) > 1e-6:
                                                 from trade_calculators import passes_economic_gate, calculate_required_p
                                                 fr_struct = get_funding_rate(symbol)
@@ -8894,11 +8907,25 @@ def main():
                                                     print(f"[{symbol} {iv}m PRE-FLIGHT REJECT] Adjusted trade structure fails economic gate (requires {_req_p:.3f} > conf {calibrated_confidence:.3f}). Aborting entry.")
                                                     status_msg = "Skipped (Adjusted Structure Fails Economic Gate)"
                                                     continue
-                                                p_star = calculate_required_p(entry=entry_price, tp=new_tp_price, sl=new_stop_price, expected_funding_frac=exp_funding_struct)
 
-                                                # Finding #52: Recompute Kelly with post-sanitizer geometry
+                                                # Finding #16 & #26: Re-evaluate dynamic confidence threshold on adjusted geometry
                                                 post_sl_m = abs(entry_price - new_stop_price) / max(1e-6, atr_dollars)
                                                 post_tp_m = abs(new_tp_price - entry_price) / max(1e-6, atr_dollars)
+                                                post_eff_tp = post_tp_m * realized_haircut
+                                                post_p_star = post_sl_m / max(1e-6, (post_eff_tp + post_sl_m))
+                                                post_cost_adj = (cost_bps / 1e4) / max(1e-6, (post_eff_tp + post_sl_m) * max(1e-4, atr_norm_val))
+                                                post_dynamic_threshold = float(round(post_p_star + post_cost_adj, 4))
+                                                if 'adjustments_applied' in locals():
+                                                    for adj_name, adj_val in adjustments_applied:
+                                                        if adj_name != "economic_base":
+                                                            post_dynamic_threshold += float(adj_val)
+                                                if calibrated_confidence < post_dynamic_threshold:
+                                                    log_event("WARNING", f"[{symbol} {iv}m PRE-FLIGHT REJECT] Adjusted trade structure below dynamic confidence threshold (requires {post_dynamic_threshold:.3f} > conf {calibrated_confidence:.3f}). Aborting entry.")
+                                                    status_msg = "Skipped (Adjusted Structure Below Dynamic Confidence Threshold)"
+                                                    continue
+                                                p_star = post_p_star
+
+                                                # Finding #52 & #16: Recompute Kelly with post-sanitizer geometry and measured cost_bps
                                                 re_scaled_kelly = risk_engine.compute_conservative_kelly(
                                                     calibrated_confidence=calibrated_confidence,
                                                     tp_multiplier=post_tp_m,
@@ -8907,7 +8934,8 @@ def main():
                                                     trade_history=bot_state.get("trade_history", []),
                                                     mcc_val=_mcc_val,
                                                     haircut=realized_haircut,
-                                                    atr_norm=atr_norm_val
+                                                    atr_norm=atr_norm_val,
+                                                    cost_bps=cost_bps
                                                 )
                                                 if re_scaled_kelly <= 0.0:
                                                     log_event("INFO", f"[{symbol} {iv}m] Recomputed Kelly non-positive ({re_scaled_kelly:.4f}) post-sanitizer — abstaining from entry.")
@@ -9202,7 +9230,8 @@ def main():
                                                         trade_history=bot_state.get("trade_history", []),
                                                         mcc_val=_mcc_val,
                                                         haircut=realized_haircut,
-                                                        atr_norm=atr_norm_val
+                                                        atr_norm=atr_norm_val,
+                                                        cost_bps=cost_bps
                                                     )
                                                     if re_scaled_kelly_final <= 0.0:
                                                         log_event("WARNING", f"[{symbol} {iv}m] Post-floor SL widening reduced Kelly edge to non-positive ({re_scaled_kelly_final:.4f}). Aborting entry.")
@@ -9515,11 +9544,11 @@ def main():
                             rec.reason_code = map_status_to_reason_code(status_msg)
                         
                         # Populate and snapshot remaining economic and sizing metrics if available
-                        if 'exp_edge_bps' in locals() and rec.expected_value is None:
+                        if 'exp_edge_bps' in locals() and exp_edge_bps is not None and rec.expected_value is None:
                             rec.expected_value = float(exp_edge_bps)
-                        if 'exp_r_val' in locals() and rec.expected_rr is None:
+                        if 'exp_r_val' in locals() and exp_r_val is not None and rec.expected_rr is None:
                             rec.expected_rr = float(exp_r_val)
-                        if 'cost_bps' in locals() and rec.round_trip_cost_bp is None:
+                        if 'cost_bps' in locals() and cost_bps is not None and rec.round_trip_cost_bp is None:
                             rec.round_trip_cost_bp = float(cost_bps)
                         if 'mhi_val' in locals() and mhi_val is not None and rec.mhi_score is None:
                             rec.mhi_score = float(mhi_val)

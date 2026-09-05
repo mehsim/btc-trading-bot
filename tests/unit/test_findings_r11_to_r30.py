@@ -53,6 +53,7 @@ def test_r11_and_r12_is_manifest_degenerate():
         "cv_metrics": {
             "holdout_balanced_accuracy": 0.45,
             "holdout_mcc": 0.12,
+            "holdout_resolved_mcc": 0.11,
             "holdout_mcc_mde_80pct": 0.10,
             "n_holdout_samples": 600,
             "lookahead": 12

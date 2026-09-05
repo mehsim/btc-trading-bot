@@ -386,7 +386,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
                 i += 1
                 continue
         except Exception as ex_conf:
-            log_event("WARNING", f"Backtest confluence check notice: {ex_conf}")
+            log_event("WARNING", f"Backtest confluence check error (Fail-Closed): {ex_conf}")
+            i += 1
+            continue
 
         # 4. Volatility & Fee check
         if use_regressor_fee_check:
@@ -605,7 +607,13 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         funding_cost = (hours_held / 8.0) * 0.0001 if hours_held >= 8.0 else 0.0
         net_return = net_return - funding_cost
 
-        equity_trade_return = position_frac * net_return
+        # Finding #25: Live capital-at-risk notional conversion:
+        # Live computes: target_notional = (current_bal * f_clamped) / stop_loss_frac
+        # where position_frac is f_clamped. Convert to notional equity fraction bounded by leverage cap.
+        sl_dist_val = abs(entry_price - stop_loss)
+        stop_loss_frac = max(0.002, sl_dist_val / max(1e-9, entry_price))
+        notional_equity_frac = min(10.0, position_frac / stop_loss_frac)
+        equity_trade_return = notional_equity_frac * net_return
         equity_compounded = equity_compounded * (1.0 + equity_trade_return)
         equity_simple += equity_trade_return
 
@@ -644,6 +652,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             "net_return": float(net_return),
             "equity_return": float(equity_trade_return),
             "position_frac": float(position_frac),
+            "notional_frac": float(notional_equity_frac),
             "half_closed": half_closed,
             "sl_frac": float(_sl_frac),
             "symbol": sym_name,
@@ -664,9 +673,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             _meanR = (sum(t["net_return"] for t in _b) / len(_b) / _sl_frac_avg) if _b else 0.0
             print(f"  {_r:<15} {_mix[_r]:>5}  {100*_mix[_r]/_n:5.1f}%   mean {_meanR:+.3f}R")
 
-    # Finding #32: Sized returns matching Kelly position_frac and equity_compounded
+    # Finding #32 & #25: Sized returns matching Kelly notional_frac and equity_compounded
     returns = [t.get("equity_return", t["net_return"]) for t in trades]
-    sl_fracs = [t.get("position_frac", 1.0) * t.get("sl_frac", 0.01) for t in trades]
+    sl_fracs = [t.get("notional_frac", t.get("position_frac", 1.0)) * t.get("sl_frac", 0.01) for t in trades]
     duration_days = None
     try:
         if "timestamp" in df.columns and len(df) > 1:

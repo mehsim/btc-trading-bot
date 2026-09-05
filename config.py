@@ -167,9 +167,18 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
         if h_mcc is not None and h_mde is not None and abs(float(h_mcc)) < float(h_mde):
             return True, f"|Holdout MCC| ({abs(float(h_mcc)):.4f}) < 80% MDE ({float(h_mde):.4f})"
 
-        # Finding #37: Directional-mass holdout governance
-        has_resolved_key = ("holdout_resolved_mcc" in manifest) or (isinstance(manifest.get("cv_metrics"), dict) and "holdout_resolved_mcc" in manifest["cv_metrics"])
-        is_governed_manifest = has_resolved_key or manifest.get("promoted") is True or "holdout_mcc_mde_80pct" in manifest or "holdout_effective_n" in manifest
+        # Finding #37 & #29: Directional-mass holdout governance for governed model manifests
+        is_governed_manifest = (
+            (h_res_mcc is not None) or
+            manifest.get("promoted") is not None or
+            "holdout_mcc_mde_80pct" in manifest or
+            "holdout_effective_n" in manifest or
+            "prefix" in manifest or
+            "manifest_schema_version" in manifest or
+            "governance_version" in manifest or
+            "cv_metrics" in manifest or
+            "git_sha" in manifest
+        )
         if is_governed_manifest and h_mcc is not None:
             if h_res_mcc is None:
                 return True, "Holdout resolved MCC missing (model scored on argmax only)"
@@ -505,10 +514,10 @@ for _tf in list(TIMEFRAME_CONFIG.keys()):
                     REJECTED_BARRIER_FILES.add(_opt_path)
                     continue
 
-                if _sl_mult < 0.3 or _tp_ranging < 0.5 or _lookahead < 4:
+                if _sl_mult < 0.3 or _sl_mult > 3.0 or _tp_ranging < 0.5 or _tp_ranging > 4.0 or _tp_trending > 5.0 or _lookahead < 4 or _lookahead > 48:
                     sys.stderr.write(
                         f"[TIMEFRAME_CONFIG Warning] Rejecting invalid barrier bounds in {_opt_path}: "
-                        f"sl={_sl_mult}, tp_r={_tp_ranging}, lookahead={_lookahead}. Preserving committed config.\n"
+                        f"sl={_sl_mult}, tp_r={_tp_ranging}, tp_t={_tp_trending}, lookahead={_lookahead}. Preserving committed config.\n"
                     )
                     REJECTED_BARRIER_FILES.add(_opt_path)
                     continue
