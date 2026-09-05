@@ -5181,7 +5181,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     if last_exec and (now_ts_sec - (float(last_exec.get("execTime", 0))/1000.0)) < 5.0 and last_exec.get("side") == side:
                         exec_id = last_exec.get("execId")
                         exec_order_id = last_exec.get("orderId")
-                        if (exec_order_id and exec_order_id in chase_order_ids) or (exec_id and exec_id in recorded_chase_exec_ids):
+                        if exec_id and exec_id in recorded_chase_exec_ids:
                             print(f"[{symbol} {iv}m API] Recent fill ({exec_id}) belongs to chase order already recorded. Skipping duplicate accumulation.")
                             # Finding #56: Only set bybit_success if actually filled target threshold
                             if filled_so_far >= (0.95 * raw_qty):
@@ -7848,7 +7848,7 @@ def main():
                             resolved_sl_dist = geom["sl_dist"]
                             tp_change = geom["tp_dist"]
                             sl_multiplier_adjusted = geom["sl_multiplier_adjusted"]
-                            resolved_sl_m = sl_multiplier_adjusted
+                            resolved_sl_m = float(resolved_sl_dist / max(1e-6, atr_dollars))
                             resolved_tp_m = geom["tp_multiplier_adjusted"]
                             tp_multiplier_adjusted = resolved_tp_m
                             struct_meta = geom["struct_meta"]

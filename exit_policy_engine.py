@@ -245,19 +245,26 @@ class ExitPolicyEngine:
         be_safety_margin_atr = float(params.get("be_safety_margin_atr", 0.10))
         
         trigger_scale_out = False
+        scale_out_atr_basis = entry_atr if entry_atr > 0 else atr_dollars
         if not half_closed and scale_out_pct > 0.0:
-            if direction == "Bullish" and current_price >= (entry_price + scale_out_atr_mult * atr_dollars):
+            if direction == "Bullish" and current_price >= (entry_price + scale_out_atr_mult * scale_out_atr_basis):
                 trigger_scale_out = True
-            elif direction == "Bearish" and current_price <= (entry_price - scale_out_atr_mult * atr_dollars):
+            elif direction == "Bearish" and current_price <= (entry_price - scale_out_atr_mult * scale_out_atr_basis):
                 trigger_scale_out = True
                 
         if trigger_scale_out and not half_closed:
             updates["trigger_scale_out"] = True
             updates["scale_out_pct"] = scale_out_pct
 
-        # 2. Check Break-Even trigger if price moved past be_trigger_atr_mult without scale-out
+        # 2. Check Break-Even trigger
+        # Finding #36: Synchronize break-even with scale-out:
+        # Volatility contraction must not pull break-even below scale-out distance,
+        # and break-even must not move the stop to entry before scale-out executes.
         if not active_trade.get("break_even_triggered"):
-            be_dist = be_trigger_atr_mult * atr_dollars
+            effective_be_basis = max(entry_atr, atr_dollars)
+            be_dist = be_trigger_atr_mult * effective_be_basis
+            if not half_closed and scale_out_pct > 0.0:
+                be_dist = max(be_dist, (scale_out_atr_mult * scale_out_atr_basis) + (0.10 * effective_be_basis))
             be_reached = (current_price >= entry_price + be_dist) if direction == "Bullish" else (current_price <= entry_price - be_dist)
             if be_reached:
                 be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)

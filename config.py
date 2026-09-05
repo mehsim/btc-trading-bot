@@ -115,20 +115,25 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
     h_brier = _extract(["holdout_brier", "brier_score", "brier"])
     h_ece = _extract(["holdout_ece", "ece"])
     h_mde = _extract(["holdout_mcc_mde_80pct"])
-    h_eff_n = _extract(["holdout_effective_n", "effective_sample_size", "effective_n"])
+    h_eff_n = _extract(["holdout_effective_n", "holdout_n_effective"])
+    h_res_mcc = _extract(["holdout_resolved_mcc", "holdout_directional_mcc"])
+    h_res_bal_acc = _extract(["holdout_resolved_balacc", "holdout_directional_balacc"])
 
-    # Finding #81: Derive 80% MDE dynamically if missing
+    # Finding #81 & Finding #40: Derive 80% MDE dynamically if missing, strictly using holdout sample size
     if h_mde is None:
         import math
         if h_eff_n is not None and float(h_eff_n) > 0:
             h_mde = round(2.8016 / math.sqrt(float(h_eff_n)), 4)
         else:
-            h_raw = _extract(["n_holdout_samples", "holdout_samples", "raw_sample_size"])
+            h_raw = _extract(["n_holdout_samples", "holdout_samples", "holdout_sample_size", "holdout_n"])
             barrier_cfg = manifest.get("barrier_config") if isinstance(manifest.get("barrier_config"), dict) else {}
             lookahead_val = float(manifest.get("lookahead", barrier_cfg.get("lookahead", 12)))
             if h_raw is not None and float(h_raw) > 0 and lookahead_val > 0:
                 derived_eff = float(h_raw) / lookahead_val
                 h_mde = round(2.8016 / math.sqrt(max(1.0, derived_eff)), 4)
+            elif h_mcc is not None:
+                # If holdout MCC is present but holdout sample size is completely unmeasured, reject as under-powered
+                return True, "Holdout sample size metadata missing for MDE calculation"
 
     try:
         if h_brier is not None and float(h_brier) >= 0.99:
@@ -139,8 +144,20 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
             return True, f"Holdout balanced accuracy ({float(h_bal_acc):.4f}) <= chance (0.3333)"
         if h_mcc is not None and float(h_mcc) <= 0.0:
             return True, f"Holdout MCC ({float(h_mcc):.4f}) <= 0.0 (sub-random)"
+        # 4. MDE Power Gate (Finding #81 & Finding #40)
         if h_mcc is not None and h_mde is not None and abs(float(h_mcc)) < float(h_mde):
             return True, f"|Holdout MCC| ({abs(float(h_mcc)):.4f}) < 80% MDE ({float(h_mde):.4f})"
+
+        # Finding #37: Directional-mass holdout governance
+        has_resolved_key = ("holdout_resolved_mcc" in manifest) or (isinstance(manifest.get("cv_metrics"), dict) and "holdout_resolved_mcc" in manifest["cv_metrics"])
+        is_governed_manifest = has_resolved_key or manifest.get("promoted") is True or "holdout_mcc_mde_80pct" in manifest or "holdout_effective_n" in manifest
+        if is_governed_manifest and h_mcc is not None:
+            if h_res_mcc is None:
+                return True, "Holdout resolved MCC missing (model scored on argmax only)"
+            if float(h_res_mcc) <= 0.0:
+                return True, f"Holdout resolved MCC ({float(h_res_mcc):.4f}) <= 0.0"
+            if h_res_bal_acc is not None and float(h_res_bal_acc) <= 0.3334:
+                return True, f"Holdout resolved balanced accuracy ({float(h_res_bal_acc):.4f}) <= chance (0.3333)"
     except Exception as ex_deg:
         return True, f"Manifest metric parsing error: {ex_deg}"
 

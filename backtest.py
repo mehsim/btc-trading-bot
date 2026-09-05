@@ -220,7 +220,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         pred_change = pred_pct * close_price
 
         from ensemble import resolve_direction
-        ml_trend, ml_confidence = resolve_direction(probs)
+        ml_trend, ml_confidence = resolve_direction(probs, interval=str(interval))
         prob_neutral = float(probs[1]) if len(probs) >= 2 else 0.0
         neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
         raw_confidence = ml_confidence
@@ -267,11 +267,18 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         p_star = sl_multiplier / max(1e-6, (effective_tp_m + sl_multiplier))
         cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + sl_multiplier) * max(1e-4, atr_norm))
         economic_base_threshold = float(round(p_star + cost_adj, 4))
+
+        # Calibrator Economic Viability Guard (Finding #31, mirrors main.py:7895-7899)
+        if calibrator is not None:
+            from tools.beta_calibrator import is_calibrator_viable
+            if not is_calibrator_viable(calibrator, min_required_p_star=economic_base_threshold):
+                i += 1
+                continue
         
         base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
         dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
 
-        # Production additive adjustments (Ranging, High Volatility, Session) - mirrors main.py:7058-7112
+        # Production additive adjustments (Ranging, High Volatility, Session) - mirrors main.py:7912-7967
         if not is_trending_state:
             regime_delta = 0.02 if str(interval) in ["15", "30"] else 0.04
             dynamic_conf_threshold += regime_delta
@@ -288,9 +295,44 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if 0 <= candle_hour < 8:
             dynamic_conf_threshold += 0.02
 
-        # Cap additive penalties so 3-class models are not pushed to unreachable thresholds (mirrors main.py:7111)
-        max_conf_cap = 0.50 if str(interval) in ["15", "30", "60"] else 0.55
-        dynamic_conf_threshold = min(max_conf_cap, dynamic_conf_threshold)
+        # Recent 50-Trade Performance Decay Filter (mirrors main.py:7944-7953)
+        if len(trades) >= 10:
+            recent_trades = trades[-50:]
+            win_count = sum(1 for t in recent_trades if float(t.get("net_return", 0.0)) > 0)
+            recent_wr = (win_count / len(recent_trades)) * 100.0
+            if recent_wr < 45.0:
+                dynamic_conf_threshold += 0.04
+
+        # HTF Contradiction Decay Penalty (mirrors main.py:7930-7941)
+        if str(interval) in ["5", "15"] and "EMA_9_1d" in df.columns and "EMA_21_1d" in df.columns:
+            htf_trend_1d = "Bullish" if df.loc[i, "EMA_9_1d"] > df.loc[i, "EMA_21_1d"] else "Bearish"
+            if htf_trend_1d != ml_trend:
+                dynamic_conf_threshold += 0.03
+
+        # Cap additive penalties so 3-class models are not pushed to unreachable thresholds (mirrors main.py:7965-7967)
+        effective_base = max(float(economic_base_threshold), float(base_cfg_thresh))
+        max_conf_cap = max(effective_base, 0.50 if str(interval) in ["15", "30", "60"] else 0.55)
+        dynamic_conf_threshold = max(effective_base, min(max_conf_cap, dynamic_conf_threshold))
+
+        # Adaptive Confidence Threshold Matrix for 15m (mirrors main.py:8056-8068)
+        if str(interval) == "15":
+            import trade_calculators
+            adaptive_val = trade_calculators.calculate_adaptive_15m_threshold(
+                regime="Ranging" if not is_trending_state else "Trending",
+                drift_p_val=0.5,
+                u_total=0.1,
+                symbol_sharpe=1.0,
+                base_threshold=economic_base_threshold
+            )
+            if adaptive_val > dynamic_conf_threshold:
+                dynamic_conf_threshold = adaptive_val
+
+        # Bayesian Cold-Start Adjustment (Trades 3-9) (mirrors main.py:8069-8075)
+        if 3 <= len(trades) < 10:
+            from mlops_engine import mlops_engine
+            bayesian_res = mlops_engine.get_bayesian_adjusted_threshold(interval, trades)
+            if bayesian_res.get("confidence_boost", 0) > 0:
+                dynamic_conf_threshold += bayesian_res["confidence_boost"]
 
         if min_confidence == "dynamic_plus_3":
             effective_min_conf = dynamic_conf_threshold + 0.03
@@ -319,6 +361,30 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             if ml_trend != trend_1d:
                 i += 1
                 continue
+
+        # 4. Pre-Trade Confluence Checks (Finding #31, mirrors main.py:8453, confluence_engine.py:107)
+        try:
+            from confluence_engine import check_pre_trade_confluence
+            sym_name = str(getattr(df, "symbol", "BTCUSDT") if hasattr(df, "symbol") else df["symbol"].iloc[0] if "symbol" in df.columns else "BTCUSDT")
+            conf_ok, _, _ = check_pre_trade_confluence(
+                current_price=close_price,
+                df_1h=df.iloc[max(0, i-100):i+1],
+                ml_trend=ml_trend,
+                news_sentiment="Neutral",
+                expected_pct_change=expected_pct_change,
+                interval=str(interval),
+                symbol=sym_name,
+                calibrated_confidence=calibrated_confidence,
+                dynamic_conf_threshold=dynamic_conf_threshold,
+                current_regime="trending" if is_trending_state else "ranging",
+                get_history_fn=lambda *args, **kwargs: None,
+                get_orderbook_fn=lambda *args, **kwargs: {"imbalance": 0.0}
+            )
+            if not conf_ok:
+                i += 1
+                continue
+        except Exception as ex_conf:
+            log_event("WARNING", f"Backtest confluence check notice: {ex_conf}")
 
         # 4. Volatility & Fee check
         if use_regressor_fee_check:
@@ -596,8 +662,9 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
             _meanR = (sum(t["net_return"] for t in _b) / len(_b) / _sl_frac_avg) if _b else 0.0
             print(f"  {_r:<15} {_mix[_r]:>5}  {100*_mix[_r]/_n:5.1f}%   mean {_meanR:+.3f}R")
 
-    returns = [t["net_return"] for t in trades]
-    sl_fracs = [t.get("sl_frac", 0.01) for t in trades]
+    # Finding #32: Sized returns matching Kelly position_frac and equity_compounded
+    returns = [t.get("equity_return", t["net_return"]) for t in trades]
+    sl_fracs = [t.get("position_frac", 1.0) * t.get("sl_frac", 0.01) for t in trades]
     duration_days = None
     try:
         if "timestamp" in df.columns and len(df) > 1:
@@ -608,6 +675,14 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         log_event("WARNING", f"Timestamp duration calculation notice: {ex_ts}")
     from trade_calculators import calculate_replay_statistics
     stats = calculate_replay_statistics(returns, initial_equity=100.0, risk_per_trade_pct=sl_fracs, duration_days=duration_days, interval=str(INTERVAL))
+    
+    # Also attach unsized stats for full transparency
+    try:
+        raw_returns = [t["net_return"] for t in trades]
+        raw_sl_fracs = [t.get("sl_frac", 0.01) for t in trades]
+        stats["unsized_stats"] = calculate_replay_statistics(raw_returns, initial_equity=100.0, risk_per_trade_pct=raw_sl_fracs, duration_days=duration_days, interval=str(INTERVAL))
+    except Exception as ex_raw:
+        log_event("WARNING", f"Unsized replay stats notice: {ex_raw}")
     
     stat_tuple = (
         stats.get("total_trades", 0),

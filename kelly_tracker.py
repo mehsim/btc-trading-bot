@@ -120,8 +120,10 @@ class KellyTracker:
             wins = [r for r in returns if r > 0]
             losses = [abs(r) for r in returns if r < 0]
 
-            # Require minimum sample of both wins and losses to prevent distortion
-            if len(wins) < 1 or len(losses) < min_losses:
+            # Finding #35: If sample window has 0 wins, that is a measured 0% win rate (negative edge) -> Fail-closed 0.0!
+            if len(wins) < 1:
+                return 0.0
+            if len(losses) < min_losses:
                 return None if insufficient_as_none else 0.0
 
             n = len(returns)

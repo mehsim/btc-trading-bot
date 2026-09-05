@@ -163,7 +163,8 @@ def compute_conservative_kelly(
     if q_kelly_geom <= 0.0:
         return 0.0
 
-    if trade_history and len(trade_history) >= 10:
+    # Finding #35: Unconditionally query global_kelly_tracker when trade_history is provided (reading persistent kelly_trade_history.json)
+    if trade_history is not None:
         emp_kelly = global_kelly_tracker.compute_kelly_fraction(
             timeframe=str(interval),
             min_trades=10,
@@ -172,7 +173,7 @@ def compute_conservative_kelly(
         )
         if emp_kelly is not None:
             if emp_kelly <= 0.0:
-                # Finding #163 & #71: Measured negative or zero empirical edge -> Fail-closed! Abstain (0.0)
+                # Finding #35, #163 & #71: Measured negative or zero empirical edge -> Fail-closed! Abstain (0.0)
                 # instead of falling through to confidence-based prior.
                 return 0.0
             # Finding #52: Empirical Kelly cannot exceed trade geometry Quarter-Kelly

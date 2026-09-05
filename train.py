@@ -436,11 +436,24 @@ def add_triple_barrier_labels(df, interval):
     tp_mult_trending = float(cfg.get("tp_mult_trending", 1.85))
     tp_mult_ranging = float(cfg.get("tp_mult_ranging", 1.40))
     
+    # Finding #38: Precompute effective barrier geometry matching live execution
+    import risk_engine
+    from config import MIN_TARGET_ATR_MULT, MIN_SL_PCT_CONFIG
+    iv_str = str(interval)
+    min_sl_pct = float(MIN_SL_PCT_CONFIG.get(iv_str, MIN_SL_PCT_CONFIG.get("default", 0.008)))
+    if iv_str in ["5", "15", "30", "60"]:
+        effective_sl_mult = min(sl_mult, 1.25)
+    else:
+        tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv_str)
+        effective_sl_mult = sl_mult * tf_sl_mult
+
     global LAST_LABELING_BARRIER_CONFIG
     LAST_LABELING_BARRIER_CONFIG = {
         "tp_mult_trending": tp_mult_trending,
         "tp_mult_ranging": tp_mult_ranging,
         "sl_mult": sl_mult,
+        "effective_sl_mult": effective_sl_mult,
+        "min_sl_pct": min_sl_pct,
         "lookahead": lookahead
     }
         
@@ -461,19 +474,8 @@ def add_triple_barrier_labels(df, interval):
             is_trending_state = False
             
         tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
-        # Finding #3 & #10: Align label stop and profit barriers with live execution geometry
-        import risk_engine
-        from config import MIN_TARGET_ATR_MULT, MIN_SL_PCT_CONFIG
-        iv_str = str(interval)
-        min_sl_pct = float(MIN_SL_PCT_CONFIG.get(iv_str, MIN_SL_PCT_CONFIG.get("default", 0.008)))
+        # Finding #3 & #10 & #38: Align label stop and profit barriers with live execution geometry
         min_sl_dist = p_t * min_sl_pct
-
-        if iv_str in ["5", "15", "30", "60"]:
-            effective_sl_mult = min(sl_mult, 1.25)
-        else:
-            tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv_str)
-            effective_sl_mult = sl_mult * tf_sl_mult
-
         sl_dist = max(effective_sl_mult * atr_t, min_sl_dist)
 
         # Min TP multiplier: max(MIN_TARGET_ATR_MULT, 1.20 * effective_sl_mult) matching live
@@ -982,14 +984,21 @@ def train_models(interval=INTERVAL, pages=PAGES):
     # Skip retuning if a saved barriers file already exists — reuse it to avoid
     # expensive Optuna trials that can OOM on low-RAM servers.
     _barriers_cache = f"optimized_barriers_{interval}.json"
+    _cache_loaded = False
     if os.path.exists(_barriers_cache) and not globals().get("FORCE_TUNE_BARRIERS", False) and not globals().get("TUNE_ONLY", False):
         try:
             with open(_barriers_cache) as _f:
-                OPTIMIZED_BARRIERS = json.load(_f)
-            print(f"\n--- Loaded existing barrier config from {_barriers_cache} (skipping Optuna pre-study) ---")
+                _loaded_barriers = json.load(_f)
+            # Finding #34: Reject cached barriers that lack tuning_cutoff_timestamp (stale / spanning holdout)
+            if _loaded_barriers.get("tuning_cutoff_timestamp") is not None:
+                OPTIMIZED_BARRIERS = _loaded_barriers
+                _cache_loaded = True
+                print(f"\n--- Loaded existing barrier config from {_barriers_cache} (skipping Optuna pre-study) ---")
+            else:
+                print(f"[Warning] {_barriers_cache} lacks tuning_cutoff_timestamp. Rejecting stale cache to prevent holdout contamination.")
         except Exception as e:
             print(f"[Warning] Failed to load {_barriers_cache}: {e}")
-    else:
+    if not _cache_loaded:
         try:
             _trials = globals().get("OPTUNA_TRIALS", 30)
             print(f"\n--- Running Optuna pre-study ({_trials} trials) to optimize Triple-Barrier Multipliers ---")
