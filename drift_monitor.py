@@ -27,21 +27,21 @@ class DriftMonitor:
                 from logger import log_event
                 log_event("WARNING", f"[DriftMonitor] Error loading training baseline: {ex}")
 
-        # Finding R67: Fallback to empirical trade experience confidences from database
+        # Finding R67 & #53: Fallback to empirical trade experience confidences from database with deterministic ORDER BY
         try:
             import sqlite3
             import database
             with sqlite3.connect(database.get_db_path()) as conn:
                 c = conn.cursor()
-                c.execute("SELECT confidence FROM completed_trades WHERE confidence > 0.1 LIMIT 100")
+                c.execute("SELECT confidence FROM completed_trades WHERE confidence > 0.1 ORDER BY timestamp DESC LIMIT 200")
                 rows = [float(r[0]) for r in c.fetchall()]
                 if len(rows) >= 20:
                     return np.array(rows, dtype=float)
         except Exception:
             pass
 
-        # Uniform baseline over viable confidence domain if no database records exist
-        return np.linspace(0.40, 0.70, max(50, n_samples))
+        # Fail-closed: Return None rather than a fabricated distribution
+        return None
 
     def evaluate_drift(self) -> Dict[str, Any]:
         trades = get_recent_experiences(limit=50)
@@ -86,9 +86,12 @@ class DriftMonitor:
                     psi_val = 0.0
                 else:
                     baseline_ref = self._get_training_baseline_confidences(len(conf_arr))
-                    calc_p = calculate_psi(baseline_ref, conf_arr)
-                    if calc_p is not None and not np.isnan(calc_p) and not np.isinf(calc_p):
-                        psi_val = round(float(calc_p), 4)
+                    if baseline_ref is not None and len(baseline_ref) >= 20:
+                        calc_p = calculate_psi(baseline_ref, conf_arr)
+                        if calc_p is not None and not np.isnan(calc_p) and not np.isinf(calc_p):
+                            psi_val = round(float(calc_p), 4)
+                        else:
+                            psi_val = 0.0
                     else:
                         psi_val = 0.0
             elif drift_alert:

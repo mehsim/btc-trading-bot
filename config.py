@@ -148,7 +148,8 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
             barrier_cfg = manifest.get("barrier_config") if isinstance(manifest.get("barrier_config"), dict) else {}
             lookahead_val = float(manifest.get("lookahead", barrier_cfg.get("lookahead", 12)))
             if h_raw is not None and float(h_raw) > 0 and lookahead_val > 0:
-                derived_eff = float(h_raw) / lookahead_val
+                block_len = lookahead_val * (len(SUPPORTED_SYMBOLS) if lookahead_val <= 20 else 1.0)
+                derived_eff = float(h_raw) / block_len
                 h_mde = round(2.8016 / math.sqrt(max(1.0, derived_eff)), 4)
             elif h_mcc is not None and (manifest.get("promoted") is True or "barrier_config" in manifest):
                 # If holdout MCC is present but holdout sample size is completely unmeasured, reject as under-powered

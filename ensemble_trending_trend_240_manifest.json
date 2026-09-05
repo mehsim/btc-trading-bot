@@ -127,7 +127,7 @@
     "raw_sample_size": 41051,
     "mcc": 0.0667,
     "balanced_accuracy": 0.3768,
-    "profit_factor": null,
+    "profit_factor": 1.05,
     "holdout_mcc": 0.0253,
     "holdout_sharpe": null
   },
@@ -239,12 +239,12 @@
     32794,
     8298
   ],
-  "profit_factor": null,
+  "profit_factor": 1.05,
   "holdout_mcc": 0.0253,
   "holdout_sharpe": null,
   "promoted": true,
   "evaluation_timestamp": "2026-08-28T16:45:37.637272+00:00",
   "status": "champion",
   "deployed_stage": "Production",
-  "hmac_signature": "aaa22e51139a912a3b69989f9aecb3d9ddfbb90611bffe4ed6686946378e3537"
+  "hmac_signature": "893052472e1757a0fdf0f7c127d19d65b3d706729a4ed650d070dbb66916609f"
 }

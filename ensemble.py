@@ -917,6 +917,26 @@ def load_ensemble_classifier(prefix, n_features=None, feature_names=None):
             f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
         )
 
+    # Check loaded booster's internal feature count against manifest feature count
+    booster_feat_count = None
+    if hasattr(xgb, "n_features_in_") and getattr(xgb, "n_features_in_", None) is not None:
+        try:
+            booster_feat_count = int(xgb.n_features_in_)
+        except (AttributeError, ValueError, TypeError):
+            pass
+    if booster_feat_count is None and hasattr(xgb, "get_booster"):
+        try:
+            booster = xgb.get_booster()
+            if booster is not None and hasattr(booster, "num_features"):
+                booster_feat_count = int(booster.num_features())
+        except (AttributeError, ValueError, TypeError):
+            pass
+    if booster_feat_count is not None and feat_count is not None and booster_feat_count != feat_count:
+        raise RuntimeError(
+            f"[Model Governance Contract Error] Booster feature count mismatch for '{prefix}': "
+            f"Loaded booster has {booster_feat_count} features, but manifest specifies {feat_count}. Model refused loading (Fail-Closed)."
+        )
+
     # Model Governance Contract Enforcement: Feature Pipeline Hash Check (Unconditional Fail-Closed)
     manifest_pipe_hash = m_data.get("feature_pipeline_hash")
     if manifest_pipe_hash:
@@ -1373,6 +1393,26 @@ def load_ensemble_regressor(prefix, n_features=None, feature_names=None):
         raise RuntimeError(
             f"[Model Governance Contract Error] Feature count mismatch for '{prefix}': "
             f"Manifest Count {feat_count} != Live Count {len(feature_names)}. Model refused loading (Fail-Closed)."
+        )
+
+    # Check loaded booster's internal feature count against manifest feature count
+    booster_feat_count = None
+    if hasattr(xgb, "n_features_in_") and getattr(xgb, "n_features_in_", None) is not None:
+        try:
+            booster_feat_count = int(xgb.n_features_in_)
+        except (AttributeError, ValueError, TypeError):
+            pass
+    if booster_feat_count is None and hasattr(xgb, "get_booster"):
+        try:
+            booster = xgb.get_booster()
+            if booster is not None and hasattr(booster, "num_features"):
+                booster_feat_count = int(booster.num_features())
+        except (AttributeError, ValueError, TypeError):
+            pass
+    if booster_feat_count is not None and feat_count is not None and booster_feat_count != feat_count:
+        raise RuntimeError(
+            f"[Model Governance Contract Error] Booster feature count mismatch for '{prefix}': "
+            f"Loaded booster has {booster_feat_count} features, but manifest specifies {feat_count}. Model refused loading (Fail-Closed)."
         )
 
     # Model Governance Contract Enforcement: Feature Pipeline Hash Check (Unconditional Fail-Closed)

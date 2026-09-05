@@ -2145,7 +2145,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         chal_bal_acc_mean = float(stat_bal.get("mean", 0.0)) if ('stat_bal' in locals() and isinstance(stat_bal, dict) and stat_bal.get("mean") is not None) else 0.0
 
         # Compute block-bootstrap 95% CI on holdout metrics using multi-symbol lookahead block length
-        _lookahead_bl = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {}).get("lookahead", 10) * len(SUPPORTED_SYMBOLS)
+        _lookahead_bl = getattr(config, "TIMEFRAME_CONFIG", {}).get(str(interval), {}).get("lookahead", 12) * len(SUPPORTED_SYMBOLS)
         from statistical_validation import StatisticalValidation
         stat_validator = StatisticalValidation()
 
@@ -2210,6 +2210,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 if is_convention_mismatch:
                     print(f"  [Predictive Floor Gate] Effective sample convention mismatch ({champ_convention} != lookahead_x_nsymbols_v2). Suppressing relative MCC comparison and enforcing strict absolute floors.")
                     champ_mcc_val = None
+                    is_distribution_shifted = True
 
                 # Finding #134: MDE 80% Power Gate
                 _n_eff_holdout = max(1.0, float(len(y_holdout_trend)) / max(1, _lookahead_bl))
@@ -2322,7 +2323,14 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 champ_trade_rets.append(-float(p_ret))
                                 _c_sl_fracs.append(0.01)
                         if len(champ_trade_rets) < 10:
-                            pf_champ = float(champ_manifest.get("profit_factor", 1.05)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest) else 1.05
+                            raw_pf = champ_manifest.get("profit_factor") if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else None
+                            if raw_pf is not None:
+                                try:
+                                    pf_champ = float(raw_pf)
+                                except (ValueError, TypeError):
+                                    pf_champ = 1.05
+                            else:
+                                pf_champ = 1.05
                         else:
                             champ_stats = calculate_replay_statistics(
                                 champ_trade_rets,
@@ -2365,32 +2373,82 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             def _wf_sim_fn(_w_test_df):
                                 _t_X = _w_test_df[_wf_feats].fillna(0.0)
                                 _t_preds = _w_m.predict(_t_X)
-                                _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
-                                _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
                                 from config import TAKER_FEE_PCT, TIMEFRAME_CONFIG
-                                _roundtrip_fee = max(0.0011, float(TAKER_FEE_PCT) * 2.0)  # Taker fee roundtrip
+                                # Finding R65: Realistic roundtrip fee + conservative 0.5 bp slippage
+                                _roundtrip_fee = max(0.0011, float(TAKER_FEE_PCT) * 2.0) + 0.00005
                                 _tf_cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                                 _sl_mult_v = float(_tf_cfg.get("sl_mult", 0.8))
-                                _tp_mult_v = float(_tf_cfg.get("tp_mult_trending", 1.5))
-                                _lookahead_bars = int(_tf_cfg.get("lookahead", 10))
+                                _tp_mult_v = float(_tf_cfg.get("tp_mult_ranging" if name.lower() == "ranging" else "tp_mult_trending", 1.5))
+                                _lookahead_bars = int(_tf_cfg.get("lookahead", 12))
                                 _w_trades = []
                                 _i = 0
-                                _n_bars = len(_t_preds)
+                                _n_bars = len(_w_test_df)
+                                _has_ohlc = all(c in _w_test_df.columns for c in ["open", "high", "low", "close"])
+
                                 while _i < _n_bars:
                                     _p_d = _t_preds[_i]
                                     if _p_d in (0, 2):
-                                        _p_r = float(_t_prices[_i])
-                                        _dir_sign = 1.0 if _p_d == 2 else -1.0
-                                        _raw_ret = _p_r * _dir_sign
-                                        _sl_thresh = -max(0.005, _sl_mult_v * 0.01)
-                                        _tp_thresh = max(0.008, _tp_mult_v * 0.01)
-                                        if _raw_ret <= _sl_thresh:
-                                            _net_ret = _sl_thresh - _roundtrip_fee
-                                        elif _raw_ret >= _tp_thresh:
-                                            _net_ret = _tp_thresh - _roundtrip_fee
+                                        if _has_ohlc:
+                                            _entry_p = float(_w_test_df["close"].iloc[_i])
+                                            if "ATR_norm" in _w_test_df.columns:
+                                                _atr_frac = max(0.002, float(_w_test_df["ATR_norm"].iloc[_i]))
+                                            elif "atr" in _w_test_df.columns:
+                                                _atr_frac = max(0.002, float(_w_test_df["atr"].iloc[_i]) / max(1.0, _entry_p))
+                                            else:
+                                                _atr_frac = 0.010
+                                            
+                                            _sl_pct = max(0.004, _sl_mult_v * _atr_frac)
+                                            _tp_pct = max(0.006, _tp_mult_v * _atr_frac)
+                                            
+                                            # Intrabar path evaluation across subsequent lookahead window
+                                            _exit_ret = None
+                                            _max_j = min(_n_bars, _i + 1 + _lookahead_bars)
+                                            for _j in range(_i + 1, _max_j):
+                                                _high_p = float(_w_test_df["high"].iloc[_j])
+                                                _low_p = float(_w_test_df["low"].iloc[_j])
+                                                if _p_d == 2:  # Long
+                                                    _cur_sl_price = _entry_p * (1.0 - _sl_pct)
+                                                    _cur_tp_price = _entry_p * (1.0 + _tp_pct)
+                                                    if _low_p <= _cur_sl_price:
+                                                        _exit_ret = -_sl_pct
+                                                        break
+                                                    elif _high_p >= _cur_tp_price:
+                                                        _exit_ret = _tp_pct
+                                                        break
+                                                else:  # Short
+                                                    _cur_sl_price = _entry_p * (1.0 + _sl_pct)
+                                                    _cur_tp_price = _entry_p * (1.0 - _tp_pct)
+                                                    if _high_p >= _cur_sl_price:
+                                                        _exit_ret = -_sl_pct
+                                                        break
+                                                    elif _low_p <= _cur_tp_price:
+                                                        _exit_ret = _tp_pct
+                                                        break
+                                            
+                                            if _exit_ret is None:
+                                                _term_p = float(_w_test_df["close"].iloc[_max_j - 1])
+                                                _ret_diff = (_term_p - _entry_p) / max(1e-6, _entry_p)
+                                                _exit_ret = _ret_diff if _p_d == 2 else -_ret_diff
+                                                _exit_ret = float(np.clip(_exit_ret, -_sl_pct, _tp_pct))
+                                            
+                                            _net_ret = _exit_ret - _roundtrip_fee
+                                            _w_trades.append({"net_return": _net_ret, "sl_frac": abs(_sl_pct)})
                                         else:
-                                            _net_ret = _raw_ret - _roundtrip_fee
-                                        _w_trades.append({"net_return": _net_ret, "sl_frac": abs(_sl_thresh)})
+                                            _price_col = "target_price_change" if "target_price_change" in _w_test_df.columns else "target_price"
+                                            _t_prices = _w_test_df[_price_col].fillna(0.0).values if _price_col in _w_test_df.columns else np.zeros(len(_w_test_df))
+                                            _p_r = float(_t_prices[_i])
+                                            _dir_sign = 1.0 if _p_d == 2 else -1.0
+                                            _raw_ret = _p_r * _dir_sign
+                                            _sl_thresh = -max(0.005, _sl_mult_v * 0.01)
+                                            _tp_thresh = max(0.008, _tp_mult_v * 0.01)
+                                            if _raw_ret <= _sl_thresh:
+                                                _net_ret = _sl_thresh - _roundtrip_fee
+                                            elif _raw_ret >= _tp_thresh:
+                                                _net_ret = _tp_thresh - _roundtrip_fee
+                                            else:
+                                                _net_ret = _raw_ret - _roundtrip_fee
+                                            _w_trades.append({"net_return": _net_ret, "sl_frac": abs(_sl_thresh)})
+                                        
                                         _i += max(1, _lookahead_bars)
                                     else:
                                         _i += 1
@@ -2497,18 +2555,13 @@ def train_models(interval=INTERVAL, pages=PAGES):
             and holdout_resolved_mcc >= 0.0
         )
 
+        stage_prefix_t = f"{c_prefix_t}_stage_tmp"
+        stage_prefix_p = f"{c_prefix_p}_stage_tmp"
         if can_promote:
-            print(f"  [Champion-Challenger] Challenger approved & promoted across all release gates. Overwriting active model files...")
-            save_ensemble_classifier(final_ensemble_t, c_prefix_t, feature_names=features, write_manifest=False)
-            save_ensemble_regressor(final_ensemble_p, c_prefix_p, feature_names=features, write_manifest=False)
-            meta_model.save_model(f"meta_{name}_trend_{interval}.json")
-            import shutil
-            chal_cal_file = f"calibrator_{name}_{interval}_challenger.json"
-            live_cal_file = f"calibrator_{name}_{interval}.json"
-            if os.path.exists(chal_cal_file):
-                shutil.copyfile(chal_cal_file, live_cal_file)
-                print(f"  [Calibrator] Promoted challenger calibrator to {live_cal_file}")
-            _remove_from_governance_denylist(f"{name}_{interval}")
+            print(f"  [Champion-Challenger] Challenger approved & promoted across all release gates. Staging active model files...")
+            save_ensemble_classifier(final_ensemble_t, stage_prefix_t, feature_names=features, write_manifest=False)
+            save_ensemble_regressor(final_ensemble_p, stage_prefix_p, feature_names=features, write_manifest=False)
+            meta_model.save_model(f"meta_{name}_trend_{interval}.json.tmp")
         elif should_save and not can_promote:
             print(f"  [Champion-Challenger] Challenger passed empirical gates but blocked by governance: holdout metrics missing or unmeasured. Preserving champion intact.")
             should_save = False
@@ -2523,8 +2576,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         # If rejected, roll back selected_features_{interval}_{name}.json to previous features
         if not should_save and _prev_feats is not None:
-            with open(features_filename, "w") as f:
+            _tmp_ff = f"{features_filename}.tmp"
+            with open(_tmp_ff, "w") as f:
                 json.dump(_prev_feats, f)
+            os.replace(_tmp_ff, features_filename)
             print(f"  [Champion-Challenger] Restored previous feature contract in {features_filename}")
 
         # Write/update governance manifest with complete cv_metrics block and sample uniqueness metrics
@@ -2560,7 +2615,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             "holdout_mcc": round(holdout_mcc, 4),
             "holdout_resolved_mcc": round(holdout_resolved_mcc, 4) if 'holdout_resolved_mcc' in locals() else None,
             "holdout_resolved_balacc": round(holdout_resolved_balacc, 4) if 'holdout_resolved_balacc' in locals() else None,
-            "holdout_effective_n": round(float(len(y_holdout_trend) / max(1, _lookahead_bl if '_lookahead_bl' in locals() else (cv.lookahead * len(SUPPORTED_SYMBOLS)))), 2),
+            "holdout_effective_n": round(max(1.0, float(len(y_holdout_trend) / max(1, _lookahead_bl if '_lookahead_bl' in locals() else (cv.lookahead * len(SUPPORTED_SYMBOLS))))), 2),
             "holdout_mcc_mde_80pct": round(2.8016 / max(1.0, np.sqrt(float(len(y_holdout_trend) / max(1, _lookahead_bl if '_lookahead_bl' in locals() else (cv.lookahead * len(SUPPORTED_SYMBOLS)))))), 4),
             "holdout_mcc_ci95": [round(float(holdout_mcc_ci_low), 4), round(float(holdout_mcc_ci_high), 4)],
             "champion_holdout_mcc": round(champ_mcc, 4) if ('champ_mcc' in locals() and champ_mcc is not None) else None,
@@ -2732,9 +2787,74 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     json.dump(chal_manifest, cmf, indent=2, default=_json_safe)
                 os.replace(_tmp_chal_path, challenger_manifest_path)
             except Exception as ex_man:
-                log_event("WARNING", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}")
+                log_event("CRITICAL", f"Failed to write cv_metrics to manifest {m_prefix}: {ex_man}. Failing closed.")
+                should_save = False
 
-        print(f"  Saved ensemble and meta-classifier models for regime: {name.upper()}")
+        if should_save and can_promote:
+            # Transactional atomic promotion: replace staged model binaries with active model files
+            for ext in ["_xgb.json", "_lgb.txt", "_cat.json", "_weights.json"]:
+                src_t = f"{stage_prefix_t}{ext}"
+                dst_t = f"{c_prefix_t}{ext}"
+                if os.path.exists(src_t):
+                    os.replace(src_t, dst_t)
+                src_p = f"{stage_prefix_p}{ext}"
+                dst_p = f"{c_prefix_p}{ext}"
+                if os.path.exists(src_p):
+                    os.replace(src_p, dst_p)
+            if os.path.exists(f"meta_{name}_trend_{interval}.json.tmp"):
+                os.replace(f"meta_{name}_trend_{interval}.json.tmp", f"meta_{name}_trend_{interval}.json")
+            chal_cal_file = f"calibrator_{name}_{interval}_challenger.json"
+            live_cal_file = f"calibrator_{name}_{interval}.json"
+            if os.path.exists(chal_cal_file):
+                import shutil
+                shutil.copyfile(chal_cal_file, live_cal_file)
+                print(f"  [Calibrator] Promoted challenger calibrator to {live_cal_file}")
+            _remove_from_governance_denylist(f"{name}_{interval}")
+            # Finding #53 & R67: Refresh training baseline distribution from genuine empirical holdout predictions
+            try:
+                if final_ensemble_t is not None and hasattr(final_ensemble_t, "predict_proba"):
+                    _h_probs = final_ensemble_t.predict_proba(X_holdout)
+                    _h_confs = np.max(_h_probs, axis=1)
+                    if len(_h_confs) >= 20:
+                        _bl_payload = {
+                            "version": "v2.1",
+                            "feature": "model_confidence",
+                            "source": f"empirical_holdout_predictions_{name}_{interval}",
+                            "timestamp": now_iso,
+                            "git_sha": _pipeline_git_sha,
+                            "count": len(_h_confs),
+                            "mean": round(float(np.mean(_h_confs)), 4),
+                            "std": round(float(np.std(_h_confs)), 4),
+                            "min": round(float(np.min(_h_confs)), 4),
+                            "max": round(float(np.max(_h_confs)), 4),
+                            "baseline_samples": [round(float(c), 4) for c in _h_confs]
+                        }
+                        _tmp_bl = "training_baseline_distribution.json.tmp"
+                        with open(_tmp_bl, "w") as bl_f:
+                            json.dump(_bl_payload, bl_f, indent=2)
+                        os.replace(_tmp_bl, "training_baseline_distribution.json")
+                        print(f"  [Drift Baseline] Updated training_baseline_distribution.json with {len(_h_confs)} empirical predictions.")
+            except Exception as ex_bl:
+                log_event("WARNING", f"[Drift Baseline Update Notice] {ex_bl}")
+
+            print(f"  [Champion-Challenger] Atomically promoted all models and manifests for regime: {name.upper()}")
+        else:
+            # Clean up staged files if promotion did not occur
+            for ext in ["_xgb.json", "_lgb.txt", "_cat.json", "_weights.json"]:
+                for s_pfx in [stage_prefix_t, stage_prefix_p]:
+                    st_f = f"{s_pfx}{ext}"
+                    if os.path.exists(st_f):
+                        try:
+                            os.remove(st_f)
+                        except OSError:
+                            pass
+            if os.path.exists(f"meta_{name}_trend_{interval}.json.tmp"):
+                try:
+                    os.remove(f"meta_{name}_trend_{interval}.json.tmp")
+                except OSError:
+                    pass
+
+        print(f"  Completed training & governance evaluation for regime: {name.upper()}")
 
         reg_slot_name = f"ensemble_{name}_{interval}"
         reg_metrics = {
@@ -2773,13 +2893,20 @@ def train_models(interval=INTERVAL, pages=PAGES):
         _u_pct = bull_pct if 'bull_pct' in locals() else 0.0
         _tot_samples = n_total if 'n_total' in locals() else (len(y_trend) if 'y_trend' in locals() else 0)
 
-        # Finding R64: Accurate promotion status badge
+        # Finding R64 & Item 50: Accurate promotion status badge
         if should_save:
             _status_title = "⚠️ *CONTRACT OVERRIDE PROMOTED*" if not compatible else "✅ *MODEL TRAINED & PROMOTED*"
             _status_badge = "PROMOTED PRODUCTION"
         else:
-            _status_title = "⚠️ *CONTRACT STALE - REJECTED*" if (not compatible and champion_exists) else "⏭️ *CHAMPION RETAINED*"
-            _status_badge = "CHAMPION REJECTED" if champion_exists else "COLD START FAILED"
+            if not champion_exists:
+                _status_title = "❌ *COLD START FAILED*"
+                _status_badge = "COLD START FAILED"
+            elif not compatible:
+                _status_title = "⚠️ *CONTRACT STALE - REJECTED*"
+                _status_badge = "CHALLENGER REJECTED"
+            else:
+                _status_title = "⏭️ *CHAMPION RETAINED*"
+                _status_badge = "CHALLENGER REJECTED"
 
         _brier_disp = f"{chal_brier:.4f}" if ('chal_brier' in locals() and chal_brier is not None) else "N/A"
         _ece_disp = f"{chal_ece:.4f}" if ('chal_ece' in locals() and chal_ece is not None) else "N/A"
