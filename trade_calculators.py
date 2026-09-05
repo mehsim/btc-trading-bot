@@ -51,7 +51,7 @@ def estimate_empirical_realized_rr(
     closed_trades: Optional[List[Dict]] = None,
     interval: Optional[str] = None,
     regime: Optional[str] = None,
-    min_samples: int = 20
+    min_samples: int = 40
 ) -> Optional[float]:
     """
     Estimates empirical realized R:R (ratio of average winning PnL to average losing PnL)
@@ -69,21 +69,22 @@ def estimate_empirical_realized_rr(
     if not closed_trades or len(closed_trades) < min_samples:
         return None
 
-    # Filter by interval and regime if specified
+    # Filter by interval and regime if specified (Strict filtering: reject missing fields)
     filtered = []
     for tr in closed_trades:
         if not isinstance(tr, dict):
             continue
         if interval is not None:
-            tr_iv = str(tr.get("interval", tr.get("timeframe", "")))
-            if tr_iv and tr_iv != str(interval):
+            tr_iv = str(tr.get("interval", tr.get("timeframe", ""))).strip().lower().replace("m", "").replace("h", "")
+            target_iv = str(interval).strip().lower().replace("m", "").replace("h", "")
+            if not tr_iv or tr_iv != target_iv:
                 continue
         if regime is not None:
             r_str = str(regime).lower()
             tr_reg = str(tr.get("regime", "")).lower()
             reg_token = "trending" if "trend" in r_str else ("ranging" if "rang" in r_str else r_str)
             tr_token = "trending" if "trend" in tr_reg else ("ranging" if "rang" in tr_reg else tr_reg)
-            if tr_reg and reg_token != tr_token:
+            if not tr_reg or reg_token != tr_token:
                 continue
         filtered.append(tr)
 
@@ -116,7 +117,14 @@ def estimate_empirical_realized_rr(
     if mean_loss <= 1e-6:
         return None
 
-    return float(mean_win / mean_loss)
+    # Conservative lower-bound empirical R:R estimation discounted by standard error
+    raw_rr = float(mean_win / mean_loss)
+    if len(wins) > 1 and len(losses) > 1:
+        se_ratio = raw_rr * np.sqrt((np.var(wins, ddof=1) / (len(wins) * (mean_win**2))) + (np.var(losses, ddof=1) / (len(losses) * (mean_loss**2))))
+        cons_rr = max(0.10, raw_rr - 1.645 * se_ratio)
+        return float(cons_rr)
+
+    return float(raw_rr)
 
 
 def get_realized_rr_haircut(
@@ -129,13 +137,13 @@ def get_realized_rr_haircut(
     """
     Computes empirical realized R:R haircut factor.
     If sufficient closed trades exist to estimate realized R:R and nominal_rr is provided,
-    calculates empirical_haircut = min(0.60, max(0.10, empirical_rr / nominal_rr)).
+    calculates empirical_haircut = min(0.35, max(0.10, empirical_rr / nominal_rr)).
     Otherwise, falls back to conservative default_haircut (0.28).
     """
     if nominal_rr is not None and nominal_rr > 0:
         emp_rr = estimate_empirical_realized_rr(closed_trades=closed_trades, interval=interval, regime=regime)
         if emp_rr is not None and emp_rr > 0:
-            return float(np.clip(emp_rr / nominal_rr, 0.10, 0.60))
+            return float(np.clip(emp_rr / nominal_rr, 0.10, 0.35))
 
     return float(default_haircut)
 
@@ -1274,14 +1282,16 @@ def resolve_trade_geometry(
 
     iv_str = str(interval)
     is_long = direction.upper() in ["BUY", "LONG", "BULLISH"]
-    target_rr = base_tp_multiplier / max(1e-6, base_sl_multiplier)
+    resolved_base_sl = float(base_sl_multiplier if base_sl_multiplier is not None else 1.0)
+    resolved_base_tp = float(base_tp_multiplier if base_tp_multiplier is not None else 1.5)
+    target_rr = resolved_base_tp / max(1e-6, resolved_base_sl)
 
     # Unified TP Multiplier resolution
     resolved_tp_m = UnifiedTargetGenerator.resolve_tp_multiplier(
         interval=iv_str,
         entry_price=entry_price,
         atr_dollars=atr_dollars,
-        base_tp_m=base_tp_multiplier
+        base_tp_m=resolved_base_tp
     )
     base_tp_dist = resolved_tp_m * atr_dollars
 
@@ -1295,7 +1305,7 @@ def resolve_trade_geometry(
             atr_val=atr_dollars,
             regime=regime,
             volatility=vol,
-            cfg_sl_mult=base_sl_multiplier,
+            cfg_sl_mult=resolved_base_sl,
             interval=iv_str
         )
         stop_loss_price = struct_sl
@@ -1303,7 +1313,7 @@ def resolve_trade_geometry(
         sl_multiplier_adjusted = sl_dist / max(1e-6, atr_dollars)
     else:
         tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv_str)
-        sl_multiplier_adjusted = base_sl_multiplier * tf_sl_mult
+        sl_multiplier_adjusted = resolved_base_sl * tf_sl_mult
         sl_dist = risk_engine.calculate_final_stop_distance(
             entry_price,
             atr_dollars,
@@ -1326,9 +1336,10 @@ def resolve_trade_geometry(
         sl_dist = min_sl_dist
         stop_loss_price = (entry_price - sl_dist) if is_long else (entry_price + sl_dist)
 
-    # R:R Preservation (Finding #91): preserve target R:R so floor doesn't degrade live payoff ratio
+    # R:R Preservation (Finding #91, Finding #12): preserve target R:R and recompute exact adjusted multipliers from final distances
     tp_dist = max(base_tp_dist, sl_dist * target_rr)
     take_profit_price = (entry_price + tp_dist) if is_long else (entry_price - tp_dist)
+    sl_multiplier_adjusted = sl_dist / max(1e-6, atr_dollars)
     tp_multiplier_adjusted = tp_dist / max(1e-6, atr_dollars)
 
     return {

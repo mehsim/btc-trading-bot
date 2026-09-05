@@ -117,3 +117,22 @@ def assert_shared_constants_aligned():
     risk_limits.assert_risk_governance_invariants()
     log_event("INFO", "✅ [Config Verifier M-2] All cross-file train.py vs config.py constants strictly verified.")
     return True
+
+
+def assert_manifest_live_parity(manifest_path: str, live_config: dict, tolerance: float = 0.05):
+    """
+    Finding #3: Directly validates that an on-disk manifest barrier_config strictly aligns
+    with live timeframe configuration parameters within tolerance.
+    """
+    import json
+    with open(manifest_path, "r", encoding="utf-8") as mf:
+        m_data = json.load(mf)
+    b_cfg = m_data.get("barrier_config", m_data)
+    for k in ["lookahead", "sl_mult", "tp_mult_trending", "tp_mult_ranging", "regime_adx_enter"]:
+        if k in b_cfg and k in live_config:
+            diff = abs(float(b_cfg[k]) - float(live_config[k]))
+            if diff > tolerance:
+                raise ValueError(
+                    f"[Config Verifier Error] Manifest {manifest_path} {k} ({b_cfg[k]}) "
+                    f"diverges from live config ({live_config[k]}) by {diff:.4f} > {tolerance}"
+                )

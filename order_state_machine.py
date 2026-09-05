@@ -44,15 +44,16 @@ class IdempotencyCache:
 
 idempotency_cache = IdempotencyCache(ttl_seconds=60.0)
 
-def generate_client_order_id(symbol: str, side: str, interval: Optional[str] = None, candle_ts: Optional[Any] = None) -> str:
+def generate_client_order_id(symbol: str, side: str, interval: Optional[str] = None, candle_ts: Optional[Any] = None, attempt: int = 1) -> str:
     clean_sym = symbol.replace("/", "").replace("-", "").replace("USDT", "")[:8]
     side_char = side.upper()[0] if side else "B"
+    att_suffix = f"_{attempt}" if attempt > 1 else ""
     if interval is not None and candle_ts is not None:
-        cl_id = f"B_{clean_sym}_{interval}_{candle_ts}_{side_char}"[:36]
+        cl_id = f"B_{clean_sym}_{interval}_{candle_ts}_{side_char}{att_suffix}"[:36]
     else:
         ts = int(time.time() * 1000)
         nonce = str(uuid.uuid4())[:4]
-        cl_id = f"B_{clean_sym}_{side_char}_{ts}_{nonce}"[:36]
+        cl_id = f"B_{clean_sym}_{side_char}_{ts}_{nonce}{att_suffix}"[:36]
     return cl_id
 
 def calculate_exponential_backoff_with_jitter(attempt: int, base_delay: Optional[float] = None, max_delay: Optional[float] = None, jitter_pct: float = 0.20) -> float:

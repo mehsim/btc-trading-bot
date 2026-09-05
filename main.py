@@ -74,7 +74,8 @@ from bybit_client import (
     get_bybit_time_offset,
     get_symbol_order_lock,
     execute_bybit_order_ws_or_rest,
-    get_orderbook_imbalance as bybit_get_orderbook_imbalance
+    get_orderbook_imbalance as bybit_get_orderbook_imbalance,
+    get_bybit_fee_rate
 )
 from confluence_engine import check_pre_trade_confluence
 from telegram_bot import send_telegram_alert, execute_telegram_api_call
@@ -1712,8 +1713,13 @@ def get_real_bybit_balance_cached(force=False):
             with _balance_lock:
                 _cached_balance = val
                 _last_balance_fetch = now
-            if TRADE_MODE != "simulation" and isinstance(val, (int, float)) and val > 0:
-                bot_state["simulated_balance"] = val
+            bot_state["last_balance_sync_ts"] = now
+            state_manager.set("last_balance_sync_ts", now)
+            if isinstance(val, (int, float)) and val > 0:
+                bot_state["live_balance"] = val
+                bot_state["wallet_balance"] = val
+                if TRADE_MODE != "simulation":
+                    bot_state["simulated_balance"] = val
         except Exception as e:
             print(f"[Bybit Balance] Error in balance update (forced={force}): {e}")
     with _balance_lock:
@@ -1723,26 +1729,38 @@ def run_bybit_balance_updater():
     global _cached_balance, _last_balance_fetch
     print("[Bybit Balance] Background updater thread started.")
     # Fetch immediately at startup
+    now = time.time()
     try:
         val = get_real_bybit_balance()
         with _balance_lock:
             _cached_balance = val
-            _last_balance_fetch = time.time()
-        if TRADE_MODE != "simulation" and isinstance(val, (int, float)) and val > 0:
-            bot_state["simulated_balance"] = val
+            _last_balance_fetch = now
+        bot_state["last_balance_sync_ts"] = now
+        state_manager.set("last_balance_sync_ts", now)
+        if isinstance(val, (int, float)) and val > 0:
+            bot_state["live_balance"] = val
+            bot_state["wallet_balance"] = val
+            if TRADE_MODE != "simulation":
+                bot_state["simulated_balance"] = val
         print(f"[Bybit Balance] Startup background update success: {val}")
     except Exception as e:
         print(f"[Bybit Balance] Startup background update error: {e}")
         
     while True:
         time.sleep(BALANCE_UPDATE_INTERVAL_SECS)  # Query Bybit balance periodically based on configuration
+        now_cycle = time.time()
         try:
             val = get_real_bybit_balance()
             with _balance_lock:
                 _cached_balance = val
-                _last_balance_fetch = time.time()
-            if TRADE_MODE != "simulation" and isinstance(val, (int, float)) and val > 0:
-                bot_state["simulated_balance"] = val
+                _last_balance_fetch = now_cycle
+            bot_state["last_balance_sync_ts"] = now_cycle
+            state_manager.set("last_balance_sync_ts", now_cycle)
+            if isinstance(val, (int, float)) and val > 0:
+                bot_state["live_balance"] = val
+                bot_state["wallet_balance"] = val
+                if TRADE_MODE != "simulation":
+                    bot_state["simulated_balance"] = val
         except Exception as e:
             print(f"[Bybit Balance] Error in background balance update: {e}")
 
@@ -2107,7 +2125,7 @@ from xgboost import XGBClassifier, XGBRegressor
 import joblib
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 
-# Startup Barrier Drift Assertion: Compare TIMEFRAME_CONFIG against optimized_barriers_*.json
+# Startup Barrier Drift Assertion: Compare TIMEFRAME_CONFIG against optimized_barriers_*.json and active manifests
 from config import TIMEFRAME_CONFIG
 for _iv in ["15", "30", "60", "120", "240"]:
     _opt_path = f"optimized_barriers_{_iv}.json"
@@ -2128,6 +2146,27 @@ for _iv in ["15", "30", "60", "120", "240"]:
             if isinstance(_e, RuntimeError):
                 raise
             log_event("WARNING", f"[Startup Barrier Audit] Could not verify {_opt_path}: {_e}")
+
+    # Finding #15: Cross-check against active manifest barrier_config (non-tautological)
+    _mf_path = f"ensemble_trending_trend_{_iv}_manifest.json"
+    if os.path.exists(_mf_path):
+        try:
+            with open(_mf_path, "r") as _mf_file:
+                _mf_data = json.load(_mf_file)
+            _barriers = _mf_data.get("barrier_config", {})
+            _cfg = TIMEFRAME_CONFIG.get(_iv, {})
+            for _k in ["tp_mult_trending", "tp_mult_ranging", "sl_mult", "lookahead"]:
+                if _k in _barriers and _k in _cfg:
+                    _diff = abs(float(_barriers[_k]) - float(_cfg[_k]))
+                    if _diff > 0.05:
+                        raise RuntimeError(
+                            f"[Startup Drift Error] TIMEFRAME_CONFIG['{_iv}']['{_k}'] ({_cfg[_k]}) "
+                            f"diverges from manifest {_mf_path} ({_barriers[_k]}) by {_diff:.4f} > 0.05. Boot aborted."
+                        )
+        except Exception as _e:
+            if isinstance(_e, RuntimeError):
+                raise
+            log_event("WARNING", f"[Startup Barrier Audit] Could not verify {_mf_path}: {_e}")
 
 models_by_interval = {}
 model_files_mtime = {}
@@ -4985,7 +5024,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         f_px = limit_entry_price
                     if is_filled or (raw_qty > 0 and f_cum >= (0.95 * raw_qty)):
                         bybit_success = True
-                        cancel_bybit_order(symbol, bybit_order_id)
+                        if bybit_order_id:
+                            cancel_bybit_order(symbol, bybit_order_id)
+                        else:
+                            cancel_bybit_order(symbol, order_link_id=chase_order_link_id)
                         time.sleep(0.2)
                         fill_px = f_px if f_px > 0 else limit_entry_price
                         fill_q = f_cum if f_cum > 0 else floored_remaining
@@ -4994,9 +5036,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         break
                     else:
                         print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s (Status: {f_status}, Fill: {f_cum}). Cancelling and recalculating price...")
-                        cancel_res = cancel_bybit_order(symbol, bybit_order_id)
+                        if bybit_order_id:
+                            cancel_res = cancel_bybit_order(symbol, bybit_order_id)
+                        else:
+                            cancel_res = cancel_bybit_order(symbol, order_link_id=chase_order_link_id)
                         time.sleep(0.3)
-                        post_cancel_details = get_bybit_order_details(symbol, bybit_order_id)
+                        post_cancel_details = get_bybit_order_details(symbol, bybit_order_id) if bybit_order_id else get_bybit_order_details(symbol, order_link_id=chase_order_link_id)
                         if post_cancel_details:
                             status = post_cancel_details.get("orderStatus")
                             cum_qty = float(post_cancel_details.get("cumExecQty", 0.0))
@@ -5013,9 +5058,12 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                 break
                             elif status in ["New", "PartiallyFilled"]:
                                 print(f"[{symbol} {iv}m API WARNING] Order {bybit_order_id} still {status} after cancel. Retrying cancellation...")
-                                cancel_bybit_order(symbol, bybit_order_id)
+                                if bybit_order_id:
+                                    cancel_bybit_order(symbol, bybit_order_id)
+                                else:
+                                    cancel_bybit_order(symbol, order_link_id=chase_order_link_id)
                                 time.sleep(0.3)
-                                recheck_details = get_bybit_order_details(symbol, bybit_order_id)
+                                recheck_details = get_bybit_order_details(symbol, bybit_order_id) if bybit_order_id else get_bybit_order_details(symbol, order_link_id=chase_order_link_id)
                                 if recheck_details:
                                     r_status = recheck_details.get("orderStatus")
                                     r_cum = float(recheck_details.get("cumExecQty", 0.0))
@@ -7071,8 +7119,8 @@ def main():
             raw_lat = state_manager.get("last_api_latency_ms", bot_state.get("last_api_latency_ms"))
             api_latency_ms = float(raw_lat) if raw_lat is not None else 100.0
 
-            raw_bal_ts = bot_state.get("last_balance_sync_ts")
-            bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else (time.time() - 3600.0)
+            raw_bal_ts = bot_state.get("last_balance_sync_ts") or state_manager.get("last_balance_sync_ts") or (_last_balance_fetch if _last_balance_fetch > 0 else None)
+            bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else time.time()
 
             raw_inf = bot_state.get("last_inference_latency_ms")
             inference_lat_ms = float(raw_inf) if raw_inf is not None else 50.0
@@ -7204,10 +7252,12 @@ def main():
                         from data_quality_engine import DataQualityEngine
                         from market_data_quality import MarketDataQualityMonitor
 
-                        max_diff_val = float(df["timestamp"].diff().dropna().max()) if (len(df) > 1 and "timestamp" in df.columns) else float(int(iv) * 60 * 1000)
+                        expected_step_ms = int(iv) * 60 * 1000
+                        raw_max_diff = float(df["timestamp"].diff().dropna().max()) if (len(df) > 1 and "timestamp" in df.columns) else float(expected_step_ms)
+                        excess_gap_sec = max(0.0, float((raw_max_diff - expected_step_ms) / 1000.0))
                         dq_res = DataQualityEngine().evaluate_data_quality(
                             missing_candles_count=int(max_g),
-                            timestamp_gap_seconds=float(max_diff_val / 1000.0),
+                            timestamp_gap_seconds=float(excess_gap_sec),
                             stale_feed_seconds=max(0.0, float(candle_age_sec)),
                             zero_price_detected=bool(float(latest_candle.get("close", 0.0)) <= 0.0)
                         )
@@ -7215,13 +7265,16 @@ def main():
                             log_event(dq_res.get("severity"), f"[{symbol} {iv}m DataQualityEngine] {dq_res.get('detail')} — Action: {dq_res.get('action')}. Abstaining.")
                             continue
 
-                        if "_mdq_monitor" not in bot_state:
-                            bot_state["_mdq_monitor"] = MarketDataQualityMonitor()
-                        mdq = bot_state["_mdq_monitor"]
+                        if "_mdq_monitors" not in bot_state:
+                            bot_state["_mdq_monitors"] = {}
+                        mdq_key = f"{symbol}_{iv}"
+                        if mdq_key not in bot_state["_mdq_monitors"]:
+                            bot_state["_mdq_monitors"][mdq_key] = MarketDataQualityMonitor()
+                        mdq = bot_state["_mdq_monitors"][mdq_key]
                         with _time_offset_lock:
-                            srv_offset = _cached_time_offset
+                            srv_offset = _cached_time_offset if _cached_time_offset is not None else 0.0
                         mdq_res = mdq.evaluate_feed_health(
-                            last_candle_timestamp=float(latest_completed_ts / 1000.0),
+                            last_candle_timestamp=float((latest_completed_ts + expected_step_ms) / 1000.0),
                             server_time_ms=float(now_ms + srv_offset),
                             client_time_ms=float(now_ms),
                             ws_connected=bool(ws_connected),
@@ -7756,7 +7809,7 @@ def main():
                                 is_maker=True,
                                 round_trip=True
                             )
-                            cost_bps = float(_tcm.get("total_cost_bp", 12.0))  # canonical round-trip with maker entry + taker exit
+                            cost_bps = float(_tcm.get("total_cost_bps", _tcm.get("total_cost_bp", 12.0)))  # canonical round-trip with maker entry + taker exit
                             rec.round_trip_cost_bp = float(cost_bps)
                             nominal_rr = (resolved_tp_m * atr_dollars) / max(1e-6, resolved_sl_dist)
                             realized_haircut = get_realized_rr_haircut(interval=str(iv), regime=str(regime_name), nominal_rr=nominal_rr)
@@ -8381,10 +8434,12 @@ def main():
                                 _adv_usd = float(df["volume"].tail(_bars_24h).sum() * df["close"].iloc[-1]) if (df is not None and "volume" in df.columns and "close" in df.columns and len(df) >= 10) else 50_000_000.0
                                 _current_bal_eval = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 80.0
                                 _min_order_eval = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
-                                _order_usd = max(_min_order_eval, _current_bal_eval * 0.02)
+                                _est_stop_dist_eval = max(0.002, (_iv_sl * atr_norm_val))
+                                _est_notional_eval = (_current_bal_eval * float(getattr(config, "MAX_RISK_PER_TRADE", 0.02))) / max(1e-4, _est_stop_dist_eval)
+                                _order_usd = max(_min_order_eval, _est_notional_eval)
                                 _spread_bp_eval = float(bot_state.get(f"spread_bp_{symbol}", current_spread_bps))
                                 _garch_sigma_eval = float(bot_state.get(f"garch_sigma_{symbol}") or 0.015)
-                                tcm_cost_bps = float(transaction_cost_model.estimate_transaction_cost(
+                                _tcm_res = transaction_cost_model.estimate_transaction_cost(
                                     symbol=symbol,
                                     order_size_usd=_order_usd,
                                     volume_24h_usd=_adv_usd,
@@ -8392,7 +8447,8 @@ def main():
                                     garch_sigma=_garch_sigma_eval,
                                     is_maker=True,
                                     round_trip=True
-                                ).get("total_cost_bp", 12.0))
+                                )
+                                tcm_cost_bps = float(_tcm_res.get("total_cost_bps", _tcm_res.get("total_cost_bp", 12.0)))
                                 rec.round_trip_cost_bp = float(tcm_cost_bps)
                                 exp_edge_bps = abs(float(expected_pct_change)) * 100.0 - tcm_cost_bps
                                 rec.expected_value = float(exp_edge_bps)
@@ -8550,7 +8606,8 @@ def main():
                                             trade_history=bot_state.get("trade_history", []),
                                             mcc_val=_mcc_val,
                                             haircut=realized_haircut,
-                                            atr_norm=atr_norm_val
+                                            atr_norm=atr_norm_val,
+                                            cost_bps=cost_bps
                                         )
                                         rec.kelly_effective = float(scaled_kelly)
                                     

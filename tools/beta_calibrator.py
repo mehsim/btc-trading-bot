@@ -169,6 +169,8 @@ def is_calibrator_viable(
     Checks if a calibrator dictionary represents a viable, non-degenerate probability map
     whose achievable ceiling exceeds the fee-inclusive break-even p*.
     """
+    if isinstance(calibrator_data, BetaCalibrator):
+        return calibrator_data.is_viable(min_required_p_star=min_required_p_star)
     if not calibrator_data or not isinstance(calibrator_data, dict):
         return False
     if calibrator_data.get("is_fallback", False) is True:

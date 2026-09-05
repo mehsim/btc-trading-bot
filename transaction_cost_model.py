@@ -73,6 +73,7 @@ class TransactionCostModel:
             "half_spread_bp": round(spread_cost_bp, 2),
             "market_impact_bp": round(market_impact_bp, 4),
             "total_cost_bp": total_cost_bp,
+            "total_cost_bps": total_cost_bp,
             "total_cost_usd": total_cost_usd,
             "is_acceptable": is_acceptable,
             "round_trip": round_trip,
@@ -118,4 +119,5 @@ def calculate_slippage_ratio(
 
 
 transaction_cost_model = TransactionCostModel(gamma=0.42)
+estimate_transaction_cost = transaction_cost_model.estimate_transaction_cost
 

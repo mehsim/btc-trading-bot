@@ -458,16 +458,29 @@ def add_triple_barrier_labels(df, interval):
             is_trending_state = False
             
         tp_mult = tp_mult_trending if is_trending_state else tp_mult_ranging
-        # Finding #24: Align label stop and profit barriers with live execution geometry
+        # Finding #3 & #10: Align label stop and profit barriers with live execution geometry
         import risk_engine
-        from config import MIN_TARGET_ATR_MULT
-        if str(interval) in ["5", "15", "30", "60"]:
-            sl_dist = max(sl_mult * atr_t, 1.25 * atr_t, p_t * 0.008)
+        from config import MIN_TARGET_ATR_MULT, MIN_SL_PCT_CONFIG
+        iv_str = str(interval)
+        min_sl_pct = float(MIN_SL_PCT_CONFIG.get(iv_str, MIN_SL_PCT_CONFIG.get("default", 0.008)))
+        min_sl_dist = p_t * min_sl_pct
+
+        if iv_str in ["5", "15", "30", "60"]:
+            effective_sl_mult = min(sl_mult, 1.25)
         else:
-            tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(interval)
-            sl_dist = sl_mult * tf_sl_mult * atr_t
-        min_tp_mult = float(MIN_TARGET_ATR_MULT.get(str(interval), MIN_TARGET_ATR_MULT.get("default", 1.20)) if isinstance(MIN_TARGET_ATR_MULT, dict) else MIN_TARGET_ATR_MULT)
-        tp_dist = max(tp_mult * atr_t, min_tp_mult * atr_t)
+            tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(iv_str)
+            effective_sl_mult = sl_mult * tf_sl_mult
+
+        sl_dist = max(effective_sl_mult * atr_t, min_sl_dist)
+
+        # Min TP multiplier: max(MIN_TARGET_ATR_MULT, 1.20 * effective_sl_mult) matching live
+        cfg_min_tp = float(MIN_TARGET_ATR_MULT.get(iv_str, MIN_TARGET_ATR_MULT.get("default", 1.20)) if isinstance(MIN_TARGET_ATR_MULT, dict) else MIN_TARGET_ATR_MULT)
+        min_tp_mult = max(cfg_min_tp, 1.20 * effective_sl_mult)
+        base_tp_dist = max(tp_mult * atr_t, min_tp_mult * atr_t)
+
+        # Target R:R preservation matching live resolve_trade_geometry
+        target_rr = tp_mult / max(1e-6, effective_sl_mult)
+        tp_dist = max(base_tp_dist, sl_dist * target_rr)
         effective_lookahead = lookahead
 
         long_tp,  long_sl  = p_t + tp_dist, p_t - sl_dist
@@ -2014,7 +2027,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 print(f"    - Classifier Balanced Accuracy: Champion = {champ_acc*100:.2f}% | Challenger = {chal_acc*100:.2f}%")
                 print(f"    - Classifier Holdout MCC: Champion = {champ_mcc:.4f} | Challenger = {holdout_mcc:.4f}")
                 print(f"    - Regressor MAE: Champion = {champ_mae:.4f} | Challenger = {chal_mae:.4f}")
-                log_event("INFO", f"Challenger Metrics: Brier = {chal_brier:.4f} | ECE = {chal_ece:.4f} | Holdout MCC = {holdout_mcc:.4f}")
+                _b_str = f"{chal_brier:.4f}" if chal_brier is not None else "N/A"
+                _e_str = f"{chal_ece:.4f}" if chal_ece is not None else "N/A"
+                log_event("INFO", f"Challenger Metrics: Brier = {_b_str} | ECE = {_e_str} | Holdout MCC = {holdout_mcc:.4f}")
 
                 # Step 2: Record immutable champion validation event in audit trail
                 _emit_governance_event({
@@ -2042,8 +2057,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                         print(f"  ℹ️ [Champion Retention Notice] Evaluation was on sub-population {SUPPORTED_SYMBOLS}. Skipping auto-denial for full-population champion '{name}_{interval}'.")
                         log_event("INFO", f"[Champion Retention Notice] Sub-population test for {name}_{interval}, auto-denial skipped.")
 
-                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc:
-                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc or chal_brier is None or chal_ece is None:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}% or unmeasured holdout metrics).")
                     should_save = False
                 elif chal_acc > champ_acc:
                     should_save = True
@@ -2053,8 +2068,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     should_save = False
             except Exception as eval_err:
                 print(f"  [Champion-Challenger Warning] Error during champion hold-out evaluation: {eval_err}. Evaluating challenger against absolute governance floors.")
-                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc:
-                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+                if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc or chal_brier is None or chal_ece is None:
+                    print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}% or unmeasured holdout metrics).")
                     should_save = False
                 else:
                     print(f"  [Champion-Challenger] PASSED: Challenger cleared absolute governance floors.")
@@ -2067,8 +2082,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             _min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
             _min_h_balacc = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
 
-            if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc:
-                print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}%).")
+            if holdout_mcc < _min_h_mcc or chal_acc < _min_h_balacc or holdout_resolved_mcc < _min_h_mcc or holdout_resolved_balacc < _min_h_balacc or chal_brier is None or chal_ece is None:
+                print(f"  [Champion-Challenger] REJECTED: Challenger fails absolute holdout governance floors (MCC {holdout_mcc:.4f} < {_min_h_mcc}, Resolved MCC {holdout_resolved_mcc:.4f} < {_min_h_mcc} or BalAcc {chal_acc*100:.2f}% < {_min_h_balacc*100:.1f}%, Resolved BalAcc {holdout_resolved_balacc*100:.2f}% < {_min_h_balacc*100:.1f}% or unmeasured holdout metrics).")
                 should_save = False
             elif champ_manifest_mcc is not None:
                 champ_mcc_baseline = float(champ_manifest_mcc)
@@ -2186,7 +2201,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
                 # Evaluate 8 Production Release Gates & Empirical Metrics
                 try:
-                    ece_pct = float(chal_ece * 100.0) if 'chal_ece' in locals() and chal_ece is not None else 3.0
+                    ece_pct = float(chal_ece * 100.0) if ('chal_ece' in locals() and chal_ece is not None) else 99.0
                     psi_score = float(champ_manifest.get("data_drift_psi", 0.02)) if ("champ_manifest" in locals() and isinstance(champ_manifest, dict)) else 0.02
                     
                     # (a) Standard cross-validation t-test on fold MCCs
@@ -2402,7 +2417,16 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         contract_stale = (not compatible) and champion_exists
 
-        if should_save:
+        can_promote = bool(
+            should_save
+            and chal_brier is not None
+            and chal_ece is not None
+            and locals().get("holdout_metrics_status", "measured") == "measured"
+            and holdout_mcc >= 0.0
+            and holdout_resolved_mcc >= 0.0
+        )
+
+        if can_promote:
             print(f"  [Champion-Challenger] Challenger approved & promoted across all release gates. Overwriting active model files...")
             save_ensemble_classifier(final_ensemble_t, c_prefix_t, feature_names=features, write_manifest=False)
             save_ensemble_regressor(final_ensemble_p, c_prefix_p, feature_names=features, write_manifest=False)
@@ -2414,6 +2438,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 shutil.copyfile(chal_cal_file, live_cal_file)
                 print(f"  [Calibrator] Promoted challenger calibrator to {live_cal_file}")
             _remove_from_governance_denylist(f"{name}_{interval}")
+        elif should_save and not can_promote:
+            print(f"  [Champion-Challenger] Challenger passed empirical gates but blocked by governance: holdout metrics missing or unmeasured. Preserving champion intact.")
+            should_save = False
         elif contract_stale:
             # champion can no longer load, but challenger failed quality — do NOT promote
             print(f"  [Champion-Challenger] Challenger REJECTED on quality; champion contract is stale. "

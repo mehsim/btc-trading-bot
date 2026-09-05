@@ -355,9 +355,6 @@ def get_bybit_min_qty_step(symbol: str) -> tuple:
 
 
 def place_bybit_order(symbol: str, side: str, qty: float, price: Optional[float] = None, sl: Optional[float] = None, tp: Optional[float] = None, reduce_only: bool = False, order_type: str = "Market", post_only: bool = False, order_link_id: Optional[str] = None) -> Dict[str, Any]:
-    if post_only and not reduce_only:
-        return place_bybit_maker_chase_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp)
-        
     order_type_str = "Limit" if (order_type == "Limit" and price is not None) else "Market"
     tif_str = "PostOnly" if post_only else ("GTC" if order_type_str == "Limit" else "IOC")
     
@@ -410,14 +407,19 @@ def get_bybit_order_details(symbol: str, order_id: Optional[str] = None, order_l
     return {}
 
 
-def cancel_bybit_order(symbol: str, order_id: str) -> Dict[str, Any]:
-    res = execute_bybit_order_ws_or_rest("/v5/order/cancel", {"category": "linear", "symbol": symbol, "orderId": order_id})
+def cancel_bybit_order(symbol: str, order_id: Optional[str] = None, order_link_id: Optional[str] = None) -> Dict[str, Any]:
+    payload = {"category": "linear", "symbol": symbol}
+    if order_id:
+        payload["orderId"] = str(order_id)
+    if order_link_id:
+        payload["orderLinkId"] = str(order_link_id)
+    res = execute_bybit_order_ws_or_rest("/v5/order/cancel", payload)
     if isinstance(res, dict) and res.get("retCode") == 110001:
         # Finding #159: Order does not exist (already filled or cancelled) - handle idempotently
         return {
             "retCode": 0,
             "retMsg": "OK (Order already closed/cancelled - idempotent)",
-            "result": {"orderId": order_id, "status": "DeemedCancelled"},
+            "result": {"orderId": order_id, "orderLinkId": order_link_id, "status": "DeemedCancelled"},
             "idempotent": True
         }
     return res
@@ -701,15 +703,53 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
     raise AccountBalanceUnavailableException("Bybit wallet balance unavailable from API")
 
 
+_fee_rate_cache: Dict[str, Tuple[Dict[str, float], float]] = {}
+_fee_rate_lock = threading.Lock()
+
+def get_bybit_fee_rate(symbol: str = "BTCUSDT") -> Dict[str, float]:
+    """
+    Finding #9: Fetches real-time maker and taker fee rates from Bybit API with a 1-hour TTL cache,
+    ensuring VIP tier upgrades or fee adjustments are reflected without stale indefinite caching.
+    """
+    now = time.time()
+    with _fee_rate_lock:
+        if symbol in _fee_rate_cache:
+            rates, exp_ts = _fee_rate_cache[symbol]
+            if now < exp_ts:
+                return rates.copy()
+
+    default_rates = {"maker_fee_rate": 0.0002, "taker_fee_rate": 0.00055}
+    try:
+        res = bybit_get_request("/v5/account/fee-rate", {"category": "linear", "symbol": symbol})
+        if res and isinstance(res, dict) and res.get("retCode") == 0:
+            r_list = res.get("result", {}).get("list", [])
+            if r_list:
+                item = r_list[0]
+                m_rate = float(item.get("makerFeeRate", 0.0002))
+                t_rate = float(item.get("takerFeeRate", 0.00055))
+                rates = {"maker_fee_rate": m_rate, "taker_fee_rate": t_rate}
+                with _fee_rate_lock:
+                    _fee_rate_cache[symbol] = (rates.copy(), now + 3600.0)  # 1-hour TTL
+                return rates.copy()
+    except Exception as ex_fee:
+        log_event("WARNING", f"bybit_client get_fee_rate warning for {symbol}: {ex_fee}")
+
+    with _fee_rate_lock:
+        _fee_rate_cache[symbol] = (default_rates.copy(), now + 300.0)  # 5-minute fallback TTL
+    return default_rates.copy()
+
+
 def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
     """
     Background worker thread running every 5s to sync wallet balance in real-time from Bybit API.
     """
     print("[Balance Sync] Bybit real-time wallet balance sync thread started (5s interval).")
+    consecutive_failures = 0
     while True:
         try:
             bal = get_real_bybit_balance_cached(force=True)
             if isinstance(bal, (int, float)) and bal > 0 and bot_state is not None:
+                consecutive_failures = 0
                 now_ts = time.time()
                 if bot_state_lock:
                     with bot_state_lock:
@@ -725,9 +765,15 @@ def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
                     state_manager["last_balance_sync_ts"] = now_ts
                 except Exception as ex_sm:
                     log_event("WARNING", f"state_manager balance sync notice: {ex_sm}")
+            else:
+                consecutive_failures += 1
         except Exception as ex_bybit_client:
+            consecutive_failures += 1
             log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
-        time.sleep(5)
+
+        # Finding #8: Apply exponential backoff with cap on consecutive failures (e.g. rate limit 429)
+        sleep_sec = min(60.0, 5.0 * (1.5 ** min(consecutive_failures, 6))) if consecutive_failures > 0 else 5.0
+        time.sleep(sleep_sec)
 
 
 def get_orderbook_imbalance(symbol: str, depth: int = 10) -> Dict[str, Any]:

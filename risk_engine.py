@@ -38,7 +38,7 @@ class AutoStopFloor:
                         if entry > 0:
                             adv = abs(exit_p - entry) / entry
                             required_floors.append(adv * 1.2)
-                    if required_floors:
+                    if len(required_floors) >= self.min_sample_size:
                         opt_floor = float(np.percentile(required_floors, 75))
                         cfg_flr = float(config.MIN_SL_PCT_CONFIG.get(str(interval), config.MIN_SL_PCT_CONFIG.get("default", 0.008)))
                         return max(cfg_flr, min(opt_floor, 0.020))
@@ -120,7 +120,8 @@ def compute_conservative_kelly(
     trade_history: Optional[list] = None,
     mcc_val: Optional[float] = None,
     haircut: Optional[float] = None,
-    atr_norm: Optional[float] = None
+    atr_norm: Optional[float] = None,
+    cost_bps: Optional[float] = None
 ) -> float:
     """
     Computes conservative Kelly fraction for trading loop.
@@ -133,14 +134,14 @@ def compute_conservative_kelly(
     from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
     haircut = haircut if haircut is not None else getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
     
-    # Compute effective geometry & payoff ratio in consistent units (Finding #49 / #38)
+    # Compute effective geometry & payoff ratio in consistent units (Finding #49 / #38 / #12)
     eff_tp = float(tp_multiplier) * haircut
     eff_sl = max(1e-6, float(sl_multiplier))
-    roundtrip_cost = 0.0010
+    roundtrip_cost = (float(cost_bps) / 10000.0) if cost_bps is not None else 0.0010
     atr_norm_val = atr_norm if atr_norm is not None else getattr(config, "TARGET_VOLATILITY_ATR", 0.005)
     cost_in_atr = roundtrip_cost / max(1e-4, float(atr_norm_val))
-    b_ratio = max(0.01, (eff_tp - cost_in_atr) / eff_sl)
-    geom_p_star = 1.0 / (b_ratio + 1.0)
+    b_ratio = max(0.001, (eff_tp - cost_in_atr) / (eff_sl + cost_in_atr))
+    geom_p_star = (eff_sl + cost_in_atr) / max(1e-6, (eff_tp + eff_sl))
 
     realized_wr = None
     p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
@@ -890,6 +891,43 @@ class JointRiskBudgetAllocator:
 joint_risk_budget_allocator = JointRiskBudgetAllocator()
 
 
+def calculate_position_size(
+    symbol: str,
+    entry_price: float,
+    stop_loss_price: float,
+    account_balance: float,
+    max_risk_pct: float = 0.02,
+    max_position_size_usd: Optional[float] = None,
+    portfolio_heat: float = 0.0,
+    heat_ceiling: float = 0.30
+) -> float:
+    """
+    Finding #13: Calculates risk-based position size in USD ensuring portfolio heat limits
+    are evaluated against the clipped/final position size and not pre-clip.
+    """
+    if account_balance <= 0 or entry_price <= 0:
+        return 0.0
+    stop_dist = abs(entry_price - stop_loss_price)
+    stop_pct = max(1e-4, stop_dist / entry_price)
+    target_risk_usd = account_balance * max_risk_pct
+    raw_size = target_risk_usd / stop_pct
+    
+    # 1. Clip to maximum position size first
+    if max_position_size_usd is not None and max_position_size_usd > 0:
+        clipped_size = min(raw_size, max_position_size_usd)
+    else:
+        clipped_size = raw_size
+
+    # 2. Evaluate and apply portfolio heat constraint on the clipped size
+    if heat_ceiling > 0 and portfolio_heat > 0:
+        avail_heat_ratio = max(0.0, 1.0 - (portfolio_heat / heat_ceiling))
+        final_size = clipped_size * avail_heat_ratio
+    else:
+        final_size = clipped_size
+        
+    return float(max(0.0, final_size))
+
+
 def calculate_atr_risk_parity_size(
     symbol: str,
     price: float,
@@ -897,7 +935,9 @@ def calculate_atr_risk_parity_size(
     sl_multiplier: float = 1.0,
     target_risk_usd: float = 10.0,
     max_position_size_usd: float = 500.0,
-    leverage: float = 3.0
+    leverage: float = 3.0,
+    portfolio_heat: float = 0.0,
+    heat_ceiling: float = 0.30
 ) -> Dict[str, Any]:
     """
     Calculates volatility-equalized position size (ATR Risk Parity).
@@ -912,6 +952,12 @@ def calculate_atr_risk_parity_size(
     # Position Size (USD) such that: Position Size * Stop % = Target Risk USD
     ideal_size_usd = target_risk_usd / max(1e-4, stop_pct)
     capped_size_usd = min(ideal_size_usd, max_position_size_usd)
+    
+    # Apply portfolio heat constraint on the capped size
+    if heat_ceiling > 0 and portfolio_heat > 0:
+        avail_ratio = max(0.0, 1.0 - (portfolio_heat / heat_ceiling))
+        capped_size_usd *= avail_ratio
+
     effective_dollar_risk = capped_size_usd * stop_pct
     
     return {
