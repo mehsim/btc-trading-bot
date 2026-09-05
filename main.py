@@ -5278,6 +5278,16 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 target_rr_venue = tp_dist / raw_sl_dist_pre
                 tp_dist = max(tp_dist, sl_dist * target_rr_venue)
 
+            # Finding N2: Enforce Terminal Risk-at-Stop Hard Boundary Assertion on venue SL
+            from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
+            current_bal_val = float(bot_state.get("live_balance", bot_state.get("wallet_balance", 80.0)))
+            max_allowed_risk_usd = current_bal_val * HARD_MAX_RISK_PER_TRADE_PCT
+            actual_risk_at_stop = actual_qty * sl_dist
+            if actual_risk_at_stop > max_allowed_risk_usd + 1e-6:
+                safe_sl_dist = max_allowed_risk_usd / max(1e-8, actual_qty)
+                log_event("CRITICAL", f"[{symbol} {iv}m Terminal Risk Boundary] Venue stop distance (${sl_dist:.2f}) risk (${actual_risk_at_stop:.2f}) exceeds HARD_MAX_RISK_PER_TRADE_PCT (${max_allowed_risk_usd:.2f}). Clamping venue SL distance to ${safe_sl_dist:.2f}.")
+                sl_dist = min(sl_dist, safe_sl_dist)
+
             stop_loss_price = (entry_price - sl_dist) if ml_trend == "Bullish" else (entry_price + sl_dist)
             take_profit_price = (entry_price + tp_dist) if ml_trend == "Bullish" else (entry_price - tp_dist)
 
@@ -9163,6 +9173,25 @@ def main():
                                                     status_msg = "Skipped (Invalid Entry Price)"
                                                     continue
 
+                                                # Finding N2 & R48: Enforce pre-order minimum stop floor BEFORE sizing, Kelly, and risk guards
+                                                min_atr_mult = 1.25 if float(leverage_val) > 10.0 else 1.0
+                                                min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+                                                min_sl_pct = float(min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)))
+                                                min_allowed_sl_dist = max(atr_dollars * min_atr_mult, entry_price * min_sl_pct)
+                                                current_sl_dist = abs(entry_price - stop_loss_price)
+                                                if current_sl_dist < min_allowed_sl_dist:
+                                                    target_rr = abs(take_profit_price - entry_price) / max(1e-6, current_sl_dist)
+                                                    new_sl_dist = min_allowed_sl_dist
+                                                    if str(ml_trend).upper() in ["BULLISH", "LONG", "BUY"]:
+                                                        stop_loss_price = entry_price - new_sl_dist
+                                                        take_profit_price = entry_price + max(abs(take_profit_price - entry_price), new_sl_dist * target_rr)
+                                                    else:
+                                                        stop_loss_price = entry_price + new_sl_dist
+                                                        take_profit_price = entry_price - max(abs(take_profit_price - entry_price), new_sl_dist * target_rr)
+                                                    sl_multiplier_adjusted = new_sl_dist / max(1e-6, atr_dollars)
+                                                    tp_multiplier_adjusted = abs(take_profit_price - entry_price) / max(1e-6, atr_dollars)
+                                                    resolved_sl_dist = new_sl_dist
+
                                                 # Final position size strictly clamped to validated checklist cap with drawdown scaling
                                                 position_size_usd = min(capped_size, max(0.0, float(capped_size * dd_mult)))
                                                 leveraged_size = position_size_usd * leverage_val
@@ -9322,7 +9351,12 @@ def main():
                                                 if not wallet_exceeded:
                                                     # Terminal Risk-at-Stop Hard Boundary Assertion
                                                     from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
-                                                    final_stop_dist = abs(entry_price - stop_loss_price)
+                                                    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+                                                    min_sl_pct = float(min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)))
+                                                    min_allowed_sl = max(atr_dollars * 1.0, entry_price * min_sl_pct)
+                                                    final_stop_dist = max(abs(entry_price - stop_loss_price), min_allowed_sl)
+                                                    if final_stop_dist > abs(entry_price - stop_loss_price) + 1e-6:
+                                                        stop_loss_price = (entry_price - final_stop_dist) if ml_trend == "Bullish" else (entry_price + final_stop_dist)
                                                     terminal_risk_usd = (qty_val * final_stop_dist)
                                                     max_terminal_risk_usd = current_bal * HARD_MAX_RISK_PER_TRADE_PCT
                                                     if terminal_risk_usd > max_terminal_risk_usd + 1e-6:

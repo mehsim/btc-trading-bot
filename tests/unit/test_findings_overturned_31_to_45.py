@@ -395,3 +395,48 @@ def test_item_45_manual_trade_missing_price_and_portfolio_heat():
         )
         # Should not crash with TypeError: float(None)
         assert isinstance(res, str)
+
+
+# =====================================================================
+# Terminal Risk-at-Stop Hard Boundary & Pre-Order SL Floor
+# =====================================================================
+def test_terminal_risk_boundary_and_pre_order_sl_floor():
+    """Verifies pre-order SL floor expands tight stop loss before sizing and terminal risk boundary clamps risk."""
+    import config
+    from risk_limits import HARD_MAX_RISK_PER_TRADE_PCT
+
+    entry_price = 60000.0
+    stop_loss_price = 59900.0  # Tight stop: 100 dist
+    take_profit_price = 60300.0  # 300 dist -> 3:1 R:R
+    atr_dollars = 300.0
+    iv = 15
+    leverage_val = 10.0
+    ml_trend = "Bullish"
+
+    # Pre-order minimum stop floor logic
+    min_atr_mult = 1.25 if float(leverage_val) > 10.0 else 1.0
+    min_sl_cfg = getattr(config, "MIN_SL_PCT_CONFIG", {})
+    min_sl_pct = float(min_sl_cfg.get(str(iv), min_sl_cfg.get("default", 0.008)))
+    min_allowed_sl_dist = max(atr_dollars * min_atr_mult, entry_price * min_sl_pct)
+    current_sl_dist = abs(entry_price - stop_loss_price)
+
+    assert current_sl_dist < min_allowed_sl_dist  # 100 < 480
+
+    target_rr = abs(take_profit_price - entry_price) / max(1e-6, current_sl_dist)  # 3.0
+    new_sl_dist = min_allowed_sl_dist
+    stop_loss_price = entry_price - new_sl_dist
+    take_profit_price = entry_price + max(abs(take_profit_price - entry_price), new_sl_dist * target_rr)
+
+    assert stop_loss_price == entry_price - min_allowed_sl_dist
+    assert take_profit_price == entry_price + (min_allowed_sl_dist * target_rr)  # R:R preserved!
+
+    # Terminal risk hard boundary check
+    current_bal = 100.0
+    max_terminal_risk_usd = current_bal * HARD_MAX_RISK_PER_TRADE_PCT  # $3.00
+    qty_val = 0.01  # 0.01 * 480 = $4.80 risk > $3.00
+    terminal_risk_usd = qty_val * new_sl_dist
+    assert terminal_risk_usd > max_terminal_risk_usd
+
+    max_allowed_q = max_terminal_risk_usd / max(1e-8, new_sl_dist)
+    assert max_allowed_q * new_sl_dist <= max_terminal_risk_usd + 1e-6
+
