@@ -31,6 +31,11 @@ class ExitPolicyEngine:
         self.shadow_hashes: Dict[str, str] = {}
         self.load_registry_and_policies()
 
+    @property
+    def active_policy(self) -> Dict[str, Any]:
+        """Exposes active champion policy regime parameters dictionary (Finding N8)."""
+        return self.champion_config.get("parameters", {})
+
     def load_registry_and_policies(self):
         """Loads policy registry and instantiates active Champion, RollbackTarget, and Shadow configs."""
         if not os.path.exists(self.registry_file):
@@ -270,7 +275,8 @@ class ExitPolicyEngine:
                 be_dist = max(be_dist, (eff_scale_mult * scale_out_atr_basis) + (0.10 * effective_be_basis))
 
             be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
-            min_safe_cushion = max(0.50 * max(1e-6, atr_dollars), entry_price * 0.0010)
+            # Finding N4: min_safe_cushion matches module's 0.60 ATR minimum stop floor
+            min_safe_cushion = max(0.60 * max(1e-6, atr_dollars), entry_price * 0.0010)
             be_dist = max(be_dist, be_buffer + min_safe_cushion)
 
             be_reached = (current_price >= entry_price + be_dist) if direction == "Bullish" else (current_price <= entry_price - be_dist)

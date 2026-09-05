@@ -4328,14 +4328,57 @@ def sync_active_positions_from_bybit():
                                 print(f"[Sync Cleanup] Removed already processed closed trade for {symbol} ({tf_key}).")
                     
                     with active_trades_lock:
-                        # Finding #25: Merge concurrent manual trades before overwriting active trades
+                        # Findings #25 & N5: Merge concurrent state updates and manual trades before overwriting active trades
                         curr_live = bot_state.get(f"active_trade_{tf_key}", [])
                         if isinstance(curr_live, list):
-                            upd_ids = {t.get("trade_id") or f"{t.get('symbol')}_{t.get('entry_time')}" for t in updated_trades}
+                            live_by_id = {
+                                (c_tr.get("trade_id") or f"{c_tr.get('symbol')}_{c_tr.get('entry_time')}"): c_tr
+                                for c_tr in curr_live
+                            }
+                            filtered_updated = []
+                            for t in updated_trades:
+                                t_id = t.get("trade_id") or f"{t.get('symbol')}_{t.get('entry_time')}"
+                                live_tr = live_by_id.get(t_id)
+                                if live_tr:
+                                    # Preserve dynamic exit / scale-out / BE state from concurrent exit evaluations
+                                    if live_tr.get("exit_processed", False):
+                                        t["exit_processed"] = True
+                                    if live_tr.get("break_even_triggered", False):
+                                        t["break_even_triggered"] = True
+                                    if live_tr.get("half_closed", False):
+                                        t["half_closed"] = True
+                                        if "scaled_out_margin" in live_tr:
+                                            t["scaled_out_margin"] = live_tr["scaled_out_margin"]
+                                        if "scaled_out_pnl" in live_tr:
+                                            t["scaled_out_pnl"] = live_tr["scaled_out_pnl"]
+                                        if "scale_out_price" in live_tr:
+                                            t["scale_out_price"] = live_tr["scale_out_price"]
+                                    c_sl = live_tr.get("stop_loss")
+                                    if c_sl is not None and float(c_sl) > 0:
+                                        t_sl = float(t.get("stop_loss") or 0.0)
+                                        direction = t.get("direction", "Bullish")
+                                        if direction == "Bullish":
+                                            if float(c_sl) > t_sl:
+                                                t["stop_loss"] = float(c_sl)
+                                        else:
+                                            if t_sl == 0.0 or float(c_sl) < t_sl:
+                                                t["stop_loss"] = float(c_sl)
+                                    t["highest_price"] = max(float(t.get("highest_price", 0.0) or 0.0), float(live_tr.get("highest_price", 0.0) or 0.0))
+                                    t_lowest = float(t.get("lowest_price", float("inf")) or float("inf"))
+                                    c_lowest = float(live_tr.get("lowest_price", float("inf")) or float("inf"))
+                                    t["lowest_price"] = min(t_lowest, c_lowest)
+                                
+                                # Do not retain trade if exit was already processed and position not open on Bybit
+                                if t.get("exit_processed", False) and symbol not in open_positions:
+                                    continue
+                                filtered_updated.append(t)
+                            
+                            upd_ids = {t.get("trade_id") or f"{t.get('symbol')}_{t.get('entry_time')}" for t in filtered_updated}
                             for c_tr in curr_live:
                                 c_id = c_tr.get("trade_id") or f"{c_tr.get('symbol')}_{c_tr.get('entry_time')}"
-                                if c_id not in upd_ids:
-                                    updated_trades.append(c_tr)
+                                if c_id not in upd_ids and not c_tr.get("exit_processed", False):
+                                    filtered_updated.append(c_tr)
+                            updated_trades = filtered_updated
                         bot_state[f"active_trade_{tf_key}"] = updated_trades
                         try:
                             import database
@@ -4346,17 +4389,18 @@ def sync_active_positions_from_bybit():
                 # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
                 recovered = 0
                 for symbol, pos in open_positions.items():
-                    in_active_execution = symbol in active_execution_symbols
+                    in_active_execution = (symbol in active_execution_symbols)
                     if in_active_execution:
-                        print(f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
+                        log_event("INFO", f"[Crash Recovery] Skipped recovery scan for {symbol} - trade is currently being executed async.")
                         continue
-                    # Re-check ALL active timeframes live in bot_state at this moment
-                    currently_tracked = any(
-                        any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
-                        for k in ACTIVE_TRADE_TF_KEYS
-                    )
+                    # Re-check ALL active timeframes live in bot_state at this moment under lock (Finding N7)
+                    with active_trades_lock:
+                        currently_tracked = any(
+                            any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
+                            for k in ACTIVE_TRADE_TF_KEYS
+                        )
                     if currently_tracked:
-                        print(f"[Crash Recovery] Skipped recovery for {symbol} - already tracked in current bot_state (live re-check).")
+                        log_event("INFO", f"[Crash Recovery] Skipped recovery for {symbol} - already tracked in current bot_state (live re-check).")
                         continue
                     if symbol not in matched_symbols:
                         avg_price = float(pos.get("avgPrice", "0"))
@@ -4536,15 +4580,18 @@ def sync_active_positions_from_bybit():
                         }
                         
                         tf_key = matched_tf
-                        # Cross-timeframe duplicate guard: skip if symbol already active in ANY timeframe
-                        already_in_any_tf = any(
-                            any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
-                            for k in ACTIVE_TRADE_TF_KEYS
-                        )
-                        if already_in_any_tf:
-                            print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe.")
-                            continue
                         with active_trades_lock:
+                            # Finding N7: Re-verify under lock that symbol is not active in execution and not already in ANY timeframe
+                            if symbol in active_execution_symbols:
+                                log_event("INFO", f"[Crash Recovery] Skipped duplicate recovery for {symbol} - trade execution active under lock.")
+                                continue
+                            already_in_any_tf = any(
+                                any(t.get("symbol") == symbol for t in bot_state.get(f"active_trade_{k}", []))
+                                for k in ACTIVE_TRADE_TF_KEYS
+                            )
+                            if already_in_any_tf:
+                                log_event("INFO", f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe under lock.")
+                                continue
                             active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
                             if not isinstance(active_trades_list, list):
                                 active_trades_list = []
@@ -6288,10 +6335,17 @@ def main():
                     risk_dist = abs(entry_price - stop_loss) if abs(entry_price - stop_loss) > 1e-6 else 1.0
                     curr_r_val = round(pnl_dist / risk_dist, 2)
                     decayed_exp_r = float(hierarchy_eval.get("decayed_expected_r", 0.0)) if isinstance(hierarchy_eval, dict) else 0.0
+                    _cur_r = str(curr_regime).strip().lower()
+                    _ent_r = str(entry_regime_val).strip().lower()
+                    reg_intact = (
+                        _cur_r == _ent_r or
+                        ("trend" in _cur_r and "trend" in _ent_r) or
+                        ("rang" in _cur_r and "rang" in _ent_r)
+                    )
                     is_runner_eligible = (
                         curr_r_val >= 2.0 and
                         decayed_exp_r >= 0.20 and
-                        "trend" in str(curr_regime).lower() and "trend" in str(entry_regime_val).lower()
+                        reg_intact
                     )
                     if is_runner_eligible:
                         log_event("INFO", f"[{active_symbol} {iv}m] Label horizon reached ({countdown_str}) but runner extension granted (PnL: +{curr_r_val:.1f}R, Exp R: {decayed_exp_r:.2f}R). Extending hold.")
@@ -7180,7 +7234,11 @@ def main():
             raw_lat = state_manager.get("last_api_latency_ms", bot_state.get("last_api_latency_ms"))
             api_latency_ms = float(raw_lat) if raw_lat is not None else 100.0
 
-            raw_bal_ts = bot_state.get("last_balance_sync_ts") or state_manager.get("last_balance_sync_ts") or (_last_balance_fetch if _last_balance_fetch > 0 else None)
+            raw_bal_ts = bot_state.get("last_balance_sync_ts")
+            if raw_bal_ts is None:
+                raw_bal_ts = state_manager.get("last_balance_sync_ts")
+            if raw_bal_ts is None and _last_balance_fetch > 0:
+                raw_bal_ts = _last_balance_fetch
             bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else 0.0
 
             raw_inf = bot_state.get("last_inference_latency_ms")

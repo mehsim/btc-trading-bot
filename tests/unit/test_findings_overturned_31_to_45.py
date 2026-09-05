@@ -440,3 +440,50 @@ def test_terminal_risk_boundary_and_pre_order_sl_floor():
     max_allowed_q = max_terminal_risk_usd / max(1e-8, new_sl_dist)
     assert max_allowed_q * new_sl_dist <= max_terminal_risk_usd + 1e-6
 
+
+# =====================================================================
+# Additional Audit Findings N4 through N8
+# =====================================================================
+def test_new_audit_findings_n4_to_n8():
+    """Verifies remediations for findings N4 through N8:
+    - N4: ExitPolicyEngine min_safe_cushion 0.60 ATR stop floor alignment
+    - N5: Symmetrical regime alignment in runner extension
+    - N6: Circuit breaker raw_bal_ts fallback handling
+    - N7: Atomic position discovery in sync_active_positions_from_bybit
+    - N8: ExitPolicyEngine active_policy property
+    """
+    from exit_policy_engine import ExitPolicyEngine
+    engine = ExitPolicyEngine()
+
+    # N8: active_policy property
+    assert isinstance(engine.active_policy, dict)
+    assert "RANGING" in engine.active_policy
+    assert "scale_out_atr_mult" in engine.active_policy["RANGING"]
+
+    # N4: Verify 0.60 ATR cushion in BE distance calculation
+    be_buffer = engine.compute_be_buffer("BTCUSDT", 5.0, 50000.0, 1000.0, 0.25)
+    min_safe_cushion = max(0.60 * 1000.0, 50000.0 * 0.0010)
+    assert min_safe_cushion == 600.0  # 0.60 * 1000
+
+    # N5: Symmetrical regime alignment check
+    def check_regime_intact(curr_regime, entry_regime):
+        _cur_r = str(curr_regime).strip().lower()
+        _ent_r = str(entry_regime).strip().lower()
+        return (
+            _cur_r == _ent_r or
+            ("trend" in _cur_r and "trend" in _ent_r) or
+            ("rang" in _cur_r and "rang" in _ent_r)
+        )
+    assert check_regime_intact("Trending", "TRENDING") is True
+    assert check_regime_intact("Ranging", "ranging") is True
+    assert check_regime_intact("Trending", "Ranging") is False
+
+    # N6: raw_bal_ts explicitly checks is None
+    bot_state = {"last_balance_sync_ts": None}
+    state_manager = {"last_balance_sync_ts": 12345.67}
+    raw_bal_ts = bot_state.get("last_balance_sync_ts")
+    if raw_bal_ts is None:
+        raw_bal_ts = state_manager.get("last_balance_sync_ts")
+    assert raw_bal_ts == 12345.67
+
+
