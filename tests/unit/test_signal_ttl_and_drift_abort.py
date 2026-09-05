@@ -167,25 +167,23 @@ def test_candle_freshness_check_logic():
     stale_completed_ts = now_ms - interval_ms - 7200000.0
     candle_close_ms = stale_completed_ts + interval_ms
     candle_age_sec = (now_ms - candle_close_ms) / 1000.0
-    max_allowed_age_sec = compute_max_allowed_candle_age(iv)
+    # Direct invocation of is_candle_fresh helper
+    from main import is_candle_fresh, CANDLE_CLOCK_SKEW_TOLERANCE_SEC
+    assert CANDLE_CLOCK_SKEW_TOLERANCE_SEC == -30.0
 
-    is_stale = candle_age_sec > max_allowed_age_sec or candle_age_sec < -30.0
-    assert is_stale is True
-    assert candle_age_sec == 7200.0
-    assert max_allowed_age_sec == 900.0
+    fresh_bool, age, max_age = is_candle_fresh(stale_completed_ts, iv, now_ms=now_ms)
+    assert fresh_bool is False
+    assert age == 7200.0
+    assert max_age == 900.0
 
     # Fresh 240m candle that closed 45 seconds ago
     fresh_completed_ts = now_ms - interval_ms - 45000.0
-    fresh_close_ms = fresh_completed_ts + interval_ms
-    fresh_age_sec = (now_ms - fresh_close_ms) / 1000.0
-
-    is_fresh_stale = fresh_age_sec > max_allowed_age_sec or fresh_age_sec < -30.0
-    assert is_fresh_stale is False
-    assert fresh_age_sec == 45.0
+    fresh_bool, age, max_age = is_candle_fresh(fresh_completed_ts, iv, now_ms=now_ms)
+    assert fresh_bool is True
+    assert age == 45.0
 
     # Future candle outside -30s tolerance (clock desync)
     future_completed_ts = now_ms - interval_ms + 45000.0
-    future_close_ms = future_completed_ts + interval_ms
-    future_age_sec = (now_ms - future_close_ms) / 1000.0
-    is_future_stale = future_age_sec > max_allowed_age_sec or future_age_sec < -30.0
-    assert is_future_stale is True
+    fresh_bool, age, max_age = is_candle_fresh(future_completed_ts, iv, now_ms=now_ms)
+    assert fresh_bool is False
+    assert age == -45.0

@@ -504,6 +504,21 @@ def get_bybit_bid_ask(symbol: str) -> tuple:
     return 0.0, 0.0
 
 
+def get_bybit_ticker_price(symbol: str) -> Optional[float]:
+    """Returns the latest ticker mark/last price for symbol."""
+    res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
+    if isinstance(res, dict) and res.get("retCode") == 0:
+        t_list = res.get("result", {}).get("list", [])
+        if t_list:
+            last = t_list[0].get("lastPrice") or t_list[0].get("markPrice")
+            if last is not None and float(last) > 0:
+                return float(last)
+    bid, ask = get_bybit_bid_ask(symbol)
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    return None
+
+
 def get_bybit_last_execution(symbol: str, order_id: Optional[str] = None) -> Dict[str, Any]:
     params: Dict[str, Any] = {"category": "linear", "symbol": symbol, "limit": 1}
     if order_id:
@@ -700,8 +715,10 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
     api_key = (os.environ.get("BYBIT_API_KEY") or get_secure_env("BYBIT_API_KEY", "")).strip()
     api_secret = (os.environ.get("BYBIT_API_SECRET") or get_secure_env("BYBIT_API_SECRET", "")).strip()
     if not api_key or not api_secret:
-        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "true":
+        if not force and (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "true"):
             return _real_balance_cache or 100.0
+        if force:
+            raise AccountBalanceUnavailableException("Bybit API credentials not configured for forced balance sync")
         with _real_balance_lock:
             _real_balance_cache = 0.0
             _last_real_balance_sync = now

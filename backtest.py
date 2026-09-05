@@ -8,10 +8,12 @@ import pandas as pd
 from datetime import datetime
 from ta.trend import EMAIndicator, ADXIndicator
 from ta.momentum import RSIIndicator
+from typing import Tuple, Optional, Dict, List, Any, Union
 
 # Add workspace path to python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from logger import log_event
+from pattern_miner import wilson_score_interval
 from data import get_history, merge_derivatives_sentiment_features
 from core import (
     add_features,
@@ -196,7 +198,7 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         if i <= active_until_idx:
             i += 1
             continue
-        adx_val = df.loc[i, "ADX"]
+        adx_val = float(df.loc[i, "ADX"]) if "ADX" in df.columns else 25.0
         close_price = df.loc[i, "close"]
         
         if not is_trending_state and adx_val >= adx_enter:
@@ -711,6 +713,91 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         return {"trades": trades, "stats": stats, "metrics": stat_tuple}
     return stat_tuple
 
+
+def format_pessimistic_win_rate(win_rate_p: float, t_count_p: int) -> Tuple[str, float, float]:
+    """
+    Computes Wilson score confidence interval and formats pessimistic win rate string.
+    Appends [INSUFFICIENT_SAMPLE: n<100] when t_count_p < 100.
+    Returns (pess_wr_str, ci_l, ci_u).
+    """
+    from pattern_miner import wilson_score_interval
+    if t_count_p > 0:
+        wins_p = int(round((win_rate_p / 100.0) * t_count_p))
+        ci_l, ci_u = wilson_score_interval(wins_p, t_count_p)
+        pess_wr_str = f"{win_rate_p:.1f}% [{ci_l*100:.1f}%, {ci_u*100:.1f}%] (n={t_count_p})"
+        if t_count_p < 100:
+            pess_wr_str += " [INSUFFICIENT_SAMPLE: n<100]"
+        elif t_count_p < 784:
+            pess_wr_str += " [n<784]"
+    else:
+        ci_l, ci_u = 0.0, 0.0
+        pess_wr_str = "N/A"
+    return pess_wr_str, ci_l, ci_u
+
+
+def train_window_models(
+    train_df: pd.DataFrame,
+    p95: float = 0.55,
+    max_conf: float = 0.75,
+    min_confidence: float = 0.40,
+    fee_rate: float = FEE_RATE,
+    interval: str = "15",
+    rule_feature: Optional[str] = None
+):
+    """
+    Refits LightGBM/HistGradientBoosting models on walk-forward training window.
+    Filters non-numeric, timestamp, and target columns.
+    Raises RuntimeError on fit failure (Fail-Closed).
+    """
+    from functools import partial
+    try:
+        numeric_cols = train_df.select_dtypes(include=[np.number]).columns
+        excluded_cols = {
+            "timestamp", "open", "high", "low", "close", "volume",
+            "open_btc", "high_btc", "low_btc", "close_btc", "volume_btc",
+            "target_trend", "target_price", "target_price_change", "target_direction", "future_ret",
+            "sample_weight", "datetime", "index"
+        }
+        feat_cols = [c for c in numeric_cols if c not in excluded_cols and not c.startswith("future_")]
+        if not feat_cols or len(train_df) < 100:
+            return None
+        
+        df_t = train_df.dropna(subset=["close"]).copy()
+        if "target_trend" not in df_t.columns:
+            ret = df_t["close"].pct_change(12).shift(-12).fillna(0.0)
+            df_t["target_trend"] = np.where(ret > 0.005, 2, np.where(ret < -0.005, 0, 1))
+            df_t["target_price"] = ret * df_t["close"]
+            
+        X_tr = df_t[feat_cols].fillna(0.0).values
+        y_tr_t = df_t["target_trend"].astype(int).values
+        y_tr_p = df_t["target_price"].astype(float).values
+        
+        from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+        m_t = HistGradientBoostingClassifier(max_iter=30, random_state=42).fit(X_tr, y_tr_t)
+        m_p = HistGradientBoostingRegressor(max_iter=30, random_state=42).fit(X_tr, y_tr_p)
+        
+        m_t.feature_names = feat_cols
+        m_p.feature_names = feat_cols
+        
+        return partial(
+            run_single_backtest,
+            models_trending={"trend": m_t, "price": m_p, "feature_names": feat_cols},
+            models_ranging={"trend": m_t, "price": m_p, "feature_names": feat_cols},
+            p95=p95,
+            max_conf=max_conf,
+            min_confidence=min_confidence,
+            fee_rate=fee_rate,
+            interval=interval,
+            rule_feature=rule_feature,
+            pessimistic_mode=True,
+            return_trades=True
+        )
+    except Exception as ex_tr:
+        from logger import log_event
+        log_event("ERROR", f"[WalkForward Refit Failure] Window model refit failed: {ex_tr}")
+        raise RuntimeError(f"Walk-forward window model refit failed: {ex_tr}") from ex_tr
+
+
 def run_backtest():
     print("=" * 60)
     print("BTC TRADING BOT - HISTORICAL BACKTESTING SIMULATOR")
@@ -931,6 +1018,7 @@ def run_backtest():
             stat_t = res_p
             trades_p = []
         t_count_p, win_rate_p, pf_p, mdd_p, ret_p, exp_r_p = stat_t[:6]
+        avg_ret_p = (ret_p / t_count_p) if t_count_p > 0 else 0.0
         for tr in trades_p:
             all_scenario_trades.append({
                 "scenario": name,
@@ -951,19 +1039,7 @@ def run_backtest():
             rule_feature=RULE_FEATURE
         )
         t_count_o, win_rate_o, pf_o, mdd_o, ret_o, exp_r_o = res_o[:6]
-        avg_ret_p = (ret_p / t_count_p) if t_count_p > 0 else 0.0
-        from pattern_miner import wilson_score_interval
-        if t_count_p > 0:
-            wins_p = int(round((win_rate_p / 100.0) * t_count_p))
-            ci_l, ci_u = wilson_score_interval(wins_p, t_count_p)
-            pess_wr_str = f"{win_rate_p:.1f}% [{ci_l*100:.1f}%, {ci_u*100:.1f}%] (n={t_count_p})"
-            if t_count_p < 100:
-                pess_wr_str += " [INSUFFICIENT_SAMPLE: n<100]"
-            elif t_count_p < 784:
-                pess_wr_str += " [n<784]"
-        else:
-            ci_l, ci_u = 0.0, 0.0
-            pess_wr_str = "N/A"
+        pess_wr_str, ci_l, ci_u = format_pessimistic_win_rate(win_rate_p, t_count_p)
 
         is_small_n = (0 < t_count_p < 100)
         results.append({
@@ -1074,54 +1150,17 @@ def run_backtest():
             return_trades=True
         )
 
-        def train_window_models(train_df):
-            try:
-                numeric_cols = train_df.select_dtypes(include=[np.number]).columns
-                excluded_cols = {
-                    "timestamp", "open", "high", "low", "close", "volume",
-                    "open_btc", "high_btc", "low_btc", "close_btc", "volume_btc",
-                    "target_trend", "target_price", "target_price_change", "target_direction", "future_ret",
-                    "sample_weight", "datetime", "index"
-                }
-                feat_cols = [c for c in numeric_cols if c not in excluded_cols and not c.startswith("future_")]
-                if not feat_cols or len(train_df) < 100:
-                    return None
-                
-                df_t = train_df.dropna(subset=["close"]).copy()
-                if "target_trend" not in df_t.columns:
-                    ret = df_t["close"].pct_change(12).shift(-12).fillna(0.0)
-                    df_t["target_trend"] = np.where(ret > 0.005, 2, np.where(ret < -0.005, 0, 1))
-                    df_t["target_price"] = ret * df_t["close"]
-                    
-                X_tr = df_t[feat_cols].fillna(0.0).values
-                y_tr_t = df_t["target_trend"].astype(int).values
-                y_tr_p = df_t["target_price"].astype(float).values
-                
-                from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
-                m_t = HistGradientBoostingClassifier(max_iter=30, random_state=42).fit(X_tr, y_tr_t)
-                m_p = HistGradientBoostingRegressor(max_iter=30, random_state=42).fit(X_tr, y_tr_p)
-                
-                m_t.feature_names = feat_cols
-                m_p.feature_names = feat_cols
-                
-                return partial(
-                    run_single_backtest,
-                    models_trending={"trend": m_t, "price": m_p, "feature_names": feat_cols},
-                    models_ranging={"trend": m_t, "price": m_p, "feature_names": feat_cols},
-                    p95=p95,
-                    max_conf=max_conf,
-                    min_confidence=MIN_CONFIDENCE,
-                    fee_rate=FEE_RATE,
-                    interval=INTERVAL,
-                    rule_feature=RULE_FEATURE,
-                    pessimistic_mode=True,
-                    return_trades=True
-                )
-            except Exception as ex_tr:
-                log_event("ERROR", f"[WalkForward Refit Failure] Window model refit failed: {ex_tr}")
-                raise RuntimeError(f"Walk-forward window model refit failed: {ex_tr}") from ex_tr
+        train_fn = partial(
+            train_window_models,
+            p95=p95,
+            max_conf=max_conf,
+            min_confidence=MIN_CONFIDENCE,
+            fee_rate=FEE_RATE,
+            interval=INTERVAL,
+            rule_feature=RULE_FEATURE
+        )
 
-        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn, train_fn=train_window_models)
+        wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn, train_fn=train_fn)
         if wf_summary.get("status") == "success":
             print("=" * 90)
             print(f"{'ROLLING WINDOW WALK-FORWARD VALIDATION' if wf_summary.get('all_windows_refitted') else 'ROLLING WINDOW REPLAY'} SUMMARY")

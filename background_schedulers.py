@@ -260,7 +260,7 @@ def evaluate_statistical_governance_cycle(state_manager_instance=None, intervals
 
         for iv in intervals_to_monitor:
             try:
-                slot_trades_all = [t for t in all_trades if str(t.get("interval", "")) == iv]
+                slot_trades_all = [t for t in all_trades if str(t.get("interval") or t.get("timeframe") or "").replace("m", "") == iv]
                 n_total = len(slot_trades_all)
 
                 # Finding #73 / R8: Evaluate KILL_CRITERIA across trailing sample of min_trades_kill (250) (trades are ordered exit_time DESC)

@@ -119,9 +119,27 @@ def filter_unprocessed_active_trades(active_trades_list: list) -> list:
     ]
 
 
+CANDLE_CLOCK_SKEW_TOLERANCE_SEC: float = -30.0
+
+
 def compute_max_allowed_candle_age(iv: Union[str, int]) -> float:
     """Production formula for maximum candle freshness tolerance in seconds."""
     return min(900.0, max(300.0, int(iv) * 60 * 0.25))
+
+
+def is_candle_fresh(latest_completed_ts: float, iv: Union[str, int], now_ms: Optional[float] = None) -> tuple[bool, float, float]:
+    """
+    Evaluates completed candle freshness against maximum allowed age and future clock skew tolerance.
+    Returns (is_fresh, candle_age_sec, max_allowed_age_sec).
+    """
+    if now_ms is None:
+        now_ms = time.time() * 1000.0
+    interval_ms = int(iv) * 60 * 1000
+    candle_close_ms = latest_completed_ts + interval_ms
+    candle_age_sec = (now_ms - candle_close_ms) / 1000.0
+    max_allowed_age_sec = compute_max_allowed_candle_age(iv)
+    is_fresh = not (candle_age_sec > max_allowed_age_sec or candle_age_sec < CANDLE_CLOCK_SKEW_TOLERANCE_SEC)
+    return is_fresh, candle_age_sec, max_allowed_age_sec
 
 
 def check_live_feature_integrity(latest_candle_weighted, features_to_use):
@@ -5094,6 +5112,10 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         order_tot_qty = 0.0
                         order_weighted_px = 0.0
                         for rec in exec_records:
+                            rec_oid = rec.get("orderId")
+                            if rec_oid and rec_oid != c_oid:
+                                log_event("WARNING", f"Ignoring foreign fill: Foreign/unrelated execution {rec.get('execId')} belongs to {rec_oid} != {c_oid}")
+                                continue
                             e_id = rec.get("execId")
                             e_q = float(rec.get("execQty", 0.0))
                             e_p = float(rec.get("execPrice", entry_price))
@@ -7213,12 +7235,8 @@ def main():
  
                 # Hard candle freshness check: Completed candle must have closed recently
                 now_ms = time.time() * 1000.0
-                interval_ms = int(iv) * 60 * 1000
-                candle_close_ms = latest_completed_ts + interval_ms
-                candle_age_sec = (now_ms - candle_close_ms) / 1000.0
-                max_allowed_age_sec = compute_max_allowed_candle_age(iv)
-
-                if candle_age_sec > max_allowed_age_sec or candle_age_sec < -30.0:
+                is_fresh, candle_age_sec, max_allowed_age_sec = is_candle_fresh(latest_completed_ts, iv, now_ms=now_ms)
+                if not is_fresh:
                     log_event("INFO", f"[{symbol} {iv}m] Stale candle skipped: completed bar closed {candle_age_sec:.1f}s ago (max allowed: {max_allowed_age_sec:.1f}s). Skipping.")
                     completed_this_hour.add((symbol, iv))
                     continue

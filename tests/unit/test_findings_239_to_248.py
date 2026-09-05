@@ -17,34 +17,50 @@ def test_finding_71_backtest_kelly_scaleout_trailing_and_metrics():
     stats_notional = calculate_replay_statistics([100.0, 200.0, -50.0])
     assert stats_notional.get("sizing_basis") == "dollar_notional"
 
-    # 2. Backtest source inspection for parity features
-    with open("backtest.py", "r") as f:
-        bt_src = f.read()
-    
-    assert "scaled_kelly <= 0.0" in bt_src
-    assert "compute_dynamic_trail_params" in bt_src
-    assert "scale_out_portion" in bt_src
-    assert "half_closed" in bt_src
-    assert "INSUFFICIENT_SAMPLE: n<100" in bt_src
+    # 2. Behavioral verification of pessimistic win rate formatting
+    from backtest import format_pessimistic_win_rate
+    pess_str_small, ci_l_sm, ci_u_sm = format_pessimistic_win_rate(55.0, 50)
+    assert "[INSUFFICIENT_SAMPLE: n<100]" in pess_str_small
+    assert "55.0%" in pess_str_small
+    assert ci_l_sm > 0.0 and ci_u_sm > ci_l_sm
+
+    pess_str_med, _, _ = format_pessimistic_win_rate(55.0, 200)
+    assert "[INSUFFICIENT_SAMPLE: n<100]" not in pess_str_med
+    assert "[n<784]" in pess_str_med
+
+    pess_str_large, _, _ = format_pessimistic_win_rate(55.0, 800)
+    assert "[INSUFFICIENT_SAMPLE: n<100]" not in pess_str_large
+    assert "[n<784]" not in pess_str_large
 
 
 # --- Finding #72 Tests ---
 def test_finding_72_challenger_artifact_and_small_n_suppression():
     """Finding #72 & #244: Walk-forward validation accurately marks is_refitted and backtest suppresses small-sample win rates."""
     from walk_forward_engine import run_walk_forward_backtest
-    from pattern_miner import wilson_score_interval
+    from backtest import train_window_models, format_pessimistic_win_rate
     import pandas as pd
     import numpy as np
 
-    # 1. Test walk-forward engine refitted vs rolling replay
+    # 1. Test walk-forward engine refitted vs rolling replay with REAL train_window_models
+    # Include non-numeric and datetime columns to verify finding #113 datetime handling
     dummy_df = pd.DataFrame({
         "timestamp": np.arange(1000, 1000 + 300 * 60, 60),
+        "datetime": [pd.Timestamp.now()] * 300,
+        "symbol": ["BTCUSDT"] * 300,
         "open": np.linspace(50000, 51000, 300),
         "high": np.linspace(50100, 51100, 300),
         "low": np.linspace(49900, 50900, 300),
         "close": np.linspace(50050, 51050, 300),
-        "volume": [10.0] * 300
+        "volume": [10.0] * 300,
+        "feature_1": np.random.randn(300),
+        "feature_2": np.random.randn(300)
     })
+
+    # Execute actual train_window_models on dataframe containing datetime & non-numeric cols
+    sim_callable = train_window_models(dummy_df.iloc[:150])
+    assert callable(sim_callable), "train_window_models must return executable simulator callable"
+    sim_out = sim_callable(dummy_df.iloc[150:200])
+    assert isinstance(sim_out, dict) and "trades" in sim_out
 
     # When train_fn returns a simulator callable, is_refitted must be True
     mock_sim = lambda t_df: {"trades": [{"pnl": 50.0, "return": 0.02, "exit_type": "tp"}]}
@@ -62,7 +78,19 @@ def test_finding_72_challenger_artifact_and_small_n_suppression():
     assert res_refit["all_windows_refitted"] is True
     assert res_refit["evaluation_mode"] == "refitted_walk_forward"
 
+    # Also verify run_walk_forward_backtest directly with train_window_models marks is_refitted
+    res_real_wf = run_walk_forward_backtest(
+        dummy_df,
+        train_window_bars=100,
+        test_window_bars=50,
+        step_bars=50,
+        train_fn=train_window_models
+    )
+    assert len(res_real_wf["windows"]) > 0
+    assert all(w["is_refitted"] is True for w in res_real_wf["windows"])
+
     # When only trade_simulator_fn is passed, is_refitted must be False
+    mock_sim = lambda t_df: {"trades": [{"pnl": 50.0, "return": 0.02, "exit_type": "tp"}]}
     res_replay = run_walk_forward_backtest(
         dummy_df,
         train_window_bars=100,
@@ -77,16 +105,18 @@ def test_finding_72_challenger_artifact_and_small_n_suppression():
     assert res_replay["all_windows_refitted"] is False
     assert res_replay["evaluation_mode"] == "rolling_window_replay"
 
-    # 2. Test sample size suppression string formatting
-    t_count = 45
-    win_rate = 60.0
-    wins = int(round((win_rate / 100.0) * t_count))
-    ci_l, ci_u = wilson_score_interval(wins, t_count)
-    pess_wr_str = f"{win_rate:.1f}% [{ci_l*100:.1f}%, {ci_u*100:.1f}%] (n={t_count})"
-    if t_count < 100:
-        pess_wr_str += " [INSUFFICIENT_SAMPLE: n<100]"
+    # 2. Test fail-closed exception raising in train_window_models
+    corrupted_df = dummy_df.copy()
+    corrupted_df["feature_1"] = "invalid_string_that_fails_numeric_conversion"
+    with patch("sklearn.ensemble.HistGradientBoostingClassifier.fit", side_effect=ValueError("Model Fit Error")):
+        with pytest.raises(RuntimeError, match="Walk-forward window model refit failed"):
+            train_window_models(dummy_df.iloc[:150])
+
+    # 3. Test production format_pessimistic_win_rate output
+    pess_wr_str, ci_l, ci_u = format_pessimistic_win_rate(60.0, 45)
     assert "[INSUFFICIENT_SAMPLE: n<100]" in pess_wr_str
     assert "-100" not in pess_wr_str
+    assert ci_l > 0.0 and ci_u > ci_l
 
 
 # --- Finding #73 Tests ---

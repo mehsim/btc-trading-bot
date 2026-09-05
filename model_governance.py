@@ -113,10 +113,12 @@ def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str)
     if is_prom is not True:
         return False, "Manifest missing or explicitly marked promoted=False"
 
-    model_type = manifest.get("model_type")
-    if model_type == "regressor":
-        # Finding #42 & Overturned #149: Regressor manifest governance validation
-        reg_metrics = manifest.get("regression_metrics")
+    model_type = str(manifest.get("model_type", "")).lower()
+    prefix = str(manifest.get("prefix", "")).lower()
+    is_regressor = (model_type in ("regressor", "price")) or ("price" in prefix)
+    if is_regressor:
+        # Finding #42 & Overturned #149 & Item 32: Regressor / price manifest governance validation
+        reg_metrics = manifest.get("regression_metrics") or manifest.get("metrics")
         if not reg_metrics or not isinstance(reg_metrics, dict):
             return False, "Regressor manifest missing non-empty regression_metrics"
         mae = reg_metrics.get("mae")
