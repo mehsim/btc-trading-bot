@@ -195,14 +195,16 @@ def require_ip_whitelist(f):
                 return f(*args, **kwargs)
             return jsonify({"error": "Unauthorized", "message": "API key required for external access. Header X-API-KEY required."}), 401
 
-        # Finding #101 & R37: Fail-Closed by default — external public access is disabled unless explicitly set to true
-        allow_public = get_secure_env("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1")
-        if allow_public:
+        # Finding #101 & Item 42: Decouple network exposure from authentication bypass.
+        # Binding to a public interface (DASHBOARD_ALLOW_PUBLIC) does NOT disable authentication.
+        # Complete authentication bypass requires an explicit, separate flag DASHBOARD_DISABLE_AUTH=true.
+        disable_auth = get_secure_env("DASHBOARD_DISABLE_AUTH", "false").lower() in ("true", "1")
+        if disable_auth:
             return f(*args, **kwargs)
 
         return jsonify({
             "error": "Forbidden",
-            "message": "External dashboard access is restricted. Configure ALLOWED_DASHBOARD_IPS or DASHBOARD_API_KEY."
+            "message": "External dashboard access is restricted. Configure ALLOWED_DASHBOARD_IPS, DASHBOARD_API_KEY, or DASHBOARD_ADMIN_KEY."
         }), 403
     return decorated_function
 

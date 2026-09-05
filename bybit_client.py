@@ -504,13 +504,28 @@ def get_bybit_bid_ask(symbol: str) -> tuple:
     return 0.0, 0.0
 
 
-def get_bybit_last_execution(symbol: str) -> Dict[str, Any]:
-    res = bybit_get_request("/v5/execution/list", {"category": "linear", "symbol": symbol, "limit": 1})
+def get_bybit_last_execution(symbol: str, order_id: Optional[str] = None) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"category": "linear", "symbol": symbol, "limit": 1}
+    if order_id:
+        params["orderId"] = str(order_id)
+    res = bybit_get_request("/v5/execution/list", params)
     if res.get("retCode") == 0:
         e_list = res.get("result", {}).get("list", [])
         if e_list:
             return e_list[0]
     return {}
+
+
+def get_bybit_order_executions(symbol: str, order_id: Optional[str] = None, order_link_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    params: Dict[str, Any] = {"category": "linear", "symbol": symbol, "limit": 10}
+    if order_id:
+        params["orderId"] = str(order_id)
+    if order_link_id:
+        params["orderLinkId"] = str(order_link_id)
+    res = bybit_get_request("/v5/execution/list", params)
+    if res.get("retCode") == 0:
+        return res.get("result", {}).get("list", [])
+    return []
 
 
 def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, max_chase_seconds: float = 10.0, order_link_id: Optional[str] = None) -> Dict[str, Any]:
@@ -714,10 +729,10 @@ def get_real_bybit_balance_cached(force: bool = False) -> float:
             log_event("WARNING", f"bybit_client notice: {ex_bybit_client}")
             continue
 
-    if _real_balance_cache is not None and _real_balance_cache > 0:
+    if not force and _real_balance_cache is not None and _real_balance_cache > 0:
         return _real_balance_cache
 
-    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "true":
+    if not force and (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING") == "true"):
         return _real_balance_cache or 100.0
 
     raise AccountBalanceUnavailableException("Bybit wallet balance unavailable from API")
@@ -767,10 +782,12 @@ def run_bybit_balance_updater(bot_state=None, bot_state_lock=None):
     consecutive_failures = 0
     while True:
         try:
+            prev_sync = _last_real_balance_sync
             bal = get_real_bybit_balance_cached(force=True)
-            if isinstance(bal, (int, float)) and bal > 0 and bot_state is not None:
+            # Finding #166 & Overturned 34: Only stamp balance sync timestamp if venue API genuinely succeeded
+            if isinstance(bal, (int, float)) and bal > 0 and _last_real_balance_sync > prev_sync and bot_state is not None:
                 consecutive_failures = 0
-                now_ts = time.time()
+                now_ts = _last_real_balance_sync
                 if bot_state_lock:
                     with bot_state_lock:
                         bot_state["wallet_balance"] = bal

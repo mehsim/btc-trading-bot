@@ -38,8 +38,8 @@ def assert_shared_constants_aligned():
                         if ("trend" in base_parts or "price" in base_parts) and iv_key in cfg_tf:
                             live_c = cfg_tf[iv_key]
                             slot_key = f"{base_parts[1]}_{iv_key}"
-                            is_denylisted = slot_key in getattr(config, "MODEL_SLOT_DENYLIST", []) or m_data.get("promoted") is False
-                            # Finding #161 (Finding #93): Strictly verify all barrier parameters for active promoted slots
+                            is_denylisted = slot_key in getattr(config, "MODEL_SLOT_DENYLIST", [])
+                            # Finding #161 (Finding #93) & Overturned R13: Strictly verify all barrier parameters for active slots
                             has_divergence = False
                             for b_key in ["lookahead", "sl_mult", "tp_mult_trending", "tp_mult_ranging"]:
                                 if b_key in b_cfg and b_key in live_c:

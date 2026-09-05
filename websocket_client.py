@@ -2,9 +2,11 @@ from logger import log_event
 """
 websocket_client.py
 -------------------
-DEPRECATION NOTICE: This standalone WebSocket client is maintained for backwards compatibility.
-Real-time market data streaming and execution feeds are unified under bybit_client.py
-and ws_feed_manager.py. Do not introduce new dependencies on this module.
+DEPRECATION NOTICE: This standalone WebSocket client is maintained for backwards compatibility
+and standalone utility helpers (e.g. parse_orderbook_depth).
+Active real-time WebSocket market data streaming and execution feeds are unified directly under
+main.py (start_ws, start_private_ws, run_websocket_watchdog) and bybit_client.py.
+Do not introduce new dependencies on this module.
 """
 
 import os

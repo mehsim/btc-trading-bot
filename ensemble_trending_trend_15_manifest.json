@@ -197,8 +197,8 @@
   },
   "barrier_config": {
     "tp_mult_trending": 1.85,
-    "tp_mult_ranging": 1.4,
-    "sl_mult": 0.85,
+    "tp_mult_ranging": 1.15,
+    "sl_mult": 0.8,
     "lookahead": 12,
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
@@ -218,5 +218,5 @@
   "holdout_mcc_promoted": true,
   "holdout_mcc": 0.0251,
   "holdout_sharpe": -18.2592,
-  "hmac_signature": "3bf1b365c0b2d6949f42fd6b6fbc387a3c3a6582172cb5c8cca1d0bedbf1c49b"
+  "hmac_signature": "2e75355de1c8196a2fb210e198ed5ef4b2946bad1e8d1995ba2b1da76cb6fd27"
 }

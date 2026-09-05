@@ -163,7 +163,7 @@
     "holdout_profit_factor": 0.93,
     "holdout_win_rate": 0.4966,
     "mae": 0.014085,
-    "rmse": 0.0075,
+    "rmse": 0.017653,
     "r2": 0.02,
     "directional_accuracy": 0.54
   },
@@ -179,12 +179,12 @@
   "model_type": "regressor",
   "regression_metrics": {
     "mae": 0.014085,
-    "rmse": 0.0075,
+    "rmse": 0.017653,
     "r2": 0.02,
     "directional_accuracy": 0.54,
     "uniqueness_ratio": 0.0909,
     "effective_sample_size": 4658.0,
     "raw_sample_size": 51233
   },
-  "hmac_signature": "e57a3d45291f5fc7cd61c1431cab25e4b1b2e998fe9bc85d55996ea50362c9ca"
+  "hmac_signature": "96d1de5966099b01d5f3ab0a965baa1c2a9a1377daf504b60793fc55acabefda"
 }

@@ -115,7 +115,7 @@ def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str)
 
     model_type = manifest.get("model_type")
     if model_type == "regressor":
-        # Finding #42: Regressor manifest governance validation
+        # Finding #42 & Overturned #149: Regressor manifest governance validation
         reg_metrics = manifest.get("regression_metrics")
         if not reg_metrics or not isinstance(reg_metrics, dict):
             return False, "Regressor manifest missing non-empty regression_metrics"
@@ -124,10 +124,28 @@ def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str)
         if mae is None or rmse is None:
             return False, "Regressor manifest regression_metrics missing mae or rmse"
         try:
-            if float(mae) <= 0.0 or float(rmse) <= 0.0:
+            f_mae = float(mae)
+            f_rmse = float(rmse)
+            if f_mae <= 0.0 or f_rmse <= 0.0:
                 return False, f"Invalid regressor metrics: mae={mae}, rmse={rmse}"
+            if f_rmse < (f_mae - 1e-9):
+                return False, f"Sanity violation: rmse ({f_rmse}) cannot be less than mae ({f_mae})"
         except (ValueError, TypeError):
             return False, f"Non-numeric regressor metrics: mae={mae}, rmse={rmse}"
+
+        r2 = reg_metrics.get("r2")
+        dir_acc = reg_metrics.get("directional_accuracy")
+        if r2 is None or dir_acc is None:
+            return False, "Regressor manifest regression_metrics missing r2 or directional_accuracy"
+        try:
+            f_r2 = float(r2)
+            f_dir = float(dir_acc)
+            if f_r2 < 0.0:
+                return False, f"Regressor r2 ({f_r2}) below governance floor (0.0)"
+            if f_dir < 0.50:
+                return False, f"Regressor directional accuracy ({f_dir}) below governance floor (0.50)"
+        except (ValueError, TypeError):
+            return False, f"Non-numeric regressor metrics: r2={r2}, directional_accuracy={dir_acc}"
         return True, ""
 
     min_holdout_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))

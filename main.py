@@ -630,7 +630,7 @@ def add_cors_headers(response):
     cors_origin = os.environ.get("DASHBOARD_CORS_ORIGIN", "").strip()
     if cors_origin:
         response.headers["Access-Control-Allow-Origin"] = cors_origin
-    elif os.environ.get("DASHBOARD_ALLOW_PUBLIC", "false").lower() in ("true", "1"):
+    elif os.environ.get("DASHBOARD_ALLOW_WILDCARD_CORS", "false").lower() in ("true", "1"):
         response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-KEY, X-ADMIN-KEY, Authorization"
@@ -4511,6 +4511,9 @@ def sync_active_positions_from_bybit():
                             "original_qty": orig_qty if (orig_qty is not None and orig_qty > 0.0) else qty_val,
                             "liq_price": liq_price,
                             "mark_price": mark_price,
+                            "entry_regime": str(bot_state.get(f"regime_{symbol}_{_iv}", bot_state.get(f"regime_{_iv}", "Trending"))),
+                            "regime": str(bot_state.get(f"regime_{symbol}_{_iv}", bot_state.get(f"regime_{_iv}", "Trending"))),
+                            "entry_scale_mult": 1.20,
                             "recovered": True
                         }
                         
@@ -4873,6 +4876,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             weighted_sum_px = 0.0
             chase_order_ids = set()
             recorded_chase_exec_ids = set()
+            credited_per_chase_order = {}
             
             for chase in range(5):
                 if decision_ts is not None:
@@ -4967,6 +4971,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                         fill_q = f_cum if f_cum > 0 else floored_remaining
                         filled_so_far += fill_q
                         weighted_sum_px += (fill_q * fill_px)
+                        if bybit_order_id:
+                            credited_per_chase_order[bybit_order_id] = credited_per_chase_order.get(bybit_order_id, 0.0) + fill_q
                         break
                     else:
                         print(f"[{symbol} {iv}m API] Order {bybit_order_id} not filled within 2.0s (Status: {f_status}, Fill: {f_cum}). Cancelling and recalculating price...")
@@ -4984,6 +4990,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                             if cum_qty > 0:
                                 filled_so_far += cum_qty
                                 weighted_sum_px += (cum_qty * avg_px)
+                                if bybit_order_id:
+                                    credited_per_chase_order[bybit_order_id] = credited_per_chase_order.get(bybit_order_id, 0.0) + cum_qty
                                 print(f"[{symbol} {iv}m API] Order {bybit_order_id} executed {cum_qty} (Total filled so far: {filled_so_far:.4f}/{raw_qty:.4f}).")
 
                             if status == "Filled" or (raw_qty > 0 and filled_so_far >= (0.95 * raw_qty)):
@@ -5005,6 +5013,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                     if delta_cum > 0:
                                         filled_so_far += delta_cum
                                         weighted_sum_px += (delta_cum * float(recheck_details.get("avgPrice", limit_entry_price)))
+                                        if bybit_order_id:
+                                            credited_per_chase_order[bybit_order_id] = credited_per_chase_order.get(bybit_order_id, 0.0) + delta_cum
                                     if r_status in ["New", "PartiallyFilled"]:
                                         log_event("CRITICAL", f"[{symbol} {iv}m API] Order {bybit_order_id} remains active ({r_status}) after cancel retry! Aborting chase loop to prevent double-order position stacking.")
                                         send_telegram_alert(f"🚨 *CHASE ABORT: UNCONFIRMED CANCEL* 🚨\n• Symbol: `{symbol}`\n• Order: `{bybit_order_id}`\n• Status: `{r_status}`\n• Action: Aborted chase loop (Fail-Closed).")
@@ -5024,6 +5034,11 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                         if e_qty > 0:
                                             filled_so_far += e_qty
                                             weighted_sum_px += (e_qty * e_px)
+                                            if bybit_order_id:
+                                                credited_per_chase_order[bybit_order_id] = credited_per_chase_order.get(bybit_order_id, 0.0) + e_qty
+                                            for x in e_list:
+                                                if x.get("execId"):
+                                                    recorded_chase_exec_ids.add(x.get("execId"))
                                             print(f"[{symbol} {iv}m API Fallback] Recovered execution fill {e_qty} for {bybit_order_id}.")
                             except Exception as ex_e_hist:
                                 log_event("WARNING", f"[{symbol} {iv}m API Fallback] Execution history check error: {ex_e_hist}")
@@ -5071,34 +5086,37 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     if filled_so_far > 0:
                         bybit_success = True
                 else:
-                    # Re-verify last execution before placing market taker IOC order
-                    last_exec = get_bybit_last_execution(symbol)
-                    now_ts_sec = time.time()
-                    if last_exec and (now_ts_sec - (float(last_exec.get("execTime", 0))/1000.0)) < 5.0 and last_exec.get("side") == side:
-                        exec_id = last_exec.get("execId")
-                        exec_order_id = last_exec.get("orderId")
-                        if exec_id and exec_id in recorded_chase_exec_ids:
-                            print(f"[{symbol} {iv}m API] Recent fill ({exec_id}) belongs to chase order already recorded. Skipping duplicate accumulation.")
-                            # Finding #56: Only set bybit_success if actually filled target threshold
-                            if filled_so_far >= (0.95 * raw_qty):
-                                bybit_success = True
-                        elif exec_order_id and exec_order_id in chase_order_ids:
-                            print(f"[{symbol} {iv}m API] Unrecorded recent chase fill ({exec_id}) for order ({exec_order_id}) detected right before IOC fallback. Skipping duplicate IOC.")
-                            fill_px = float(last_exec.get("execPrice", entry_price))
-                            raw_fill_q = float(last_exec.get("execQty", remaining_qty))
-                            fill_q = min(raw_fill_q, max(0.0, raw_qty - filled_so_far))
+                    # Item 31: Query executions strictly filtered by chase order IDs to prevent undercounts and foreign fill contamination
+                    for c_oid in list(chase_order_ids):
+                        exec_records = get_bybit_order_executions(symbol, order_id=c_oid)
+                        if not exec_records:
+                            continue
+                        order_tot_qty = 0.0
+                        order_weighted_px = 0.0
+                        for rec in exec_records:
+                            e_id = rec.get("execId")
+                            e_q = float(rec.get("execQty", 0.0))
+                            e_p = float(rec.get("execPrice", entry_price))
+                            if e_id and e_id not in recorded_chase_exec_ids:
+                                recorded_chase_exec_ids.add(e_id)
+                            order_tot_qty += e_q
+                            order_weighted_px += (e_q * e_p)
+                        already_credited = credited_per_chase_order.get(c_oid, 0.0)
+                        uncredited_delta = max(0.0, order_tot_qty - already_credited)
+                        if uncredited_delta > 0:
+                            avg_exec_px = (order_weighted_px / order_tot_qty) if order_tot_qty > 0 else entry_price
+                            log_event("INFO", f"[{symbol} {iv}m API] Recovered {uncredited_delta:.4f} uncredited fill for chase order {c_oid} at {avg_exec_px:.2f} before IOC fallback.")
+                            fill_q = min(uncredited_delta, max(0.0, raw_qty - filled_so_far))
                             if fill_q > 0:
                                 filled_so_far += fill_q
-                                weighted_sum_px += (fill_q * fill_px)
-                                if exec_id:
-                                    recorded_chase_exec_ids.add(exec_id)
-                            actual_qty = filled_so_far
-                            entry_price = weighted_sum_px / max(1e-9, filled_so_far)
-                            if filled_so_far >= (0.95 * raw_qty):
-                                bybit_success = True
-                        else:
-                            # Finding #78: Foreign execution detected (not in chase_order_ids). Do NOT credit foreign fill to this bot order.
-                            log_event("INFO", f"[{symbol} {iv}m API] Foreign/unrelated execution ({exec_id}, orderId={exec_order_id}) detected right before IOC fallback. Ignoring foreign fill.")
+                                weighted_sum_px += (fill_q * avg_exec_px)
+                            credited_per_chase_order[c_oid] = already_credited + uncredited_delta
+
+                    if filled_so_far > 0:
+                        actual_qty = filled_so_far
+                        entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                        if filled_so_far >= (0.95 * raw_qty):
+                            bybit_success = True
 
                     if not bybit_success:
                         # Recalculate remaining IOC quantity after execution checks
@@ -5347,6 +5365,8 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
             "min_sl_dist": float(locals().get("min_sl_dist", atr_dollars * 0.60)),
             "initial_planned_rr": float(init_planned_rr),
             "entry_regime": str(bot_state.get(f"regime_{symbol}_{iv}", bot_state.get(f"regime_{iv}", "Trending"))),
+            "regime": str(bot_state.get(f"regime_{symbol}_{iv}", bot_state.get(f"regime_{iv}", "Trending"))),
+            "entry_scale_mult": float(entry_scale_mult) if "entry_scale_mult" in locals() and entry_scale_mult is not None else 1.20,
             "direction": str(ml_trend),
             "end_time": float(time.time() + duration_seconds),
             "entry_time": int(time.time() * 1000),
@@ -5814,13 +5834,15 @@ def main():
 
                 # Scale-Out (50% partial profit taking at timeframe & trend-adaptive ATR multiple)
                 from config import TAKER_FEE_PCT, SCALE_OUT_CONFIG
-                trade_adx = float(active_trade.get("adx", active_trade.get("entry_adx", 25.0)))
-                if str(iv) in ["240", "360"]:
-                    scale_out_mult = 1.60 if trade_adx >= 35.0 else (1.20 if trade_adx < 22.0 else 1.40)
-                elif str(iv) in ["60", "120"]:
-                    scale_out_mult = 1.40 if trade_adx >= 35.0 else (1.00 if trade_adx < 22.0 else 1.20)
-                else:
-                    scale_out_mult = 1.20 if trade_adx >= 35.0 else (0.80 if trade_adx < 22.0 else 1.00)
+                scale_out_mult = float(active_trade.get("entry_scale_mult", 0.0))
+                if scale_out_mult <= 0:
+                    trade_adx = float(active_trade.get("adx", active_trade.get("entry_adx", 25.0)))
+                    if str(iv) in ["240", "360"]:
+                        scale_out_mult = 1.60 if trade_adx >= 35.0 else (1.20 if trade_adx < 22.0 else 1.40)
+                    elif str(iv) in ["60", "120"]:
+                        scale_out_mult = 1.40 if trade_adx >= 35.0 else (1.00 if trade_adx < 22.0 else 1.20)
+                    else:
+                        scale_out_mult = 1.20 if trade_adx >= 35.0 else (0.80 if trade_adx < 22.0 else 1.00)
                 scale_out_portion = SCALE_OUT_CONFIG.get("position_portion", 0.50)
                 half_closed = active_trade.get("half_closed", False)
                 trigger_scale_out = False
@@ -6174,9 +6196,10 @@ def main():
                         if champ_updates.get("break_even_triggered"):
                             active_trade["break_even_triggered"] = True
                         if champ_updates.get("trigger_scale_out") and not half_closed:
-                            if not active_trade.get("scale_out_triggered"):
-                                active_trade["scale_out_triggered"] = True
-                                active_trades_updated = True
+                            if TRADE_MODE == "simulation" or not active_trade.get("bybit_scale_out_order_id"):
+                                if not active_trade.get("scale_out_triggered"):
+                                    active_trade["scale_out_triggered"] = True
+                                    active_trades_updated = True
 
                     # Exit Quality Score (Finding #17, #76)
                     eqs_mode = getattr(config, "EXIT_QUALITY_MODE", "shadow")
@@ -6457,7 +6480,8 @@ def main():
                         "exit_time": float(time.time()),
                         "interval": str(iv),
                         "direction": str(direction),
-                        "regime": str(active_trade.get("regime", "")),
+                        "regime": str(active_trade.get("regime") or active_trade.get("entry_regime") or bot_state.get(f"regime_{active_symbol}_{iv}") or bot_state.get(f"regime_{iv}") or "Trending"),
+                        "entry_regime": str(active_trade.get("entry_regime") or active_trade.get("regime") or bot_state.get(f"regime_{active_symbol}_{iv}") or bot_state.get(f"regime_{iv}") or "Trending"),
                         "entry_price": float(entry_price),
                         "exit_price": float(actual_price),
                         "change_pct": float(total_net_return_pct if active_trade.get("half_closed", False) else net_return_pct),
@@ -6495,7 +6519,18 @@ def main():
                         log_event("WARNING", f"[DB Close Trade Atomically Warning] {ex_db_close}")
                         db_closed = False
                     if not db_closed:
-                        log_event("CRITICAL", f"[Database Close Failure] Atomic persistence failed/rolled back for {completed_trade.get('trade_id')} ({active_symbol} {iv}m).")
+                        # Retry once after short backoff to recover transient locks
+                        import time as _t_close
+                        _t_close.sleep(0.1)
+                        try:
+                            db_closed = database.close_trade_atomically(completed_trade, tf=str(iv))
+                        except Exception as ex_retry:
+                            log_event("WARNING", f"[DB Close Trade Retry Warning] {ex_retry}")
+                            db_closed = False
+                    if not db_closed:
+                        log_event("CRITICAL", f"[Database Close Failure] Atomic persistence failed/rolled back for {completed_trade.get('trade_id')} ({active_symbol} {iv}m). Retaining trade in active list to prevent state desync.")
+                        updated_trades.append(active_trade)
+                        continue
                     active_trade["exit_processed"] = True
                     with active_trades_lock:
                         bot_state["trade_history"].append(completed_trade)
@@ -7114,7 +7149,7 @@ def main():
             api_latency_ms = float(raw_lat) if raw_lat is not None else 100.0
 
             raw_bal_ts = bot_state.get("last_balance_sync_ts") or state_manager.get("last_balance_sync_ts") or (_last_balance_fetch if _last_balance_fetch > 0 else None)
-            bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else time.time()
+            bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else 0.0
 
             raw_inf = bot_state.get("last_inference_latency_ms")
             inference_lat_ms = float(raw_inf) if raw_inf is not None else 50.0
@@ -7772,20 +7807,42 @@ def main():
                             _est_notional = (_current_bal * _max_risk_frac) / _est_stop_dist
                             _min_order = float(getattr(config, "MIN_ORDER_VALUE_USDT", 5.1))
                             _order_usd = max(_min_order, _est_notional)
-                            if f"current_spread_bps_{symbol}" not in bot_state:
-                                _live_s_bp = bot_state.get(f"spread_bps_{symbol}", bot_state.get("current_spread_bps"))
-                                if _live_s_bp:
-                                    bot_state[f"current_spread_bps_{symbol}"] = float(_live_s_bp)
-                                    bot_state[f"spread_bp_{symbol}"] = float(_live_s_bp)
-                            _spread_bp = float(bot_state.get(f"spread_bp_{symbol}") or bot_state.get(f"current_spread_bps_{symbol}") or bot_state.get("current_spread_bps") or 1.5)
+
+                            # Finding #79 & Overturned R47: Calculate live market microstructure spread in bps via real top-of-book orderbook
+                            ob_data = get_orderbook_imbalance_and_spread(symbol)
+                            ob_spread = ob_data.get("spread", 0.0) if isinstance(ob_data, dict) else 0.0
+                            if ob_spread > 0.0:
+                                current_spread_bps = round(float(ob_spread * 10000.0), 2)
+                            else:
+                                _bid_px = float(latest_candle.get("bid", 0.0))
+                                _ask_px = float(latest_candle.get("ask", 0.0))
+                                if _ask_px > _bid_px > 0:
+                                    current_spread_bps = round(((_ask_px - _bid_px) / ((_ask_px + _bid_px) / 2.0)) * 10000.0, 2)
+                                else:
+                                    current_spread_bps = 1.5
+                            bot_state[f"current_spread_bps_{symbol}"] = current_spread_bps
+                            bot_state[f"spread_bp_{symbol}"] = current_spread_bps
+                            bot_state["current_spread_bps"] = current_spread_bps
+                            bot_state[f"garch_sigma_{symbol}"] = float(atr_norm_val) if 'atr_norm_val' in locals() and atr_norm_val > 0 else 0.015
+
+                            _val_s = bot_state.get(f"spread_bp_{symbol}")
+                            if _val_s is None:
+                                _val_s = bot_state.get(f"current_spread_bps_{symbol}")
+                            if _val_s is None:
+                                _val_s = bot_state.get("current_spread_bps")
+                            _spread_bp = float(_val_s) if _val_s is not None else 1.5
                             _garch_sigma = float(bot_state.get(f"garch_sigma_{symbol}") or (atr_norm_val if atr_norm_val > 0 else 0.015))
+
+                            # Overturned #150: Model realistic round-trip costs: taker exit is guaranteed on SL, entry may be maker chase or taker IOC
+                            _is_extreme_vol = bool(atr_norm_val > 0.02 or "vol" in str(regime_name).lower())
+                            _is_maker_entry = not _is_extreme_vol
                             _tcm = transaction_cost_model.estimate_transaction_cost(
                                 symbol=symbol,
                                 order_size_usd=_order_usd,
                                 volume_24h_usd=_adv_usd,
                                 bid_ask_spread_bp=_spread_bp,
                                 garch_sigma=_garch_sigma,
-                                is_maker=True,
+                                is_maker=_is_maker_entry,
                                 round_trip=True
                             )
                             cost_bps = float(_tcm.get("total_cost_bps", _tcm.get("total_cost_bp", 12.0)))  # canonical round-trip with maker entry + taker exit
@@ -7878,23 +7935,6 @@ def main():
                             effective_base = max(float(economic_base_threshold), float(base_cfg_thresh))
                             max_conf_cap = max(effective_base, 0.50 if str(iv) in ["15", "30", "60"] else 0.55)
                             dynamic_conf_threshold = max(effective_base, min(max_conf_cap, dynamic_conf_threshold))
-
-                            # Finding #79: Calculate live market microstructure spread in bps via real top-of-book orderbook
-                            ob_data = get_orderbook_imbalance_and_spread(symbol)
-                            ob_spread = ob_data.get("spread", 0.0) if isinstance(ob_data, dict) else 0.0
-                            if ob_spread > 0.0:
-                                current_spread_bps = round(float(ob_spread * 10000.0), 2)
-                            else:
-                                _bid_px = float(latest_candle.get("bid", 0.0))
-                                _ask_px = float(latest_candle.get("ask", 0.0))
-                                if _ask_px > _bid_px > 0:
-                                    current_spread_bps = round(((_ask_px - _bid_px) / ((_ask_px + _bid_px) / 2.0)) * 10000.0, 2)
-                                else:
-                                    current_spread_bps = round(float(cost_bps / 2.0), 2)
-                            bot_state[f"current_spread_bps_{symbol}"] = current_spread_bps
-                            bot_state[f"spread_bp_{symbol}"] = current_spread_bps
-                            bot_state["current_spread_bps"] = current_spread_bps
-                            bot_state[f"garch_sigma_{symbol}"] = float(atr_norm_val) if 'atr_norm_val' in locals() and atr_norm_val > 0 else 0.015
 
                             # Finding #129: Compute Composite Uncertainty (U_ensemble + U_market) with distinct predictions and matching weights
                             from statistical_validation import statistical_validation
@@ -8421,15 +8461,21 @@ def main():
                                 _est_stop_dist_eval = max(0.002, (_iv_sl * atr_norm_val))
                                 _est_notional_eval = (_current_bal_eval * float(getattr(config, "MAX_RISK_PER_TRADE", 0.02))) / max(1e-4, _est_stop_dist_eval)
                                 _order_usd = max(_min_order_eval, _est_notional_eval)
-                                _spread_bp_eval = float(bot_state.get(f"spread_bp_{symbol}", current_spread_bps))
+                                _spread_val_eval = bot_state.get(f"spread_bp_{symbol}")
+                                if _spread_val_eval is None:
+                                    _spread_val_eval = bot_state.get(f"current_spread_bps_{symbol}")
+                                if _spread_val_eval is None:
+                                    _spread_val_eval = current_spread_bps
+                                _spread_bp_eval = float(_spread_val_eval)
                                 _garch_sigma_eval = float(bot_state.get(f"garch_sigma_{symbol}") or (atr_norm_val if 'atr_norm_val' in locals() and atr_norm_val > 0 else 0.015))
+                                _is_maker_eval = not bool(atr_norm_val > 0.02)
                                 _tcm_res = transaction_cost_model.estimate_transaction_cost(
                                     symbol=symbol,
                                     order_size_usd=_order_usd,
                                     volume_24h_usd=_adv_usd,
                                     bid_ask_spread_bp=_spread_bp_eval,
                                     garch_sigma=_garch_sigma_eval,
-                                    is_maker=True,
+                                    is_maker=_is_maker_eval,
                                     round_trip=True
                                 )
                                 tcm_cost_bps = float(_tcm_res.get("total_cost_bps", _tcm_res.get("total_cost_bp", 12.0)))

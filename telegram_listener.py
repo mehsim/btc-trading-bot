@@ -346,10 +346,34 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
 
         position_size_usd = min(position_size_usd, capped_size)
 
-        # Enforce ExecutionValidator (Finding R55: supply required live_price)
+        # Enforce ExecutionValidator (Finding R55 & Item 45: supply safe live_price and portfolio_heat)
         from execution_validator import ExecutionValidator
         ev = ExecutionValidator(max_portfolio_heat=getattr(config, "MAX_PORTFOLIO_HEAT", 0.20))
-        current_live_px = float(bot_state.get(f"live_price_{sym}", final_entry)) if bot_state else final_entry
+        
+        current_live_px = None
+        raw_px = bot_state.get(f"live_price_{sym}") if bot_state else None
+        if raw_px is not None:
+            try:
+                cand = float(raw_px)
+                if cand > 0:
+                    current_live_px = cand
+            except (ValueError, TypeError):
+                pass
+        if current_live_px is None:
+            try:
+                from bybit_client import get_bybit_ticker_price
+                ticker_px = get_bybit_ticker_price(sym)
+                if ticker_px is not None and float(ticker_px) > 0:
+                    current_live_px = float(ticker_px)
+            except (ValueError, TypeError, KeyError, ConnectionError, OSError):
+                pass
+        if current_live_px is None:
+            current_live_px = float(final_entry) if final_entry else 0.0
+
+        total_active_size = sum(float(t.get("position_size_usd", t.get("original_size", 0.0)) or 0.0) for t in active_trades_list)
+        current_bal = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0)))) if bot_state else 80.0
+        portfolio_heat = min(1.0, max(0.0, total_active_size / max(1.0, current_bal)))
+
         ev_valid, ev_msg = ev.validate_order(
             symbol=sym,
             direction=ml_trend,
@@ -357,7 +381,8 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
             stop_loss_price=final_sl,
             take_profit_price=final_tp,
             position_size_usd=position_size_usd,
-            live_price=current_live_px
+            live_price=current_live_px,
+            portfolio_heat=portfolio_heat
         )
         if not ev_valid:
             rec.outcome = "REJECTED"

@@ -240,16 +240,17 @@ class ExitPolicyEngine:
         
         # 1. Scale-out Check
         scale_out_pct = float(params.get("scale_out_pct", 0.25))
-        scale_out_atr_mult = float(params.get("scale_out_atr_mult", 1.2))
+        # Overturned R18: Synchronize scale-out multiplier with resting limit order's entry_scale_mult
+        eff_scale_mult = float(active_trade.get("entry_scale_mult", params.get("scale_out_atr_mult", 1.2)))
         be_trigger_atr_mult = float(params.get("be_trigger_atr_mult", 1.5))
         be_safety_margin_atr = float(params.get("be_safety_margin_atr", 0.10))
         
         trigger_scale_out = False
         scale_out_atr_basis = entry_atr if entry_atr > 0 else atr_dollars
         if not half_closed and scale_out_pct > 0.0:
-            if direction == "Bullish" and current_price >= (entry_price + scale_out_atr_mult * scale_out_atr_basis):
+            if direction == "Bullish" and current_price >= (entry_price + eff_scale_mult * scale_out_atr_basis):
                 trigger_scale_out = True
-            elif direction == "Bearish" and current_price <= (entry_price - scale_out_atr_mult * scale_out_atr_basis):
+            elif direction == "Bearish" and current_price <= (entry_price - eff_scale_mult * scale_out_atr_basis):
                 trigger_scale_out = True
                 
         if trigger_scale_out and not half_closed:
@@ -257,32 +258,45 @@ class ExitPolicyEngine:
             updates["scale_out_pct"] = scale_out_pct
 
         # 2. Check Break-Even trigger
-        # Finding #36: Synchronize break-even with scale-out:
+        # Finding #36 & Overturned R17 & R18: Synchronize break-even with scale-out:
         # Volatility contraction must not pull break-even below scale-out distance,
         # and break-even must not move the stop to entry before scale-out executes.
         if not active_trade.get("break_even_triggered"):
             effective_be_basis = entry_atr if entry_atr > 0 else atr_dollars
             be_dist = be_trigger_atr_mult * effective_be_basis
-            if not half_closed and scale_out_pct > 0.0:
-                be_dist = max(be_dist, (scale_out_atr_mult * scale_out_atr_basis) + (0.10 * effective_be_basis))
+            # Floor break-even trigger distance above resting scale-out price whenever scale-out order exists
+            has_resting_scale_out = bool(active_trade.get("bybit_scale_out_order_id") or (not half_closed and scale_out_pct > 0.0))
+            if has_resting_scale_out:
+                be_dist = max(be_dist, (eff_scale_mult * scale_out_atr_basis) + (0.10 * effective_be_basis))
+
+            be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
+            min_safe_cushion = max(0.50 * max(1e-6, atr_dollars), entry_price * 0.0010)
+            be_dist = max(be_dist, be_buffer + min_safe_cushion)
+
             be_reached = (current_price >= entry_price + be_dist) if direction == "Bullish" else (current_price <= entry_price - be_dist)
             if be_reached:
-                be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
                 if direction == "Bullish":
                     raw_target_sl = entry_price + be_buffer
-                    # R17 Clamp: target_sl must never exceed current_price in low-ATR conditions
-                    target_sl = min(raw_target_sl, current_price - (0.05 * max(1e-6, atr_dollars)))
-                    is_tighter = target_sl > stop_loss + 1e-4
+                    # Overturned R17: Never clamp stop loss right under current price; require adequate cushion
+                    if raw_target_sl > (current_price - min_safe_cushion):
+                        target_sl = None
+                        is_tighter = False
+                    else:
+                        target_sl = raw_target_sl
+                        is_tighter = target_sl > stop_loss + 1e-4
                 else:
                     raw_target_sl = entry_price - be_buffer
-                    # R17 Clamp: target_sl must never fall below current_price in low-ATR conditions
-                    target_sl = max(raw_target_sl, current_price + (0.05 * max(1e-6, atr_dollars)))
-                    is_tighter = target_sl < stop_loss - 1e-4
+                    if raw_target_sl < (current_price + min_safe_cushion):
+                        target_sl = None
+                        is_tighter = False
+                    else:
+                        target_sl = raw_target_sl
+                        is_tighter = target_sl < stop_loss - 1e-4
 
-                if is_tighter:
+                if is_tighter and target_sl is not None:
                     updates["new_stop_loss"] = target_sl
                     stop_loss = target_sl
-                updates["break_even_triggered"] = True
+                    updates["break_even_triggered"] = True
 
         # 3. Check Take Profit Hit (Cleaned fix: allowed regardless of half_closed)
         if direction == "Bullish":

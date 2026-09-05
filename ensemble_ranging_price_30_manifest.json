@@ -110,7 +110,7 @@
     "effective_sample_size": 3249.08,
     "raw_sample_size": 42232,
     "mae": 0.010396,
-    "rmse": 0.0075,
+    "rmse": 0.013029,
     "r2": 0.02,
     "directional_accuracy": 0.54
   },
@@ -125,12 +125,12 @@
   "model_type": "regressor",
   "regression_metrics": {
     "mae": 0.010396,
-    "rmse": 0.0075,
+    "rmse": 0.013029,
     "r2": 0.02,
     "directional_accuracy": 0.54,
     "uniqueness_ratio": 0.0769,
     "effective_sample_size": 3249.08,
     "raw_sample_size": 42232
   },
-  "hmac_signature": "a439c33b4b86470843810422a100518dc164d9403d7a3fa24367e1039926293a"
+  "hmac_signature": "08018ce4e660aa39c9f8c076912a9346150a1d90e96c1fa04150f695810ac75b"
 }

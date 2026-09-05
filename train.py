@@ -1554,7 +1554,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
             xgb_t = create_model(XGBClassifier, best_params_xgb_t)
             lgb_t = create_model(LGBMClassifier, best_params_lgb_t)
             cat_t = create_model(CatBoostClassifier, best_params_cat_t)
-            ensemble_t = EnsembleClassifier(xgb_t, lgb_t, cat_t)
+            ensemble_t = EnsembleClassifier(xgb_t, lgb_t, cat_t, interval=interval)
             
             xgb_p = create_model(XGBRegressor, best_params_xgb_p)
             lgb_p = create_model(LGBMRegressor, best_params_lgb_p)
@@ -1832,7 +1832,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
         final_xgb_t = create_model(XGBClassifier, best_params_xgb_t)
         final_lgb_t = create_model(LGBMClassifier, best_params_lgb_t)
         final_cat_t = create_model(CatBoostClassifier, best_params_cat_t)
-        final_ensemble_t = EnsembleClassifier(final_xgb_t, final_lgb_t, final_cat_t)
+        final_ensemble_t = EnsembleClassifier(final_xgb_t, final_lgb_t, final_cat_t, interval=interval)
         
         final_xgb_p = create_model(XGBRegressor, best_params_xgb_p)
         final_lgb_p = create_model(LGBMRegressor, best_params_lgb_p)
@@ -2359,7 +2359,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             _w_xgb = create_model(XGBClassifier, best_params_xgb_t)
                             _w_lgb = create_model(LGBMClassifier, best_params_lgb_t)
                             _w_cat = create_model(CatBoostClassifier, best_params_cat_t)
-                            _w_m = EnsembleClassifier(_w_xgb, _w_lgb, _w_cat)
+                            _w_m = EnsembleClassifier(_w_xgb, _w_lgb, _w_cat, interval=interval)
                             _w_m.fit(_w_X, _w_y)
                             
                             def _wf_sim_fn(_w_test_df):

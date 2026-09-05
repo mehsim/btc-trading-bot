@@ -357,13 +357,17 @@ class EnsembleClassifier:
     Blends XGBoost, LightGBM, and CatBoost classifiers using a Stacking Meta-Classifier
     (Logistic Regression) with validation-calibrated coefficients and fallbacks.
     """
-    def __init__(self, xgb_model, lgb_model=None, cat_model=None):
+    def __init__(self, xgb_model, lgb_model=None, cat_model=None, lookahead=None, interval=None, n_symbols=None):
         self.xgb_model = xgb_model
         self.lgb_model = lgb_model
         self.cat_model = cat_model
+        self.lookahead = lookahead
+        self.interval = interval
+        self.n_symbols = n_symbols
         self.weights = [1.0/3.0, 1.0/3.0, 1.0/3.0]
         self.meta_coef_ = None
         self.meta_intercept_ = None
+        self.meta_clf = None
 
     def fit(self, X, y, sample_weight=None, X_val=None, y_val=None, X_train=None, y_train=None, sample_weight_train=None):
         X_arr = np.asarray(X, dtype=float)
@@ -374,15 +378,21 @@ class EnsembleClassifier:
         self.meta_intercept_ = None
         self.meta_clf = None
         
-        # Finding #42: Fit stacking meta-classifier on pooled out-of-fold predictions (no leakage)
+        # Finding #42 & Overturned R16: Fit stacking meta-classifier on pooled out-of-fold predictions with purged lookahead across pooled symbols
         if self.lgb_model is not None and self.cat_model is not None and len(X_arr) >= 20 and y_arr is not None:
             try:
                 from sklearn.metrics import accuracy_score
                 from sklearn.linear_model import LogisticRegression
                 from sklearn.base import clone
+                from config import SUPPORTED_SYMBOLS, TIMEFRAME_CONFIG
 
                 n_samples = len(X_arr)
-                lookahead_bars = int(getattr(self, "lookahead", 12))
+                iv_str = str(getattr(self, "interval", None) or "15")
+                sym_count = int(getattr(self, "n_symbols", None) or len(SUPPORTED_SYMBOLS))
+                raw_la = getattr(self, "lookahead", None)
+                base_la = int(raw_la) if raw_la is not None else int(TIMEFRAME_CONFIG.get(iv_str, {}).get("lookahead", 12))
+                # For multi-symbol pooled data sorted chronologically across symbols, purge window must cover all interleaved symbols
+                lookahead_bars = (base_la * sym_count) if base_la <= 20 else base_la
                 n_splits = max(2, min(5, n_samples // 50))
                 cv = PurgedEmbargoTimeSeriesSplit(n_splits=n_splits, lookahead=lookahead_bars, embargo_pct=0.01)
                 splits = list(cv.split(X_arr, y_arr))

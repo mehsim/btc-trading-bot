@@ -224,6 +224,12 @@ def init_db():
                     except Exception as ex_database:
                         log_event("WARNING", f"database notice: {ex_database}")
             
+            # Backfill any existing NULL/empty regime entries in completed_trades
+            try:
+                cursor.execute("UPDATE completed_trades SET regime = 'Trending' WHERE regime IS NULL OR TRIM(regime) = '';")
+            except Exception as ex_regime_backfill:
+                log_event("WARNING", f"database notice regime backfill: {ex_regime_backfill}")
+            
             # 3. Create Active Trades Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS active_trades (
@@ -693,7 +699,7 @@ def close_trade_atomically(trade: dict, tf: str = "60") -> bool:
                     raw_data=excluded.raw_data;
             """, (
                 t_id, symbol, trade.get("exit_time"), str(tf), trade.get("direction"),
-                str(trade.get("regime", "")),
+                str(trade.get("regime") or trade.get("entry_regime") or "Trending"),
                 round_monetary(trade.get("entry_price"), 4), round_monetary(trade.get("exit_price"), 4),
                 round_monetary(trade.get("change_pct"), 4), 1 if trade.get("success") else 0,
                 trade.get("reason"), round_monetary(trade.get("position_size_usd"), 4), round_monetary(trade.get("original_size"), 4),

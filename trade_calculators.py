@@ -81,7 +81,7 @@ def estimate_empirical_realized_rr(
                 continue
         if regime is not None:
             r_str = str(regime).lower()
-            tr_reg = str(tr.get("regime", "")).lower()
+            tr_reg = str(tr.get("regime") or tr.get("entry_regime") or "").lower()
             reg_token = "trending" if "trend" in r_str else ("ranging" if "rang" in r_str else r_str)
             tr_token = "trending" if "trend" in tr_reg else ("ranging" if "rang" in tr_reg else tr_reg)
             if not tr_reg or reg_token != tr_token:
@@ -1454,11 +1454,12 @@ def calculate_break_even_stop(
     taker_fee_pct: Optional[float] = None,
     spread_pct: float = 0.00015,
     slippage_pct: float = 0.00050,
-    interval: Optional[str] = None
+    interval: Optional[str] = None,
+    is_maker: bool = False
 ) -> float:
     """
     Calculates dynamic transaction-cost-aware break-even stop loss with timeframe-scaled breathing room.
-    Guarantees non-negative NET PnL after taker fees (entry + exit), spread, and slippage,
+    Guarantees non-negative NET PnL after fees (entry + exit), spread, and slippage,
     while giving higher timeframes (60m, 120m, 240m, 360m) proper room to absorb candle wicks.
     """
     dir_str = str(direction).lower()
@@ -1466,8 +1467,9 @@ def calculate_break_even_stop(
 
     # Round-trip cost buffer = entry fee + exit fee + spread + slippage
     eff_taker_fee = float(getattr(config, "TAKER_FEE_PCT", 0.00055)) if taker_fee_pct is None else float(taker_fee_pct)
-    roundtrip_fee_pct = eff_taker_fee * 2.0  # 0.0011
-    total_cost_pct = roundtrip_fee_pct + spread_pct + slippage_pct # ~0.00175 (0.175%)
+    eff_maker_fee = float(getattr(config, "MAKER_FEE_PCT", 0.00020))
+    roundtrip_fee_pct = (eff_maker_fee + eff_taker_fee) if is_maker else (eff_taker_fee * 2.0)
+    total_cost_pct = roundtrip_fee_pct + spread_pct + slippage_pct
 
     cost_buffer = entry_price * total_cost_pct
     

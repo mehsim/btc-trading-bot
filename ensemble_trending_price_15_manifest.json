@@ -105,8 +105,8 @@
   },
   "barrier_config": {
     "tp_mult_trending": 1.85,
-    "tp_mult_ranging": 1.4,
-    "sl_mult": 0.85,
+    "tp_mult_ranging": 1.15,
+    "sl_mult": 0.8,
     "lookahead": 12,
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
@@ -126,5 +126,5 @@
     "effective_sample_size": 475.95,
     "raw_sample_size": 51825
   },
-  "hmac_signature": "0a3728c192964a0b77d0ad4bb00873f3988b1f1ab5f4c7c5fc36cf23e065574a"
+  "hmac_signature": "de1fab94d4b7b662318902ed1d8d8ee0c33b998976f0ca29144f86ebd1b97b48"
 }
