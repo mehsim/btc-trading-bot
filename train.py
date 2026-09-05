@@ -196,17 +196,20 @@ def create_model(model_class, params):
     name = model_class.__name__
     if "XGB" in name:
         params['n_jobs'] = 1
+        params.setdefault('random_state', 42)
         if GPU_XGB:
             params['device'] = 'cuda'
             params['tree_method'] = 'hist'
     elif "LGBM" in name:
         params['n_jobs'] = 1
         params['verbose'] = -1
+        params.setdefault('random_state', 42)
         if GPU_LGB:
             params['device'] = 'gpu'
     elif "CatBoost" in name:
         params['thread_count'] = 1
         params['verbose'] = 0
+        params.setdefault('random_seed', 42)
         if GPU_CAT:
             params['task_type'] = 'GPU'
     return model_class(**params)
@@ -659,7 +662,8 @@ def tune_triple_barrier_multipliers(df_coin, interval, n_trials=30):
             gc.collect()
             return 0.0
 
-    study = optuna.create_study(direction="maximize")
+    sampler = optuna.samplers.TPESampler(seed=42)
+    study = optuna.create_study(direction="maximize", sampler=sampler)
     study.optimize(objective, n_trials=n_trials)
     best = study.best_params
     best["lookahead"] = int(TIMEFRAME_CONFIG.get(str(interval), {}).get("lookahead", 10))
@@ -2015,7 +2019,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     if f_name in X_holdout.columns:
                         X_holdout_champ[f_name] = X_holdout[f_name]
                     else:
-                        X_holdout_champ[f_name] = 0.0
+                        raise RuntimeError(f"Champion feature '{f_name}' missing from holdout dataset (contract mismatch)")
 
                 champ_pred_t = champion_t.predict(X_holdout_champ)
                 champ_pred_p = champion_p.predict(X_holdout_champ)
@@ -2265,10 +2269,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
                             _sl_fracs.append(0.01)
                     
                     from trade_calculators import calculate_replay_statistics
+                    holdout_duration_days = float(len(X_holdout) * int(interval)) / 1440.0 if ('X_holdout' in locals() and len(X_holdout) > 0) else None
                     chal_stats = calculate_replay_statistics(
                         chal_trade_rets,
                         initial_equity=100.0,
                         risk_per_trade_pct=_sl_fracs if _sl_fracs else 0.01,
+                        duration_days=holdout_duration_days,
                         interval=str(interval)
                     )
                     chal_pf = float(chal_stats.get("profit_factor", 1.0))
@@ -2293,6 +2299,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 champ_trade_rets,
                                 initial_equity=100.0,
                                 risk_per_trade_pct=_c_sl_fracs if _c_sl_fracs else 0.01,
+                                duration_days=holdout_duration_days,
                                 interval=str(interval)
                             )
                             pf_champ = float(champ_stats.get("profit_factor", 0.95))
@@ -2300,7 +2307,9 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     elif champion_exists and not contract_stale and "champ_manifest" in locals() and isinstance(champ_manifest, dict) and "profit_factor" in champ_manifest:
                         pf_champ = float(champ_manifest.get("profit_factor", 0.95))
 
-                    n_optuna_trials_val = int(_trials) if ('_trials' in locals() and _trials is not None) else 1
+                    _real_optuna_trials = int(_EXECUTED_OPTUNA_TRIALS) if '_EXECUTED_OPTUNA_TRIALS' in globals() else 0
+                    _barrier_trials = int(_trials) if ('_trials' in locals() and _trials is not None) else 0
+                    n_optuna_trials_val = max(_real_optuna_trials, _barrier_trials, 30)
 
                     # Gate 1: Walk-Forward Validation using true rolling refit callback
                     wf_pass = False

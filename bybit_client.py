@@ -507,7 +507,7 @@ def get_bybit_last_execution(symbol: str) -> Dict[str, Any]:
     return {}
 
 
-def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, max_chase_seconds: float = 10.0) -> Dict[str, Any]:
+def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Optional[float] = None, tp: Optional[float] = None, max_chase_seconds: float = 10.0, order_link_id: Optional[str] = None) -> Dict[str, Any]:
     ticker_res = bybit_get_request("/v5/market/tickers", {"category": "linear", "symbol": symbol})
     best_bid = 0.0
     best_ask = 0.0
@@ -521,11 +521,11 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         spread_pct = (best_ask - best_bid) / best_bid
         if spread_pct > 0.003:
             print(f"[{symbol}] Wide spread detected ({spread_pct*100:.2f}% > 0.30%). Bypassing Post-Only to execute via Taker Market.")
-            return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+            return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False, order_link_id=order_link_id)
 
     limit_price = best_bid if side == "Buy" and best_bid > 0 else (best_ask if side == "Sell" and best_ask > 0 else None)
     if limit_price is None:
-        return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+        return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False, order_link_id=order_link_id)
 
     post_payload = {
         "category": "linear",
@@ -537,6 +537,8 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         "timeInForce": "PostOnly",
         "positionIdx": 0
     }
+    if order_link_id:
+        post_payload["orderLinkId"] = str(order_link_id)[:36]
     if sl:
         post_payload["stopLoss"] = format_bybit_price(symbol, sl)
     if tp:
@@ -544,7 +546,15 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         
     res = execute_bybit_order_ws_or_rest("/v5/order/create", post_payload)
     if res.get("retCode") != 0:
-        return place_bybit_order(symbol=symbol, side=side, qty=qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+        # Check if the order actually reached the venue before firing market order
+        if order_link_id:
+            try:
+                chk_post = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": symbol, "orderLinkId": str(order_link_id)[:36]})
+                if chk_post.get("retCode") == 0 and chk_post.get("result", {}).get("list"):
+                    return res
+            except Exception as ex_chk:
+                log_event("WARNING", f"Error checking order status on create non-zero: {ex_chk}")
+        return res
 
     order_id = res.get("result", {}).get("orderId")
     if not order_id:
@@ -575,7 +585,7 @@ def place_bybit_maker_chase_order(symbol: str, side: str, qty: float, sl: Option
         
     rem_qty = float(qty) - filled_qty
     if rem_qty > 0.0001:
-        return place_bybit_order(symbol=symbol, side=side, qty=rem_qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False)
+        return place_bybit_order(symbol=symbol, side=side, qty=rem_qty, sl=sl, tp=tp, reduce_only=False, order_type="Market", post_only=False, order_link_id=f"{order_link_id}_m"[:36] if order_link_id else None)
     return chk_final
 
 

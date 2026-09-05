@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -2290,6 +2290,13 @@ def load_model_weights(iv):
                     send_telegram_alert(f"🚨 *MODEL GOVERNANCE REJECTION* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {reason}")
                     return False
 
+                from ensemble import verify_manifest_hmac_signature
+                if not verify_manifest_hmac_signature(m):
+                    sig_reason = "HMAC signature verification failed (tampered manifest)"
+                    log_event("CRITICAL", f"[Model Manifest Security] {sig_reason} for {prefix} ({iv}m).")
+                    send_telegram_alert(f"🚨 *TAMPERED MANIFEST DETECTED* 🚨\n• *Model*: {prefix}\n• *Interval*: {iv}m\n• *Reason*: {sig_reason}")
+                    return False
+
                 manifest_by_prefix[prefix] = m
                 from model_governance import model_governance_engine
                 model_governance_engine.log_barrier_manifest_audit("BTCUSDT", str(iv), m)
@@ -4238,9 +4245,10 @@ def sync_active_positions_from_bybit():
         return True
     
     try:
-        # Acquire unified lock hierarchy to safely fetch and mutate active trades state (Finding #22, #104)
-        with active_execution_lock:
-            with active_trades_lock:
+        # Finding #26: Release locks during blocking network I/O; acquire locks only for memory/DB mutations
+        import contextlib
+        with contextlib.nullcontext():
+            with contextlib.nullcontext():
                 pos_list = get_all_bybit_positions()
                 if pos_list is None:
                     print("[Position Sync] Failed to fetch positions from Bybit. Skipping sync to prevent false exits.")
@@ -4255,9 +4263,11 @@ def sync_active_positions_from_bybit():
 
                 matched_symbols = set()
                 for tf_key in ACTIVE_TRADE_TF_KEYS:
-                    current_trades = bot_state.get(f"active_trade_{tf_key}", [])
-                    if not isinstance(current_trades, list):
-                        current_trades = []
+                    with active_trades_lock:
+                        current_trades = bot_state.get(f"active_trade_{tf_key}", [])
+                        if not isinstance(current_trades, list):
+                            current_trades = []
+                        current_trades = list(current_trades)
                     
                     seen_symbols_in_tf = set()
                     updated_trades = []
@@ -4438,7 +4448,21 @@ def sync_active_positions_from_bybit():
                             else:
                                 print(f"[Sync Cleanup] Removed already processed closed trade for {symbol} ({tf_key}).")
                     
-                    bot_state[f"active_trade_{tf_key}"] = updated_trades
+                    with active_trades_lock:
+                        # Finding #25: Merge concurrent manual trades before overwriting active trades
+                        curr_live = bot_state.get(f"active_trade_{tf_key}", [])
+                        if isinstance(curr_live, list):
+                            upd_ids = {t.get("trade_id") or f"{t.get('symbol')}_{t.get('entry_time')}" for t in updated_trades}
+                            for c_tr in curr_live:
+                                c_id = c_tr.get("trade_id") or f"{c_tr.get('symbol')}_{c_tr.get('entry_time')}"
+                                if c_id not in upd_ids:
+                                    updated_trades.append(c_tr)
+                        bot_state[f"active_trade_{tf_key}"] = updated_trades
+                        try:
+                            import database
+                            database.save_active_trades(tf_key, updated_trades)
+                        except Exception as ex_db_s:
+                            log_event("WARNING", f"Error persisting active trades for {tf_key}: {ex_db_s}")
     
                 # Reconstruct any open positions on Bybit that are NOT in bot_state (orphaned/manual positions)
                 recovered = 0
@@ -4496,13 +4520,15 @@ def sync_active_positions_from_bybit():
                             cur = con.cursor()
                             expected_dir_alt = "Long" if direction == "Bullish" else "Short"
                             min_recov_ts = time.time() - (86400 * 2)
+                            # Finding #28: Match closest entry timestamp to position creation time rather than latest row
+                            ref_pos_ts = float(pos.get("createdTime", 0)) / 1000.0 if pos.get("createdTime") else (float(pos.get("updatedTime", 0)) / 1000.0 if pos.get("updatedTime") else time.time())
                             cur.execute("""
                                 SELECT interval, calibrated_conf, direction, ts FROM decision_journal 
                                 WHERE symbol = ? AND outcome = 'EXECUTED' 
                                   AND (direction = ? OR direction = ?)
                                   AND ts >= ?
-                                ORDER BY ts DESC LIMIT 1
-                            """, (symbol, direction, expected_dir_alt, min_recov_ts))
+                                ORDER BY ABS(ts - ?) ASC LIMIT 1
+                            """, (symbol, direction, expected_dir_alt, min_recov_ts, ref_pos_ts))
                             exec_row = cur.fetchone()
                             con.close()
                             if exec_row:
@@ -4636,16 +4662,17 @@ def sync_active_positions_from_bybit():
                         if already_in_any_tf:
                             print(f"[Crash Recovery] Skipped duplicate recovery for {symbol} - already tracked in an active timeframe.")
                             continue
-                        active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
-                        if not isinstance(active_trades_list, list):
-                            active_trades_list = []
-                        active_trades_list.append(recovered_trade)
-                        bot_state[f"active_trade_{tf_key}"] = active_trades_list
-                        try:
-                            import database
-                            database.save_active_trades(tf_key, active_trades_list)
-                        except Exception as ex_db_save:
-                            print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
+                        with active_trades_lock:
+                            active_trades_list = bot_state.get(f"active_trade_{tf_key}", [])
+                            if not isinstance(active_trades_list, list):
+                                active_trades_list = []
+                            active_trades_list.append(recovered_trade)
+                            bot_state[f"active_trade_{tf_key}"] = active_trades_list
+                            try:
+                                import database
+                                database.save_active_trades(tf_key, active_trades_list)
+                            except Exception as ex_db_save:
+                                print(f"[Crash Recovery] Failed to persist recovered trade to DB: {ex_db_save}")
                         recovered += 1
                         print(f"[Crash Recovery] Discovered/Recovered open position on Bybit: {symbol} {direction}")
                         
@@ -4779,11 +4806,13 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
     actual_qty = raw_qty
     order_res = {}
 
-    def _abort_async(reason: str):
+    def _abort_async(reason: str, reason_code: Optional[Any] = None):
         if journal_rec is not None:
             try:
                 journal_rec.outcome = "SKIPPED"
                 journal_rec.reject_reason = reason
+                if reason_code is not None:
+                    journal_rec.reason_code = reason_code.value if hasattr(reason_code, "value") else str(reason_code)
                 journal_rec.trade_id = None
                 write_decision(journal_rec)
                 log_event("INFO", f"[{symbol} {iv}m] Journalled async skipped decision: {reason}")
@@ -4956,33 +4985,33 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     elapsed = time.time() - float(decision_ts)
                     if elapsed > signal_ttl_seconds:
                         print(f"[{symbol} {iv}m API] Signal TTL expired during chase ({elapsed:.1f}s > {signal_ttl_seconds:.1f}s). Aborting remaining chase iterations.")
-                        if filled_so_far > 0:
+                        if filled_so_far >= (0.95 * raw_qty):
                             bybit_success = True
-                            break
-                        else:
-                            log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase with 0 fills. Aborting order placement completely.")
-                            send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired during chase.")
-                            _abort_async("Signal TTL expired during chase with 0 fills")
-                            return
+                        break
+                    else:
+                        log_event("WARNING", f"[{symbol} {iv}m API] Signal TTL expired during chase with 0 fills. Aborting order placement completely.")
+                        send_telegram_alert(f"⚠️ [{symbol} {iv}m] Order aborted: Signal TTL expired during chase.")
+                        _abort_async("Signal TTL expired during chase with 0 fills")
+                        return
 
                 if chase > 0:
                     c_bid, c_ask, c_last = get_bybit_bid_ask(symbol)
                     c_mid = (c_bid + c_ask) / 2.0 if (c_bid is not None and c_ask is not None and c_bid > 0 and c_ask > 0) else (c_last if c_last and c_last > 0 else 0.0)
                     if c_mid <= 0:
                         log_event("WARNING", f"[{symbol} {iv}m API] Live price unavailable before chase {chase+1}. Aborting remaining chase.")
-                        if filled_so_far > 0:
+                        if filled_so_far >= (0.95 * raw_qty):
                             bybit_success = True
                         break
                     # Immediate Trigger Invariant check (Finding #55)
                     if (ml_trend == "Bullish" and c_mid <= stop_loss_price) or (ml_trend == "Bearish" and c_mid >= stop_loss_price):
                         log_event("WARNING", f"[{symbol} {iv}m API] Live price ({c_mid:.2f}) breached stop ({stop_loss_price:.2f}) before chase {chase+1}. Aborting chase.")
-                        if filled_so_far > 0:
+                        if filled_so_far >= (0.95 * raw_qty):
                             bybit_success = True
                         break
                     # Adverse drift check (Finding #55)
                     if abs(c_mid - entry_price) > max(0.25 * atr_dollars, entry_price * 0.0025):
                         log_event("WARNING", f"[{symbol} {iv}m API] Live price drifted adversely ({c_mid:.2f} vs entry {entry_price:.2f}) before chase {chase+1}. Aborting chase.")
-                        if filled_so_far > 0:
+                        if filled_so_far >= (0.95 * raw_qty):
                             bybit_success = True
                         break
 
@@ -4996,7 +5025,7 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 min_q, step_q = _step_res if isinstance(_step_res, (tuple, list)) else (float(_step_res), float(_step_res))
                 floored_remaining = math.floor(remaining_qty / step_q + 1e-9) * step_q if step_q > 0 else remaining_qty
                 if floored_remaining < min_q:
-                    if filled_so_far > 0:
+                    if filled_so_far >= (0.95 * raw_qty):
                         bybit_success = True
                     break
                 chase_qty_str = format_bybit_qty(symbol, floored_remaining)
@@ -5009,6 +5038,15 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                     sl=stop_loss_price, tp=take_profit_price, post_only=True,
                     order_link_id=chase_order_link_id
                 )
+                if journal_rec is not None:
+                    try:
+                        journal_rec.order_payload_json = json.dumps({
+                            "symbol": symbol, "side": side, "qty": str(chase_qty_str),
+                            "price": limit_entry_price, "orderLinkId": chase_order_link_id
+                        })
+                        journal_rec.venue_response_json = json.dumps(order_res)
+                    except Exception as _ex_pj:
+                        log_event("WARNING", f"Error serializing order payload for journal: {_ex_pj}")
                 
                 if order_res.get("retCode") == 0:
                     bybit_order_id = order_res.get("result", {}).get("orderId")
@@ -5248,12 +5286,23 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                                             cancel_bybit_order(symbol, r_oid)
                                 except Exception as _rec_err:
                                     log_event("WARNING", f"[{symbol} {iv}m API] IOC reconciliation error: {_rec_err}")
-                                if filled_so_far > 0:
+                                if filled_so_far >= (0.95 * raw_qty):
                                     actual_qty = filled_so_far
                                     entry_price = weighted_sum_px / max(1e-9, filled_so_far)
                                     bybit_success = True
+                                elif filled_so_far > 0:
+                                    actual_qty = filled_so_far
+                                    entry_price = weighted_sum_px / max(1e-9, filled_so_far)
+                                    bybit_success = False
                                 else:
                                     bybit_success = False
+
+            # Finding #24: Sweep all chase order IDs on exit to cancel any resting orders
+            for chk_oid in list(chase_order_ids):
+                try:
+                    cancel_bybit_order(symbol, chk_oid)
+                except Exception as _cl_ex:
+                    log_event("WARNING", f"Error sweeping chase order {chk_oid}: {_cl_ex}")
                         
         min_fill_pct = getattr(config, "MIN_ACCEPTABLE_FILL_PCT", 0.60)
         if raw_qty > 0 and actual_qty > 0:
@@ -5778,6 +5827,13 @@ def main():
 
                 min_pct_floor = risk_engine.auto_stop_floor.get_floor(active_symbol, database_module=database, interval=str(iv)) if hasattr(risk_engine, 'auto_stop_floor') else volatility_clusterer.get_symbol_break_even_floor(active_symbol)
                 be_mult = mfe_be_trigger.get_trigger_multiple(active_symbol, timeframe=str(iv))
+                # Finding #19: Coordinate BE trigger distance with champion policy regime threshold
+                regime_for_be = active_trade.get("entry_regime") or bot_state.get(f"regime_{active_symbol}_{iv}", bot_state.get(f"regime_{iv}", "RANGING"))
+                reg_key_be = exit_policy_engine._resolve_regime_key(str(regime_for_be), float(bot_state.get(f"adx_{active_symbol}_{iv}", 20.0)))
+                policy_params_be = exit_policy_engine.active_policy.get(reg_key_be, {}) if hasattr(exit_policy_engine, "active_policy") and exit_policy_engine.active_policy else {}
+                policy_be_mult = float(policy_params_be.get("be_trigger_atr_mult", 0.0))
+                if policy_be_mult > 0:
+                    be_mult = max(be_mult, policy_be_mult)
                 trade_leverage = float(active_trade.get("leverage", 1.0))
                 required_be_dist = compute_be_trigger_distance(atr_dollars, trade_leverage, iv, be_mult, entry_price, min_pct_floor)
 
@@ -5862,7 +5918,9 @@ def main():
                 half_closed = active_trade.get("half_closed", False)
                 trigger_scale_out = False
                 if not half_closed:
-                    if active_trade.get("trade_id") in rebal_scale_set:
+                    if active_trade.get("scale_out_triggered"):
+                        trigger_scale_out = True
+                    elif active_trade.get("trade_id") in rebal_scale_set:
                         trigger_scale_out = True
                         print(f"[{active_symbol} {iv}m Portfolio Rebalance] Scale-out triggered by Portfolio Utility Optimizer.")
                     elif TRADE_MODE != "simulation":
@@ -6676,6 +6734,14 @@ def main():
                 else:
                     updated_trades.append(active_trade)
             with active_trades_lock:
+                # Finding #25: Merge with any concurrent manual trades added while the exit loop ran
+                current_active_trades = bot_state.get(active_trade_key, [])
+                if isinstance(current_active_trades, list):
+                    evaluated_ids = {t.get("trade_id") or f"{t.get('symbol')}_{t.get('entry_time')}" for t in active_trades_list}
+                    for cat in current_active_trades:
+                        cat_id = cat.get("trade_id") or f"{cat.get('symbol')}_{cat.get('entry_time')}"
+                        if cat_id not in evaluated_ids:
+                            updated_trades.append(cat)
                 bot_state[active_trade_key] = updated_trades
                 try:
                     import database
@@ -8337,7 +8403,10 @@ def main():
                                                     log_event("INFO", f"[{symbol} {iv}m] [Shadow Expectancy Gate] Negative Historical EV ({hist_ev*100:+.2f}%) over {len(interval_closed)} trades — would block in active mode.")
                                                     bot_state[f"shadow_expectancy_block_{symbol}_{iv}"] = True
                                 except Exception as ex_exp:
-                                    log_event("DEBUG", f"Expectancy gate check notice for {symbol} {iv}m: {ex_exp}")
+                                    log_event("WARNING", f"Expectancy gate check error for {symbol} {iv}m: {ex_exp}")
+                                    if exp_mode == "active":
+                                        exp_gate_blocked = True
+                                        exp_gate_msg = f"Expectancy check DB error (Fail-Closed): {ex_exp}"
 
                             # P3: Correlated Portfolio Cluster Exposure Guard
                             cluster_blocked = False
@@ -8622,6 +8691,8 @@ def main():
                                         portfolio_heat = min(1.0, total_active_size / max(1.0, current_bal))
                                         mhi_val = float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 70.0)))
                                         rec.mhi_score = float(mhi_val)
+                                        th_recs = bot_state.get("trade_history", [])
+                                        df_th = pd.DataFrame(th_recs) if th_recs else df_completed
                                         budget_res = risk_engine.joint_risk_budget_allocator.allocate_risk_budget(
                                             symbol=symbol,
                                             entry_price=entry_price,
@@ -8632,7 +8703,9 @@ def main():
                                             total_equity=current_bal,
                                             portfolio_heat=portfolio_heat,
                                             mhi_score=mhi_val,
-                                            df_completed=df_completed,
+                                            df_completed=df_th,
+                                            trade_history=th_recs,
+                                            interval=str(iv),
                                             mcc_val=_mcc_val,
                                             stop_distance=abs(entry_price - stop_loss_price),
                                             target_distance=abs(entry_price - take_profit_price)
@@ -9260,6 +9333,7 @@ def main():
                                                             wallet_exceeded = True
                                                         else:
                                                             log_event("INFO", f"[{symbol} {iv}m Terminal Risk Guard] Clamped risk from ${terminal_risk_usd:.2f} to ${max_terminal_risk_usd:.2f} (3% hard cap). Qty: {qty_str} -> {c_qty_str}")
+                                                            qty_val = c_qty_val
                                                             raw_qty = c_qty_val
                                                             qty_str = c_qty_str
                                                             position_size_usd = (raw_qty * entry_price) / max(1.0, leverage_val)
@@ -9327,7 +9401,7 @@ def main():
                                                             wallet_exceeded = True
                                                             bybit_success = False
                                                         else:
-                                                            raw_qty = qty_val
+                                                            raw_qty = float(qty_str) if qty_str else qty_val
                                                             actual_qty = raw_qty
                                                             bybit_success = True
                                                             bybit_order_id = None
@@ -9537,10 +9611,17 @@ def main():
                             rec.round_trip_cost_bp = float(cost_bps)
                         if 'mhi_val' in locals() and mhi_val is not None and rec.mhi_score is None:
                             rec.mhi_score = float(mhi_val)
-                        if 'position_size_usd' in locals() and position_size_usd is not None and rec.position_size_usd is None:
-                            rec.position_size_usd = float(position_size_usd)
-                        if 'leverage_val' in locals() and leverage_val is not None and rec.leverage is None:
-                            rec.leverage = float(leverage_val)
+                        # Finding #29: Intended size and leverage recorded even on pre-sizing rejections
+                        if rec.position_size_usd is None:
+                            if 'position_size_usd' in locals() and position_size_usd is not None:
+                                rec.position_size_usd = float(position_size_usd)
+                            else:
+                                rec.position_size_usd = float(round(current_bal * getattr(config, "RISK_PER_TRADE_PCT", 0.01), 2))
+                        if rec.leverage is None:
+                            if 'leverage_val' in locals() and leverage_val is not None:
+                                rec.leverage = float(leverage_val)
+                            else:
+                                rec.leverage = 1.0
                         rec.snapshot(
                             status_msg=status_msg,
                             expected_value=rec.expected_value,
@@ -9560,7 +9641,7 @@ def main():
                                 rec.outcome = "SKIPPED"
                             elif rec.outcome == "APPROVED":
                                 rec.outcome = "EXECUTED" if placed else "SKIPPED"
-                            elif rec.outcome == "ERROR" and status_msg in ("Traded", ""):
+                            elif rec.outcome == "ERROR":
                                 pass
                             else:
                                 rec.outcome = "SKIPPED"

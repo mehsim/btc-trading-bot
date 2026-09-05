@@ -146,8 +146,11 @@ def compute_conservative_kelly(
     realized_wr = None
     p_hat = float(np.clip(calibrated_confidence, 0.01, 0.99))
     if trade_history and len(trade_history) >= 10:
-        win_count = sum(1 for t in trade_history if float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or t.get("success"))
-        realized_wr = float(win_count) / float(len(trade_history))
+        # Finding #20: Prefer timeframe-specific empirical trades if >= 10 records exist
+        tf_trades = [t for t in trade_history if str(t.get("interval", "")).replace("m", "") == str(interval).replace("m", "")]
+        eval_trades = tf_trades if len(tf_trades) >= 10 else trade_history
+        win_count = sum(1 for t in eval_trades if float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or t.get("success"))
+        realized_wr = float(win_count) / float(len(eval_trades))
         p_hat = min(p_hat, realized_wr)
         # Finding #38: Geometry gate - if expected win rate cannot clear order geometry break-even, fail closed
         if min(float(calibrated_confidence), realized_wr) <= geom_p_star:
@@ -730,7 +733,8 @@ class JointRiskBudgetAllocator:
         mcc_val: Optional[float] = None,
         stop_distance: Optional[float] = None,
         target_distance: Optional[float] = None,
-        interval: Optional[str] = None
+        interval: Optional[str] = None,
+        trade_history: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Jointly optimizes (stop_distance, target_distance, position_size, capital_at_risk, expected_utility).
@@ -772,21 +776,10 @@ class JointRiskBudgetAllocator:
             target_dist = max(raw_target_dist, entry_price * 0.008) # Minimum 0.8% target floor
         target_distance = target_dist
 
-        # 4. MHI-Tied Fractional Kelly Sizing
+        # Hard Guard against saturated portfolio heat or degraded market health index (Finding #99)
         max_kelly_frac = self.get_mhi_max_kelly(mhi_score)
-        if max_kelly_frac <= 0.0 or max_available_risk_usd <= 0.0:
+        if portfolio_heat >= 1.0 or max_kelly_frac <= 0.0 or avail_budget_factor <= 0.0:
             return {
-                "symbol": symbol,
-                "stop_distance": stop_distance,
-                "target_distance": target_distance,
-                "risk_per_trade": 0.0,
-                "position_size": 0.0,
-                "expected_edge": 0.0,
-                "expected_utility": 0.0,
-                "capital_at_risk": 0.0,
-                "kelly_fraction": 0.0,
-                "portfolio_heat": portfolio_heat,
-                "liquidity_cap_applied": False,
                 "execution_permitted": False,
                 "reason": f"Halted by MHI ({mhi_score:.1f}) or exhausted portfolio heat ({portfolio_heat*100:.1f}%)"
             }
@@ -797,13 +790,20 @@ class JointRiskBudgetAllocator:
         b_ratio = eff_target_dist / stop_distance if stop_distance > 0 else 1.5
         p_win = max(0.01, min(0.99, calibrated_confidence))
 
-        # Finding #71: Align win rate with realized empirical outcomes
+        # Finding #71 & #20: Align win rate with realized empirical outcomes
         realized_wr = None
-        if df_completed is not None and len(df_completed) >= 10:
+        if df_completed is not None and hasattr(df_completed, "columns") and len(df_completed) >= 10:
             if "pnl_usd" in df_completed.columns:
                 realized_wr = float((df_completed["pnl_usd"] > 0).mean())
             elif "success" in df_completed.columns:
                 realized_wr = float((df_completed["success"] > 0).mean())
+        if realized_wr is None and trade_history and len(trade_history) >= 10:
+            # Check timeframe-specific subset if available
+            tf_th = [t for t in trade_history if str(t.get("interval", "")).replace("m", "") == str(interval).replace("m", "")] if interval else []
+            src_th = tf_th if len(tf_th) >= 10 else trade_history
+            pnl_wins = [float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or bool(t.get("success")) for t in src_th]
+            if len(pnl_wins) >= 10:
+                realized_wr = float(sum(pnl_wins) / len(pnl_wins))
                 
         if realized_wr is not None:
             p_win = min(p_win, realized_wr)

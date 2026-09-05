@@ -287,8 +287,12 @@ def calculate_replay_statistics(
         try:
             mins = float(str(interval).lower().replace("m", "").replace("h", "")) * (60.0 if "h" in str(interval).lower() else 1.0)
             candles_per_year = (365.25 * 24.0 * 60.0) / max(1.0, mins)
-            ann_factor = float(np.sqrt(candles_per_year))
-            annualized_return = ending_return * min(52.0, (candles_per_year / max(1.0, float(total_trades))))
+            # Estimate calendar duration from trade count and interval instead of assuming 1 trade/candle
+            est_days = max(1.0, (total_trades * mins) / (24.0 * 60.0))
+            est_years = est_days / 365.25
+            est_annual_trades = float(total_trades) / max(1e-4, est_years)
+            ann_factor = float(np.sqrt(min(candles_per_year, max(1.0, est_annual_trades))))
+            annualized_return = ending_return / max(1e-4, est_years)
         except Exception:
             ann_factor = 1.0
             annualized_return = ending_return
@@ -296,6 +300,7 @@ def calculate_replay_statistics(
         ann_factor = 1.0
         annualized_return = ending_return
 
+    t_stat = (pct_mean / max(1e-8, pct_std)) * float(np.sqrt(total_trades)) if (pct_std > 0 and total_trades > 0) else 0.0
     sharpe_ratio = (pct_mean / max(1e-8, pct_std)) * ann_factor if pct_std > 0 else 0.0
     sortino_ratio = (pct_mean / max(1e-8, pct_downside_std)) * ann_factor if pct_downside_std > 0 else (sharpe_ratio if pct_mean > 0 else 0.0)
 
@@ -316,6 +321,7 @@ def calculate_replay_statistics(
         "profit_factor": float(profit_factor),
         "expectancy_r": float(expectancy_r),
         "sharpe_ratio": float(sharpe_ratio),
+        "t_stat": float(t_stat),
         "sortino_ratio": float(sortino_ratio),
         "calmar_ratio": float(calmar_ratio),
         "recovery_factor": float(recovery_factor),

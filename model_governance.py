@@ -116,7 +116,7 @@ def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str)
     h_bal = extract_metric(manifest, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
     _ci = manifest.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(manifest.get("cv_metrics"), dict) else None
     h_ci_low = _ci[0] if isinstance(_ci, (list, tuple)) and len(_ci) >= 1 else None
-    is_prom = manifest.get("promoted", True)
+    is_prom = manifest.get("promoted")
 
     if h_mcc is None or h_mcc < min_holdout_mcc:
         return False, f"Holdout MCC ({h_mcc}) below governance floor ({min_holdout_mcc:.4f}) or missing"
@@ -127,7 +127,7 @@ def validate_manifest_governance_floors(manifest: Dict[str, Any], interval: str)
     if h_ci_low is not None and h_ci_low < -0.05:
         return False, f"Holdout MCC CI95 lower bound ({h_ci_low:.4f}) < -0.05"
 
-    if is_prom is False:
-        return False, "Manifest explicitly marked promoted=False"
+    if is_prom is not True:
+        return False, "Manifest missing or explicitly marked promoted=False"
 
     return True, ""

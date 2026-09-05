@@ -1169,10 +1169,8 @@ def is_feature_contract_compatible(
     and feature_names (order-sensitive) against the challenger feature list.
     Uses the RFECV-selected feature list as the challenger source of truth.
     """
-    try:
-        verify_manifest_hmac_signature(champion_manifest)
-    except Exception as ex_sig:
-        return False, f"Manifest HMAC verification failed: {ex_sig}"
+    if not verify_manifest_hmac_signature(champion_manifest):
+        raise RuntimeError("Champion manifest HMAC verification failed: invalid or tampered signature.")
 
     from config import SUPPORTED_MANIFEST_SCHEMA_VERSION
     schema_v = champion_manifest.get("manifest_schema_version", 1)
@@ -1181,25 +1179,31 @@ def is_feature_contract_compatible(
 
     champ_count = champion_manifest.get("feature_count")
     champ_hash  = champion_manifest.get("feature_contract_hash")
-    champ_names = champion_manifest.get("feature_names", [])
+    champ_names = champion_manifest.get("feature_names")
+
+    if champ_count is None or champ_hash is None or not champ_names:
+        return False, "Champion manifest missing required feature contract fields (feature_count, feature_contract_hash, or feature_names)"
 
     chal_count = len(challenger_feature_names)
     chal_hash  = hashlib.sha256(
         ",".join(challenger_feature_names).encode("utf-8")
     ).hexdigest()[:12]
 
-    if champ_count is not None and champ_count != chal_count:
+    if champ_count != chal_count:
         return False, (
             f"Feature count changed: champion={champ_count}, challenger={chal_count}"
         )
 
-    if champ_hash is not None and champ_hash != chal_hash:
+    if champ_hash != chal_hash:
         added   = [f for f in challenger_feature_names if f not in champ_names]
         removed = [f for f in champ_names if f not in challenger_feature_names]
         diff    = f" | Added: {added} | Removed: {removed}" if (added or removed) else ""
         return False, (
             f"Feature contract hash changed: champion={champ_hash}, challenger={chal_hash}{diff}"
         )
+
+    if list(champ_names) != list(challenger_feature_names):
+        return False, "Feature names or order mismatch between champion and challenger"
 
     return True, "compatible"
 

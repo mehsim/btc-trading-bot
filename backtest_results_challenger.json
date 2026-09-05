@@ -81,6 +81,7 @@
   ],
   "walk_forward_validation": {
     "status": "success",
+    "evaluation_mode": "refitted_walk_forward",
     "all_windows_refitted": true,
     "window_count": 5,
     "total_trades": 142,

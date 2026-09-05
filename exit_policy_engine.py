@@ -191,12 +191,12 @@ class ExitPolicyEngine:
     @staticmethod
     def _resolve_regime_key(regime: str, adx_val: float = 15.0) -> str:
         r = str(regime).upper()
+        if "RANG" in r or "CHOP" in r:
+            return "RANGING"
         if "STRONG" in r or ("HIGH VOL" in r and "TREND" in r) or (("TREND" in r) and float(adx_val) >= 30.0):
             return "STRONG_TREND"
         if "TREND" in r or "MODERATE" in r or float(adx_val) >= 25.0:
             return "MODERATE_TREND"
-        if "RANG" in r:
-            return "RANGING"
         from logger import log_event
         log_event("WARNING", f"[Exit Policy Engine] Unrecognized regime '{regime}' (ADX={adx_val:.1f}). Falling back to RANGING.")
         return "RANGING"

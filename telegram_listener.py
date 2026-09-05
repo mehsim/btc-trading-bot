@@ -314,9 +314,17 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
         position_size_usd = 2.0
         rec.position_size_usd = position_size_usd
 
-        # Evaluate pre-trade risk checklist and concurrent position limits
+        # Evaluate pre-trade risk checklist and concurrent position limits under active_trades_lock
         import config
-        active_trades_list = [t for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in (bot_state.get(f"active_trade_{tf_k}", []) if bot_state else [])]
+        if active_trades_lock is None:
+            try:
+                import main
+                active_trades_lock = getattr(main, "active_trades_lock", None)
+            except Exception as _ex_l:
+                log_event("WARNING", f"telegram_listener notice: {_ex_l}")
+        chk_lock = active_trades_lock if active_trades_lock is not None else (bot_state_lock if bot_state_lock else threading.Lock())
+        with chk_lock:
+            active_trades_list = [t for tf_k in ["15m", "30m", "1h", "2h", "4h", "6h"] for t in (bot_state.get(f"active_trade_{tf_k}", []) if bot_state else [])]
         max_concurrent = getattr(config, "MAX_CONCURRENT_POSITIONS", 3)
         if len(active_trades_list) >= max_concurrent:
             rec.outcome = "REJECTED"
@@ -406,6 +414,12 @@ def execute_manual_trade(symbol, interval, direction, entry_price=None, stop_los
                     "atr_dollars": atr_dollars
                 }
 
+                if active_trades_lock is None:
+                    try:
+                        import main
+                        active_trades_lock = getattr(main, "active_trades_lock", None)
+                    except Exception as _ex_l2:
+                        log_event("WARNING", f"telegram_listener notice: {_ex_l2}")
                 lock_to_use = active_trades_lock if active_trades_lock is not None else (bot_state_lock if bot_state_lock else threading.Lock())
                 with lock_to_use:
                     key = f"active_trade_{tf_key}"

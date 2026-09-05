@@ -358,8 +358,8 @@ MONTE_CARLO_MAX_STRESS_LOSS_PCT = 0.25     # 25% max stress loss equity budget
 MONTE_CARLO_SHOCK_PCT = -0.30              # 30% market index shock parameter
 
 # v2 & v3 Institutional Quant Engine Feature Flags (disabled / shadow / active)
-EXIT_QUALITY_MODE = "shadow"          # "disabled", "shadow", "active"
-EXPECTANCY_GATE_MODE = "shadow"       # "disabled", "shadow", "active"
+EXIT_QUALITY_MODE = os.getenv("EXIT_QUALITY_MODE", "active")          # "disabled", "shadow", "active"
+EXPECTANCY_GATE_MODE = os.getenv("EXPECTANCY_GATE_MODE", "active")       # "disabled", "shadow", "active"
 SHADOW_EVALUATION_MODE = "active"     # "disabled", "shadow", "active"
 
 ENABLE_REGIME_HYSTERESIS = True

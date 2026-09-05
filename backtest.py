@@ -1024,8 +1024,8 @@ def run_backtest():
                     return_trades=True
                 )
             except Exception as ex_tr:
-                log_event("WARNING", f"Window model refit warning: {ex_tr}")
-                return None
+                log_event("ERROR", f"[WalkForward Refit Failure] Window model refit failed: {ex_tr}")
+                raise RuntimeError(f"Walk-forward window model refit failed: {ex_tr}") from ex_tr
 
         wf_summary = run_walk_forward_backtest(df, trade_simulator_fn=sim_fn, train_fn=train_window_models)
         if wf_summary.get("status") == "success":
