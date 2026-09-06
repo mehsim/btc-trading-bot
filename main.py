@@ -742,6 +742,9 @@ economic_calendar_lock = threading.Lock()
 
 # Re-entrant lock for thread-safe access to bot_state and file IO
 bot_state_lock = threading.RLock()
+# Throttle state for skipping feature builds on intervals with no servable model slot.
+_dead_slot_last_fetch = {}
+DEAD_SLOT_FETCH_INTERVAL_SEC = 300.0
 
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
 
@@ -7058,6 +7061,41 @@ def main():
         
         htf_cache = {}
         fetched_data = {}
+
+        # Drop pairs whose ML slots are all refused. fetch_single_history builds the full ~180
+        # feature matrix per pair; with every slot currently denied that work is discarded at the
+        # _fully_denied abstain a few hundred lines below, and it is the dominant CPU cost (measured
+        # 170% sustained on 2 vCPUs while placing zero orders). Guarded three ways so behaviour is
+        # unchanged wherever the data is actually used: an interval is only dropped when it has no
+        # servable slot, has no open position, and was evaluated within the throttle window.
+        if check_queue:
+            try:
+                _now_q = time.time()
+                _kept = []
+                for _sym_q, _iv_q in check_queue:
+                    _tf_q = models_by_interval.get(_iv_q, {}) or {}
+                    _dead = bool(_tf_q.get("_fully_denied"))
+                    if not _dead:
+                        _kept.append((_sym_q, _iv_q)); continue
+                    _tfk_q = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}.get(_iv_q, f"{_iv_q}m")
+                    _has_pos = any(
+                        str(_t_q.get("symbol")) == str(_sym_q)
+                        for _t_q in (bot_state.get(f"active_trade_{_tfk_q}", []) or [])
+                    )
+                    if _has_pos:
+                        _kept.append((_sym_q, _iv_q)); continue
+                    _lastq = _dead_slot_last_fetch.get((_sym_q, _iv_q), 0.0)
+                    if (_now_q - _lastq) >= DEAD_SLOT_FETCH_INTERVAL_SEC:
+                        _dead_slot_last_fetch[(_sym_q, _iv_q)] = _now_q
+                        _kept.append((_sym_q, _iv_q))
+                if len(_kept) != len(check_queue):
+                    log_event("INFO", f"[Parallel Fetch] Throttled {len(check_queue) - len(_kept)} of {len(check_queue)} pairs with no servable model slot and no open position.")
+                check_queue = _kept
+            except Exception as _q_err:
+                # Never let the optimisation change what is evaluated: on any error keep the
+                # original queue intact.
+                log_event("WARNING", f"[Parallel Fetch] Dead-slot throttle skipped: {_q_err}")
+
         if check_queue:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             
