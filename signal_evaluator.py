@@ -92,7 +92,12 @@ class SignalEvaluator:
         # Throttle for intervals whose ML slots are all refused: the rule-based
         # fallback tape still refreshes, just at 5m rather than 60s.
         self._dead_slot_last_eval = {}
-        self._DEAD_SLOT_MIN_INTERVAL_SEC = 300.0
+        # 900s, not 300s. The only cross-module consumer of the dead-slot fallback tape is
+        # get_hierarchical_macro_bias (line ~44), which reads the 4h entry -- a 4-hour macro
+        # bias does not need a 5-minute refresh. At 300s this loop was still doing 45 full
+        # feature builds every 5 minutes and measured 271s of 662s process CPU (41%), the
+        # single largest consumer once the main-loop fetch was throttled.
+        self._DEAD_SLOT_MIN_INTERVAL_SEC = 900.0
         self.bot_state = bot_state
         self.state_lock = threading.Lock()
         self.models_by_interval = OrderedDict()
