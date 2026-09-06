@@ -744,6 +744,49 @@ economic_calendar_lock = threading.Lock()
 bot_state_lock = threading.RLock()
 # Throttle state for skipping feature builds on intervals with no servable model slot.
 _dead_slot_last_fetch = {}
+
+_slot_refusal_cache = {}
+_SLOT_REFUSAL_TTL_SEC = 60.0
+
+
+def _interval_slots_all_refused(interval):
+    """
+    True when neither regime variant for `interval` could serve, using only manifest-level
+    checks the serving path already applies (denylist, governance floors, MDE degeneracy).
+    Never reports refused on uncertainty: any error returns False so the pair is fetched
+    and the full downstream path decides.
+    """
+    _now = time.time()
+    _c = _slot_refusal_cache.get(interval)
+    if _c is not None and (_now - _c[1]) < _SLOT_REFUSAL_TTL_SEC:
+        return _c[0]
+    refused = True
+    try:
+        from ensemble import is_model_slot_denied
+        import model_governance
+        for _reg in ("trending", "ranging"):
+            if is_model_slot_denied(f"{_reg}_trend_{interval}") or is_model_slot_denied(f"{_reg}_price_{interval}"):
+                continue
+            _man = f"ensemble_{_reg}_trend_{interval}_manifest.json"
+            if not os.path.exists(_man):
+                continue
+            with open(_man, "r") as _mf:
+                _md = json.load(_mf)
+            _ok, _ = model_governance.validate_manifest_governance_floors(_md, interval)
+            if not _ok:
+                continue
+            _degen, _ = config.is_manifest_degenerate(_md)
+            if _degen:
+                continue
+            refused = False
+            break
+    except Exception as _sr_err:
+        log_event("WARNING", f"[Slot Refusal] Pre-check inconclusive for {interval}m: {_sr_err}")
+        refused = False
+    _slot_refusal_cache[interval] = (refused, _now)
+    return refused
+
+
 DEAD_SLOT_FETCH_INTERVAL_SEC = 300.0
 
 HISTORY_FILE = "/data/dashboard_history.json" if os.path.exists("/data") and os.access("/data", os.W_OK) else "dashboard_history.json"
@@ -7075,6 +7118,12 @@ def main():
                 for _sym_q, _iv_q in check_queue:
                     _tf_q = models_by_interval.get(_iv_q, {}) or {}
                     _dead = bool(_tf_q.get("_fully_denied"))
+                    if not _dead:
+                        # _fully_denied covers only the hard denylist. A slot whose manifest fails
+                        # the governance floors or is degenerate under its own 80% MDE is refused at
+                        # serve time just as firmly, so treat the interval as dead when BOTH regimes
+                        # fail. Same manifest-only checks the serving path applies -- no data needed.
+                        _dead = _interval_slots_all_refused(_iv_q)
                     if not _dead:
                         _kept.append((_sym_q, _iv_q)); continue
                     _tfk_q = {"15": "15m", "30": "30m", "60": "1h", "120": "2h", "240": "4h"}.get(_iv_q, f"{_iv_q}m")
