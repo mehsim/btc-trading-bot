@@ -1,3 +1,4 @@
+import time
 import pytest
 from collections.abc import Mapping, MutableMapping
 from state_manager import StateManager, state_manager
@@ -26,6 +27,7 @@ def test_state_manager_is_mutable_mapping():
 def test_evaluate_pre_trade_checklist_preserves_state_manager():
     """Verify evaluate_pre_trade_checklist accurately consumes StateManager singleton."""
     sm = StateManager()
+    sm["wallet_margin_info"] = {"total_equity": 1000.0, "used_margin": 0.0, "ts": time.time()}
     sm["live_balance"] = 500.0
     sm["peak_balance"] = 500.0
     sm["circuit_breaker_active"] = False
@@ -47,6 +49,7 @@ def test_evaluate_pre_trade_checklist_preserves_state_manager():
 def test_circuit_breaker_active_veto_with_state_manager():
     """Verify circuit_breaker_active veto fires when StateManager is passed."""
     sm = StateManager()
+    sm["wallet_margin_info"] = {"total_equity": 1000.0, "used_margin": 0.0, "ts": time.time()}
     sm["live_balance"] = 500.0
     sm["circuit_breaker_active"] = True
 
@@ -67,6 +70,7 @@ def test_circuit_breaker_active_veto_with_state_manager():
 def test_drawdown_halt_with_state_manager():
     """Verify 20%+ drawdown from peak in StateManager halts trading."""
     sm = StateManager()
+    sm["wallet_margin_info"] = {"total_equity": 1000.0, "used_margin": 0.0, "ts": time.time()}
     sm["live_balance"] = 60.0    # 70% drawdown from $200
     sm["peak_balance"] = 200.0
     sm["circuit_breaker_active"] = False
@@ -89,6 +93,7 @@ def test_drawdown_halt_with_state_manager():
 def test_missing_or_zero_equity_fails_closed():
     """Verify missing or zero equity fails closed."""
     sm = StateManager()
+    sm["wallet_margin_info"] = {"total_equity": 1000.0, "used_margin": 0.0, "ts": time.time()}
     sm["live_balance"] = 0.0
     sm["wallet_balance"] = 0.0
     sm["simulated_balance"] = 0.0

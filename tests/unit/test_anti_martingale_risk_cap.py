@@ -1,3 +1,4 @@
+import time
 from risk_engine import evaluate_pre_trade_checklist, calculate_anti_martingale_risk_multiplier
 
 
@@ -8,6 +9,7 @@ def test_anti_martingale_multiplier_does_not_exceed_risk_cap():
     """
     equity = 80.0
     bot_state = {
+        "wallet_margin_info": {"total_equity": equity, "used_margin": 0.0, "ts": time.time()},
         "live_balance": equity,
         "wallet_balance": equity,
         "peak_balance": equity,

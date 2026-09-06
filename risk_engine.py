@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple, Union
@@ -497,10 +498,16 @@ def check_wallet_margin_utilization(candidate_margin: float, margin_info: Any) -
         if total_equity <= 0.0:
             return False, "REJECTED: Total equity non-positive"
         new_used = used_margin + float(candidate_margin)
-        utilization_pct = (new_used / total_equity) * 100.0
-        max_allowed = float(getattr(config, "MAX_WALLET_MARGIN_UTILIZATION_PCT", 85.0))
-        if utilization_pct > max_allowed:
-            return False, f"REJECTED: Wallet margin utilization {utilization_pct:.1f}% exceeds max {max_allowed:.1f}%"
+        # MAX_WALLET_MARGIN_UTILIZATION_PCT is a FRACTION despite the _PCT suffix
+        # (risk_limits.HARD_MAX_WALLET_MARGIN_UTILIZATION_PCT = 0.90, and risk_limits.py:77
+        # multiplies by 100 to display it). Comparing a percentage against it rejected every
+        # trade above 0.9% utilisation. Work in fractions and tolerate either convention.
+        utilization = new_used / total_equity
+        max_allowed = float(getattr(config, "MAX_WALLET_MARGIN_UTILIZATION_PCT", 0.90))
+        if max_allowed > 1.0:
+            max_allowed = max_allowed / 100.0
+        if utilization > max_allowed:
+            return False, f"REJECTED: Wallet margin utilization {utilization * 100.0:.1f}% exceeds max {max_allowed * 100.0:.1f}%"
         return True, "APPROVED"
     except (ValueError, TypeError) as e:
         return False, f"REJECTED: Margin calculation error: {e}"
@@ -556,6 +563,29 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
 
         if equity is None or equity <= 0:
             return False, "REJECTED: Account equity is missing, zero or negative (Fail-Closed)", 0.0, 0.0
+
+        # Wallet margin-utilisation ceiling. check_wallet_margin_utilization existed but had zero
+        # production callers, so no margin cap was enforced anywhere on the order path. The snapshot
+        # is written from the venue wallet stream (main.py, private WS "wallet" topic) rather than
+        # reconstructed from local trade records, so positions opened outside the bot are counted.
+        # Absent or stale data rejects: a ceiling that silently does not apply is the defect itself.
+        _mi = bot_state.get("wallet_margin_info")
+        _mi_max_age = float(getattr(config, "WALLET_MARGIN_MAX_AGE_SEC", 900.0))
+        if not isinstance(_mi, dict):
+            return False, "REJECTED: Wallet margin snapshot unavailable (Fail-Closed)", 0.0, 0.0
+        try:
+            _mi_ts = float(_mi.get("ts", 0.0))
+        except (TypeError, ValueError):
+            _mi_ts = 0.0
+        _mi_age = time.time() - _mi_ts
+        if _mi_ts <= 0.0 or _mi_age > _mi_max_age:
+            return False, f"REJECTED: Wallet margin snapshot stale ({_mi_age:.0f}s > {_mi_max_age:.0f}s) (Fail-Closed)", 0.0, 0.0
+        _cand_margin = float(position_size_usd) if position_size_usd is not None else 0.0
+        if _cand_margin != _cand_margin or _cand_margin < 0.0:
+            return False, "REJECTED: Candidate margin is NaN or negative (Fail-Closed)", 0.0, 0.0
+        _mu_ok, _mu_reason = check_wallet_margin_utilization(_cand_margin, _mi)
+        if not _mu_ok:
+            return False, _mu_reason, 0.0, 0.0
 
         peak_equity = None
         raw_peak = bot_state.get("peak_balance")

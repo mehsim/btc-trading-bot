@@ -1,3 +1,4 @@
+import time
 import pytest
 import pandas as pd
 import numpy as np
@@ -60,7 +61,8 @@ def test_evaluate_pre_trade_checklist_leveraged_notional():
         "volume": np.full(50, 1000.0)
     }, index=dates)
     
-    bot_state = {"simulated_balance": 100.0, "wallet_balance": 100.0}
+    bot_state = {"simulated_balance": 100.0, "wallet_balance": 100.0,
+                 "wallet_margin_info": {"total_equity": 100.0, "used_margin": 0.0, "ts": time.time()}}
     pass_flag, msg, cap_size, lev = evaluate_pre_trade_checklist(
         symbol="BTCUSDT",
         position_size_usd=2.0,

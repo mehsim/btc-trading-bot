@@ -2937,6 +2937,24 @@ def on_private_message(ws, message):
         elif topic == "wallet":
             wallet_data = data.get("data", [])
             if wallet_data:
+                # Capture venue-reported margin so the wallet-utilisation ceiling has an
+                # authoritative source. Reconstructing used margin from local trade records
+                # misses any position opened outside the bot, so read it from the venue.
+                try:
+                    _acct = wallet_data[0]
+                    _te = float(_acct.get("totalEquity") or _acct.get("totalWalletBalance") or 0.0)
+                    _im = float(_acct.get("totalInitialMargin") or 0.0)
+                    if _te > 0.0:
+                        bot_state["wallet_margin_info"] = {
+                            "total_equity": _te,
+                            "used_margin": _im,
+                            "ts": time.time(),
+                        }
+                except (TypeError, ValueError) as _mi_err:
+                    # Leave the previous snapshot in place; staleness is enforced downstream by
+                    # evaluate_pre_trade_checklist, which rejects rather than skipping the check.
+                    log_event("WARNING", f"[Wallet Margin] Could not parse venue margin fields: {_mi_err}")
+
                 total_equity = wallet_data[0].get("totalEquity") or wallet_data[0].get("totalWalletBalance")
                 if total_equity:
                     val = float(total_equity)
@@ -4281,8 +4299,21 @@ def sync_active_positions_from_bybit():
                                     success = update_bybit_stop_loss(symbol, sl_val, t)
                                     if success:
                                         t["stop_loss"] = sl_val
+                                        t["sl_venue_synced"] = True
                                     else:
-                                        t["stop_loss"] = bybit_sl
+                                        # bybit_sl is 0.0 exactly when the venue has NO stop attached,
+                                        # and this branch is reached precisely because the stop was
+                                        # missing or invalid -- so adopting it recorded "no stop" and
+                                        # discarded the only protective level that had been computed.
+                                        # Retain the sanitized level for tracking and surface the fact
+                                        # that the venue is unprotected. Alert once per transition so a
+                                        # persistently failing push does not spam every sync pass.
+                                        _was_synced = t.get("sl_venue_synced", True)
+                                        t["stop_loss"] = sl_val
+                                        t["sl_venue_synced"] = False
+                                        if _was_synced is not False:
+                                            log_event("CRITICAL", f"[{symbol}] Venue stop-loss push FAILED. Position is UNPROTECTED on the exchange; retaining local stop {sl_val:.6f} for tracking only.")
+                                            send_telegram_alert(f"🚨 *UNPROTECTED POSITION* 🚨\n• *Symbol*: {symbol}\n• Venue stop-loss push failed\n• Exchange has NO stop attached\n• Local stop retained: `{sl_val:.6f}`")
                                 else:
                                     t["stop_loss"] = sl_val
                             
