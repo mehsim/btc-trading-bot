@@ -2735,6 +2735,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                     "regime_adx_exit":  float(REGIME_ADX_EXIT_BY_INTERVAL.get(str(interval), STRONG_TREND_ADX_EXIT)),
                 }
 
+                # Champion manifest must carry `promoted`; model_governance.validate_manifest_governance_floors
+                # rejects any manifest where it is not True, and previously only the challenger sidecar
+                # received the key, so every retrained champion was refused at load.
+                manifest_data["promoted"] = bool(should_save and can_promote)
                 manifest_data.pop("hmac_signature", None)
                 canonical_json = json.dumps(manifest_data, sort_keys=True, default=_json_safe).encode("utf-8")
                 manifest_data["hmac_signature"] = hmac.new(hmac_key, canonical_json, hashlib.sha256).hexdigest()

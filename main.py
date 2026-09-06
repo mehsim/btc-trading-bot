@@ -4369,7 +4369,7 @@ def sync_active_positions_from_bybit():
                                     t["lowest_price"] = min(t_lowest, c_lowest)
                                 
                                 # Do not retain trade if exit was already processed and position not open on Bybit
-                                if t.get("exit_processed", False) and symbol not in open_positions:
+                                if t.get("exit_processed", False) and t.get("symbol") not in open_positions:
                                     continue
                                 filtered_updated.append(t)
                             
