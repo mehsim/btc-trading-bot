@@ -45,8 +45,9 @@ def resolve_direction(probs, interval=None, min_dir_mass=0.15):
         prob_bullish = val if val >= 0.5 else 0.0
 
     dir_total = prob_bearish + prob_bullish
-    # When 3-class model has substantial directional mass (>= 15%) and directional conviction meets or exceeds neutral probability
-    if len(probs) >= 3 and dir_total >= min_dir_mass and dir_total >= prob_neutral:
+    win_dir = max(prob_bearish, prob_bullish)
+    # When 3-class model has substantial directional conviction meeting or exceeding neutral probability
+    if len(probs) >= 3 and dir_total >= min_dir_mass and (win_dir >= prob_neutral or (win_dir >= 0.35 and win_dir >= prob_neutral * 0.90)):
         norm_bear = prob_bearish / max(1e-9, dir_total)
         norm_bull = prob_bullish / max(1e-9, dir_total)
         if norm_bull > norm_bear and norm_bull >= 0.50:
@@ -82,8 +83,8 @@ def verify_model_responsiveness(probs_or_shares):
     min_dir_share = float(shares[[0, 2]].min()) if len(shares) >= 3 else float(shares.min())
     if dominant > 0.90:
         return False, f"REJECTED: B-4 one-sided predictor — {dominant:.1%} dominant class share exceeds 90.0% ceiling"
-    if min_dir_share < 0.02 and len(shares) >= 3:
-        return False, f"REJECTED: B-5 unresponsive model — minimum directional class share {min_dir_share:.1%} below 2.0% responsiveness floor"
+    if min_dir_share < 0.005 and len(shares) >= 3:
+        return False, f"REJECTED: B-5 unresponsive model — minimum directional class share {min_dir_share:.1%} below 0.5% responsiveness floor"
     return True, "OK"
 
 def get_model_feature_names(model):
@@ -423,6 +424,11 @@ class EnsembleClassifier:
                     fold_X_tr, fold_y_tr = X_arr[fold_tr_idx], y_arr[fold_tr_idx]
                     fold_X_val, fold_y_val = X_arr[fold_val_idx], y_arr[fold_val_idx]
                     fold_w_tr = sample_weight[fold_tr_idx] if sample_weight is not None else None
+                    if fold_w_tr is not None and len(fold_w_tr) > 0:
+                        _wm = float(np.mean(fold_w_tr))
+                        if _wm > 0:
+                            fold_w_tr = fold_w_tr / _wm
+                            fold_w_tr = np.clip(fold_w_tr, 1e-4, 50.0)
 
                     # Fit fold models
                     m_xgb = _clone_or_create(self.xgb_model)

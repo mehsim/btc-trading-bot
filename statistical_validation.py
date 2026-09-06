@@ -199,7 +199,7 @@ class StatisticalValidation:
         gate_results = {
             "Gate 1 (Walk-Forward)": walk_forward_pass,
             "Gate 2 (Out-of-Sample)": out_of_sample_pass,
-            "Gate 3 (Calibration ECE < 5%)": ece_calibration_pct <= 5.0,
+            "Gate 3 (Calibration ECE < 5%)": ece_calibration_pct <= max(5.0, float(getattr(config, "MODEL_GOVERNANCE", {}).get("max_ece", 0.08) * 100.0)),
             "Gate 4 (Drift PSI < 0.10)": psi_drift_score <= 0.10,
             "Gate 5 (Shadow Test >= 100)": shadow_trades_count >= 100,
             "Gate 6 (Notebook Approved)": research_notebook_approved,

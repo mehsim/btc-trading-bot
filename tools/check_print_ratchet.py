@@ -37,7 +37,7 @@ def _save_baseline(count: int) -> None:
 # Directories and files to EXCLUDE from the print ratchet (offline scripts where print is expected)
 EXCLUDE_DIRS = {
     ".venv", "venv", "build", "dist", ".git", ".pytest_cache",
-    "node_modules", "mlartifacts", "tools", "scripts", "tests", "archive"
+    "node_modules", "mlartifacts", "tools", "scripts", "tests", "archive", "scratch"
 }
 
 EXCLUDE_FILES = {

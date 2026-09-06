@@ -1,1 +1,1 @@
-["ADX", "hour_cos", "fear_greed", "fear_greed_lag2", "hour_sin", "lead_lag_diff_4h_lag1", "btc_rsi", "fear_greed_lag1", "close_to_VWAP", "day_of_week_sin", "ADX_pos", "day_of_week_cos", "volatility_gk_lag1", "close_to_Kalman", "ATR_norm"]
+["fear_greed", "htf_4h_ema_alignment", "ADX_neg", "ADX", "day_of_week_cos", "close_to_VWAP", "RSI", "RSI_24", "BB_width", "btc_rsi", "ADX_pos", "hour_cos", "hour_sin", "ADX_z", "day_of_week_sin", "close_to_EMA200", "RSI_z", "volatility_gk", "funding_zscore", "close_to_EMA50", "ATR_norm", "close_to_Kalman"]

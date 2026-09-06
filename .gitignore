@@ -58,3 +58,4 @@ governance_audit_trail.json*
 data/
 models_backup_*/
 circuit_breaker_state.json
+scratch/

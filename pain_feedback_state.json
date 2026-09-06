@@ -4,8 +4,8 @@
     "interval": "15",
     "base_floor": 0.006,
     "adjusted_floor": 0.010400000000000001,
-    "applied_at": "2026-09-03T13:24:40.790338+00:00",
+    "applied_at": "2026-09-06T21:42:46.213165+00:00",
     "decay_days": 7,
-    "reason": "Pain trade (15m): stopped at 0.80%, reversed to TP"
+    "reason": "Pain trade (15m, n=2): stopped at 0.80%, reversed to TP"
   }
 }

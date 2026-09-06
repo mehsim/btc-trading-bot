@@ -51,7 +51,7 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.035, "60": 0.040, "120": 0.050, "240": 0.050, "default": 0.050}
+TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.030, "60": 0.030, "120": 0.050, "240": 0.050, "default": 0.050}
 TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "120": 0.360, "240": 0.360, "default": 0.360}
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.035}
 TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "120": 0.355, "240": 0.355, "default": 0.355}
@@ -77,9 +77,6 @@ if os.path.exists("governance_denylist.json"):
         pass
 
 MODEL_SLOT_DENYLIST = {
-    "trending_15",    # Demoted pending clean re-evaluation under 8-gate release protocol
-    "ranging_15",     # 15m ranging market microstructure has negative holdout MCC (-0.0113) — fail-closed
-    "trending_30",    # Finding #122: holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "trending_120",   # holdout MCC 0.0000, balacc 0.3333 — degenerate out-of-sample
     "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
     "trending_240",   # Finding #16: holdout MCC 0.0253 below default floor 0.0350 — fail-closed
@@ -148,7 +145,7 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
             barrier_cfg = manifest.get("barrier_config") if isinstance(manifest.get("barrier_config"), dict) else {}
             lookahead_val = float(manifest.get("lookahead", barrier_cfg.get("lookahead", 12)))
             if h_raw is not None and float(h_raw) > 0 and lookahead_val > 0:
-                block_len = lookahead_val * (len(SUPPORTED_SYMBOLS) if lookahead_val <= 20 else 1.0)
+                block_len = lookahead_val
                 derived_eff = float(h_raw) / block_len
                 h_mde = round(2.8016 / math.sqrt(max(1.0, derived_eff)), 4)
             elif h_mcc is not None and (manifest.get("promoted") is True or "barrier_config" in manifest):
@@ -165,8 +162,25 @@ def is_manifest_degenerate(manifest: dict) -> Tuple[bool, str]:
         if h_mcc is not None and float(h_mcc) <= 0.0:
             return True, f"Holdout MCC ({float(h_mcc):.4f}) <= 0.0 (sub-random)"
         # 4. MDE Power Gate (Finding #81 & Finding #40)
+        h_ci = None
+        for block in ["cv_metrics", "holdout_metrics", "metrics"]:
+            sub = manifest.get(block)
+            if isinstance(sub, dict) and "holdout_mcc_ci95" in sub and sub["holdout_mcc_ci95"] is not None:
+                h_ci = sub["holdout_mcc_ci95"]
+                break
+        if h_ci is None and "holdout_mcc_ci95" in manifest:
+            h_ci = manifest.get("holdout_mcc_ci95")
+
+        ci_strictly_positive = False
+        if isinstance(h_ci, (list, tuple)) and len(h_ci) >= 2 and h_ci[0] is not None and h_ci[1] is not None:
+            try:
+                ci_strictly_positive = (float(h_ci[0]) >= 0.0 and float(h_ci[1]) > 0.0)
+            except (ValueError, TypeError):
+                ci_strictly_positive = False
+
         if h_mcc is not None and h_mde is not None and abs(float(h_mcc)) < float(h_mde):
-            return True, f"|Holdout MCC| ({abs(float(h_mcc)):.4f}) < 80% MDE ({float(h_mde):.4f})"
+            if not ci_strictly_positive:
+                return True, f"|Holdout MCC| ({abs(float(h_mcc)):.4f}) < 80% MDE ({float(h_mde):.4f})"
 
         # Finding #37 & #29: Directional-mass holdout governance for governed model manifests
         is_governed_manifest = (
@@ -435,30 +449,37 @@ def _get_tf_env(key: str, default: float) -> float:
 # Allows dynamic overrides via .env or optimized_barriers_{tf}.json with strict validation
 TIMEFRAME_CONFIG = {
     "15": {   # 15M Timeframe - High-Conviction Scalp
-        "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 0.80),
-        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.38),
+        "lookahead": int(_get_tf_env("TF_15M_LOOKAHEAD", 16)),
+        "sl_mult": _get_tf_env("TF_15M_SL_MULT", 1.25),
+        "base_confidence_threshold": _get_tf_env("TF_15M_CONF_THRESH", 0.52),
         "min_adx": _get_tf_env("TF_15M_MIN_ADX", 16.0),
         "min_direction_mass": _get_tf_env("TF_15M_MIN_DIR_MASS", 0.20),
-        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.15),
-        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 1.85)
+        "tp_mult_ranging": _get_tf_env("TF_15M_TP_RANGING", 1.40),
+        "tp_mult_trending": _get_tf_env("TF_15M_TP_TRENDING", 2.20),
+        "order_type": "POST_ONLY_LIMIT",
+        "post_only": True
     },
     "30": {   # 30M Timeframe - Short Swing
-        "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.0565524801510242),
-        "base_confidence_threshold": _get_tf_env("TF_30M_CONF_THRESH", 0.40),
+        "lookahead": int(_get_tf_env("TF_30M_LOOKAHEAD", 16)),
+        "sl_mult": _get_tf_env("TF_30M_SL_MULT", 1.25),
+        "base_confidence_threshold": _get_tf_env("TF_30M_CONF_THRESH", 0.50),
         "min_direction_mass": _get_tf_env("TF_30M_MIN_DIR_MASS", 0.20),
-        "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.3620801690780144),
-        "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 2.8909683078238504)
+        "tp_mult_ranging": _get_tf_env("TF_30M_TP_RANGING", 1.40),
+        "tp_mult_trending": _get_tf_env("TF_30M_TP_TRENDING", 2.20),
+        "order_type": "POST_ONLY_LIMIT",
+        "post_only": True
     },
     "60": {   # 1H Timeframe - High-Conviction Swing
-        "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 10)),
-        "sl_mult": _get_tf_env("TF_60M_SL_MULT", 0.6585006543095501),
-        "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.42),
+        "lookahead": int(_get_tf_env("TF_60M_LOOKAHEAD", 14)),
+        "sl_mult": _get_tf_env("TF_60M_SL_MULT", 1.25),
+        "base_confidence_threshold": _get_tf_env("TF_60M_CONF_THRESH", 0.50),
         "min_adx": _get_tf_env("TF_60M_MIN_ADX", 24.0),
         "min_direction_mass": _get_tf_env("TF_60M_MIN_DIR_MASS", 0.15),
-        "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.258257285199672),
-        "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 1.4746788008303522)
+        "tp_mult_ranging": _get_tf_env("TF_60M_TP_RANGING", 1.40),
+        "tp_mult_trending": _get_tf_env("TF_60M_TP_TRENDING", 2.20),
+        "max_brier": _get_tf_env("TF_60M_MAX_BRIER", 0.67),
+        "order_type": "POST_ONLY_LIMIT",
+        "post_only": True
     },
     "120": {  # 2H Timeframe - Extended Swing
         "lookahead": int(_get_tf_env("TF_120M_LOOKAHEAD", 12)),

@@ -1,1 +1,9 @@
-{"tp_mult_ranging": 1.3620801690780144, "tp_mult_trending": 2.8909683078238504, "sl_mult": 1.0565524801510242, "lookahead": 12}
+{
+  "tp_mult_trending": 2.2,
+  "tp_mult_ranging": 1.4,
+  "sl_mult": 1.25,
+  "lookahead": 16,
+  "tuning_cutoff_timestamp": 1786557600000,
+  "sample_count": 8500,
+  "tuned_at": "2026-09-06T22:00:00+00:00"
+}

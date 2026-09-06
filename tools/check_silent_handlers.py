@@ -36,8 +36,8 @@ def _save_baseline(count: int) -> None:
         with open(_BASELINE_FILE, "w") as f:
             json.dump(data, f, indent=2)
 
-# Files to exclude (external libraries, build output, virtual environments, tooling)
-EXCLUDE_DIRS = {".venv", "venv", "build", "dist", ".git", ".pytest_cache", "node_modules", "mlartifacts", "tools"}
+# Files to exclude (external libraries, build output, virtual environments, tooling, scratch)
+EXCLUDE_DIRS = {".venv", "venv", "build", "dist", ".git", ".pytest_cache", "node_modules", "mlartifacts", "tools", "scratch"}
 EXCLUDE_FILES = {"setup.py"}
 
 

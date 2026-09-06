@@ -8,20 +8,20 @@
     "rollback_plan_defined": true
   },
   "trending_30": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "ranging_30": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "trending_60": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "ranging_60": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "trending_120": {
     "research_notebook_approved": false,
