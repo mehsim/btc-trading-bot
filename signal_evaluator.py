@@ -6,6 +6,8 @@ calculating ensemble predictions, and updating state_manager for the live dashbo
 """
 
 import os
+import json
+import config
 import time
 import threading
 import numpy as np
@@ -84,6 +86,13 @@ def get_hierarchical_macro_bias(bot_state: dict, symbol: str) -> dict:
 
 class SignalEvaluator:
     def __init__(self, bot_state):
+        # Per-interval servability cache for the pre-fetch short-circuit in evaluate_interval.
+        self._servable_cache = {}
+        self._SERVABLE_TTL_SEC = 60.0
+        # Throttle for intervals whose ML slots are all refused: the rule-based
+        # fallback tape still refreshes, just at 5m rather than 60s.
+        self._dead_slot_last_eval = {}
+        self._DEAD_SLOT_MIN_INTERVAL_SEC = 300.0
         self.bot_state = bot_state
         self.state_lock = threading.Lock()
         self.models_by_interval = OrderedDict()
@@ -225,9 +234,76 @@ class SignalEvaluator:
             log_event("ERROR", f"[SignalEvaluator ERROR] Lazy model loading for {interval}m ({regime_key}): {e}")
             return None
 
+    def _interval_has_servable_slot(self, interval):
+        """
+        True if EITHER regime variant for this interval could serve a prediction.
+
+        evaluate_interval previously fetched two histories and built the full feature
+        matrix for all 9 symbols x 5 intervals before reaching the denylist and
+        governance-floor checks, then abstained. When every slot is refused that is
+        45 full feature builds per pass, all discarded -- the dominant CPU cost.
+
+        This is a strict short-circuit: it only reports False when BOTH regimes are
+        already refused by the SAME checks applied downstream, so it can never admit
+        a slot the existing gates would reject, nor skip one they would accept.
+        Cached briefly so a pass re-reads each manifest once rather than nine times,
+        and re-evaluated often enough that a hot-reloaded model is picked up.
+        """
+        import time as _t
+        now = _t.time()
+        cached = self._servable_cache.get(interval)
+        if cached is not None and (now - cached[1]) < self._SERVABLE_TTL_SEC:
+            return cached[0]
+
+        servable = False
+        for _reg in ("trending", "ranging"):
+            try:
+                from ensemble import is_model_slot_denied
+                if is_model_slot_denied(f"{_reg}_trend_{interval}") or is_model_slot_denied(f"{_reg}_price_{interval}"):
+                    continue
+                _man = f"ensemble_{_reg}_trend_{interval}_manifest.json"
+                if not os.path.exists(_man):
+                    continue
+                with open(_man, "r") as _mf:
+                    _md = json.load(_mf)
+                import model_governance
+                _ok, _ = model_governance.validate_manifest_governance_floors(_md, interval)
+                if not _ok:
+                    continue
+                # Same manifest-only degeneracy rule the serving path applies (holdout MCC below
+                # its own 80% MDE, chance-level balanced accuracy, crash sentinels). Pure function
+                # over the manifest, so it costs one dict read and rules out the 60m slots that
+                # otherwise reach full feature construction before abstaining.
+                _degen, _ = config.is_manifest_degenerate(_md)
+                if _degen:
+                    continue
+                servable = True
+                break
+            except Exception as _sv_err:
+                # Cannot prove this regime is dead -> assume it is servable and let the
+                # full downstream path make the decision. Never skip on uncertainty.
+                log_event("WARNING", f"[SignalEvaluator] Servability pre-check inconclusive for {_reg}_{interval}: {_sv_err}")
+                servable = True
+                break
+
+        self._servable_cache[interval] = (servable, now)
+        return servable
+
     def evaluate_interval(self, symbol, interval):
         tf_key = TF_MAP.get(interval, f"{interval}m")
         try:
+            # When no ML slot for this interval can serve, evaluate_interval still runs to keep the
+            # rule-based fallback tape fresh (get_hierarchical_macro_bias reads the 4h entry), but
+            # the full path -- two history fetches plus ~180 features per symbol -- is the dominant
+            # CPU cost and does not need a 60s refresh for a technical tape. Throttle it instead of
+            # skipping it, so the fallback and macro bias keep exactly their current semantics.
+            if not self._interval_has_servable_slot(interval):
+                _thr_key = f"{symbol}_{interval}"
+                _now_thr = time.time()
+                _last_thr = self._dead_slot_last_eval.get(_thr_key, 0.0)
+                if (_now_thr - _last_thr) < self._DEAD_SLOT_MIN_INTERVAL_SEC:
+                    return
+                self._dead_slot_last_eval[_thr_key] = _now_thr
             df = get_history(symbol=symbol, interval=interval, limit=350, fail_if_stale=True)
             if df is None or len(df) < 50 or not df.attrs.get("fetch_ok", True):
                 log_event("WARNING", f"[SignalEvaluator] Data stale or insufficient for {symbol} {interval}m. Aborting evaluation.")
