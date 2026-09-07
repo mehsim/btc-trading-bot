@@ -7,6 +7,7 @@ Telegram API integrations, alert notifications, daily summary generator, interac
 
 import os
 import time
+import json
 import requests
 import threading
 from datetime import datetime, timezone
@@ -38,7 +39,16 @@ def get_telegram_config():
     return token, chat_ids
 
 
+from dotenv import load_dotenv
+load_dotenv()
+
+_last_sent_messages: Dict[str, float] = {}
+_telegram_call_lock = threading.Lock()
+_last_call_time = 0.0
+
+
 def execute_telegram_api_call(method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    global _last_call_time
     token, allowed_chat_ids = get_telegram_config()
     if not token:
         return {}
@@ -52,9 +62,25 @@ def execute_telegram_api_call(method: str, payload: Dict[str, Any]) -> Dict[str,
     headers = {"Content-Type": "application/json"}
     for attempt in range(3):
         try:
+            with _telegram_call_lock:
+                now = time.time()
+                elapsed = now - _last_call_time
+                if elapsed < 0.5:
+                    time.sleep(0.5 - elapsed)
+                _last_call_time = time.time()
+
             resp = requests.post(url, json=payload, headers=headers, timeout=15, proxies=proxies_dict)
             if resp.status_code == 200:
                 return resp.json()
+            elif resp.status_code == 429:
+                err_data = {}
+                try:
+                    err_data = resp.json()
+                except (ValueError, json.JSONDecodeError):
+                    err_data = {}
+                retry_after = err_data.get("parameters", {}).get("retry_after", 60)
+                log_event("WARNING", f"[Telegram Rate Limit] 429 Flood Control: retry after {retry_after}s ({retry_after/3600:.1f}h). Text: {err_data.get('description')}")
+                return err_data
             elif resp.status_code == 400 and payload.get("parse_mode"):
                 plain_payload = dict(payload)
                 plain_payload.pop("parse_mode", None)
@@ -76,6 +102,19 @@ def send_telegram_alert(message: str, disable_web_page_preview: bool = True) -> 
     token, chat_ids = get_telegram_config()
     if not token or not chat_ids:
         return False
+
+    # Deduplicate exact messages sent within 30 seconds
+    now = time.time()
+    msg_hash = str(hash(message))
+    if msg_hash in _last_sent_messages and (now - _last_sent_messages[msg_hash]) < 30.0:
+        return True
+    _last_sent_messages[msg_hash] = now
+
+    # Clean old entries
+    if len(_last_sent_messages) > 100:
+        for k in list(_last_sent_messages.keys()):
+            if (now - _last_sent_messages[k]) > 120.0:
+                _last_sent_messages.pop(k, None)
 
     success = False
     for cid in chat_ids:
