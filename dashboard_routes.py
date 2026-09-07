@@ -601,8 +601,24 @@ def api_status():
         # Multi-Timeframe 4H -> 1H Synergy Matrix for all supported coins
         synergy_matrix = {}
         for s in symbols:
-            p4 = status_data.get(f"latest_prediction_{s}_4h") or status_data.get(f"latest_prediction_{s}_240") or latest_by_sym_iv.get(f"{s}_240") or {}
-            p1 = status_data.get(f"latest_prediction_{s}_1h") or status_data.get(f"latest_prediction_{s}_60") or latest_by_sym_iv.get(f"{s}_60") or {}
+            p4 = (
+                status_data.get(f"latest_prediction_{s}_4h") or 
+                status_data.get(f"latest_prediction_{s}_240") or 
+                status_data.get(f"latest_prediction_bg_{s}_4h") or 
+                status_data.get(f"latest_prediction_bg_{s}_240") or 
+                status_data.get(f"evaluator_prediction_{s}_4h") or 
+                status_data.get(f"evaluator_prediction_{s}_240") or 
+                latest_by_sym_iv.get(f"{s}_240") or {}
+            )
+            p1 = (
+                status_data.get(f"latest_prediction_{s}_1h") or 
+                status_data.get(f"latest_prediction_{s}_60") or 
+                status_data.get(f"latest_prediction_bg_{s}_1h") or 
+                status_data.get(f"latest_prediction_bg_{s}_60") or 
+                status_data.get(f"evaluator_prediction_{s}_1h") or 
+                status_data.get(f"evaluator_prediction_{s}_60") or 
+                latest_by_sym_iv.get(f"{s}_60") or {}
+            )
             adx4 = status_data.get(f"adx_{s}_4h") if status_data.get(f"adx_{s}_4h") is not None else status_data.get(f"adx_{s}_240", 25.0)
             
             d4 = str(p4.get("direction", "Neutral")) if isinstance(p4, dict) else "Neutral"
@@ -636,9 +652,22 @@ def api_status():
             iv_key = tf_to_iv.get(tf, tf)
             coin_signals = []
             for s in symbols:
-                pred = latest_by_sym_iv.get(f"{s}_{iv_key}") or status_data.get(f"latest_prediction_{s}_{tf}") or status_data.get(f"latest_prediction_{s}_{iv_key}")
+                pred = (
+                    latest_by_sym_iv.get(f"{s}_{iv_key}") or 
+                    status_data.get(f"latest_prediction_{s}_{tf}") or 
+                    status_data.get(f"latest_prediction_{s}_{iv_key}") or
+                    status_data.get(f"latest_prediction_bg_{s}_{tf}") or 
+                    status_data.get(f"latest_prediction_bg_{s}_{iv_key}") or
+                    status_data.get(f"evaluator_prediction_{s}_{tf}") or 
+                    status_data.get(f"evaluator_prediction_{s}_{iv_key}")
+                )
                 if not pred and s == "BTCUSDT":
-                    pred = status_data.get(f"latest_prediction_{tf}") or status_data.get(f"latest_prediction_{iv_key}")
+                    pred = (
+                        status_data.get(f"latest_prediction_{tf}") or 
+                        status_data.get(f"latest_prediction_{iv_key}") or
+                        status_data.get(f"latest_prediction_bg_{tf}") or 
+                        status_data.get(f"latest_prediction_bg_{iv_key}")
+                    )
                 
                 short_name = s.replace("USDT", "")
                 direction = "Neutral"
@@ -966,7 +995,9 @@ def api_status():
         status_data["model_governance_summary"] = gov_summary
         status_data["uptime_seconds"] = int(time.time() - startup_time)
         
-    return jsonify(status_data)
+        # Remove any internal private objects (keys starting with '_') that cannot be JSON serialized
+        clean_status = {k: v for k, v in status_data.items() if not str(k).startswith("_")}
+    return jsonify(clean_status)
 
 
 @dashboard_bp.route("/api/health")
