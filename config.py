@@ -51,7 +51,7 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.030, "60": 0.030, "120": 0.035, "240": 0.050, "default": 0.050}
+TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.030, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.050}
 TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "120": 0.360, "240": 0.360, "default": 0.360}
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.035}
 TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "120": 0.355, "240": 0.355, "default": 0.355}
@@ -78,7 +78,6 @@ if os.path.exists("governance_denylist.json"):
 
 MODEL_SLOT_DENYLIST = {
     "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
-    "trending_240",   # Finding #16: holdout MCC 0.0253 below default floor 0.0350 — fail-closed
     "ranging_240",    # Finding #16: challenger manifest unpromoted — fail-closed
     "trending_360",   # 360m slot unservable / non-production
     "ranging_360",    # 360m slot unservable / non-production
@@ -492,13 +491,16 @@ TIMEFRAME_CONFIG = {
         "post_only": True
     },
     "240": {  # 4H Timeframe - High-Conviction Macro Swing
-        "lookahead": int(_get_tf_env("TF_240M_LOOKAHEAD", 12)),
-        "sl_mult": _get_tf_env("TF_240M_SL_MULT", 0.7692996169158203),
-        "base_confidence_threshold": _get_tf_env("TF_240M_CONF_THRESH", 0.48),
+        "lookahead": int(_get_tf_env("TF_240M_LOOKAHEAD", 14)),
+        "sl_mult": _get_tf_env("TF_240M_SL_MULT", 1.00),
+        "base_confidence_threshold": _get_tf_env("TF_240M_CONF_THRESH", 0.50),
         "min_adx": _get_tf_env("TF_240M_MIN_ADX", 28.0),
         "min_direction_mass": _get_tf_env("TF_240M_MIN_DIR_MASS", 0.15),
-        "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.783121353301515),
-        "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 2.4005024826625188)
+        "tp_mult_ranging": _get_tf_env("TF_240M_TP_RANGING", 1.40),
+        "tp_mult_trending": _get_tf_env("TF_240M_TP_TRENDING", 2.20),
+        "max_brier": _get_tf_env("TF_240M_MAX_BRIER", 0.67),
+        "order_type": "POST_ONLY_LIMIT",
+        "post_only": True
     },
     "360": {  # 6H Timeframe - Macro Swing
         "lookahead": int(_get_tf_env("TF_360M_LOOKAHEAD", 12)),

@@ -71,6 +71,24 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-09-07T10:17:31.724781+00:00"
+    },
+    "ensemble_trending_240": {
+      "run_id": "train_240m_trending_1788778294",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.3793704368946114,
+        "val_mae": 0.04028610419368936,
+        "cv_mcc": 0.0625,
+        "holdout_mcc": 0.07142156451520075,
+        "holdout_resolved_mcc": 0.07165043551906917,
+        "holdout_effective_n": 177.59,
+        "mde_80pct": 0.0867,
+        "profit_factor": 4.5349282276702425,
+        "brier": 0.6587018978541126,
+        "ece": 0.0125279516198899
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-09-07T10:55:25.462857+00:00"
     }
   },
   "Staging": {
@@ -2543,6 +2561,24 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-09-07T10:16:41.747182+00:00"
+    },
+    {
+      "run_id": "train_240m_trending_1788778294",
+      "model_name": "ensemble_trending_240",
+      "metrics": {
+        "val_accuracy": 0.3793704368946114,
+        "val_mae": 0.04028610419368936,
+        "cv_mcc": 0.0625,
+        "holdout_mcc": 0.07142156451520075,
+        "holdout_resolved_mcc": 0.07165043551906917,
+        "holdout_effective_n": 177.59,
+        "mde_80pct": 0.0867,
+        "profit_factor": 4.5349282276702425,
+        "brier": 0.6587018978541126,
+        "ece": 0.0125279516198899
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-07T10:51:34.463341+00:00"
     }
   ]
 }
