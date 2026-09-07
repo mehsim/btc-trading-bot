@@ -3067,13 +3067,20 @@
                         const adxVal = data[`adx_${tf}`] || 0.00;
                         const badgeElem = document.getElementById(`regime-badge-${tf}`);
                         if (badgeElem) {
-                            badgeElem.innerText = regimeVal.replace(/\(ADX.*\)/g, '').trim();
+                            let cleanBadge = "Ranging (GMM)";
                             if (regimeVal.includes("Trending")) {
+                                cleanBadge = "Trending (GMM)";
                                 badgeElem.style.color = "var(--accent-orange)";
                             } else if (regimeVal.includes("Ranging")) {
+                                cleanBadge = "Ranging (GMM)";
                                 badgeElem.style.color = "var(--accent-blue)";
                             } else {
+                                cleanBadge = regimeVal.replace(/\(ADX.*\)/g, '').trim();
                                 badgeElem.style.color = "var(--text-secondary)";
+                            }
+                            badgeElem.innerText = cleanBadge.toUpperCase();
+                            if (adxVal > 0) {
+                                badgeElem.title = `Regime: ${cleanBadge} | ADX: ${Number(adxVal).toFixed(1)}`;
                             }
                         }
 
