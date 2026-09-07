@@ -234,7 +234,7 @@
   ],
   "promoted": true,
   "evaluation_timestamp": "2026-09-06T21:35:47.493545+00:00",
-  "hmac_signature": "a29ba21254a6bacadb246dce7cbae3f5b81e429b42489e472539e16fc37b0b74",
   "stage": "Production",
-  "status": "Production"
+  "status": "Production",
+  "hmac_signature": "83f651b57b8b21a2c7fab77f815a4c3b76eacbb94ab7763e3ded13f4975170bd"
 }

@@ -130,7 +130,7 @@
   "target_slot": "trending_60",
   "promoted": true,
   "evaluation_timestamp": "2026-09-06T21:35:47.493545+00:00",
-  "hmac_signature": "8245c294a9578ad1984d0c930f2f7e8ff3e86a14993a205a03c6958534360e82",
   "stage": "Production",
-  "status": "Production"
+  "status": "Production",
+  "hmac_signature": "9543caa4c03f1fe752cb31c5c70d459d7b472e5079ce3fd5f1e7a824d38f23cf"
 }

@@ -47,7 +47,7 @@ def resolve_direction(probs, interval=None, min_dir_mass=0.15):
     dir_total = prob_bearish + prob_bullish
     win_dir = max(prob_bearish, prob_bullish)
     # When 3-class model has substantial directional conviction meeting or exceeding neutral probability
-    if len(probs) >= 3 and dir_total >= min_dir_mass and (win_dir >= prob_neutral or (win_dir >= 0.35 and win_dir >= prob_neutral * 0.90)):
+    if len(probs) >= 3 and dir_total >= min_dir_mass and (win_dir >= prob_neutral or (win_dir >= 0.35 and win_dir >= prob_neutral * 0.80)):
         norm_bear = prob_bearish / max(1e-9, dir_total)
         norm_bull = prob_bullish / max(1e-9, dir_total)
         if norm_bull > norm_bear and norm_bull >= 0.50:

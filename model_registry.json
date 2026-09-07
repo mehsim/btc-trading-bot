@@ -53,6 +53,24 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-09-06T21:41:57.995879+00:00"
+    },
+    "ensemble_trending_120": {
+      "run_id": "train_120m_trending_1788775816",
+      "model_name": "ensemble_trending_120",
+      "metrics": {
+        "val_accuracy": 0.3683920533212186,
+        "val_mae": 0.029304811294013303,
+        "cv_mcc": 0.0478,
+        "holdout_mcc": 0.055680206520187084,
+        "holdout_resolved_mcc": 0.05593655562722462,
+        "holdout_effective_n": 129.44,
+        "mde_80pct": 0.0904,
+        "profit_factor": 1.058,
+        "brier": 0.6640996063775121,
+        "ece": 0.008859412902777893
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-09-07T10:17:31.724781+00:00"
     }
   },
   "Staging": {
@@ -2489,6 +2507,42 @@
       },
       "stage": "Rejected",
       "registered_at_utc": "2026-09-06T21:35:47.499004+00:00"
+    },
+    {
+      "run_id": "train_120m_trending_1788775816",
+      "model_name": "ensemble_trending_120",
+      "metrics": {
+        "val_accuracy": 0.3683920533212186,
+        "val_mae": 0.029304811294013303,
+        "cv_mcc": 0.0478,
+        "holdout_mcc": 0.055680206520187084,
+        "holdout_resolved_mcc": 0.05593655562722462,
+        "holdout_effective_n": 129.44,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.6640996063775121,
+        "ece": 0.008859412902777893
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-07T10:10:16.534129+00:00"
+    },
+    {
+      "run_id": "train_120m_trending_1788775816",
+      "model_name": "ensemble_trending_120",
+      "metrics": {
+        "val_accuracy": 0.3683920533212186,
+        "val_mae": 0.029304811294013303,
+        "cv_mcc": 0.0478,
+        "holdout_mcc": 0.055680206520187084,
+        "holdout_resolved_mcc": 0.05593655562722462,
+        "holdout_effective_n": 129.44,
+        "mde_80pct": 0.0904,
+        "profit_factor": 1.058,
+        "brier": 0.6640996063775121,
+        "ece": 0.008859412902777893
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-09-07T10:16:41.747182+00:00"
     }
   ]
 }

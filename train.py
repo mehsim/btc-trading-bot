@@ -2447,7 +2447,7 @@ def train_models(interval=INTERVAL, pages=PAGES):
                                 from config import TAKER_FEE_PCT, TIMEFRAME_CONFIG
                                 _tf_cfg = TIMEFRAME_CONFIG.get(str(interval), {})
                                 _is_post_only = bool(_tf_cfg.get("post_only", False))
-                                _roundtrip_fee = float(getattr(config, "MAKER_FEE_PCT", 0.0002)) * 2.0 + 0.00002 if _is_post_only else (max(0.0011, float(TAKER_FEE_PCT) * 2.0) + 0.00005)
+                                _roundtrip_fee = float(getattr(config, "MAKER_FEE_PCT", 0.0002)) * 2.0 + 0.00002 if _is_post_only else (max(0.0011, float(TAKER_FEE_PCT) * 2.0) + 0.00005)  # Legacy default roundtrip fee: 0.0010
                                 _sl_mult_v = float(_tf_cfg.get("sl_mult", 0.8))
                                 _tp_mult_v = float(_tf_cfg.get("tp_mult_ranging" if name.lower() == "ranging" else "tp_mult_trending", 1.5))
                                 _lookahead_bars = int(_tf_cfg.get("lookahead", 12))
