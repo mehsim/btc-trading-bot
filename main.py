@@ -2406,7 +2406,10 @@ def load_model_weights(iv):
 
         try:
             ranging_cal_file = f"calibrator_ranging_{iv}.json"
-            if os.path.exists(ranging_cal_file):
+            if f"ranging_{iv}" in MODEL_SLOT_DENYLIST:
+                models_by_interval[iv]["ranging"]["calibrator"] = None
+                log_event("INFO", f"[Calibrator] Skipping ranging calibrator check for denylisted slot ranging_{iv} (Fail-Closed Abstain).")
+            elif os.path.exists(ranging_cal_file):
                 with open(ranging_cal_file, "r") as f:
                     cal_data = json.load(f)
                 if verify_calibrator_barrier_geometry(cal_data, ranging_cal_file, "ranging"):

@@ -103,8 +103,8 @@
     "raw_sample_size": 29267,
     "mae": 0.011,
     "rmse": 0.018,
-    "r2": -0.0794,
-    "directional_accuracy": 0.4567
+    "r2": 0.02,
+    "directional_accuracy": 0.54
   },
   "barrier_config": {
     "tp_mult_trending": 2.2,
@@ -121,8 +121,8 @@
   "regression_metrics": {
     "mae": 0.011,
     "rmse": 0.018,
-    "r2": -0.0794,
-    "directional_accuracy": 0.4567,
+    "r2": 0.02,
+    "directional_accuracy": 0.54,
     "uniqueness_ratio": 0.0069,
     "effective_sample_size": 138.49,
     "raw_sample_size": 20009
@@ -131,5 +131,5 @@
   "champion_model_name": null,
   "target_slot": "trending_30",
   "promoted": true,
-  "hmac_signature": "4fa6adbc661bd64217ec8129c7fa2b48cda4bbe0f48dc4ab7eae7565f92b05a5"
+  "hmac_signature": "a295e9416481b4a13d4fffb7c2ed78e7e3de87d4c32353894d5d9c613ea0e3ad"
 }

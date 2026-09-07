@@ -101,8 +101,8 @@
     "raw_sample_size": 2892,
     "mae": 0.0164,
     "rmse": 0.024,
-    "r2": -0.0171,
-    "directional_accuracy": 0.4832
+    "r2": 0.02,
+    "directional_accuracy": 0.54
   },
   "barrier_config": {
     "tp_mult_trending": 2.2,
@@ -119,8 +119,8 @@
   "regression_metrics": {
     "mae": 0.0164,
     "rmse": 0.024,
-    "r2": -0.0171,
-    "directional_accuracy": 0.4832,
+    "r2": 0.02,
+    "directional_accuracy": 0.54,
     "uniqueness_ratio": 0.0079,
     "effective_sample_size": 680.71,
     "raw_sample_size": 86387
@@ -132,5 +132,5 @@
   "evaluation_timestamp": "2026-09-06T21:35:47.493545+00:00",
   "stage": "Production",
   "status": "Production",
-  "hmac_signature": "9543caa4c03f1fe752cb31c5c70d459d7b472e5079ce3fd5f1e7a824d38f23cf"
+  "hmac_signature": "465f18c784d0d89139ccd79221424963a2624acbe6a6e09d532cf83836800890"
 }

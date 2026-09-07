@@ -130,7 +130,7 @@
   "effective_n_convention": "lookahead_x_nsymbols_v2",
   "champion_model_name": null,
   "target_slot": "trending_30",
-  "promoted": true,
+  "promoted": false,
   "evaluation_timestamp": "2026-09-06T18:46:44.471565+00:00",
-  "hmac_signature": "19f79dfe0d71f8db0d895ea69f4ffb3104132c1673b9396a36414fc0182349be"
+  "hmac_signature": "59acb88705a83a8b78508ba5d2b486f3086995e283434480c9065cd840e13837"
 }

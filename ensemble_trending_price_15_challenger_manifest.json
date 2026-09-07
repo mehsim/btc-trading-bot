@@ -114,7 +114,7 @@
     "regime_adx_enter": 28.0,
     "regime_adx_exit": 24.0
   },
-  "promoted": true,
+  "promoted": false,
   "evaluation_timestamp": "2026-09-06T16:38:50.615532+00:00",
   "status": "champion",
   "deployed_stage": "Production",
@@ -132,5 +132,5 @@
   "effective_n_convention": "lookahead_x_nsymbols_v2",
   "champion_model_name": null,
   "target_slot": "trending_15",
-  "hmac_signature": "4aacb9980be45428ac1e7c1f7ace7c05f21ad116d38e09e71f0b2b35ce0e982d"
+  "hmac_signature": "706ab2a97a8f7bcfcfdca93c4ec25ace8a60f3220201268f2b321e6b4ce5ae97"
 }
