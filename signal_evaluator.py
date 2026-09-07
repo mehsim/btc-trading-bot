@@ -314,19 +314,13 @@ class SignalEvaluator:
                 log_event("WARNING", f"[SignalEvaluator] Data stale or insufficient for {symbol} {interval}m. Aborting evaluation.")
                 return
 
-            if symbol.upper() != "BTCUSDT" and "close_btc" not in df.columns:
-                try:
-                    df_btc = get_history(symbol="BTCUSDT", interval=interval, limit=350, fail_if_stale=True)
-                    if df_btc is not None and not df_btc.empty and df_btc.attrs.get("fetch_ok", True) and "close" in df_btc.columns and "timestamp" in df_btc.columns:
-                        btc_sub = df_btc[["timestamp", "close"]].rename(columns={"close": "close_btc"})
-                        df = pd.merge(df, btc_sub, on="timestamp", how="inner")
-                except Exception as ex_btc:
-                    log_event("WARNING", f"[SignalEvaluator] Failed merging BTC history for {symbol}: {ex_btc}")
-            if "close_btc" not in df.columns:
-                df["close_btc"] = df["close"]
-
             df = merge_derivatives_sentiment_features(df, symbol=symbol, interval=interval)
-            df = add_features(df)
+            if "close_btc" not in df.columns:
+                df["close_btc"] = df["btc_close"] if "btc_close" in df.columns else df["close"]
+            if "btc_volume" not in df.columns:
+                df["btc_volume"] = df["volume"]
+
+            df = add_features(df, symbol=symbol, interval=interval)
             
             last_row = df.iloc[-1]
             adx_val = float(last_row.get("ADX", 20.0)) if "ADX" in last_row and not np.isnan(last_row["ADX"]) else 20.0
@@ -352,9 +346,211 @@ class SignalEvaluator:
                     self.bot_state[f"regime_{tf_key}"] = regime_str
                     self.bot_state[f"adx_{tf_key}"] = adx_val
 
-            # Check governance slot denylist before model evaluation or rule fallback
+            macro_bias = get_hierarchical_macro_bias(getattr(self, "bot_state", {}), symbol)
+
+            # Option B: Dedicated Mean-Reversion Ranging Strategy Engine
+            if not is_trending:
+                from ranging_strategy import evaluate_ranging_mean_reversion
+                ranging_sig = evaluate_ranging_mean_reversion(df, symbol=symbol, interval=str(interval))
+                last_row = df.iloc[-1]
+                close_p = float(last_row.get("close", 0.0))
+                c_ts = int(time.time() * 1000)
+                if "timestamp" in last_row:
+                    try:
+                        raw_t = last_row["timestamp"]
+                        if isinstance(raw_t, (int, float, np.integer, np.floating)):
+                            v = float(raw_t)
+                            c_ts = int(v * 1000) if v < 1e11 else int(v)
+                        else:
+                            c_ts = int(pd.to_datetime(raw_t).timestamp() * 1000)
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        pass
+
+                if ranging_sig.is_signal:
+                    direction = ranging_sig.direction
+                    raw_conf = ranging_sig.confidence
+                    calibrated_conf = ranging_sig.confidence
+                    entry_p = ranging_sig.entry_price
+                    tp_p = ranging_sig.take_profit
+                    sl_p = ranging_sig.stop_loss
+                    exp_move = ranging_sig.expected_move
+
+                    pred_entry = {
+                        "symbol": str(symbol),
+                        "direction": str(direction),
+                        "confidence": float(raw_conf),
+                        "calibrated_confidence": float(calibrated_conf),
+                        "predicted_change": float(exp_move),
+                        "predicted_price": float(tp_p),
+                        "entry_price": float(entry_p),
+                        "take_profit": float(tp_p),
+                        "stop_loss": float(sl_p),
+                        "signal_source": "MEAN_REVERSION_BB",
+                        "model_version": "v1.0_ranging_bb",
+                        "order_type": "POST_ONLY_LIMIT",
+                        "setup_type": ranging_sig.reason,
+                        "macro_4h_direction": str(macro_bias.get("direction", "Neutral")),
+                        "status": "Active (Mean Reversion)",
+                        "timestamp": time.time()
+                    }
+                    with self.state_lock:
+                        self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = pred_entry
+                        self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = pred_entry
+                        if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                            self.bot_state[f"latest_prediction_bg_{tf_key}"] = pred_entry
+                            self.bot_state[f"evaluator_prediction_{tf_key}"] = pred_entry
+
+                        history = self.bot_state.get("prediction_history", [])
+                        if isinstance(history, list):
+                            existing_p = next((p for p in history if isinstance(p, dict) and p.get("candle_timestamp") == c_ts and str(p.get("interval")) == str(interval) and str(p.get("symbol")) == str(symbol)), None)
+                            if existing_p is not None:
+                                existing_p["timestamp"] = float(time.time())
+                                existing_p["direction"] = str(direction)
+                                existing_p["calibrated_confidence"] = float(calibrated_conf)
+                                existing_p["raw_confidence"] = float(raw_conf)
+                                existing_p["status"] = "Active (Mean Reversion)"
+                            else:
+                                new_pred = {
+                                    "prediction_id": f"{symbol}_{interval}_{int(c_ts)}",
+                                    "symbol": str(symbol),
+                                    "timestamp": float(time.time()),
+                                    "candle_timestamp": c_ts,
+                                    "interval": str(interval),
+                                    "direction": str(direction),
+                                    "ref_price": float(close_p),
+                                    "predicted_change": float(exp_move),
+                                    "predicted_price": float(tp_p),
+                                    "entry_price": float(entry_p),
+                                    "take_profit": float(tp_p),
+                                    "stop_loss": float(sl_p),
+                                    "order_type": "POST_ONLY_LIMIT",
+                                    "status": "Active (Mean Reversion)",
+                                    "calibrated_confidence": float(calibrated_conf),
+                                    "raw_confidence": float(raw_conf),
+                                    "dynamic_threshold": 0.45,
+                                    "signal_source": "MEAN_REVERSION_BB",
+                                    "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
+                                }
+                                history.append(new_pred)
+                                try:
+                                    from database import save_prediction as db_save_pred
+                                    db_save_pred(new_pred)
+                                except Exception as ex_save:
+                                    log_event("WARNING", f"[SignalEvaluator] Failed saving ranging prediction to DB: {ex_save}")
+
+                            try:
+                                from decision_journal import DecisionRecord, write_decision
+                                rec = DecisionRecord(
+                                    ts=float(time.time()),
+                                    candle_timestamp=c_ts,
+                                    symbol=str(symbol),
+                                    interval=str(interval),
+                                    signal_source="MEAN_REVERSION_BB",
+                                    direction=str(direction),
+                                    raw_confidence=float(raw_conf),
+                                    calibrated_conf=float(calibrated_conf),
+                                    regime=regime_str,
+                                    adx=adx_val,
+                                    outcome="EVALUATED",
+                                    reject_reason="Active Mean-Reversion Setup"
+                                )
+                                rec.snapshot(
+                                    predicted_change=float(exp_move),
+                                    dynamic_threshold=0.45
+                                )
+                                write_decision(rec)
+                            except Exception as ex_dj:
+                                log_event("WARNING", f"[SignalEvaluator] Decision journal ranging write notice: {ex_dj}")
+
+                            if len(history) > 200:
+                                self.bot_state["prediction_history"] = history[-200:]
+                else:
+                    neut_pred = {
+                        "symbol": str(symbol),
+                        "direction": "Neutral",
+                        "confidence": 0.0,
+                        "calibrated_confidence": 0.0,
+                        "predicted_change": 0.0,
+                        "signal_source": "MEAN_REVERSION_BB",
+                        "model_version": "v1.0_ranging_bb",
+                        "setup_type": ranging_sig.reason,
+                        "status": f"Abstain ({ranging_sig.reason})",
+                        "timestamp": time.time()
+                    }
+                    with self.state_lock:
+                        self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = neut_pred
+                        self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = neut_pred
+                        if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
+                            self.bot_state[f"latest_prediction_bg_{tf_key}"] = neut_pred
+                            self.bot_state[f"evaluator_prediction_{tf_key}"] = neut_pred
+
+                        history = self.bot_state.get("prediction_history", [])
+                        if isinstance(history, list):
+                            existing_p = next((p for p in history if isinstance(p, dict) and p.get("candle_timestamp") == c_ts and str(p.get("interval")) == str(interval) and str(p.get("symbol")) == str(symbol)), None)
+                            if existing_p is not None:
+                                existing_p["timestamp"] = float(time.time())
+                                existing_p["direction"] = "Neutral"
+                                existing_p["calibrated_confidence"] = 0.0
+                                existing_p["raw_confidence"] = 0.0
+                                existing_p["status"] = f"Abstain ({ranging_sig.reason})"
+                            else:
+                                new_pred = {
+                                    "prediction_id": f"{symbol}_{interval}_{int(c_ts)}",
+                                    "symbol": str(symbol),
+                                    "timestamp": float(time.time()),
+                                    "candle_timestamp": c_ts,
+                                    "interval": str(interval),
+                                    "direction": "Neutral",
+                                    "ref_price": float(close_p),
+                                    "predicted_change": 0.0,
+                                    "predicted_price": float(close_p),
+                                    "status": f"Abstain ({ranging_sig.reason})",
+                                    "calibrated_confidence": 0.0,
+                                    "raw_confidence": 0.0,
+                                    "dynamic_threshold": 0.45,
+                                    "signal_source": "MEAN_REVERSION_BB",
+                                    "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
+                                }
+                                history.append(new_pred)
+                                try:
+                                    from database import save_prediction as db_save_pred
+                                    db_save_pred(new_pred)
+                                except Exception as ex_save:
+                                    log_event("WARNING", f"[SignalEvaluator] Failed saving ranging abstain to DB: {ex_save}")
+
+                            try:
+                                from decision_journal import DecisionRecord, write_decision
+                                rec = DecisionRecord(
+                                    ts=float(time.time()),
+                                    candle_timestamp=c_ts,
+                                    symbol=str(symbol),
+                                    interval=str(interval),
+                                    signal_source="MEAN_REVERSION_BB",
+                                    direction="Neutral",
+                                    raw_confidence=0.0,
+                                    calibrated_conf=0.0,
+                                    regime=regime_str,
+                                    adx=adx_val,
+                                    outcome="SKIPPED",
+                                    reject_reason=f"Abstain ({ranging_sig.reason})"
+                                )
+                                rec.snapshot(
+                                    predicted_change=0.0,
+                                    dynamic_threshold=0.45
+                                )
+                                write_decision(rec)
+                            except Exception as ex_dj:
+                                log_event("WARNING", f"[SignalEvaluator] Decision journal ranging abstain write notice: {ex_dj}")
+
+                            if len(history) > 200:
+                                self.bot_state["prediction_history"] = history[-200:]
+
+                self.update_confluence_results(tf_key, df, symbol)
+                return
+
+            # Check governance slot denylist for trending models before model evaluation
             from ensemble import is_model_slot_denied
-            _regime_key = "trending" if is_trending else "ranging"
+            _regime_key = "trending"
             if is_model_slot_denied(f"{_regime_key}_trend_{interval}") or is_model_slot_denied(f"{_regime_key}_price_{interval}"):
                 log_event("INFO", f"[SignalEvaluator Denylist] {symbol} {interval}m ({_regime_key}) is denied by governance policy — skipping safely.")
                 denied_entry = {
@@ -500,7 +696,7 @@ class SignalEvaluator:
                             interval=str(interval)
                         )
                         resolved_sl_dist = abs(close_price - struct_sl)
-                        actual_sl_m = resolved_sl_dist / max(1e-6, atr_val)
+                        actual_sl_m = min(1.75 * sl_m, max(0.75 * sl_m, resolved_sl_dist / max(1e-6, atr_val)))
                     else:
                         import database
                         tf_sl_mult = risk_engine.get_timeframe_stop_multiplier(str(interval))
@@ -508,7 +704,7 @@ class SignalEvaluator:
                         resolved_sl_dist = risk_engine.calculate_final_stop_distance(
                             close_price, atr_val, symbol, df=df, gmm_multiplier=sl_multiplier_adj, database_module=database, interval=str(interval)
                         )
-                        actual_sl_m = resolved_sl_dist / max(1e-6, atr_val)
+                        actual_sl_m = min(1.75 * sl_m, max(0.75 * sl_m, resolved_sl_dist / max(1e-6, atr_val)))
 
                     # H-4: compute round-trip cost from TCM using per-symbol ADV from df.
                     # df loaded at line 125; tail(96) × 15m bars ≈ 24h volume.
@@ -538,9 +734,12 @@ class SignalEvaluator:
                     
                     # Low-Timeframe Chop Gate: on 15m/30m, quiet market chop (ADX < 22.0) requires +5% higher conviction to avoid fee churn
                     ltf_chop_penalty = 0.05 if (str(interval) in ["15", "30"] and adx_cur < 22.0) else 0.0
+
+                    # Trend Strength Hurdle Discount: In strong trends (ADX >= 28), scale toward geometric baseline (52-55%)
+                    trend_strength_discount = 0.03 * min(1.0, max(0.0, (adx_cur - 28.0) / 12.0)) if adx_cur >= 28.0 else 0.0
                     
                     # Finding #89: Remove arbitrary 0.55 cap so high required economic thresholds properly bite
-                    eval_threshold = round(min(0.65, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle) + ltf_chop_penalty), 4)
+                    eval_threshold = round(min(0.65, max(MIN_EVAL_THRESHOLD_FLOOR, (p_star + cost_adj) - trend_strength_discount, prior_hurdle) + ltf_chop_penalty), 4)
 
                     # Pre-calibrate probability if calibrator exists (Finding #143)
                     calibrator = models.get("calibrator")

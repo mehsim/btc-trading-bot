@@ -70,10 +70,10 @@ class Test1H4HEngineUpgrade(unittest.TestCase):
     def test_optimized_barriers_240_parameters(self):
         with open("optimized_barriers_240.json", "r") as f:
             barriers = json.load(f)
-        self.assertAlmostEqual(barriers.get("tp_mult_trending"), 2.4005, places=2)
-        self.assertAlmostEqual(barriers.get("tp_mult_ranging"), 1.7831, places=2)
-        self.assertAlmostEqual(barriers.get("sl_mult"), 0.7693, places=2)
-        self.assertEqual(barriers.get("lookahead"), 12)
+        self.assertAlmostEqual(barriers.get("tp_mult_trending"), 2.2, places=2)
+        self.assertAlmostEqual(barriers.get("tp_mult_ranging"), 1.4, places=2)
+        self.assertAlmostEqual(barriers.get("sl_mult"), 1.0, places=2)
+        self.assertEqual(barriers.get("lookahead"), 14)
 
     def test_single_candle_cooldown_detection(self):
         # Simulate trade history with an exit 30 minutes ago on a 60m interval

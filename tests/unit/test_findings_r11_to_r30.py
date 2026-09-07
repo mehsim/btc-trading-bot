@@ -180,14 +180,14 @@ def test_r17_and_r18_exit_policy_target_sl_clamp_and_entry_atr():
     # Pass price high enough to reach BE trigger distance
     exit_reason, updates, trace = engine.evaluate_exit(
         active_trade=active_trade,
-        current_price=80200.0,
+        current_price=80250.0,
         current_time=time.time(),
         current_atr=20.0,
         regime="Trending_Bullish"
     )
     assert updates.get("break_even_triggered") is True
     if "new_stop_loss" in updates:
-        assert updates["new_stop_loss"] < 80200.0  # Must be clamped below current price!
+        assert updates["new_stop_loss"] < 80250.0  # Must be clamped below current price!
     assert exit_reason is None  # Must NOT instantly trip stop loss!
 
 

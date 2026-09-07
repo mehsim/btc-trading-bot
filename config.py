@@ -513,6 +513,18 @@ TIMEFRAME_CONFIG = {
     }
 }
 
+# Expanded Execution Take-Profit Multipliers on Trending Signals (2.40 - 2.80 ATR)
+# Fixes payoff ratio to achieve 1.6 - 2.0 Win/Loss ratio while keeping Stop Loss tight.
+TRENDING_TP_TARGET_MULT = {
+    "15": 2.50,
+    "30": 2.50,
+    "60": 2.60,
+    "120": 2.70,
+    "240": 2.80,
+    "360": 2.80,
+    "default": 2.60
+}
+
 # Finding R43: Preserve immutable snapshot of committed config literals before auto-sync
 import copy
 COMMITTED_TIMEFRAME_CONFIG: dict = copy.deepcopy(TIMEFRAME_CONFIG)

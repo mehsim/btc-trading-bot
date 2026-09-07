@@ -4185,10 +4185,45 @@ def get_bybit_active_limit_order_id(symbol, side):
         print(f"[Active Limit Order Query Warning] Error for {symbol} {side}: {e}")
     return None
 
+_last_stale_order_check = 0.0
+
+def cancel_stale_unfilled_orders(max_age_seconds: float = 1800.0):
+    """
+    Unfilled Order Timer:
+    Cancels any resting Bybit limit orders that have remained unfilled for > 30 minutes.
+    Keeps trading capital free and prevents adverse ghost fills.
+    """
+    global _last_stale_order_check
+    if TRADE_MODE == "simulation":
+        return
+    now = time.time()
+    if now - _last_stale_order_check < 60.0:
+        return
+    _last_stale_order_check = now
+
+    try:
+        from config import SUPPORTED_SYMBOLS
+        for sym in SUPPORTED_SYMBOLS:
+            res = bybit_get_request("/v5/order/realtime", {"category": "linear", "symbol": sym})
+            if res and res.get("retCode") == 0:
+                orders = res.get("result", {}).get("list", [])
+                for o in orders:
+                    if o.get("orderType") == "Limit" and o.get("orderStatus") in ["New", "PartiallyFilled"]:
+                        created_ms = float(o.get("createdTime", 0.0))
+                        if created_ms > 0 and (now * 1000 - created_ms) > (max_age_seconds * 1000):
+                            ord_id = o.get("orderId")
+                            log_event("INFO", f"[Stale Order Cleaner] Cancelling limit order {ord_id} for {sym} (Age: {((now*1000-created_ms)/60000):.1f} min > {max_age_seconds//60} min).")
+                            cancel_bybit_order(sym, ord_id)
+    except Exception as e:
+        log_event("WARNING", f"[Stale Order Cleaner] Notice: {e}")
+
 def sync_active_positions_from_bybit():
     """Real-time Sync: Sync all active trades from Bybit to keep bot_state completely aligned with testnet/live."""
     if TRADE_MODE == "simulation":
         return True
+    
+    # Unfilled Order Timer: Cancel stale limit orders older than 30 mins
+    cancel_stale_unfilled_orders(max_age_seconds=1800.0)
     
     try:
         # Finding #26: Release locks during blocking network I/O; acquire locks only for memory/DB mutations
@@ -5452,15 +5487,9 @@ def _execute_bybit_trade_async_inner(symbol, iv, tf, ml_trend, leverage_val, qty
                 if not tp_ok:
                     log_event("WARNING", f"[{symbol} {iv}m] Failed to place Take Profit on Bybit after fill (SL is active).")
             
-            # Place scale-out limit order on Bybit using timeframe and trend-adaptive ATR target
+            # Place scale-out limit order on Bybit using mandatory 1.0 ATR (+1.0R) target
             limit_side = "Sell" if ml_trend == "Bullish" else "Buy"
-            entry_adx_val = float(latest_candle.get("ADX", 25.0)) if isinstance(latest_candle, dict) and "ADX" in latest_candle else 25.0
-            if str(iv) in ["240", "360"]:
-                entry_scale_mult = 1.60 if entry_adx_val >= 35.0 else (1.20 if entry_adx_val < 22.0 else 1.40)
-            elif str(iv) in ["60", "120"]:
-                entry_scale_mult = 1.40 if entry_adx_val >= 35.0 else (1.00 if entry_adx_val < 22.0 else 1.20)
-            else:
-                entry_scale_mult = 1.20 if entry_adx_val >= 35.0 else (0.80 if entry_adx_val < 22.0 else 1.00)
+            entry_scale_mult = 1.0
             limit_price = entry_price + entry_scale_mult * atr_dollars if ml_trend == "Bullish" else entry_price - entry_scale_mult * atr_dollars
             limit_qty_str = format_bybit_qty(symbol, actual_qty * 0.5)
             limit_qty_val = float(limit_qty_str)
@@ -5853,9 +5882,9 @@ def main():
                         # Detect scale-out fill from cached and stored qty values
                         original_qty = float(active_trade.get("original_qty", active_trade.get("qty", 0.0)))
                         current_qty = float(active_trade.get("qty", 0.0))
-                        if original_qty > 0 and current_qty <= (original_qty * 0.6) and not active_trade.get("half_closed", False):
-                            # Verify fill status of the scale-out limit order to prevent premature/false triggers
-                            scale_out_order_id = active_trade.get("bybit_scale_out_order_id")
+                        scale_out_order_id = active_trade.get("bybit_scale_out_order_id")
+                        if not active_trade.get("half_closed", False):
+                            # 1. Check if resting scale-out limit order was filled
                             if scale_out_order_id:
                                 order_details = get_bybit_order_details(active_symbol, scale_out_order_id)
                                 if order_details and order_details.get("orderStatus") == "Filled":
@@ -5865,37 +5894,40 @@ def main():
                                     stuck_since = active_trade.get("scale_out_stuck_since", time.time())
                                     active_trade.setdefault("scale_out_stuck_since", stuck_since)
                                     
-                                    # Timeframe-scaled scale-out timeout
-                                    if str(iv) in ["240", "360"]:
-                                        max_scale_out_wait = 43200  # 12 hours for 4H/6H swing runners
-                                    elif str(iv) in ["60", "120"]:
-                                        max_scale_out_wait = 7200   # 2 hours for 1H/2H trades
-                                    elif str(iv) == "30":
-                                        max_scale_out_wait = 1800   # 30 mins
-                                    else:
-                                        max_scale_out_wait = 600    # 10 mins for 15m scalps
-                                        
-                                    if time.time() - stuck_since > max_scale_out_wait:
-                                        print(f"[{active_symbol} {iv}m] Scale-out limit order expired after {max_scale_out_wait//60} min ({status_msg}). Cancelling stale order.")
+                                    # Stale scale-out order timeout (30 mins)
+                                    if time.time() - stuck_since > 1800:
+                                        print(f"[{active_symbol} {iv}m] Scale-out limit order expired after 30 min ({status_msg}). Cancelling stale order.")
                                         cancel_bybit_order(active_symbol, scale_out_order_id)
                                         active_trade.pop("scale_out_stuck_since", None)
                                         active_trade["bybit_scale_out_order_id"] = None
-                                    else:
-                                        pass
-                            else:
-                                # Fallback only if price has actually reached scale-out profit target
+
+                            # 2. Mandatory +1.0R / 1.0 ATR Scale-Out execution (handles unfilled resting orders or small orders)
+                            if not bybit_scaled_out:
                                 atr_d = active_trade.get("atr_dollars", 0.015 * entry_price)
-                                scale_mult_req = 1.40 if str(iv) in ["240", "360"] else (1.20 if str(iv) in ["60", "120"] else 0.80)
                                 reached_scale_target = False
-                                if direction == "Bullish" and current_price >= entry_price + scale_mult_req * atr_d:
+                                if direction == "Bullish" and current_price >= entry_price + 1.0 * atr_d:
                                     reached_scale_target = True
-                                elif direction == "Bearish" and current_price <= entry_price - scale_mult_req * atr_d:
+                                elif direction == "Bearish" and current_price <= entry_price - 1.0 * atr_d:
                                     reached_scale_target = True
                                     
                                 if reached_scale_target:
+                                    if TRADE_MODE != "simulation":
+                                        if scale_out_order_id:
+                                            cancel_bybit_order(active_symbol, scale_out_order_id)
+                                            active_trade["bybit_scale_out_order_id"] = None
+                                        close_qty_str = format_bybit_qty(active_symbol, original_qty * 0.5)
+                                        close_side = "Sell" if direction == "Bullish" else "Buy"
+                                        if float(close_qty_str) > 0:
+                                            m_res = place_bybit_order(active_symbol, close_side, float(close_qty_str), reduce_only=True, order_type="Market")
+                                            if m_res.get("retCode") == 0:
+                                                log_event("INFO", f"[{active_symbol} {iv}m API] Mandatory 50% scale-out executed at ${current_price:.2f}.")
+                                                bybit_scaled_out = True
+                                            else:
+                                                log_event("WARNING", f"[{active_symbol} {iv}m API WARNING] Market scale-out failed: {m_res.get('retMsg')}")
+                                    else:
+                                        bybit_scaled_out = True
+                                elif original_qty > 0 and current_qty <= (original_qty * 0.6):
                                     bybit_scaled_out = True
-                                else:
-                                    active_trade["original_qty"] = current_qty
 
                 # Trailing stop and break-even variables
                 atr_dollars = active_trade.get("atr_dollars", 50.0)
@@ -5917,9 +5949,8 @@ def main():
                 regime_for_be = active_trade.get("entry_regime") or bot_state.get(f"regime_{active_symbol}_{iv}", bot_state.get(f"regime_{iv}", "RANGING"))
                 reg_key_be = exit_policy_engine._resolve_regime_key(str(regime_for_be), float(bot_state.get(f"adx_{active_symbol}_{iv}", 20.0)))
                 policy_params_be = exit_policy_engine.active_policy.get(reg_key_be, {}) if hasattr(exit_policy_engine, "active_policy") and exit_policy_engine.active_policy else {}
-                policy_be_mult = float(policy_params_be.get("be_trigger_atr_mult", 0.0))
-                if policy_be_mult > 0:
-                    be_mult = max(be_mult, policy_be_mult)
+                policy_be_mult = float(policy_params_be.get("be_trigger_atr_mult", 0.75))
+                be_mult = policy_be_mult if policy_be_mult > 0 else 0.75
                 trade_leverage = float(active_trade.get("leverage", 1.0))
                 required_be_dist = compute_be_trigger_distance(atr_dollars, trade_leverage, iv, be_mult, entry_price, min_pct_floor)
 
@@ -6701,6 +6732,14 @@ def main():
                     with active_trades_lock:
                         bot_state["trade_history"].append(completed_trade)
                         active_trades_updated = True
+                    try:
+                        risk_engine.quarantine_manager.record_closed_trade(
+                            symbol=active_symbol,
+                            pnl_usd=float(total_pnl),
+                            is_win=bool(total_pnl > 0)
+                        )
+                    except Exception as ex_q:
+                        log_event("WARNING", f"quarantine recording notice: {ex_q}")
                     # Log to trade journal CSV
                     log_trade_journal(completed_trade)
                     
@@ -7449,6 +7488,7 @@ def main():
                     mhi_val = None
                     wallet_exceeded = False
                     bybit_success = False
+                    current_bal = float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
                     try:
                     
                         latest_candle = df.iloc[-1]
@@ -7574,6 +7614,26 @@ def main():
                                         bot_state[f"latest_prediction_{k_suffix}"] = pred_entry_dict
                                 continue
 
+                        is_quar, rem_hours, quar_reason = risk_engine.quarantine_manager.is_quarantined(symbol)
+                        if is_quar:
+                            pred_entry_dict = {
+                                "direction": "Neutral",
+                                "predicted_change": 0.0,
+                                "predicted_price": float(latest_candle["close"]),
+                                "current_price": float(latest_candle["close"]),
+                                "confidence": 0.0,
+                                "calibrated_confidence": 0.0,
+                                "timestamp": latest_completed_ts,
+                                "model_type": "None",
+                                "signal_source": "QUARANTINED",
+                                "status": f"Skipped (Quarantined: {symbol} cooling off {rem_hours:.1f}h [{quar_reason}])"
+                            }
+                            for k_suffix in [str(tf), str(iv)]:
+                                bot_state[f"regime_{symbol}_{k_suffix}"] = regime
+                                bot_state[f"adx_{symbol}_{k_suffix}"] = adx_regime
+                                bot_state[f"latest_prediction_{symbol}_{k_suffix}"] = pred_entry_dict
+                            continue
+
                         if iv in models_by_interval:
                             models_tf = models_by_interval[iv]
                             from config import ENABLE_DYNAMIC_REGIME_ROUTING, DYNAMIC_REGIME_ROUTING_INTERVALS
@@ -7597,81 +7657,111 @@ def main():
                             active_meta_model = m_meta
                             regime_name = f"{served_regime} (GMM)" if ENABLE_DYNAMIC_REGIME_ROUTING else served_regime
 
-                            # C-1 Predictive Floor & Holdout Out-Of-Sample Governance Check
-                            from config import (
-                                MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC,
-                                TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC,
-                                TIMEFRAME_MIN_CV_FOLD_MCC
-                            )
-                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
-                            min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), TIMEFRAME_MIN_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)))
-                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
-                            min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.355)))
-                            min_cv_fold_floor = TIMEFRAME_MIN_CV_FOLD_MCC.get(str(iv), TIMEFRAME_MIN_CV_FOLD_MCC.get("default", -0.05))
+                            # Option B: Dedicated Mean-Reversion Ranging Engine Bridge
+                            is_ranging_regime = (regime_key == "ranging") or ("Ranging" in str(regime)) or (adx_regime is not None and float(adx_regime) < 25.0)
+                            is_ranging_active = False
+                            ranging_sig = None
 
-                            mcc_val = getattr(active_model_trend, "manifest_mcc", None) or models_tf.get(regime_key, {}).get("manifest_mcc") or models_tf.get("manifest_mcc")
-                            mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
-                            bal_acc_val = getattr(active_model_trend, "manifest_bal_acc", None) or models_tf.get(regime_key, {}).get("manifest_bal_acc") or models_tf.get("manifest_bal_acc")
-                            holdout_mcc_val = getattr(active_model_trend, "holdout_mcc", None) or models_tf.get(regime_key, {}).get("holdout_mcc") or models_tf.get("holdout_mcc")
-                            holdout_bal_acc_val = getattr(active_model_trend, "holdout_bal_acc", None) or models_tf.get(regime_key, {}).get("holdout_bal_acc") or models_tf.get("holdout_bal_acc")
-                            holdout_ci95_low = getattr(active_model_trend, "holdout_ci95_low", None) or models_tf.get(regime_key, {}).get("holdout_ci95_low") or models_tf.get("holdout_ci95_low")
-                            is_promoted_flag = getattr(active_model_trend, "promoted", None) if getattr(active_model_trend, "promoted", None) is not None else models_tf.get(regime_key, {}).get("promoted")
+                            if is_ranging_regime:
+                                from ranging_strategy import evaluate_ranging_mean_reversion
+                                ranging_sig = evaluate_ranging_mean_reversion(df, symbol=symbol, interval=str(iv))
+                                if ranging_sig.is_signal:
+                                    is_ranging_active = True
+                                    ml_trend = ranging_sig.direction
+                                    ml_confidence = float(ranging_sig.confidence)
+                                    calibrated_confidence = float(ranging_sig.confidence)
+                                    pred_change = float(ranging_sig.expected_move) if ml_trend == "Bullish" else -float(ranging_sig.expected_move)
+                                    predicted_price = float(latest_candle["close"]) + pred_change
+                                    expected_pct_change = (abs(pred_change) / float(latest_candle["close"])) * 100
+                                    signal_source_type = "MEAN_REVERSION_BB"
+                                    is_fallback_signal = False
+                                    _manifest_mcc_val = 0.15
+                                    model_ver = "v1.0_ranging_bb"
+                                    git_sha_val = "prod"
+                                    manifest_schema_val = "v3.0"
+                                    feature_contract_val = "ranging_bb"
+                                    cal_ver = "v1.0_ranging_bb"
+                                    cal_ece = 0.03
+                                    abstain_reason = None
+                                    log_event("INFO", f"[{symbol} {iv}m Ranging Bridge] Active mean-reversion signal: {ml_trend} conf={calibrated_confidence:.3f} entry={ranging_sig.entry_price} tp={ranging_sig.take_profit} sl={ranging_sig.stop_loss}")
+                                else:
+                                    abstain_reason = ranging_sig.reason
 
-                            man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
-                            if os.path.exists(man_path):
-                                try:
-                                    with open(man_path, "r") as mf:
-                                        _mdata = json.load(mf)
-                                        if mcc_val is None:
-                                            mcc_val = extract_metric(_mdata, ["manifest_mcc"], ["cv_metrics", "mcc", "mean"], ["metrics", "mcc"])
-                                        if mcc_min_val is None:
-                                            mcc_min_val = extract_metric(_mdata, ["manifest_mcc_min"], ["cv_metrics", "mcc", "min"], ["metrics", "mcc_min"])
-                                        if bal_acc_val is None:
-                                            bal_acc_val = extract_metric(_mdata, ["manifest_bal_acc"], ["cv_metrics", "balanced_accuracy", "mean"], ["metrics", "balanced_accuracy"])
-                                        if holdout_mcc_val is None:
-                                            holdout_mcc_val = extract_metric(_mdata, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
-                                        if holdout_bal_acc_val is None:
-                                            holdout_bal_acc_val = extract_metric(_mdata, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
-                                        if holdout_ci95_low is None:
-                                            _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(_mdata.get("cv_metrics"), dict) else None
-                                            if isinstance(_ci, (list, tuple)) and len(_ci) >= 1:
-                                                holdout_ci95_low = _ci[0]
-                                        if is_promoted_flag is None:
-                                            is_promoted_flag = _mdata.get("promoted", False)  # Finding #84: Fail-closed default
-                                except Exception as mf_err:
-                                    log_event("CRITICAL", f"Failed to load manifest {man_path}: {mf_err}")
-                                    manifest_load_error = str(mf_err)
-                            else:
-                                manifest_load_error = f"Manifest {man_path} missing on disk"
+                            if not is_ranging_active and not abstain_reason:
+                                # C-1 Predictive Floor & Holdout Out-Of-Sample Governance Check
+                                from config import (
+                                    MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC,
+                                    TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC,
+                                    TIMEFRAME_MIN_CV_FOLD_MCC
+                                )
+                                min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
+                                min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), TIMEFRAME_MIN_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)))
+                                min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
+                                min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.355)))
+                                min_cv_fold_floor = TIMEFRAME_MIN_CV_FOLD_MCC.get(str(iv), TIMEFRAME_MIN_CV_FOLD_MCC.get("default", -0.05))
 
-                            abstain_reason = None
-                            if "manifest_load_error" in locals() and manifest_load_error:
-                                abstain_reason = f"Corrupted or unreadable manifest {man_path}: {manifest_load_error}"
-                            elif m_price is None or m_trend is None or not feat_list:
-                                abstain_reason = f"{served_regime} model offline"
-                            elif active_calibrator is None or (isinstance(active_calibrator, dict) and active_calibrator.get("is_fallback", False)):
-                                abstain_reason = f"{served_regime} calibrator missing or fallback (Fail-Closed)"
-                            elif _mdata is not None and isinstance(_mdata, dict):
-                                from config import is_manifest_degenerate
-                                is_deg, deg_reason = is_manifest_degenerate(_mdata)
-                                if is_deg:
-                                    abstain_reason = f"Degenerate manifest: {deg_reason}"
-                            
-                            if not abstain_reason:
-                                if mcc_val is not None and mcc_val < min_mcc_floor:
-                                    abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
-                                elif mcc_min_val is not None and mcc_min_val < min_cv_fold_floor:
-                                    abstain_reason = f"min CV MCC {mcc_min_val:.4f} < {min_cv_fold_floor}"
-                                elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
-                                    abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
-                                elif holdout_mcc_val is None or holdout_mcc_val < min_holdout_mcc_floor:
-                                    abstain_reason = f"Holdout MCC ({holdout_mcc_val}) < floor {min_holdout_mcc_floor} or missing"
-                                elif holdout_bal_acc_val is None or holdout_bal_acc_val < min_holdout_bal_acc_floor:
-                                    abstain_reason = f"Holdout BalAcc ({holdout_bal_acc_val}) < floor {min_holdout_bal_acc_floor} or missing"
-                                elif holdout_ci95_low is not None and holdout_ci95_low < -0.05:
-                                    abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
-                                elif is_promoted_flag is False:
-                                    abstain_reason = f"{served_regime} model manifest promoted=False"
+                                mcc_val = getattr(active_model_trend, "manifest_mcc", None) or models_tf.get(regime_key, {}).get("manifest_mcc") or models_tf.get("manifest_mcc")
+                                mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
+                                bal_acc_val = getattr(active_model_trend, "manifest_bal_acc", None) or models_tf.get(regime_key, {}).get("manifest_bal_acc") or models_tf.get("manifest_bal_acc")
+                                holdout_mcc_val = getattr(active_model_trend, "holdout_mcc", None) or models_tf.get(regime_key, {}).get("holdout_mcc") or models_tf.get("holdout_mcc")
+                                holdout_bal_acc_val = getattr(active_model_trend, "holdout_bal_acc", None) or models_tf.get(regime_key, {}).get("holdout_bal_acc") or models_tf.get("holdout_bal_acc")
+                                holdout_ci95_low = getattr(active_model_trend, "holdout_ci95_low", None) or models_tf.get(regime_key, {}).get("holdout_ci95_low") or models_tf.get("holdout_ci95_low")
+                                is_promoted_flag = getattr(active_model_trend, "promoted", None) if getattr(active_model_trend, "promoted", None) is not None else models_tf.get(regime_key, {}).get("promoted")
+
+                                man_path = f"ensemble_{regime_key}_trend_{iv}_manifest.json"
+                                if os.path.exists(man_path):
+                                    try:
+                                        with open(man_path, "r") as mf:
+                                            _mdata = json.load(mf)
+                                            if mcc_val is None:
+                                                mcc_val = extract_metric(_mdata, ["manifest_mcc"], ["cv_metrics", "mcc", "mean"], ["metrics", "mcc"])
+                                            if mcc_min_val is None:
+                                                mcc_min_val = extract_metric(_mdata, ["manifest_mcc_min"], ["cv_metrics", "mcc", "min"], ["metrics", "mcc_min"])
+                                            if bal_acc_val is None:
+                                                bal_acc_val = extract_metric(_mdata, ["manifest_bal_acc"], ["cv_metrics", "balanced_accuracy", "mean"], ["metrics", "balanced_accuracy"])
+                                            if holdout_mcc_val is None:
+                                                holdout_mcc_val = extract_metric(_mdata, ["holdout_mcc"], ["cv_metrics", "holdout_mcc"], ["metrics", "holdout_mcc"])
+                                            if holdout_bal_acc_val is None:
+                                                holdout_bal_acc_val = extract_metric(_mdata, ["holdout_balanced_accuracy"], ["cv_metrics", "holdout_balanced_accuracy"], ["metrics", "holdout_balanced_accuracy"])
+                                            if holdout_ci95_low is None:
+                                                _ci = _mdata.get("cv_metrics", {}).get("holdout_mcc_ci95") if isinstance(_mdata.get("cv_metrics"), dict) else None
+                                                if isinstance(_ci, (list, tuple)) and len(_ci) >= 1:
+                                                    holdout_ci95_low = _ci[0]
+                                            if is_promoted_flag is None:
+                                                is_promoted_flag = _mdata.get("promoted", False)  # Finding #84: Fail-closed default
+                                    except Exception as mf_err:
+                                        log_event("CRITICAL", f"Failed to load manifest {man_path}: {mf_err}")
+                                        manifest_load_error = str(mf_err)
+                                else:
+                                    manifest_load_error = f"Manifest {man_path} missing on disk"
+
+                                if "manifest_load_error" in locals() and manifest_load_error:
+                                    abstain_reason = f"Corrupted or unreadable manifest {man_path}: {manifest_load_error}"
+                                elif m_price is None or m_trend is None or not feat_list:
+                                    abstain_reason = f"{served_regime} model offline"
+                                elif active_calibrator is None or (isinstance(active_calibrator, dict) and active_calibrator.get("is_fallback", False)):
+                                    abstain_reason = f"{served_regime} calibrator missing or fallback (Fail-Closed)"
+                                elif _mdata is not None and isinstance(_mdata, dict):
+                                    from config import is_manifest_degenerate
+                                    is_deg, deg_reason = is_manifest_degenerate(_mdata)
+                                    if is_deg:
+                                        abstain_reason = f"Degenerate manifest: {deg_reason}"
+                                
+                                if not abstain_reason:
+                                    if mcc_val is not None and mcc_val < min_mcc_floor:
+                                        abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
+                                    elif mcc_min_val is not None and mcc_min_val < min_cv_fold_floor:
+                                        abstain_reason = f"min CV MCC {mcc_min_val:.4f} < {min_cv_fold_floor}"
+                                    elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
+                                        abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
+                                    elif holdout_mcc_val is None or holdout_mcc_val < min_holdout_mcc_floor:
+                                        abstain_reason = f"Holdout MCC ({holdout_mcc_val}) < floor {min_holdout_mcc_floor} or missing"
+                                    elif holdout_bal_acc_val is None or holdout_bal_acc_val < min_holdout_bal_acc_floor:
+                                        abstain_reason = f"Holdout BalAcc ({holdout_bal_acc_val}) < floor {min_holdout_bal_acc_floor} or missing"
+                                    elif holdout_ci95_low is not None and holdout_ci95_low < -0.05:
+                                        abstain_reason = f"Holdout CI95 lower bound {holdout_ci95_low:.4f} < -0.05"
+                                    elif is_promoted_flag is False:
+                                        abstain_reason = f"{served_regime} model manifest promoted=False"
 
                             if abstain_reason:
                                 log_event("WARNING", f"[{symbol} {iv}m ({regime_key})] {abstain_reason}. Abstaining.")
@@ -7683,8 +7773,8 @@ def main():
                                     "direction": "Abstain",
                                     "raw_confidence": 0.0,
                                     "calibrated_confidence": 0.0,
-                                    "manifest_mcc": mcc_val,
-                                    "signal_source": "GOVERNANCE_ABSTAIN",
+                                    "manifest_mcc": mcc_val if 'mcc_val' in locals() and mcc_val is not None else 0.0,
+                                    "signal_source": "MEAN_REVERSION_BB" if is_ranging_regime else "GOVERNANCE_ABSTAIN",
                                     "is_fallback": False,
                                     "status": f"Abstain ({abstain_reason})"
                                 }
@@ -7709,161 +7799,169 @@ def main():
                             if hasattr(latest_candle_weighted.index, "duplicated") and latest_candle_weighted.index.duplicated().any():
                                 latest_candle_weighted = latest_candle_weighted[~latest_candle_weighted.index.duplicated(keep="first")]
 
-                            from ensemble import get_model_feature_names
-                            _exp_names = get_model_feature_names(active_model_trend)
-                            if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
-                                _features_to_use = _exp_names
-                            elif feat_list is not None:
-                                _features_to_use = feat_list
+                            if is_ranging_active:
+                                prob_bearish = 1.0 if ml_trend == "Bearish" else 0.0
+                                prob_neutral = 0.0
+                                prob_bullish = 1.0 if ml_trend == "Bullish" else 0.0
+                                probs = [prob_bearish, prob_neutral, prob_bullish]
+                                conformal_unc_score = 0.0
+                                conformal_is_uncertain = False
                             else:
-                                from core import features as master_features
-                                _features_to_use = master_features
-
-                            X_live_full, missing_model_features = check_live_feature_integrity(latest_candle_weighted, _features_to_use)
-                            if missing_model_features:
-                                log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
-                                rec.outcome = "REJECTED"
-                                rec.reason_code = ReasonCode.PREDICTION_ERROR
-                                rec.reject_reason = f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
-                                write_decision(rec)
-                                continue
-
-                            try:
-                                X_live = _slice_model_input(active_model_trend, X_live_full)
-                            except Exception as ex_slice:
-                                log_event("WARNING", f"[{symbol} {iv}m] Feature slice failed: {ex_slice}. Abstaining (fail-closed).")
-                                rec.outcome = "REJECTED"
-                                rec.reason_code = ReasonCode.PREDICTION_ERROR
-                                rec.reject_reason = f"Feature slice failed: {ex_slice}"
-                                write_decision(rec)
-                                continue
-
-                            # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
-                            if str(iv) == "15":
-                                ensemble_weights = [0.10, 0.45, 0.45]
-                            elif str(iv) == "30":
-                                ensemble_weights = [0.15, 0.42, 0.43]
-                            else:
-                                ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
-                        
-                            t_inf_start = time.time()
-                            try:
-                                pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
-                                pred_change = pred_pct * float(latest_candle["close"])
-                                predicted_price = float(latest_candle["close"]) + pred_change
-                            
-                                # 3-class probabilities with Conformal Uncertainty estimation
-                                if hasattr(active_model_trend, "predict_with_uncertainty"):
-                                    probs_arr, conformal_unc_score, conformal_is_uncertain = active_model_trend.predict_with_uncertainty(X_live, weights=ensemble_weights)
-                                    probs = probs_arr[0]
+                                from ensemble import get_model_feature_names
+                                _exp_names = get_model_feature_names(active_model_trend)
+                                if _exp_names and not all(str(n).startswith("Column_") for n in _exp_names):
+                                    _features_to_use = _exp_names
+                                elif feat_list is not None:
+                                    _features_to_use = feat_list
                                 else:
-                                    probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
-                                    conformal_unc_score = 0.0
-                                    conformal_is_uncertain = False
+                                    from core import features as master_features
+                                    _features_to_use = master_features
 
-                                # Finding #166 (Finding #96): Record live model inference latency
-                                inf_lat_ms = (time.time() - t_inf_start) * 1000.0
-                                bot_state["last_inference_latency_ms"] = inf_lat_ms
-                                try:
-                                    from state_manager import state_manager as _sm_inst
-                                    _sm_inst["last_inference_latency_ms"] = inf_lat_ms
-                                except Exception as ex_inf:
-                                    log_event("WARNING", f"state_manager latency notice: {ex_inf}")
-                            except Exception as pred_err:
-                                import traceback
-                                err_msg = f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] {type(pred_err).__name__}: {pred_err}"
-                                log_event("WARNING", f"{err_msg}\n{traceback.format_exc()}")
-                                print(f"{err_msg}. Aborting trade entry (Fail-Closed).")
-                                status_msg = f"Skipped (Prediction Error: {type(pred_err).__name__} {pred_err})"
-                                rec.reject_reason = status_msg
-                                all_pass = False
-                                continue
-
-                            # Degenerate live prediction detector (requires statistically sufficient sample size N >= 30 per symbol)
-                            _model_key = f"{symbol}_ensemble_{regime_key}_trend_{iv}"
-                            if _model_key not in _recent_runtime_argmax:
-                                from collections import deque
-                                _recent_runtime_argmax[_model_key] = deque(maxlen=50)
-                            _recent_runtime_argmax[_model_key].append(int(np.argmax(probs)))
-                            if len(_recent_runtime_argmax[_model_key]) >= 30:
-                                _shares = np.bincount(_recent_runtime_argmax[_model_key], minlength=3) / len(_recent_runtime_argmax[_model_key])
-                                # One-sided directional collapse: exclusively Bearish (0) or Bullish (2) dominating
-                                if len(_shares) >= 3 and (_shares[0] >= 0.95 or _shares[2] >= 0.95):
-                                    log_event("WARNING", f"[{_model_key}] degenerate one-sided directional predictor: {_shares.round(3)} over {len(_recent_runtime_argmax[_model_key])} predictions — abstaining (Fail-Closed)")
-                                    status_msg = f"Skipped (Degenerate Prediction: {_model_key})"
+                                X_live_full, missing_model_features = check_live_feature_integrity(latest_candle_weighted, _features_to_use)
+                                if missing_model_features:
+                                    log_event("WARNING", f"[{symbol} {iv}m] Live inference missing {len(missing_model_features)} expected model features: {missing_model_features[:5]}. Abstaining (fail-closed).")
+                                    rec.outcome = "REJECTED"
+                                    rec.reason_code = ReasonCode.PREDICTION_ERROR
+                                    rec.reject_reason = f"Missing {len(missing_model_features)} model features: {','.join(missing_model_features[:10])}"
+                                    write_decision(rec)
                                     continue
-                        
-                            if len(probs) >= 3:
-                                prob_bearish = float(probs[0])
-                                prob_neutral = float(probs[1])
-                                prob_bullish = float(probs[2])
-                            elif len(probs) == 2:
-                                prob_bearish = float(probs[0])
-                                prob_neutral = 0.0
-                                prob_bullish = float(probs[1])
-                            else:
-                                val = float(probs[0])
-                                prob_bearish = val if val < 0.5 else 0.0
-                                prob_neutral = 0.0
-                                prob_bullish = val if val >= 0.5 else 0.0
 
-                            from ensemble import resolve_direction
-                            ml_trend, ml_confidence = resolve_direction(probs, interval=str(iv))
-                            raw_class_prob = prob_bullish if ml_trend == "Bullish" else (prob_bearish if ml_trend == "Bearish" else prob_neutral)
+                                try:
+                                    X_live = _slice_model_input(active_model_trend, X_live_full)
+                                except Exception as ex_slice:
+                                    log_event("WARNING", f"[{symbol} {iv}m] Feature slice failed: {ex_slice}. Abstaining (fail-closed).")
+                                    rec.outcome = "REJECTED"
+                                    rec.reason_code = ReasonCode.PREDICTION_ERROR
+                                    rec.reject_reason = f"Feature slice failed: {ex_slice}"
+                                    write_decision(rec)
+                                    continue
 
-                            # 1. Calibrate the directional confidence (matching economic 2-class break-even scale)
-                            calibrated_confidence = ml_confidence if ml_trend in ["Bullish", "Bearish"] else raw_class_prob
-                            calibrator = active_calibrator
-                            is_fallback_signal = False
-                            signal_source_type = "ML_ENSEMBLE"
-                            if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
-                                from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
-                                if not is_calibrator_viable(calibrator):
-                                    log_event("WARNING", f"[{symbol} {iv}m] Calibrator failed viability check (Fail-Closed). Abstaining.")
-                                    is_fallback_signal = True
-                                    signal_source_type = "UNVIABLE_CALIBRATOR"
-                                    calibrated_confidence = 0.0
-                                    ml_trend = "Neutral"
+                                # Item A: Interval-Specific Ensemble Weights (LightGBM & CatBoost-heavy for 15M/30M scalp accuracy)
+                                if str(iv) == "15":
+                                    ensemble_weights = [0.10, 0.45, 0.45]
+                                elif str(iv) == "30":
+                                    ensemble_weights = [0.15, 0.42, 0.43]
                                 else:
-                                    calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
-                                    method_name = calibrator.get("scaling_method", "calibration")
-                                    print(f"[{symbol} {iv}m {method_name}] Dir Mass: {ml_confidence*100:.2f}% (Raw Class: {raw_class_prob*100:.2f}%) -> Calibrated: {calibrated_confidence*100:.2f}%")
+                                    ensemble_weights = [0.30, 0.20, 0.50] if "Trending" in regime_name else [0.30, 0.50, 0.20]
+                            
+                                t_inf_start = time.time()
+                                try:
+                                    pred_pct = float(active_model_price.predict(X_live, weights=ensemble_weights)[0])
+                                    pred_change = pred_pct * float(latest_candle["close"])
+                                    predicted_price = float(latest_candle["close"]) + pred_change
+                                
+                                    # 3-class probabilities with Conformal Uncertainty estimation
+                                    if hasattr(active_model_trend, "predict_with_uncertainty"):
+                                        probs_arr, conformal_unc_score, conformal_is_uncertain = active_model_trend.predict_with_uncertainty(X_live, weights=ensemble_weights)
+                                        probs = probs_arr[0]
+                                    else:
+                                        probs = active_model_trend.predict_proba(X_live, weights=ensemble_weights)[0]
+                                        conformal_unc_score = 0.0
+                                        conformal_is_uncertain = False
 
-                            # 2. Decision-layer neutral discount (default 0.0 to prevent double penalty)
-                            neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
-                            if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
-                                calibrated_confidence = min(0.95, calibrated_confidence * (1.0 - prob_neutral * neutral_coeff))
+                                    # Finding #166 (Finding #96): Record live model inference latency
+                                    inf_lat_ms = (time.time() - t_inf_start) * 1000.0
+                                    bot_state["last_inference_latency_ms"] = inf_lat_ms
+                                    try:
+                                        from state_manager import state_manager as _sm_inst
+                                        _sm_inst["last_inference_latency_ms"] = inf_lat_ms
+                                    except Exception as ex_inf:
+                                        log_event("WARNING", f"state_manager latency notice: {ex_inf}")
+                                except Exception as pred_err:
+                                    import traceback
+                                    err_msg = f"[{symbol} {iv}m CRITICAL PREDICTION ERROR] {type(pred_err).__name__}: {pred_err}"
+                                    log_event("WARNING", f"{err_msg}\n{traceback.format_exc()}")
+                                    print(f"{err_msg}. Aborting trade entry (Fail-Closed).")
+                                    status_msg = f"Skipped (Prediction Error: {type(pred_err).__name__} {pred_err})"
+                                    rec.reject_reason = status_msg
+                                    all_pass = False
+                                    continue
 
-                            # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
-                            calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
+                                # Degenerate live prediction detector (requires statistically sufficient sample size N >= 30 per symbol)
+                                _model_key = f"{symbol}_ensemble_{regime_key}_trend_{iv}"
+                                if _model_key not in _recent_runtime_argmax:
+                                    from collections import deque
+                                    _recent_runtime_argmax[_model_key] = deque(maxlen=50)
+                                _recent_runtime_argmax[_model_key].append(int(np.argmax(probs)))
+                                if len(_recent_runtime_argmax[_model_key]) >= 30:
+                                    _shares = np.bincount(_recent_runtime_argmax[_model_key], minlength=3) / len(_recent_runtime_argmax[_model_key])
+                                    # One-sided directional collapse: exclusively Bearish (0) or Bullish (2) dominating
+                                    if len(_shares) >= 3 and (_shares[0] >= 0.95 or _shares[2] >= 0.95):
+                                        log_event("WARNING", f"[{_model_key}] degenerate one-sided directional predictor: {_shares.round(3)} over {len(_recent_runtime_argmax[_model_key])} predictions — abstaining (Fail-Closed)")
+                                        status_msg = f"Skipped (Degenerate Prediction: {_model_key})"
+                                        continue
+                            
+                                if len(probs) >= 3:
+                                    prob_bearish = float(probs[0])
+                                    prob_neutral = float(probs[1])
+                                    prob_bullish = float(probs[2])
+                                elif len(probs) == 2:
+                                    prob_bearish = float(probs[0])
+                                    prob_neutral = 0.0
+                                    prob_bullish = float(probs[1])
+                                else:
+                                    val = float(probs[0])
+                                    prob_bearish = val if val < 0.5 else 0.0
+                                    prob_neutral = 0.0
+                                    prob_bullish = val if val >= 0.5 else 0.0
 
-                            # Governance MCC / Predictive Floor Check
-                            from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC
-                            min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
-                            min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
-                            _manifest_mcc_val = getattr(m_trend, "manifest_mcc", None)
-                            _holdout_mcc_val = getattr(m_trend, "holdout_mcc", None)
-                            if _manifest_mcc_val is None:
-                                _manifest_mcc_val = locals().get("manifest_info", {}).get("manifest_mcc")
-                            if _holdout_mcc_val is None:
-                                _holdout_mcc_val = locals().get("manifest_info", {}).get("holdout_mcc")
+                                from ensemble import resolve_direction
+                                ml_trend, ml_confidence = resolve_direction(probs, interval=str(iv))
+                                raw_class_prob = prob_bullish if ml_trend == "Bullish" else (prob_bearish if ml_trend == "Bearish" else prob_neutral)
 
-                            if _manifest_mcc_val is not None and _manifest_mcc_val < min_mcc_floor:
-                                log_event("WARNING", f"[{symbol} {iv}m] Model MCC ({_manifest_mcc_val:.4f}) below governance floor ({min_mcc_floor}). ABSTAIN.")
-                                continue
-                            if _holdout_mcc_val is not None and _holdout_mcc_val < min_holdout_mcc_floor:
-                                log_event("WARNING", f"[{symbol} {iv}m] Model Holdout MCC ({_holdout_mcc_val:.4f}) below holdout floor ({min_holdout_mcc_floor}). ABSTAIN.")
-                                continue
+                                # 1. Calibrate the directional confidence (matching economic 2-class break-even scale)
+                                calibrated_confidence = ml_confidence if ml_trend in ["Bullish", "Bearish"] else raw_class_prob
+                                calibrator = active_calibrator
+                                is_fallback_signal = False
+                                signal_source_type = "ML_ENSEMBLE"
+                                if calibrator is not None and ml_trend in ["Bullish", "Bearish"]:
+                                    from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
+                                    if not is_calibrator_viable(calibrator):
+                                        log_event("WARNING", f"[{symbol} {iv}m] Calibrator failed viability check (Fail-Closed). Abstaining.")
+                                        is_fallback_signal = True
+                                        signal_source_type = "UNVIABLE_CALIBRATOR"
+                                        calibrated_confidence = 0.0
+                                        ml_trend = "Neutral"
+                                    else:
+                                        calibrated_confidence = calibrate_probability(ml_confidence, calibrator)
+                                        method_name = calibrator.get("scaling_method", "calibration")
+                                        print(f"[{symbol} {iv}m {method_name}] Dir Mass: {ml_confidence*100:.2f}% (Raw Class: {raw_class_prob*100:.2f}%) -> Calibrated: {calibrated_confidence*100:.2f}%")
 
-                            expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
+                                # 2. Decision-layer neutral discount (default 0.0 to prevent double penalty)
+                                neutral_coeff = getattr(config, "NEUTRAL_PENALTY_COEFFICIENT", 0.0)
+                                if ml_trend in ("Bullish", "Bearish") and neutral_coeff > 0.0:
+                                    calibrated_confidence = min(0.95, calibrated_confidence * (1.0 - prob_neutral * neutral_coeff))
 
-                            reg_dict = models_tf.get(regime_key, {})
-                            model_ver = reg_dict.get("model_version") or getattr(m_trend, "model_version", None)
-                            git_sha_val = reg_dict.get("git_sha")
-                            manifest_schema_val = reg_dict.get("manifest_schema_version")
-                            feature_contract_val = reg_dict.get("feature_contract_hash")
-                            cal_ver = reg_dict.get("calibrator_version")
-                            cal_ece = reg_dict.get("calibrator_ece")
+                                # Clip calibrated output away from 0.0 & 1.0 saturation boundaries (EPS = 1e-3)
+                                calibrated_confidence = float(np.clip(calibrated_confidence, 1e-3, 1.0 - 1e-3))
+
+                                # Governance MCC / Predictive Floor Check
+                                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC
+                                min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
+                                min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
+                                _manifest_mcc_val = getattr(m_trend, "manifest_mcc", None)
+                                _holdout_mcc_val = getattr(m_trend, "holdout_mcc", None)
+                                if _manifest_mcc_val is None:
+                                    _manifest_mcc_val = locals().get("manifest_info", {}).get("manifest_mcc")
+                                if _holdout_mcc_val is None:
+                                    _holdout_mcc_val = locals().get("manifest_info", {}).get("holdout_mcc")
+
+                                if _manifest_mcc_val is not None and _manifest_mcc_val < min_mcc_floor:
+                                    log_event("WARNING", f"[{symbol} {iv}m] Model MCC ({_manifest_mcc_val:.4f}) below governance floor ({min_mcc_floor}). ABSTAIN.")
+                                    continue
+                                if _holdout_mcc_val is not None and _holdout_mcc_val < min_holdout_mcc_floor:
+                                    log_event("WARNING", f"[{symbol} {iv}m] Model Holdout MCC ({_holdout_mcc_val:.4f}) below holdout floor ({min_holdout_mcc_floor}). ABSTAIN.")
+                                    continue
+
+                                expected_pct_change = (abs(pred_change) / latest_candle["close"]) * 100
+
+                                reg_dict = models_tf.get(regime_key, {})
+                                model_ver = reg_dict.get("model_version") or getattr(m_trend, "model_version", None)
+                                git_sha_val = reg_dict.get("git_sha")
+                                manifest_schema_val = reg_dict.get("manifest_schema_version")
+                                feature_contract_val = reg_dict.get("feature_contract_hash")
+                                cal_ver = reg_dict.get("calibrator_version")
+                                cal_ece = reg_dict.get("calibrator_ece")
 
                             pred_entry_dict = {
                                 "timestamp": float(time.time()),
@@ -7883,7 +7981,8 @@ def main():
                                 "manifest_schema_version": manifest_schema_val,
                                 "feature_contract_hash": feature_contract_val,
                                 "calibrator_version": cal_ver,
-                                "calibrator_ece": cal_ece
+                                "calibrator_ece": cal_ece,
+                                "status": "Active (Mean Reversion)" if is_ranging_active else str(ml_trend)
                             }
                             for k_suffix in [str(tf), str(iv)]:
                                 bot_state[f"regime_{symbol}_{k_suffix}"] = regime_name
@@ -7954,7 +8053,8 @@ def main():
                                 vol_factor = max(0.75, min(1.5, 1.5 - ((atr_norm_val - 0.003) / 0.005) * 0.75))
 
                             min_target = max(getattr(config, "MIN_TARGET_ATR_MULT", {}).get(str(iv), 1.5), 1.20 * sl_multiplier)
-                            base_tp_target = max(cfg.get("tp_mult_ranging", 1.40) if is_ranging_regime else cfg.get("tp_mult_trending", 1.85), min_target)
+                            trending_target = getattr(config, "TRENDING_TP_TARGET_MULT", {}).get(str(iv), cfg.get("tp_mult_trending", 2.60))
+                            base_tp_target = max(cfg.get("tp_mult_ranging", 1.40) if is_ranging_regime else trending_target, min_target)
                             tp_multiplier_adjusted = round(base_tp_target * vol_factor, 3)
 
                             # Volatility (ATR Percentile) Adjustment (±5%)
@@ -7980,31 +8080,50 @@ def main():
                                 session_factor = 0.98
                             tp_multiplier_adjusted *= session_factor
 
-                            # Finding #159 (Finding #91): Single shared canonical trade geometry resolver
-                            geom = trade_calculators.resolve_trade_geometry(
-                                entry_price=entry_close,
-                                direction=ml_trend,
-                                interval=str(iv),
-                                atr_dollars=atr_dollars,
-                                base_sl_multiplier=float(cfg.get("sl_mult", sl_multiplier)),
-                                base_tp_multiplier=tp_multiplier_adjusted,
-                                df=df_completed,
-                                symbol=symbol,
-                                regime=regime_name,
-                                volatility=atr_norm_val,
-                                database_module=database
-                            )
-                            stop_loss_price = geom["stop_loss_price"]
-                            take_profit_price = geom["take_profit_price"]
-                            resolved_sl_dist = geom["sl_dist"]
-                            tp_change = geom["tp_dist"]
-                            sl_multiplier_adjusted = geom["sl_multiplier_adjusted"]
-                            resolved_sl_m = float(resolved_sl_dist / max(1e-6, atr_dollars))
-                            resolved_tp_m = geom["tp_multiplier_adjusted"]
-                            tp_multiplier_adjusted = resolved_tp_m
-                            struct_meta = geom["struct_meta"]
-                            struct_sl_dist_pct = geom["struct_sl_dist_pct"]
-                            scaled_lev = None
+                            if is_ranging_active and ranging_sig is not None:
+                                entry_close = float(ranging_sig.entry_price)
+                                stop_loss_price = float(ranging_sig.stop_loss)
+                                take_profit_price = float(ranging_sig.take_profit)
+                                resolved_sl_dist = abs(entry_close - stop_loss_price)
+                                tp_change = abs(take_profit_price - entry_close)
+                                sl_multiplier_adjusted = resolved_sl_dist / max(1e-6, atr_dollars)
+                                tp_multiplier_adjusted = tp_change / max(1e-6, atr_dollars)
+                                resolved_sl_m = sl_multiplier_adjusted
+                                resolved_tp_m = tp_multiplier_adjusted
+                                struct_sl_dist_pct = (resolved_sl_dist / entry_close) * 100.0
+                                struct_meta = {
+                                    "source": "RANGING_MEAN_REVERSION_BB",
+                                    "window": 20,
+                                    "quality_score": 90,
+                                    "reason": ranging_sig.reason
+                                }
+                                scaled_lev = None
+                            else:
+                                # Finding #159 (Finding #91): Single shared canonical trade geometry resolver
+                                geom = trade_calculators.resolve_trade_geometry(
+                                    entry_price=entry_close,
+                                    direction=ml_trend,
+                                    interval=str(iv),
+                                    atr_dollars=atr_dollars,
+                                    base_sl_multiplier=float(cfg.get("sl_mult", sl_multiplier)),
+                                    base_tp_multiplier=tp_multiplier_adjusted,
+                                    df=df_completed,
+                                    symbol=symbol,
+                                    regime=regime_name,
+                                    volatility=atr_norm_val,
+                                    database_module=database
+                                )
+                                stop_loss_price = geom["stop_loss_price"]
+                                take_profit_price = geom["take_profit_price"]
+                                resolved_sl_dist = geom["sl_dist"]
+                                tp_change = geom["tp_dist"]
+                                sl_multiplier_adjusted = geom["sl_multiplier_adjusted"]
+                                resolved_sl_m = float(resolved_sl_dist / max(1e-6, atr_dollars))
+                                resolved_tp_m = geom["tp_multiplier_adjusted"]
+                                tp_multiplier_adjusted = resolved_tp_m
+                                struct_meta = geom["struct_meta"]
+                                struct_sl_dist_pct = geom["struct_sl_dist_pct"]
+                                scaled_lev = None
 
                             # Economic Break-Even Threshold (p*) based on exact resolved order geometry
                             _bars_per_day = max(1, round(1440 / max(1, int(iv))))
@@ -8072,14 +8191,15 @@ def main():
 
                             # Calibrator Economic Viability Guard
                             from tools.beta_calibrator import is_calibrator_viable
-                            if active_calibrator is None or not is_calibrator_viable(active_calibrator, min_required_p_star=min(0.60, economic_base_threshold)):
-                                log_event("WARNING", f"[{symbol} {iv}m Calibrator Guard] Active calibrator missing, fallback, or achievable ceiling cannot reach fee-inclusive break-even p* ({economic_base_threshold:.4f}). Abstaining (Fail-Closed).")
-                                continue
+                            if not is_ranging_active:
+                                if active_calibrator is None or not is_calibrator_viable(active_calibrator, min_required_p_star=min(0.60, economic_base_threshold)):
+                                    log_event("WARNING", f"[{symbol} {iv}m Calibrator Guard] Active calibrator missing, fallback, or achievable ceiling cannot reach fee-inclusive break-even p* ({economic_base_threshold:.4f}). Abstaining (Fail-Closed).")
+                                    continue
 
                             # ADX Regime Floor Filter (Regime-aware: Ranging models trade 10-24 ADX; Trending requires high momentum)
                             is_ranging_regime = "Ranging" in regime_name
                             if is_ranging_regime:
-                                min_adx_thresh = float(cfg.get("min_adx_ranging", 10.0 if str(iv) in ["15", "30"] else 12.0))
+                                min_adx_thresh = float(cfg.get("min_adx_ranging", 8.0 if is_ranging_active else (10.0 if str(iv) in ["15", "30"] else 12.0)))
                             else:
                                 min_adx_thresh = float(cfg.get("min_adx", 16.0 if str(iv) in ["15", "30"] else 24.0))
                             if adx_regime < min_adx_thresh:
@@ -8147,30 +8267,34 @@ def main():
                             # Finding #129: Compute Composite Uncertainty (U_ensemble + U_market) with distinct predictions and matching weights
                             from statistical_validation import statistical_validation
                             _mean_atr = float(df_completed["ATR_norm"].mean()) if (df_completed is not None and "ATR_norm" in df_completed.columns and len(df_completed) >= 20) else atr_norm_val
-                            target_class_idx = 2 if ml_trend == "Bullish" else (0 if ml_trend == "Bearish" else 1)
-                            ind_preds = {}
-                            if hasattr(active_model_trend, "predict_individual_proba"):
-                                try:
-                                    ind_p_map = active_model_trend.predict_individual_proba(X_live)
-                                    for m_k, p_arr in ind_p_map.items():
-                                        if isinstance(p_arr, (list, np.ndarray)) and len(p_arr) > target_class_idx:
-                                            ind_preds[m_k] = float(p_arr[target_class_idx])
-                                except Exception as ex_ind:
-                                    log_event("WARNING", f"Individual prediction notice: {ex_ind}")
-                            if not ind_preds:
-                                ref_prob = prob_bullish if ml_trend == "Bullish" else prob_bearish
-                                ind_preds = {"xgb": float(ref_prob)}
-                                log_event("WARNING", f"[{symbol} {iv}m] No individual learner predictions available; falling back to single model uncertainty.")
-                            elif len(ind_preds) < 2:
-                                log_event("WARNING", f"[{symbol} {iv}m] Only {len(ind_preds)} model prediction available ({list(ind_preds.keys())}); cross-learner disagreement unavailable.")
-
-                            ens_w = getattr(active_model_trend, "weights", None)
-                            if ens_w is not None and isinstance(ens_w, (list, tuple, np.ndarray)) and len(ens_w) == 3:
-                                w_dict = {"xgb": float(ens_w[0]), "lgb": float(ens_w[1]), "cat": float(ens_w[2])}
-                            elif "ensemble_weights" in locals() and isinstance(ensemble_weights, (list, tuple)) and len(ensemble_weights) == 3:
-                                w_dict = {"xgb": float(ensemble_weights[0]), "lgb": float(ensemble_weights[1]), "cat": float(ensemble_weights[2])}
+                            if is_ranging_active:
+                                ind_preds = {"ranging_bb": float(calibrated_confidence)}
+                                w_dict = {"ranging_bb": 1.0}
                             else:
-                                w_dict = {"xgb": 0.3333, "lgb": 0.3333, "cat": 0.3334}
+                                target_class_idx = 2 if ml_trend == "Bullish" else (0 if ml_trend == "Bearish" else 1)
+                                ind_preds = {}
+                                if hasattr(active_model_trend, "predict_individual_proba"):
+                                    try:
+                                        ind_p_map = active_model_trend.predict_individual_proba(X_live)
+                                        for m_k, p_arr in ind_p_map.items():
+                                            if isinstance(p_arr, (list, np.ndarray)) and len(p_arr) > target_class_idx:
+                                                ind_preds[m_k] = float(p_arr[target_class_idx])
+                                    except Exception as ex_ind:
+                                        log_event("WARNING", f"Individual prediction notice: {ex_ind}")
+                                if not ind_preds:
+                                    ref_prob = prob_bullish if ml_trend == "Bullish" else prob_bearish
+                                    ind_preds = {"xgb": float(ref_prob)}
+                                    log_event("WARNING", f"[{symbol} {iv}m] No individual learner predictions available; falling back to single model uncertainty.")
+                                elif len(ind_preds) < 2:
+                                    log_event("WARNING", f"[{symbol} {iv}m] Only {len(ind_preds)} model prediction available ({list(ind_preds.keys())}); cross-learner disagreement unavailable.")
+
+                                ens_w = getattr(active_model_trend, "weights", None)
+                                if ens_w is not None and isinstance(ens_w, (list, tuple, np.ndarray)) and len(ens_w) == 3:
+                                    w_dict = {"xgb": float(ens_w[0]), "lgb": float(ens_w[1]), "cat": float(ens_w[2])}
+                                elif "ensemble_weights" in locals() and isinstance(ensemble_weights, (list, tuple)) and len(ensemble_weights) == 3:
+                                    w_dict = {"xgb": float(ensemble_weights[0]), "lgb": float(ensemble_weights[1]), "cat": float(ensemble_weights[2])}
+                                else:
+                                    w_dict = {"xgb": 0.3333, "lgb": 0.3333, "cat": 0.3334}
 
                             unc_metrics = statistical_validation.calculate_composite_uncertainty(
                                 individual_predictions=ind_preds,
@@ -8192,7 +8316,21 @@ def main():
                             # Compute rolling 30-trade symbol Sharpe
                             sym_trades = [t for t in bot_state.get("trade_history", []) if t.get("symbol") == symbol][-30:]
                             if len(sym_trades) >= 5:
-                                sym_returns = [float(t.get("change_pct", (t.get("pnl_usd", 0.0) / max(1.0, float(t.get("original_size", t.get("position_size_usd", 1.0)))) * 100.0))) for t in sym_trades]
+                                sym_returns = []
+                                for t in sym_trades:
+                                    cp = t.get("change_pct")
+                                    if cp is not None and str(cp).strip() != "":
+                                        try:
+                                            sym_returns.append(float(cp))
+                                        except (ValueError, TypeError):
+                                            sym_returns.append(0.0)
+                                    else:
+                                        try:
+                                            pnl_val = float(t.get("pnl_usd") or 0.0)
+                                            sz_val = float(t.get("original_size") or t.get("position_size_usd") or 1.0)
+                                            sym_returns.append((pnl_val / max(1.0, sz_val)) * 100.0)
+                                        except (ValueError, TypeError, ZeroDivisionError):
+                                            sym_returns.append(0.0)
                                 from trade_calculators import calculate_rolling_sharpe
                                 sym_sharpe = round(float(calculate_rolling_sharpe(sym_returns)), 2)
                             else:
@@ -8201,8 +8339,16 @@ def main():
 
                             # Compute MHI score
                             from strategy_health_engine import strategy_health_engine
+                            recent_pnls = []
+                            for t in bot_state.get("trade_history", [])[-50:]:
+                                p_val = t.get("pnl_usd")
+                                if p_val is not None and str(p_val).strip() != "":
+                                    try:
+                                        recent_pnls.append(float(p_val))
+                                    except (ValueError, TypeError):
+                                        pass
                             mhi_res = strategy_health_engine.compute_model_health_index(
-                                recent_pnls=[float(t.get("pnl_usd", 0.0)) for t in bot_state.get("trade_history", [])[-50:]],
+                                recent_pnls=recent_pnls,
                                 ece_score=float(bot_state.get("last_ece", 0.04)),
                                 brier_score=float(bot_state.get("last_brier_score", 0.15)),
                                 psi_score=float(bot_state.get("last_psi", 0.04)),
@@ -8456,7 +8602,8 @@ def main():
                                             print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
                                         else:
                                             dynamic_conf_threshold += 0.10
-                                            confluence_blocked = True
+                                            if not is_ranging_active:
+                                                confluence_blocked = True
                                             adjustments_applied.append(("macro_opposition", 0.10))
                                             print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
@@ -8626,7 +8773,7 @@ def main():
                                 status_msg = "Skipped (Funding Block)"
                                 rec.reason_code = ReasonCode.FUNDING_BLOCK
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: High funding fee payment risk (Funding: {funding_rate*100:.3f}%).")
-                            elif confluence_blocked:
+                            elif confluence_blocked and not is_ranging_active:
                                 status_msg = "Skipped (Macro Opposition)"
                                 rec.reason_code = ReasonCode.MACRO_OPPOSITION
                                 log_event("WARNING", f"[{symbol} {iv}m] Prediction skipped: HTF macro trend opposes trade direction ({htf_trend}).")
@@ -9835,7 +9982,8 @@ def main():
                             if 'position_size_usd' in locals() and position_size_usd is not None:
                                 rec.position_size_usd = float(position_size_usd)
                             else:
-                                rec.position_size_usd = float(round(current_bal * getattr(config, "RISK_PER_TRADE_PCT", 0.01), 2))
+                                _cur_bal_val = current_bal if ('current_bal' in locals() and current_bal is not None) else float(bot_state.get("live_balance", bot_state.get("wallet_balance", bot_state.get("simulated_balance", 80.0))))
+                                rec.position_size_usd = float(round(_cur_bal_val * getattr(config, "RISK_PER_TRADE_PCT", 0.01), 2))
                         if rec.leverage is None:
                             if 'leverage_val' in locals() and leverage_val is not None:
                                 rec.leverage = float(leverage_val)

@@ -674,12 +674,12 @@ class MFEBreakEvenTrigger:
                         mfe_ratios.append(mfe_val / max(1e-9, atr))
             if len(mfe_ratios) >= self.min_sample_size:
                 trig = float(np.percentile(mfe_ratios, 25))
-                trig = float(np.clip(trig, 0.8, 2.0))
+                trig = float(np.clip(trig, 0.75, 2.0))
                 self.trigger_cache[key] = trig
                 return trig
         except Exception:
             pass
-        return 0.85 if str(timeframe) not in ["15", "30"] else 0.65
+        return 0.75 if str(timeframe) not in ["15", "30"] else 0.65
 
 
 adaptive_volume_gate = AdaptiveVolumeGate()

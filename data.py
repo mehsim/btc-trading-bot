@@ -19,9 +19,11 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kline_cache.
 db_write_lock = threading.Lock()
 _db_initialized = False
 _db_init_lock = threading.Lock()
+_quick_check_done = False
 
 def safe_get_sqlite_conn(db_path=DB_PATH, timeout=60.0):
     import sqlite3
+    global _quick_check_done
     for attempt in range(3):
         conn = None
         try:
@@ -30,12 +32,15 @@ def safe_get_sqlite_conn(db_path=DB_PATH, timeout=60.0):
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
             conn.row_factory = sqlite3.Row
-            res = conn.execute("PRAGMA quick_check(1);").fetchone()
-            if res and res[0] != "ok":
-                raise sqlite3.DatabaseError(f"Corrupt DB disk image: {res[0]}")
+            if not _quick_check_done:
+                res = conn.execute("PRAGMA quick_check(1);").fetchone()
+                if res and res[0] != "ok":
+                    raise sqlite3.DatabaseError(f"Corrupt DB disk image: {res[0]}")
+                _quick_check_done = True
             return conn
         except sqlite3.DatabaseError as e:
             print(f"[SQLite Auto-Recovery] Detected database corruption ({e}). Rebuilding database file {db_path}...")
+            _quick_check_done = False
             try:
                 if conn is not None:
                     conn.close()
@@ -53,6 +58,31 @@ def safe_get_sqlite_conn(db_path=DB_PATH, timeout=60.0):
     conn.execute("PRAGMA busy_timeout = 60000;")
     conn.execute("PRAGMA journal_mode = WAL;")
     return conn
+
+def prune_kline_cache(db_path=DB_PATH, keep_bars=30000):
+    """
+    Prunes kline_cache.db to retain only the most recent keep_bars per symbol/interval.
+    Prevents database bloat, disk exhaustion, and long scan times.
+    """
+    try:
+        conn = safe_get_sqlite_conn(db_path)
+        with db_write_lock:
+            conn.execute("""
+                DELETE FROM kline_data
+                WHERE rowid NOT IN (
+                    SELECT rowid FROM (
+                        SELECT rowid, ROW_NUMBER() OVER (PARTITION BY symbol, interval ORDER BY timestamp DESC) as rn
+                        FROM kline_data
+                    ) WHERE rn <= ?
+                )
+            """, (keep_bars,))
+            conn.commit()
+            conn.close()
+        log_event("INFO", f"[Kline Cache] Retention prune completed. Kept latest {keep_bars} bars per asset.")
+        return True
+    except Exception as e:
+        log_event("WARNING", f"[Kline Cache] Prune error: {e}")
+        return False
 
 def init_db():
     global _db_initialized

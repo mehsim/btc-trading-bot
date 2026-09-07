@@ -18,7 +18,8 @@ features = [
     "RSI_24", "ROC_24", "volatility_24h",
     "hour_sin", "hour_cos", "day_of_week_sin", "day_of_week_cos",
     "RSI_z", "ADX_z", "close_to_Kalman",
-    "stoch_k", "stoch_d", "williams_r", "cci", "bb_zscore"
+    "stoch_k", "stoch_d", "williams_r", "cci", "bb_zscore",
+    "rel_momentum_btc_1h", "rel_momentum_btc_4h", "beta_to_btc_24h", "rel_volume_surge"
 ]
 for lag in [1, 2, 3, 4, 5]:
     features.append(f"return_5m_lag{lag}")

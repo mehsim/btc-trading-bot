@@ -31,7 +31,7 @@
     },
     "policy_v3": {
       "status": "Champion",
-      "policy_hash": "c70d41e033f605a0",
+      "policy_hash": "ca19faa52da3fa60",
       "policy_path": "policies/policy_v3.json",
       "evaluation_report": "reports/exit_eval_v3.json",
       "composite_score": 0.84,

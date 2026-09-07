@@ -2579,6 +2579,60 @@
       },
       "stage": "Rejected",
       "registered_at_utc": "2026-09-07T10:51:34.463341+00:00"
+    },
+    {
+      "run_id": "train_60m_trending_1788791371",
+      "model_name": "ensemble_trending_60",
+      "metrics": {
+        "val_accuracy": 0.36164376771868256,
+        "val_mae": 0.017669260529446368,
+        "cv_mcc": -0.0021,
+        "holdout_mcc": 0.052077701734289855,
+        "holdout_resolved_mcc": 0.03429795313157623,
+        "holdout_effective_n": 103.28,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.6604581590252454,
+        "ece": 0.005964440179296295
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-07T14:29:31.977608+00:00"
+    },
+    {
+      "run_id": "train_60m_trending_1788791782",
+      "model_name": "ensemble_trending_60",
+      "metrics": {
+        "val_accuracy": 0.29099371264777246,
+        "val_mae": 0.01757995897482914,
+        "cv_mcc": -0.0017,
+        "holdout_mcc": -0.038155736630086035,
+        "holdout_resolved_mcc": -0.037422337137703376,
+        "holdout_effective_n": 163.43,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.6676495875835727,
+        "ece": 0.19278878773070765
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-07T14:36:22.646981+00:00"
+    },
+    {
+      "run_id": "train_60m_trending_1788792142",
+      "model_name": "ensemble_trending_60",
+      "metrics": {
+        "val_accuracy": 0.3225511849746036,
+        "val_mae": 0.022324640630936726,
+        "cv_mcc": 0.0086,
+        "holdout_mcc": -0.013974122521764326,
+        "holdout_resolved_mcc": -0.016940766315879267,
+        "holdout_effective_n": 62.06,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.6689058971160027,
+        "ece": 0.04106366211335833
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-07T14:42:22.678801+00:00"
     }
   ]
 }

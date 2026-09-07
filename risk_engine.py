@@ -1,4 +1,8 @@
+import os
+import json
 import time
+import threading
+from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple, Union
@@ -544,6 +548,10 @@ def evaluate_pre_trade_checklist(symbol: str, position_size_usd: float, leverage
         if bot_state.get("circuit_breaker_active", False):
             return False, "REJECTED: Daily Drawdown Circuit Breaker is active", 0.0, 0.0
 
+        is_quar, rem_hours, quar_reason = quarantine_manager.is_quarantined(symbol)
+        if is_quar:
+            return False, f"REJECTED: Symbol {symbol} is in 24h quarantine cooldown ({rem_hours:.1f}h remaining: {quar_reason})", 0.0, 0.0
+
         # Resolve equity from live state keys (fail-closed if missing, zero or negative)
         live_bal = bot_state.get("live_balance")
         wallet_bal = bot_state.get("wallet_balance")
@@ -1073,6 +1081,113 @@ def calculate_anti_martingale_risk_multiplier(
         "drawdown_pct": round(drawdown_pct * 100.0, 2),
         "recent_win_rate_pct": round(win_rate_recent * 100.0, 1)
     }
+
+
+class SymbolQuarantineManager:
+    """
+    Monitors per-symbol rolling performance and enforces a 24-hour quarantine
+    on assets exhibiting severe negative expectancy or loss streaks.
+    """
+    def __init__(self, state_file: str = "quarantine_state.json", cooldown_hours: float = 24.0, min_trades: int = 6, min_win_rate: float = 0.30, max_net_loss: float = -2.00):
+        self.state_file = state_file
+        self.cooldown_seconds = cooldown_hours * 3600.0
+        self.min_trades = min_trades
+        self.min_win_rate = min_win_rate
+        self.max_net_loss = max_net_loss
+        self.quarantined_symbols: Dict[str, Dict[str, Any]] = {}
+        self.symbol_trades: Dict[str, List[Dict[str, Any]]] = {}
+        self._lock = threading.Lock()
+        self._load_state()
+
+    def _load_state(self):
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, "r") as f:
+                    data = json.load(f)
+                    self.quarantined_symbols = data.get("quarantined_symbols", {})
+                    self.symbol_trades = data.get("symbol_trades", {})
+        except Exception as e:
+            log_event("WARNING", f"Error loading quarantine state: {e}")
+
+    def _save_state(self):
+        try:
+            data = {
+                "quarantined_symbols": self.quarantined_symbols,
+                "symbol_trades": self.symbol_trades,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            tmp = f"{self.state_file}.tmp.{os.getpid()}"
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, self.state_file)
+        except Exception as e:
+            log_event("WARNING", f"Error saving quarantine state: {e}")
+
+    def is_quarantined(self, symbol: str) -> Tuple[bool, float, str]:
+        """
+        Returns (is_quarantined, remaining_hours, reason).
+        Automatically releases expired quarantines.
+        """
+        now = time.time()
+        with self._lock:
+            if symbol in self.quarantined_symbols:
+                info = self.quarantined_symbols[symbol]
+                release_ts = float(info.get("release_ts", 0.0))
+                if now < release_ts:
+                    remaining_hours = max(0.0, (release_ts - now) / 3600.0)
+                    reason = info.get("reason", "Rolling Underperformance Timeout")
+                    return True, remaining_hours, reason
+                else:
+                    del self.quarantined_symbols[symbol]
+                    self.symbol_trades[symbol] = []
+                    self._save_state()
+                    log_event("INFO", f"[Quarantine Manager] Released {symbol} from 24h quarantine cooldown.")
+                    return False, 0.0, ""
+            return False, 0.0, ""
+
+    def record_closed_trade(self, symbol: str, pnl_usd: float, is_win: bool) -> Optional[Dict[str, Any]]:
+        """
+        Records closed trade outcome. If criteria met, triggers 24h quarantine.
+        """
+        now = time.time()
+        with self._lock:
+            if symbol not in self.symbol_trades:
+                self.symbol_trades[symbol] = []
+            
+            self.symbol_trades[symbol].append({
+                "timestamp": now,
+                "pnl_usd": float(pnl_usd),
+                "is_win": bool(is_win)
+            })
+            self.symbol_trades[symbol] = self.symbol_trades[symbol][-15:]
+
+            trades = self.symbol_trades[symbol]
+            if len(trades) >= self.min_trades:
+                wins = sum(1 for t in trades if t["is_win"])
+                total = len(trades)
+                wr = wins / total
+                net_pnl = sum(t["pnl_usd"] for t in trades)
+
+                if wr < self.min_win_rate or net_pnl <= self.max_net_loss:
+                    release_ts = now + self.cooldown_seconds
+                    reason = f"Low WR ({wr*100:.1f}% < {self.min_win_rate*100:.0f}%)" if wr < self.min_win_rate else f"Net Loss (${net_pnl:.2f} <= ${self.max_net_loss:.2f})"
+                    quar_info = {
+                        "release_ts": release_ts,
+                        "quarantined_at": now,
+                        "reason": reason,
+                        "win_rate": wr,
+                        "net_pnl": net_pnl,
+                        "trade_count": total
+                    }
+                    self.quarantined_symbols[symbol] = quar_info
+                    self._save_state()
+                    log_event("WARNING", f"[Quarantine Manager] {symbol} QUARANTINED for 24 hours: {reason} across {total} trades (Net: ${net_pnl:+.2f}).")
+                    return quar_info
+            self._save_state()
+            return None
+
+
+quarantine_manager = SymbolQuarantineManager()
 
 
 

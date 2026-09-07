@@ -103,9 +103,9 @@ class ExitPolicyEngine:
             "version": "3.0.0",
             "min_engine_version": "3.0",
             "parameters": {
-                "RANGING": { "scale_out_pct": 0.25, "scale_out_atr_mult": 1.2, "be_trigger_atr_mult": 1.5, "be_safety_margin_atr": 0.10 },
-                "MODERATE_TREND": { "scale_out_pct": 0.20, "scale_out_atr_mult": 1.5, "be_trigger_atr_mult": 1.5, "be_safety_margin_atr": 0.10 },
-                "STRONG_TREND": { "scale_out_pct": 0.00, "scale_out_atr_mult": 0.0, "be_trigger_atr_mult": 2.0, "be_safety_margin_atr": 0.10 }
+                "RANGING": { "scale_out_pct": 0.50, "scale_out_atr_mult": 1.0, "be_trigger_atr_mult": 0.75, "be_safety_margin_atr": 0.10 },
+                "MODERATE_TREND": { "scale_out_pct": 0.50, "scale_out_atr_mult": 1.0, "be_trigger_atr_mult": 0.75, "be_safety_margin_atr": 0.10 },
+                "STRONG_TREND": { "scale_out_pct": 0.50, "scale_out_atr_mult": 1.0, "be_trigger_atr_mult": 0.75, "be_safety_margin_atr": 0.10 }
             }
         }
 
@@ -244,10 +244,10 @@ class ExitPolicyEngine:
         exit_reason = None
         
         # 1. Scale-out Check
-        scale_out_pct = float(params.get("scale_out_pct", 0.25))
+        scale_out_pct = float(params.get("scale_out_pct", 0.50))
         # Overturned R18: Synchronize scale-out multiplier with resting limit order's entry_scale_mult
-        eff_scale_mult = float(active_trade.get("entry_scale_mult", params.get("scale_out_atr_mult", 1.2)))
-        be_trigger_atr_mult = float(params.get("be_trigger_atr_mult", 1.5))
+        eff_scale_mult = float(active_trade.get("entry_scale_mult", params.get("scale_out_atr_mult", 1.0)))
+        be_trigger_atr_mult = float(params.get("be_trigger_atr_mult", 0.75))
         be_safety_margin_atr = float(params.get("be_safety_margin_atr", 0.10))
         
         trigger_scale_out = False
@@ -263,16 +263,10 @@ class ExitPolicyEngine:
             updates["scale_out_pct"] = scale_out_pct
 
         # 2. Check Break-Even trigger
-        # Finding #36 & Overturned R17 & R18: Synchronize break-even with scale-out:
-        # Volatility contraction must not pull break-even below scale-out distance,
-        # and break-even must not move the stop to entry before scale-out executes.
+        # Early Break-Even: Stop Loss ratchets to entry + fee buffer as soon as trade reaches +0.75 ATR
         if not active_trade.get("break_even_triggered"):
             effective_be_basis = entry_atr if entry_atr > 0 else atr_dollars
             be_dist = be_trigger_atr_mult * effective_be_basis
-            # Floor break-even trigger distance above resting scale-out price whenever scale-out order exists
-            has_resting_scale_out = bool(active_trade.get("bybit_scale_out_order_id") or (not half_closed and scale_out_pct > 0.0))
-            if has_resting_scale_out:
-                be_dist = max(be_dist, (eff_scale_mult * scale_out_atr_basis) + (0.10 * effective_be_basis))
 
             be_buffer = self.compute_be_buffer(active_trade.get("symbol", "BTCUSDT"), leverage, entry_price, atr_dollars, be_safety_margin_atr)
             # Finding N4: min_safe_cushion matches module's 0.60 ATR minimum stop floor
@@ -566,7 +560,7 @@ class ExitPolicyEngine:
         import config
         tf_cfg = getattr(config, "TIMEFRAME_CONFIG", {}).get(tf_clean, {})
         lookahead = int(tf_cfg.get("lookahead", 12))
-        base_soft = max(16, int(lookahead))
+        base_soft = max(16, int(round(lookahead * 1.33)), int(lookahead) + 4)
         hard_limit = max(base_soft + 2, int(lookahead * 1.5))
 
         import config

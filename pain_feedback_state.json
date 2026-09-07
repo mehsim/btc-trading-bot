@@ -4,8 +4,17 @@
     "interval": "15",
     "base_floor": 0.006,
     "adjusted_floor": 0.010400000000000001,
-    "applied_at": "2026-09-06T21:42:46.213165+00:00",
+    "applied_at": "2026-09-07T14:50:54.611167+00:00",
     "decay_days": 7,
     "reason": "Pain trade (15m, n=2): stopped at 0.80%, reversed to TP"
+  },
+  "BTCUSDT": {
+    "symbol": "BTCUSDT",
+    "interval": null,
+    "base_floor": 0.008,
+    "adjusted_floor": 0.013000000000000001,
+    "applied_at": "2026-09-07T14:54:05.077644+00:00",
+    "decay_days": 7,
+    "reason": "Pain trade (Nonem, n=2): stopped at 1.00%, reversed to TP"
   }
 }

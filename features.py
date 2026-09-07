@@ -360,7 +360,52 @@ def add_features(df, fetch_calendar_callback=None, symbol=None, interval=None):
         df[f"lead_lag_diff_1h_lag{lag}"] = df["lead_lag_diff_1h"].shift(lag).fillna(0.0)
         df[f"lead_lag_diff_4h_lag{lag}"] = df["lead_lag_diff_4h"].shift(lag).fillna(0.0)
         df[f"volume_ratio_to_btc_lag{lag}"] = df["volume_ratio_to_btc"].shift(lag).fillna(0.0)
-        
+
+    # Altcoin Cross-Asset Relative Alpha Features
+    iv_int = 15
+    if interval is not None:
+        try:
+            iv_int = int(str(interval).replace("m", "").replace("h", ""))
+        except (ValueError, TypeError):
+            iv_int = 15
+    elif "interval" in df.columns:
+        try:
+            iv_int = int(str(df["interval"].iloc[-1]).replace("m", "").replace("h", ""))
+        except (ValueError, TypeError):
+            iv_int = 15
+    elif getattr(df, "attrs", {}).get("interval"):
+        try:
+            iv_int = int(str(df.attrs["interval"]).replace("m", "").replace("h", ""))
+        except (ValueError, TypeError):
+            iv_int = 15
+    elif len(df) >= 2:
+        try:
+            dt_mins = round(abs(float(df["timestamp"].iloc[-1]) - float(df["timestamp"].iloc[-2])) / 60000.0)
+            iv_int = dt_mins if dt_mins > 0 else 15
+        except (ValueError, TypeError):
+            iv_int = 15
+
+    bars_1h = max(1, round(60 / max(1, iv_int)))
+    bars_4h = max(1, round(240 / max(1, iv_int)))
+    bars_24h = max(2, round(1440 / max(1, iv_int)))
+
+    df["rel_momentum_btc_1h"] = (df["close"].pct_change(bars_1h) - btc_close_series.pct_change(bars_1h)).fillna(0.0)
+    df["rel_momentum_btc_4h"] = (df["close"].pct_change(bars_4h) - btc_close_series.pct_change(bars_4h)).fillna(0.0)
+
+    # 24H rolling beta to BTC
+    ret_asset = df["close"].pct_change().fillna(0.0)
+    ret_btc = btc_close_series.pct_change().fillna(0.0)
+    cov_24h = ret_asset.rolling(bars_24h, min_periods=min(5, bars_24h)).cov(ret_btc)
+    var_btc_24h = ret_btc.rolling(bars_24h, min_periods=min(5, bars_24h)).var()
+    df["beta_to_btc_24h"] = (cov_24h / var_btc_24h.replace(0, np.nan)).fillna(1.0)
+
+    # Relative Volume Surge
+    alt_vol_sma = df["volume"].rolling(20, min_periods=5).mean().replace(0, np.nan)
+    btc_vol_sma = btc_vol_series.rolling(20, min_periods=5).mean().replace(0, np.nan)
+    alt_vol_ratio = (df["volume"] / alt_vol_sma).fillna(1.0)
+    btc_vol_ratio = (btc_vol_series / btc_vol_sma).fillna(1.0)
+    df["rel_volume_surge"] = (alt_vol_ratio / (btc_vol_ratio + 1e-8)).fillna(1.0)
+
     # Autoregressive target coin lags
     for lag in [1, 2, 3, 4, 5]:
         df[f"return_5m_lag{lag}"] = df["return_5m"].shift(lag)
