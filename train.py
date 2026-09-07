@@ -2162,11 +2162,12 @@ def train_models(interval=INTERVAL, pages=PAGES):
 
         # C-1 Institutional Governance: Predictive Floor Enforcement (MCC < floor or min fold MCC < floor or BalAcc < floor)
         import config
-        from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+        from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, TIMEFRAME_MIN_CV_FOLD_MCC
         min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_mcc", 0.05))
         min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
         min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_mcc", 0.02))
         min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.34))
+        min_cv_fold_floor = TIMEFRAME_MIN_CV_FOLD_MCC.get(str(interval), TIMEFRAME_MIN_CV_FOLD_MCC.get("default", -0.05))
 
         chal_mcc_mean = float(stat_mcc.get("mean", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("mean") is not None) else 0.0
         chal_mcc_min = float(stat_mcc.get("min", 0.0)) if ('stat_mcc' in locals() and isinstance(stat_mcc, dict) and stat_mcc.get("min") is not None) else 0.0
@@ -2185,8 +2186,8 @@ def train_models(interval=INTERVAL, pages=PAGES):
             if chal_mcc_mean < min_mcc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger MCC ({chal_mcc_mean:.4f}) below predictive floor ({min_mcc_floor})")
                 should_save = False
-            elif chal_mcc_min < -0.05:
-                print(f"  [Predictive Floor Gate] REJECTED: Challenger severely anti-correlated on at least one CV fold (min fold MCC = {chal_mcc_min:.4f} < -0.05)")
+            elif chal_mcc_min < min_cv_fold_floor:
+                print(f"  [Predictive Floor Gate] REJECTED: Challenger severely anti-correlated on at least one CV fold (min fold MCC = {chal_mcc_min:.4f} < {min_cv_fold_floor})")
                 should_save = False
             elif chal_bal_acc_mean < min_bal_acc_floor:
                 print(f"  [Predictive Floor Gate] REJECTED: Challenger Balanced Accuracy ({chal_bal_acc_mean:.4f}) below predictive floor ({min_bal_acc_floor})")

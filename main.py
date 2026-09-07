@@ -7602,12 +7602,14 @@ def main():
                             # C-1 Predictive Floor & Holdout Out-Of-Sample Governance Check
                             from config import (
                                 MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC,
-                                TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC
+                                TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC,
+                                TIMEFRAME_MIN_CV_FOLD_MCC
                             )
                             min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(iv), TIMEFRAME_MIN_MCC.get("default", MODEL_GOVERNANCE.get("min_mcc", 0.05)))
                             min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(iv), TIMEFRAME_MIN_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36)))
                             min_holdout_mcc_floor = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", MODEL_GOVERNANCE.get("min_holdout_mcc", 0.035)))
                             min_holdout_bal_acc_floor = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(iv), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", MODEL_GOVERNANCE.get("min_holdout_balanced_accuracy", 0.355)))
+                            min_cv_fold_floor = TIMEFRAME_MIN_CV_FOLD_MCC.get(str(iv), TIMEFRAME_MIN_CV_FOLD_MCC.get("default", -0.05))
 
                             mcc_val = getattr(active_model_trend, "manifest_mcc", None) or models_tf.get(regime_key, {}).get("manifest_mcc") or models_tf.get("manifest_mcc")
                             mcc_min_val = getattr(active_model_trend, "manifest_mcc_min", None) or models_tf.get(regime_key, {}).get("manifest_mcc_min") or models_tf.get("manifest_mcc_min")
@@ -7660,8 +7662,8 @@ def main():
                             if not abstain_reason:
                                 if mcc_val is not None and mcc_val < min_mcc_floor:
                                     abstain_reason = f"MCC {mcc_val:.4f} < floor {min_mcc_floor}"
-                                elif mcc_min_val is not None and mcc_min_val < -0.05:
-                                    abstain_reason = f"min CV MCC {mcc_min_val:.4f} < -0.05"
+                                elif mcc_min_val is not None and mcc_min_val < min_cv_fold_floor:
+                                    abstain_reason = f"min CV MCC {mcc_min_val:.4f} < {min_cv_fold_floor}"
                                 elif bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
                                     abstain_reason = f"BalAcc {bal_acc_val:.4f} < floor {min_bal_acc_floor}"
                                 elif holdout_mcc_val is None or holdout_mcc_val < min_holdout_mcc_floor:

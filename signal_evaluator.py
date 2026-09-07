@@ -379,9 +379,10 @@ class SignalEvaluator:
             if models is not None:
                 
                 # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
-                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+                from config import MODEL_GOVERNANCE, TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_CV_FOLD_MCC
                 min_mcc_floor = TIMEFRAME_MIN_MCC.get(str(interval), MODEL_GOVERNANCE.get("min_mcc", 0.05))
                 min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC.get(str(interval), MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.36))
+                min_cv_fold_floor = TIMEFRAME_MIN_CV_FOLD_MCC.get(str(interval), TIMEFRAME_MIN_CV_FOLD_MCC.get("default", -0.05))
 
                 mcc_val = models.get("manifest_mcc")
                 mcc_min_val = models.get("manifest_mcc_min")
@@ -429,10 +430,10 @@ class SignalEvaluator:
                     _record_abstain(f"MCC {mcc_val:.4f} < {min_mcc_floor}")
                     return "Neutral", 0.0, f"Model predictive content below governance floor (MCC {mcc_val:.4f} < {min_mcc_floor})"
 
-                if mcc_min_val is not None and mcc_min_val < -0.05:
-                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): severely anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < -0.05). ABSTAIN.")
-                    _record_abstain(f"min fold MCC {mcc_min_val:.4f} < -0.05")
-                    return "Neutral", 0.0, f"Model severely anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < -0.05)"
+                if mcc_min_val is not None and mcc_min_val < min_cv_fold_floor:
+                    log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): severely anti-correlated on CV fold (min MCC {mcc_min_val:.4f} < {min_cv_fold_floor}). ABSTAIN.")
+                    _record_abstain(f"min fold MCC {mcc_min_val:.4f} < {min_cv_fold_floor}")
+                    return "Neutral", 0.0, f"Model severely anti-correlated on CV fold (min fold MCC {mcc_min_val:.4f} < {min_cv_fold_floor})"
 
                 if bal_acc_val is not None and bal_acc_val < min_bal_acc_floor:
                     log_event("WARNING", f"[SignalEvaluator Gate] {interval}m ({_regime_key}): BalAcc ({bal_acc_val:.4f}) below floor ({min_bal_acc_floor}). ABSTAIN.")

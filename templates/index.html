@@ -3077,7 +3077,27 @@
                             }
                         }
 
-                        const pred = data[`latest_prediction_${tf}`];
+                        let pred = data[`latest_prediction_${tf}`] || data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`];
+                        // If prediction is older than 24h, fallback to live background evaluator or clean idle state
+                        if (pred && pred.timestamp && (Date.now() / 1000 - pred.timestamp > 86400)) {
+                            pred = data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`] || {
+                                direction: "No Signal",
+                                confidence: 0.0,
+                                calibrated_confidence: 0.0,
+                                predicted_change: 0.0,
+                                status: "Awaiting Live Evaluation"
+                            };
+                        }
+                        // If market regime is Ranging and ranging models are denylisted / offline, ensure card reflects Abstain
+                        if (regimeVal.includes("Ranging") && pred && pred.signal_source !== "GOVERNANCE_DENIED" && (!pred.timestamp || (Date.now() / 1000 - pred.timestamp > 3600))) {
+                            pred = data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`] || {
+                                direction: "Neutral",
+                                confidence: 0.0,
+                                calibrated_confidence: 0.0,
+                                predicted_change: 0.0,
+                                status: "Abstain (Ranging Regime)"
+                            };
+                        }
                         const predElem = document.getElementById(`model-prediction-${tf}`);
                         const barElem = document.getElementById(`confidence-meter-bar-${tf}`);
                         const subtitleElem = document.getElementById(`model-details-subtitle-${tf}`);

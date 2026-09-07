@@ -55,6 +55,7 @@ TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.030, "60": 0.030, "120": 0.035, "240":
 TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "120": 0.360, "240": 0.360, "default": 0.360}
 TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.035}
 TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "120": 0.355, "240": 0.355, "default": 0.355}
+TIMEFRAME_MIN_CV_FOLD_MCC = {"15": -0.050, "30": -0.050, "60": -0.050, "120": -0.060, "240": -0.050, "default": -0.050}
 
 # Finding #157: Base Dynamic Stop Loss Multiplier
 DYNAMIC_SL_MULTIPLIER = 1.0
