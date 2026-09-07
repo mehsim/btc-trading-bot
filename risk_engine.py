@@ -133,7 +133,7 @@ def compute_conservative_kelly(
     import numpy as np
     from kelly_tracker import global_kelly_tracker
     from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
-    haircut = haircut if haircut is not None else getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
+    haircut = haircut if haircut is not None else getattr(config, "REALIZED_RR_HAIRCUT", 0.75)
     
     # Compute effective geometry & payoff ratio in consistent units (Finding #49 / #38 / #12)
     eff_tp = float(tp_multiplier) * haircut
@@ -834,7 +834,7 @@ class JointRiskBudgetAllocator:
             }
 
         # Raw Kelly formula b = (TP_dist * haircut) / SL_dist, p = confidence (Finding #99, #71, #27, #29)
-        haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
+        haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.75)
         eff_target_dist = target_distance * haircut if target_distance > 0 else 0.0
         b_ratio = eff_target_dist / stop_distance if stop_distance > 0 else 1.5
         p_win = max(0.01, min(0.99, calibrated_confidence))

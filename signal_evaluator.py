@@ -471,6 +471,10 @@ class SignalEvaluator:
                         prob_neutral = 0.0
                         prob_bullish = float(probs[0]) if float(probs[0]) >= 0.5 else 0.0
 
+                    from ensemble import resolve_direction
+                    _top_trend, _top_conf = resolve_direction(probs)
+                    raw_conf = _top_conf
+
                     from config import TIMEFRAME_CONFIG, MIN_EVAL_THRESHOLD_FLOOR
                     from trade_calculators import transaction_cost_model, UnifiedTargetGenerator, get_realized_rr_haircut
                     import risk_engine
@@ -484,10 +488,11 @@ class SignalEvaluator:
                     if str(interval) in ["15", "30", "60"]:
                         import trade_calculators
                         atr_norm_val = (atr_val / max(1e-6, close_price))
+                        struct_direction = _top_trend if _top_trend in ["Bullish", "Bearish"] else "Bullish"
                         struct_sl, _, _ = trade_calculators.calculate_adaptive_structural_stop(
                             df_recent=df,
                             entry_price=close_price,
-                            direction="Bullish",
+                            direction=struct_direction,
                             atr_val=atr_val,
                             regime=str(regime_str),
                             volatility=atr_norm_val,
@@ -522,7 +527,7 @@ class SignalEvaluator:
                     realized_haircut = get_realized_rr_haircut(interval=str(interval), regime=str(regime_str), nominal_rr=nominal_rr)
                     effective_tp_m = actual_tp_m * realized_haircut
                     p_star = actual_sl_m / max(1e-6, (effective_tp_m + actual_sl_m))
-                    cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + actual_sl_m) * max(1e-4, atr_norm))
+                    cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + actual_sl_m) * max(1e-4, atr_norm))
                     
                     # Information-Theoretic Regime Entropy Hurdle:
                     # In quiet sideways markets (ADX < 25), demand higher statistical signal-to-noise ratio (up to +0.15).
@@ -535,18 +540,14 @@ class SignalEvaluator:
                     ltf_chop_penalty = 0.05 if (str(interval) in ["15", "30"] and adx_cur < 22.0) else 0.0
                     
                     # Finding #89: Remove arbitrary 0.55 cap so high required economic thresholds properly bite
-                    eval_threshold = round(max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle) + ltf_chop_penalty, 4)
-
-                    from ensemble import resolve_direction
-                    _top_trend, _top_conf = resolve_direction(probs)
-                    raw_conf = _top_conf
+                    eval_threshold = round(min(0.65, max(MIN_EVAL_THRESHOLD_FLOOR, p_star + cost_adj, prior_hurdle) + ltf_chop_penalty), 4)
 
                     # Pre-calibrate probability if calibrator exists (Finding #143)
                     calibrator = models.get("calibrator")
-                    p_star_req = float(round(p_star + cost_adj, 4))
+                    p_star_req = float(round(min(0.65, p_star + cost_adj), 4))
                     if calibrator is not None and isinstance(calibrator, dict):
                         from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
-                        if is_calibrator_viable(calibrator, min_required_p_star=p_star_req):
+                        if is_calibrator_viable(calibrator, min_required_p_star=min(0.60, p_star_req)):
                             calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
                         else:
                             calibrated_conf = 0.0
@@ -623,8 +624,8 @@ class SignalEvaluator:
                     calibrator = models.get("calibrator")
                     if calibrator is not None and isinstance(calibrator, dict) and direction in ["Bullish", "Bearish"]:
                         from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
-                        p_star_req = float(round(p_star + cost_adj, 4))
-                        if not is_calibrator_viable(calibrator, min_required_p_star=p_star_req):
+                        p_star_req = float(round(min(0.65, p_star + cost_adj), 4))
+                        if not is_calibrator_viable(calibrator, min_required_p_star=min(0.60, p_star_req)):
                             log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m calibrator unviable or fallback. Filtering to Neutral (Fail-Closed).")
                             direction = "Neutral"
                             calibrated_conf = 0.50

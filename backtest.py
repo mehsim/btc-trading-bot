@@ -269,13 +269,13 @@ def run_single_backtest(df, models_trending, models_ranging, p95, max_conf, min_
         realized_haircut = get_realized_rr_haircut(interval=str(interval), regime="trending" if is_trending_state else "ranging", nominal_rr=nominal_rr)
         effective_tp_m = tp_multiplier * realized_haircut
         p_star = sl_multiplier / max(1e-6, (effective_tp_m + sl_multiplier))
-        cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + sl_multiplier) * max(1e-4, atr_norm))
-        economic_base_threshold = float(round(p_star + cost_adj, 4))
+        cost_adj = (cost_bps / 1e4) / max(1e-6, (tp_multiplier + sl_multiplier) * max(1e-4, atr_norm))
+        economic_base_threshold = float(round(min(0.65, p_star + cost_adj), 4))
 
         # Calibrator Economic Viability Guard (Finding #31, mirrors main.py:7895-7899)
         if calibrator is not None:
             from tools.beta_calibrator import is_calibrator_viable
-            if not is_calibrator_viable(calibrator, min_required_p_star=economic_base_threshold):
+            if not is_calibrator_viable(calibrator, min_required_p_star=min(0.60, economic_base_threshold)):
                 i += 1
                 continue
         

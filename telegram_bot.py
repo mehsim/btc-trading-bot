@@ -45,13 +45,18 @@ load_dotenv()
 _last_sent_messages: Dict[str, float] = {}
 _telegram_call_lock = threading.Lock()
 _last_call_time = 0.0
+_telegram_flood_until = 0.0
 
 
 def execute_telegram_api_call(method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    global _last_call_time
+    global _last_call_time, _telegram_flood_until
     token, allowed_chat_ids = get_telegram_config()
     if not token:
         return {}
+
+    now_ts = time.time()
+    if now_ts < _telegram_flood_until:
+        return {"ok": False, "description": f"Telegram flood wait active ({int(_telegram_flood_until - now_ts)}s remaining)"}
 
     url = f"https://api.telegram.org/bot{token}/{method}"
     tg_proxy = os.environ.get("TELEGRAM_PROXY") or os.environ.get("BYBIT_PROXY")
@@ -78,7 +83,8 @@ def execute_telegram_api_call(method: str, payload: Dict[str, Any]) -> Dict[str,
                     err_data = resp.json()
                 except (ValueError, json.JSONDecodeError):
                     err_data = {}
-                retry_after = err_data.get("parameters", {}).get("retry_after", 60)
+                retry_after = int(err_data.get("parameters", {}).get("retry_after", 60))
+                _telegram_flood_until = time.time() + retry_after
                 log_event("WARNING", f"[Telegram Rate Limit] 429 Flood Control: retry after {retry_after}s ({retry_after/3600:.1f}h). Text: {err_data.get('description')}")
                 return err_data
             elif resp.status_code == 400 and payload.get("parse_mode"):

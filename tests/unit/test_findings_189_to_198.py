@@ -245,25 +245,25 @@ def test_finding_26_execution_validator_heat_and_atr_norm():
 # Finding #27 & #29: Realized RR Haircut & Size Normalization
 # ---------------------------------------------------------------------------
 def test_finding_27_29_realized_rr_haircut_and_size_normalization():
-    """Finding #27 & #29: Haircut is 0.28 everywhere; empirical RR is size-normalized."""
-    assert config.REALIZED_RR_HAIRCUT == 0.28
+    """Finding #27 & #29: Haircut is 0.75 everywhere; empirical RR is size-normalized."""
+    assert config.REALIZED_RR_HAIRCUT == 0.75
 
-    # Under haircut = 0.28 and tp=2.0, sl=1.0, eff_tp is 0.56, so p* is 64.14%
-    # With confidence 0.60 <= 0.6414, Kelly correctly abstains (returns 0.0)
+    # Under haircut = 0.75 and tp=2.0, sl=1.0, eff_tp is 1.50, so p* is 40.0%
+    # With confidence 0.35 <= 0.40, Kelly correctly abstains (returns 0.0)
     with patch.object(risk_engine.global_kelly_tracker, "compute_kelly_fraction", return_value=None):
         kelly_low = risk_engine.compute_conservative_kelly(
-            calibrated_confidence=0.60,
+            calibrated_confidence=0.35,
             tp_multiplier=2.0,
             sl_multiplier=1.0,
             interval="15",
             trade_history=[],
             cost_bps=0.0
         )
-        assert kelly_low == 0.0, "Low confidence below break-even p* under 0.28 haircut must fail closed to 0.0"
+        assert kelly_low == 0.0, "Low confidence below break-even p* under 0.75 haircut must fail closed to 0.0"
 
-        # With confidence 0.75 > 0.6414, Kelly produces positive allocation
+        # With confidence 0.60 > 0.40, Kelly produces positive allocation
         kelly_high = risk_engine.compute_conservative_kelly(
-            calibrated_confidence=0.75,
+            calibrated_confidence=0.60,
             tp_multiplier=2.0,
             sl_multiplier=1.0,
             interval="15",

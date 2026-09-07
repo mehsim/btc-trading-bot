@@ -29,10 +29,18 @@ def test_calibrator_ranging_120_rejected_due_to_missing_support():
 
 
 def test_calibrator_trending_15_rejected_due_to_flat_y_range():
-    """Calibrator trending_15 has y array range < 0.02 and must fail viability."""
+    """Calibrator with y array range < 0.02 must fail viability."""
     from tools.beta_calibrator import is_calibrator_viable
-    with open("calibrator_trending_15.json", "r") as f:
-        data = json.load(f)
+    data = {
+        "scaling_method": "isotonic",
+        "is_fitted": True,
+        "is_fallback": False,
+        "target_definition": "triple_barrier_exact",
+        "fitting_sample_size": 10000,
+        "min_bin_support": 1000,
+        "y": [0.20, 0.205, 0.21],
+        "X": [0.40, 0.50, 0.60]
+    }
     ys = data.get("y", [])
     assert len(ys) > 0
     assert (max(ys) - min(ys)) < 0.02

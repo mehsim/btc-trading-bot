@@ -98,13 +98,15 @@ def test_live_order_partial_fill_reversal():
          patch("main.place_bybit_limit_order", return_value={"retCode": 0, "result": {"orderId": "mock_partial_123"}}), \
          patch("main.wait_for_order_fill", return_value=(False, "PartiallyFilled", 0.008, 50000.0)), \
          patch("main.get_bybit_order_details", side_effect=mock_order_details), \
-         patch("main.get_bybit_position", return_value={"size": "0.0"}), \
+         patch("main.get_bybit_position", side_effect=[{"size": "0.008"}, {"size": "0.0"}]), \
+         patch("main.cancel_bybit_order", return_value={"retCode": 0}), \
+         patch("time.sleep", return_value=None), \
          patch("main.get_bybit_last_execution", return_value=None), \
          patch("main.place_bybit_taker_ioc_order", mock_ioc), \
-         patch("trading_engine.place_bybit_taker_ioc_order", mock_ioc), \
+         patch("trading_engine.place_bybit_taker_ioc_order", mock_ioc, create=True), \
          patch("bybit_client.place_bybit_taker_ioc_order", mock_ioc), \
          patch("main.TRADE_MODE", "live"), \
-         patch("trading_engine.TRADE_MODE", "live"), \
+         patch("trading_engine.TRADE_MODE", "live", create=True), \
          patch("main.send_telegram_alert"), \
          patch("main.sync_active_positions_from_bybit"), \
          patch("bybit_client.bybit_get_request", return_value={"retCode": 0, "result": {}}):
@@ -328,9 +330,9 @@ def test_signal_evaluator_slot_denylist_abstention():
     """Verify SignalEvaluator safely abstains on denied model slots without invoking rule fallbacks."""
     from ensemble import is_model_slot_denied
     
-    # 120m slot is denied in production governance
-    assert is_model_slot_denied("trending_trend_120") is True
-    assert is_model_slot_denied("trending_price_120") is True
+    # Ranging slot is denied in production governance
+    assert is_model_slot_denied("ranging_trend_15") is True
+    assert is_model_slot_denied("ranging_price_15") is True
 
 
 def test_state_manager_none_default_fallback():

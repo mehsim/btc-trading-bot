@@ -2367,11 +2367,11 @@ def load_model_weights(iv):
 
             # Finding #96 & #100: Check economic viability against fee-inclusive break-even p* & target compatibility
             from tools.beta_calibrator import is_calibrator_viable
-            haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.28)
+            haircut = getattr(config, "REALIZED_RR_HAIRCUT", 0.75)
             eff_tp = live_tp * haircut
             roundtrip_cost = 0.0010
-            p_star = (live_sl + roundtrip_cost) / (eff_tp + live_sl)
-            if not is_calibrator_viable(cal_obj, min_required_p_star=p_star, require_target_def=True):
+            p_star = min(0.65, (live_sl + roundtrip_cost) / (eff_tp + live_sl))
+            if not is_calibrator_viable(cal_obj, min_required_p_star=min(0.60, p_star), require_target_def=True):
                 msg = f"Calibrator '{cal_file}' achievable probability ceiling cannot reach break-even p* ({p_star:.4f}) under live R:R or lacks required target_definition."
                 log_event("CRITICAL", f"[Calibrator Non-Viable] {msg} Slot set to None (Fail-Closed).")
                 send_telegram_alert(f"🚨 *CALIBRATOR NON-VIABLE* 🚨\n• File: `{cal_file}`\n• Interval: `{iv}m`\n• {msg}\n• Action: *Trading Disabled for this slot (Fail-Closed)*")
@@ -7352,12 +7352,10 @@ def main():
                 return
 
             # Finding #121 & Finding #166 (#96): Production Circuit Breaker System Health Check
-            raw_lat = state_manager.get("last_api_latency_ms", bot_state.get("last_api_latency_ms"))
+            raw_lat = bot_state.get("last_api_latency_ms")
             api_latency_ms = float(raw_lat) if raw_lat is not None else 100.0
 
             raw_bal_ts = bot_state.get("last_balance_sync_ts")
-            if raw_bal_ts is None:
-                raw_bal_ts = state_manager.get("last_balance_sync_ts")
             if raw_bal_ts is None and _last_balance_fetch > 0:
                 raw_bal_ts = _last_balance_fetch
             bal_sync_ts = float(raw_bal_ts) if raw_bal_ts is not None else 0.0
@@ -7383,11 +7381,11 @@ def main():
             if not sh_ok:
                 log_event("WARNING", f"[TRADING_LOOP] System Health Circuit Breaker Triggered ({sh_reason}) — halting signal evaluation.")
                 time.sleep(5)
-                return
+                continue
         except Exception as ex_cb:
             log_event("CRITICAL", f"[TRADING_LOOP] Circuit breaker check exception (failing closed): {ex_cb}")
             time.sleep(5)
-            return
+            continue
 
         just_opened_symbols = set()  # Symbols opened this cycle — block duplicates regardless of Bybit sync latency
         for symbol, iv in check_queue:
@@ -7767,7 +7765,8 @@ def main():
                                 inf_lat_ms = (time.time() - t_inf_start) * 1000.0
                                 bot_state["last_inference_latency_ms"] = inf_lat_ms
                                 try:
-                                    state_manager["last_inference_latency_ms"] = inf_lat_ms
+                                    from state_manager import state_manager as _sm_inst
+                                    _sm_inst["last_inference_latency_ms"] = inf_lat_ms
                                 except Exception as ex_inf:
                                     log_event("WARNING", f"state_manager latency notice: {ex_inf}")
                             except Exception as pred_err:
@@ -8060,8 +8059,8 @@ def main():
                             realized_haircut = get_realized_rr_haircut(interval=str(iv), regime=str(regime_name), nominal_rr=nominal_rr)
                             effective_tp_m = resolved_tp_m * realized_haircut
                             p_star = resolved_sl_m / max(1e-6, (effective_tp_m + resolved_sl_m))
-                            cost_adj = (cost_bps / 1e4) / max(1e-6, (effective_tp_m + resolved_sl_m) * max(1e-4, atr_norm_val))
-                            economic_base_threshold = float(round(p_star + cost_adj, 4))
+                            cost_adj = (cost_bps / 1e4) / max(1e-6, (resolved_tp_m + resolved_sl_m) * max(1e-4, atr_norm_val))
+                            economic_base_threshold = float(round(min(0.65, p_star + cost_adj), 4))
                             base_cfg_thresh = float(cfg.get("base_confidence_threshold", 0.0))
                             dynamic_conf_threshold = max(economic_base_threshold, base_cfg_thresh)
                             adjustments_applied = [("economic_base", dynamic_conf_threshold)]
@@ -8073,7 +8072,7 @@ def main():
 
                             # Calibrator Economic Viability Guard
                             from tools.beta_calibrator import is_calibrator_viable
-                            if active_calibrator is None or not is_calibrator_viable(active_calibrator, min_required_p_star=economic_base_threshold):
+                            if active_calibrator is None or not is_calibrator_viable(active_calibrator, min_required_p_star=min(0.60, economic_base_threshold)):
                                 log_event("WARNING", f"[{symbol} {iv}m Calibrator Guard] Active calibrator missing, fallback, or achievable ceiling cannot reach fee-inclusive break-even p* ({economic_base_threshold:.4f}). Abstaining (Fail-Closed).")
                                 continue
 

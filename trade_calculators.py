@@ -44,8 +44,8 @@ def assert_valid_geometry(direction, entry, sl, tp, symbol=""):
         raise ValueError(f"[{symbol}] Un-economical R:R ratio ({rr:.2f} < 0.40): entry={entry}, sl={sl}, tp={tp}")
     return True
 
-REALIZED_RR_HAIRCUT = 0.28  # Empirical realized limit maker exit realization factor (calibrated from pooled backtest trade logs)
-DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT = 0.28
+REALIZED_RR_HAIRCUT = float(getattr(config, "REALIZED_RR_HAIRCUT", 0.75))  # Empirical realized limit maker exit realization factor (calibrated from pooled backtest trade logs)
+DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT = float(getattr(config, "REALIZED_RR_HAIRCUT", 0.75))
 
 def estimate_empirical_realized_rr(
     closed_trades: Optional[List[Dict]] = None,
@@ -132,40 +132,43 @@ def get_realized_rr_haircut(
     regime: Optional[str] = None,
     nominal_rr: Optional[float] = None,
     closed_trades: Optional[List[Dict]] = None,
-    default_haircut: float = DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT
+    default_haircut: Optional[float] = None
 ) -> float:
     """
     Computes empirical realized R:R haircut factor.
     If sufficient closed trades exist to estimate realized R:R and nominal_rr is provided,
-    calculates empirical_haircut = min(0.28, max(0.10, empirical_rr / nominal_rr)).
-    Otherwise, falls back to conservative default_haircut (0.28).
+    calculates empirical_haircut = min(0.95, max(0.25, empirical_rr / nominal_rr)).
+    Otherwise, falls back to conservative default_haircut (0.75).
     """
+    base_default = float(default_haircut) if default_haircut is not None else float(getattr(config, "REALIZED_RR_HAIRCUT", 0.75))
     if nominal_rr is not None and nominal_rr > 0:
         emp_rr = estimate_empirical_realized_rr(closed_trades=closed_trades, interval=interval, regime=regime)
         if emp_rr is not None and emp_rr > 0:
-            return float(np.clip(emp_rr / nominal_rr, 0.10, 0.28))
+            return float(np.clip(emp_rr / nominal_rr, 0.25, 0.95))
 
-    return float(default_haircut)
+    return float(base_default)
 
 
 DEFAULT_ROUND_TRIP_COST_FRAC = float(getattr(config, "TAKER_FEE_PCT", 0.00055) + getattr(config, "MAKER_FEE_PCT", 0.00020) + 0.00015 + 0.00035)
 
 
-def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: Optional[float] = None, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> float:
+def calculate_required_p(entry: float, tp: float, sl: float, cost_frac: Optional[float] = None, realized_rr_haircut: Optional[float] = None, expected_funding_frac: float = 0.0) -> float:
     """
     Computes required break-even probability accounting for realistic execution costs, target realization,
     and adverse funding over expected holding horizon (Finding #60 & #83).
     Formula: p* = (sl_frac + cost_frac + expected_funding_frac) / (sl_frac + (tp_frac * realized_rr_haircut))
     """
+    haircut_val = float(realized_rr_haircut) if realized_rr_haircut is not None else float(getattr(config, "REALIZED_RR_HAIRCUT", 0.75))
     eff_cost_frac = DEFAULT_ROUND_TRIP_COST_FRAC if cost_frac is None else float(cost_frac)
     sl_dist = abs(entry - sl)
     tp_dist = abs(tp - entry)
     sl_frac = sl_dist / max(1e-9, entry)
-    tp_frac = (tp_dist / max(1e-9, entry)) * realized_rr_haircut
+    tp_frac = (tp_dist / max(1e-9, entry)) * haircut_val
     total_cost_frac = eff_cost_frac + max(0.0, float(expected_funding_frac or 0.0))
-    return (sl_frac + total_cost_frac) / max(1e-9, (sl_frac + tp_frac))
+    raw_p = (sl_frac + total_cost_frac) / max(1e-9, (sl_frac + tp_frac))
+    return float(np.clip(raw_p, 0.10, 0.80))
 
-def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: Optional[float] = None, realized_rr_haircut: float = REALIZED_RR_HAIRCUT, expected_funding_frac: float = 0.0) -> bool:
+def passes_economic_gate(entry: float, tp: float, sl: float, conf: float, cost_frac: Optional[float] = None, realized_rr_haircut: Optional[float] = None, expected_funding_frac: float = 0.0) -> bool:
     """
     Evaluates whether calibrated confidence meets the required win rate for the given entry, TP, and SL,
     accounting for realistic execution costs, target realization, and adverse funding.

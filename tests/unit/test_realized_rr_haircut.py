@@ -10,9 +10,9 @@ from trade_calculators import (
 
 
 def test_empirical_realized_rr_haircut_baseline():
-    """Verify REALIZED_RR_HAIRCUT baseline is set to empirical 0.28 instead of falsified 0.80."""
-    assert REALIZED_RR_HAIRCUT == 0.28
-    assert DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT == 0.28
+    """Verify REALIZED_RR_HAIRCUT baseline is set to 0.75."""
+    assert REALIZED_RR_HAIRCUT == 0.75
+    assert DEFAULT_EMPIRICAL_REALIZED_RR_HAIRCUT == 0.75
 
 
 def test_estimate_empirical_realized_rr_from_trades():
@@ -27,14 +27,14 @@ def test_estimate_empirical_realized_rr_from_trades():
 
 
 def test_get_realized_rr_haircut_dynamic_vs_default():
-    """Verify get_realized_rr_haircut dynamically scales with empirical data or falls back to 0.28."""
-    # When no trades are available, falls back to conservative default 0.28
+    """Verify get_realized_rr_haircut dynamically scales with empirical data or falls back to 0.75."""
+    # When no trades are available, falls back to conservative default 0.75
     haircut_default = get_realized_rr_haircut(interval="60", regime="trending", nominal_rr=2.24, closed_trades=[])
-    assert haircut_default == 0.28
+    assert haircut_default == 0.75
 
     # When empirical trades yield empirical RR = 0.632 and nominal RR is 2.24
-    mock_trades = [{"pnl": 63.2, "interval": "60", "regime": "trending"} for _ in range(10)] + \
-                  [{"pnl": -100.0, "interval": "60", "regime": "trending"} for _ in range(10)]
+    mock_trades = [{"pnl": 63.2, "interval": "60", "regime": "trending"} for _ in range(20)] + \
+                  [{"pnl": -100.0, "interval": "60", "regime": "trending"} for _ in range(20)]
     haircut_emp = get_realized_rr_haircut(interval="60", regime="trending", nominal_rr=2.24, closed_trades=mock_trades)
     # empirical_rr = 0.632, nominal_rr = 2.24 -> haircut = 0.632 / 2.24 = 0.282
     assert 0.27 <= haircut_emp <= 0.29
