@@ -9946,6 +9946,9 @@ def main():
                                 matched_pred["dynamic_threshold"] = float(dynamic_conf_threshold)
                                 matched_pred["threshold_base"] = float(economic_base_threshold) if 'economic_base_threshold' in locals() else None
                                 matched_pred["threshold_adjustments"] = adjustments_applied if 'adjustments_applied' in locals() else []
+                                matched_pred["signal_source"] = str(pred_entry_dict.get("signal_source") or "ML_ENSEMBLE")
+                                if "model_version" in pred_entry_dict:
+                                    matched_pred["model_version"] = str(pred_entry_dict["model_version"])
                                 try:
                                     database.save_prediction(matched_pred)
                                 except Exception as ex_db1:
@@ -9962,6 +9965,8 @@ def main():
                                     "predicted_change": float(pred_change),
                                     "predicted_price": float(predicted_price),
                                     "status": str(status_msg),
+                                    "signal_source": str(pred_entry_dict.get("signal_source") or "ML_ENSEMBLE"),
+                                    "model_version": str(pred_entry_dict.get("model_version") or "v1.0"),
                                     "calibrated_confidence": float(calibrated_confidence),
                                     "raw_confidence": float(ml_confidence),
                                     "dynamic_threshold": float(dynamic_conf_threshold),
