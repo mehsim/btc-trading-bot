@@ -682,7 +682,11 @@ def api_status():
                 conf = 0.0
                 if isinstance(pred, dict):
                     direction = str(pred.get("direction", "Neutral"))
+                    if direction in ["Abstain", "Offline", "Denied", "Neutral"] and pred.get("model_direction") in ["Bullish", "Bearish"]:
+                        direction = str(pred.get("model_direction"))
                     raw_conf = pred.get("calibrated_confidence", pred.get("confidence", 0.0))
+                    if (raw_conf is None or float(raw_conf or 0.0) == 0.0) and pred.get("raw_confidence"):
+                        raw_conf = pred.get("raw_confidence")
                     try:
                         conf = float(raw_conf or 0.0) * 100.0
                     except Exception:

@@ -63,13 +63,15 @@ class TestRanging240mDecoupling(unittest.TestCase):
             signal_evaluator.get_history = orig_get_history
 
     def test_15m_ranging_retains_bridge(self):
-        """Verify 15m in ranging mode still routes to Option B MEAN_REVERSION_BB."""
+        """Verify 15m in ranging mode falls through to ML ensemble when in mid-range,
+        and routes to Option B MEAN_REVERSION_BB when band extreme is pierced."""
         df = self._create_ranging_df(260)
         import signal_evaluator
         orig_get_history = signal_evaluator.get_history
         signal_evaluator.get_history = lambda symbol, interval, limit, **kwargs: df
 
         try:
+            # 1. Mid-range fallthrough to ML Ensemble
             self.evaluator.evaluate_interval("BTCUSDT", "15")
             pred = (
                 self.bot_state.get("latest_prediction_bg_BTCUSDT_15m")
@@ -77,11 +79,34 @@ class TestRanging240mDecoupling(unittest.TestCase):
                 or self.bot_state.get("evaluator_prediction_15m")
             )
             self.assertIsNotNone(pred, "Expected a prediction for 15m")
-            # 15m is on the denylist and has no active ranging ML, so it MUST route to MEAN_REVERSION_BB
             self.assertEqual(
                 pred.get("signal_source"),
+                "ML_ENSEMBLE",
+                f"15m ranging inside mid-range should fall through to ML ensemble, got {pred.get('signal_source')}"
+            )
+
+            # 2. Extreme band touch routes to MEAN_REVERSION_BB
+            df_extreme = self._create_ranging_df(260)
+            df_extreme.loc[df_extreme.index[-1], "low"] = 95.0
+            df_extreme.loc[df_extreme.index[-1], "close"] = 96.0
+            df_extreme.loc[df_extreme.index[-1], "open"] = 96.0
+            df_extreme.loc[df_extreme.index[-1], "high"] = 97.0
+            df_extreme.loc[df_extreme.index[-1], "RSI"] = 30.0
+            df_extreme["lower_wick_volume_ratio"] = 1.0
+            df_extreme.loc[df_extreme.index[-1], "lower_wick_volume_ratio"] = 1.8
+
+            signal_evaluator.get_history = lambda symbol, interval, limit, **kwargs: df_extreme
+            self.evaluator.evaluate_interval("BTCUSDT", "15")
+            pred_ext = (
+                self.bot_state.get("latest_prediction_bg_BTCUSDT_15m")
+                or self.bot_state.get("latest_prediction_bg_15m")
+                or self.bot_state.get("evaluator_prediction_15m")
+            )
+            self.assertIsNotNone(pred_ext, "Expected an extreme prediction for 15m")
+            self.assertEqual(
+                pred_ext.get("signal_source"),
                 "MEAN_REVERSION_BB",
-                f"15m ranging should route to Option B bridge, got {pred.get('signal_source')}"
+                f"15m ranging at band extreme should route to Option B bridge, got {pred_ext.get('signal_source')}"
             )
         finally:
             signal_evaluator.get_history = orig_get_history

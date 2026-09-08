@@ -3123,21 +3123,30 @@
                             const confVal = (pred.calibrated_confidence !== undefined ? pred.calibrated_confidence : (pred.confidence || 0.0));
                             const confPct = confVal * 100;
 
-                            // Normalization: If trade was skipped, abstained, or confidence is sub-threshold (<50%), display as Neutral
-                            const isSkipped = statusText.startsWith("Skipped") || statusText.startsWith("Abstain");
-                            const isSubThreshold = (dir === "Bullish" || dir === "Bearish") && (confVal < 0.50 || isSkipped);
-                            if (isSubThreshold || isSkipped) {
-                                dir = "Neutral";
+                            // Normalization & Status Display: Keep true directional bias with status tags
+                            const isSkipped = statusText.startsWith("Skipped");
+                            const isAbstain = statusText.startsWith("Abstain");
+                            let displayDir = dir;
+
+                            if (dir === "Bullish" || dir === "Bearish") {
+                                if (isSkipped) {
+                                    const match = statusText.match(/Skipped \(([^)]+)\)/);
+                                    let tag = match ? match[1] : "Skipped";
+                                    if (tag.length > 18) tag = tag.substring(0, 16) + '..';
+                                    displayDir = `${dir} [${tag}]`;
+                                } else if (isAbstain) {
+                                    displayDir = `${dir} [Abstain]`;
+                                }
                             }
 
-                            predElem.innerText = dir;
+                            predElem.innerText = displayDir;
                             if (dir === "Bullish") {
-                                predElem.style.color = "var(--accent-green)";
-                                predElem.style.textShadow = "var(--neon-green-glow)";
+                                predElem.style.color = isSkipped ? "#34D399" : "var(--accent-green)";
+                                predElem.style.textShadow = isSkipped ? "none" : "var(--neon-green-glow)";
                                 barElem.style.backgroundColor = "var(--accent-green)";
                             } else if (dir === "Bearish") {
-                                predElem.style.color = "var(--accent-red)";
-                                predElem.style.textShadow = "var(--neon-red-glow)";
+                                predElem.style.color = isSkipped ? "#F87171" : "var(--accent-red)";
+                                predElem.style.textShadow = isSkipped ? "none" : "var(--neon-red-glow)";
                                 barElem.style.backgroundColor = "var(--accent-red)";
                             } else if (dir.includes("Offline") || dir.includes("Denied")) {
                                 predElem.style.color = "var(--text-muted)";

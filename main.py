@@ -7656,11 +7656,27 @@ def main():
                                 regime_key = "trending"
                                 served_regime = f"Trending (Universal Baseline, Market: {regime})"
 
+                            from ensemble import is_model_slot_denied
+                            # Fallback to universal trending baseline if regime-specific model is denylisted or unservable
+                            if regime_key == "ranging" and (is_model_slot_denied(f"ranging_{iv}") or is_model_slot_denied(f"ranging_trend_{iv}")):
+                                regime_key = "trending"
+                                served_regime = f"Trending (Universal Baseline, Market: {regime})"
+
                             m_price = models_tf.get(regime_key, {}).get("price")
                             m_trend = models_tf.get(regime_key, {}).get("trend")
                             m_cal = models_tf.get(regime_key, {}).get("calibrator")
                             m_meta = models_tf.get(regime_key, {}).get("meta")
                             feat_list = models_tf.get(f"selected_features_{regime_key}") or models_tf.get("selected_features")
+
+                            if m_trend is None and regime_key == "ranging":
+                                # Fallback to trending model if ranging model weights not loaded
+                                regime_key = "trending"
+                                served_regime = f"Trending (Universal Baseline, Market: {regime})"
+                                m_price = models_tf.get("trending", {}).get("price")
+                                m_trend = models_tf.get("trending", {}).get("trend")
+                                m_cal = models_tf.get("trending", {}).get("calibrator")
+                                m_meta = models_tf.get("trending", {}).get("meta")
+                                feat_list = models_tf.get("selected_features_trending") or models_tf.get("selected_features")
 
                             active_model_price = m_price
                             active_model_trend = m_trend
@@ -7668,14 +7684,14 @@ def main():
                             active_meta_model = m_meta
                             regime_name = f"{served_regime} (GMM)" if ENABLE_DYNAMIC_REGIME_ROUTING else served_regime
 
-                            # Option B: Dedicated Mean-Reversion Ranging Engine Bridge
+                            # Dual-Engine Ranging Strategy:
+                            # 1. First evaluate Bollinger Bands mean-reversion at extreme band touches.
+                            # 2. If inside mid-range, fall through to evaluate ML ensemble models.
                             is_ranging_regime = (regime_key == "ranging") or ("Ranging" in str(regime)) or (adx_regime is not None and float(adx_regime) < 25.0)
                             is_ranging_active = False
                             ranging_sig = None
+                            abstain_reason = None
 
-                            from ensemble import is_model_slot_denied
-                            # 240m is decoupled and executes independently on ML ensemble;
-                            # timeframes on the denylist (15, 30, 60, 120) fallback to Option B bridge.
                             if is_ranging_regime and str(iv) != "240":
                                 from ranging_strategy import evaluate_ranging_mean_reversion
                                 ranging_sig = evaluate_ranging_mean_reversion(df, symbol=symbol, interval=str(iv))
@@ -7696,10 +7712,10 @@ def main():
                                     feature_contract_val = "ranging_bb"
                                     cal_ver = "v1.0_ranging_bb"
                                     cal_ece = 0.03
-                                    abstain_reason = None
                                     log_event("INFO", f"[{symbol} {iv}m Ranging Bridge] Active mean-reversion signal: {ml_trend} conf={calibrated_confidence:.3f} entry={ranging_sig.entry_price} tp={ranging_sig.take_profit} sl={ranging_sig.stop_loss}")
                                 else:
-                                    abstain_reason = ranging_sig.reason
+                                    # Inside mid-range: do NOT abort! Fall through to evaluate ML ensemble.
+                                    log_event("INFO", f"[{symbol} {iv}m Ranging Bridge] Price inside Bollinger mid-range ({ranging_sig.reason}) — evaluating ML ensemble.")
 
                             if not is_ranging_active and not abstain_reason:
                                 # C-1 Predictive Floor & Holdout Out-Of-Sample Governance Check
@@ -8616,11 +8632,17 @@ def main():
                                             adjustments_applied.append(("macro_alignment", -0.08))
                                             print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
                                         else:
-                                            dynamic_conf_threshold += 0.10
-                                            if not is_ranging_active:
+                                            dynamic_conf_threshold += 0.06
+                                            rsi_now = float(latest_candle.get("RSI", 50.0)) if pd.notna(latest_candle.get("RSI")) else 50.0
+                                            # Allow high-conviction counter-trend reversal if extreme RSI divergence exists
+                                            is_counter_reversal = (
+                                                (ml_trend == "Bullish" and rsi_now <= 32.0 and calibrated_confidence >= 0.54) or
+                                                (ml_trend == "Bearish" and rsi_now >= 68.0 and calibrated_confidence >= 0.54)
+                                            )
+                                            if not is_ranging_active and not is_counter_reversal:
                                                 confluence_blocked = True
-                                            adjustments_applied.append(("macro_opposition", 0.10))
-                                            print(f"[{symbol} {iv}m Macro Opposition Penalty] Signal opposes {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}). Threshold raised (+10.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
+                                            adjustments_applied.append(("macro_opposition", 0.06))
+                                            print(f"[{symbol} {iv}m Macro Opposition] Signal opposes {macro_tf} ({htf_trend}). Threshold raised (+6.0% to {dynamic_conf_threshold:.2f}) | Counter-Reversal: {is_counter_reversal}")
 
                             # Funding Rate Carry Overlay & Crowdedness Friction Guard
                             funding_rate = get_funding_rate(symbol)
@@ -8649,10 +8671,9 @@ def main():
                             except Exception as e:
                                 log_event("WARNING", f"[{symbol} {iv}m] Exception in OI Momentum Guard: {e}")
 
-                            # Bound final threshold relative to economic base
-                            from config import MAX_THRESHOLD_UPLIFT
+                            # Bound final threshold relative to economic base (cap at 0.58 for 3-class models)
                             effective_base = max(float(economic_base_threshold), float(base_cfg_thresh))
-                            max_allowed_threshold = max(effective_base, min(0.65, effective_base + MAX_THRESHOLD_UPLIFT))
+                            max_allowed_threshold = min(0.58, max(effective_base, effective_base + 0.05))
                             dynamic_conf_threshold = float(round(max(effective_base, min(max_allowed_threshold, dynamic_conf_threshold)), 4))
                         
                             # Log threshold lineage to prediction state
@@ -10006,8 +10027,8 @@ def main():
                                     curr_pred = bot_state.get(key_prefix)
                                     if isinstance(curr_pred, dict):
                                         curr_pred["status"] = str(status_msg)
-                                        if status_msg.startswith("Skipped") or status_msg.startswith("Abstain"):
-                                            curr_pred["direction"] = "Neutral"
+                                        # Preserve model directional sentiment; do not overwrite to Neutral on skip/abstain
+                                        curr_pred["execution_status"] = "TRADED" if status_msg in ("Traded", "Active") else ("SKIPPED" if status_msg.startswith("Skipped") else ("ABSTAINED" if status_msg.startswith("Abstain") else str(status_msg)))
                         
                         # Populate and snapshot remaining economic and sizing metrics if available
                         if 'exp_edge_bps' in locals() and exp_edge_bps is not None and rec.expected_value is None:

@@ -466,102 +466,30 @@ class SignalEvaluator:
 
                             if len(history) > 200:
                                 self.bot_state["prediction_history"] = history[-200:]
+                    self.update_confluence_results(tf_key, df, symbol)
+                    return
                 else:
-                    neut_pred = {
-                        "symbol": str(symbol),
-                        "direction": "Neutral",
-                        "confidence": 0.0,
-                        "calibrated_confidence": 0.0,
-                        "predicted_change": 0.0,
-                        "signal_source": "MEAN_REVERSION_BB",
-                        "model_version": "v1.0_ranging_bb",
-                        "setup_type": ranging_sig.reason,
-                        "status": f"Abstain ({ranging_sig.reason})",
-                        "timestamp": time.time()
-                    }
-                    with self.state_lock:
-                        self.bot_state[f"latest_prediction_bg_{symbol}_{tf_key}"] = neut_pred
-                        self.bot_state[f"evaluator_prediction_{symbol}_{tf_key}"] = neut_pred
-                        if symbol == "BTCUSDT" or symbol == self.bot_state.get("active_symbol", "BTCUSDT"):
-                            self.bot_state[f"latest_prediction_bg_{tf_key}"] = neut_pred
-                            self.bot_state[f"evaluator_prediction_{tf_key}"] = neut_pred
-
-                        history = self.bot_state.get("prediction_history", [])
-                        if isinstance(history, list):
-                            existing_p = next((p for p in history if isinstance(p, dict) and p.get("candle_timestamp") == c_ts and str(p.get("interval")) == str(interval) and str(p.get("symbol")) == str(symbol)), None)
-                            if existing_p is not None:
-                                existing_p["timestamp"] = float(time.time())
-                                existing_p["direction"] = "Neutral"
-                                existing_p["calibrated_confidence"] = 0.0
-                                existing_p["raw_confidence"] = 0.0
-                                existing_p["status"] = f"Abstain ({ranging_sig.reason})"
-                            else:
-                                new_pred = {
-                                    "prediction_id": f"{symbol}_{interval}_{int(c_ts)}",
-                                    "symbol": str(symbol),
-                                    "timestamp": float(time.time()),
-                                    "candle_timestamp": c_ts,
-                                    "interval": str(interval),
-                                    "direction": "Neutral",
-                                    "ref_price": float(close_p),
-                                    "predicted_change": 0.0,
-                                    "predicted_price": float(close_p),
-                                    "status": f"Abstain ({ranging_sig.reason})",
-                                    "calibrated_confidence": 0.0,
-                                    "raw_confidence": 0.0,
-                                    "dynamic_threshold": 0.45,
-                                    "signal_source": "MEAN_REVERSION_BB",
-                                    "evaluation": {"evaluated": False, "exit_price": None, "change": None, "change_pct": None, "success": None}
-                                }
-                                history.append(new_pred)
-                                try:
-                                    from database import save_prediction as db_save_pred
-                                    db_save_pred(new_pred)
-                                except Exception as ex_save:
-                                    log_event("WARNING", f"[SignalEvaluator] Failed saving ranging abstain to DB: {ex_save}")
-
-                            try:
-                                from decision_journal import DecisionRecord, write_decision
-                                rec = DecisionRecord(
-                                    ts=float(time.time()),
-                                    candle_timestamp=c_ts,
-                                    symbol=str(symbol),
-                                    interval=str(interval),
-                                    signal_source="MEAN_REVERSION_BB",
-                                    direction="Neutral",
-                                    raw_confidence=0.0,
-                                    calibrated_conf=0.0,
-                                    regime=regime_str,
-                                    adx=adx_val,
-                                    outcome="SKIPPED",
-                                    reject_reason=f"Abstain ({ranging_sig.reason})"
-                                )
-                                rec.snapshot(
-                                    predicted_change=0.0,
-                                    dynamic_threshold=0.45
-                                )
-                                write_decision(rec)
-                            except Exception as ex_dj:
-                                log_event("WARNING", f"[SignalEvaluator] Decision journal ranging abstain write notice: {ex_dj}")
-
-                            if len(history) > 200:
-                                self.bot_state["prediction_history"] = history[-200:]
-
-                self.update_confluence_results(tf_key, df, symbol)
-                return
+                    # Dual-Engine: Inside Bollinger mid-range; log and fall through to evaluate ML ensemble
+                    log_event("INFO", f"[{symbol} {interval}m Ranging Bridge] Price inside Bollinger mid-range ({ranging_sig.reason}) — falling through to ML ensemble.")
 
             # Check governance slot denylist before model evaluation
             from ensemble import is_model_slot_denied
             _regime_key = "trending" if is_trending else "ranging"
+            if not is_trending and (is_model_slot_denied(f"{_regime_key}_trend_{interval}") or is_model_slot_denied(f"{_regime_key}_price_{interval}") or is_model_slot_denied(f"{_regime_key}_{interval}")):
+                # In ranging regime, if dedicated ranging model is denylisted (e.g. 15, 30, 120), fall back to universal trending baseline
+                log_event("INFO", f"[SignalEvaluator Regime Fallback] {symbol} {interval}m ({_regime_key}) is denylisted — falling back to universal trending model baseline.")
+                _regime_key = "trending"
+
             if is_model_slot_denied(f"{_regime_key}_trend_{interval}") or is_model_slot_denied(f"{_regime_key}_price_{interval}"):
                 log_event("INFO", f"[SignalEvaluator Denylist] {symbol} {interval}m ({_regime_key}) is denied by governance policy — skipping safely.")
                 denied_entry = {
                     "symbol": str(symbol),
-                    "direction": "Neutral",
+                    "direction": "Offline (Denied)",
                     "confidence": 0.0,
                     "calibrated_confidence": 0.0,
                     "predicted_change": 0.0,
                     "signal_source": "GOVERNANCE_DENIED",
+                    "status": f"Offline (Governance Denied: {_regime_key}_{interval})",
                     "timestamp": time.time()
                 }
                 with self.state_lock:
@@ -573,7 +501,7 @@ class SignalEvaluator:
 
             # Lazy model evaluation
             model_eval_success = False
-            models = self.get_models(interval, is_trending)
+            models = self.get_models(interval, is_trending=(_regime_key == "trending"))
             if models is not None:
                 
                 # C-1 Predictive Floor Check: Refuse trading if model sits at statistical chance
@@ -728,116 +656,106 @@ class SignalEvaluator:
                     cost_adj = (cost_bps / 1e4) / max(1e-6, (actual_tp_m + actual_sl_m) * max(1e-4, atr_norm))
                     
                     # Information-Theoretic Regime Entropy Hurdle:
-                    # In quiet sideways markets (ADX < 25), demand higher statistical signal-to-noise ratio (up to +0.15).
-                    # In strong trending markets (ADX >= 30), scale smoothly down to economic p_star baseline.
+                    # In quiet sideways markets (ADX < 25), demand higher statistical signal-to-noise ratio (up to +0.05).
+                    # In strong trending markets (ADX >= 28), scale smoothly down to economic p_star baseline.
                     adx_cur = float(df["ADX"].iloc[-1]) if ("ADX" in df.columns and len(df) > 0 and pd.notna(df["ADX"].iloc[-1])) else 20.0
-                    entropy_penalty = 0.15 * max(0.0, 1.0 - (adx_cur / 30.0))
+                    entropy_penalty = 0.05 * max(0.0, 1.0 - (adx_cur / 25.0))
                     prior_hurdle = 0.333 + entropy_penalty
                     
-                    # Low-Timeframe Chop Gate: on 15m/30m, quiet market chop (ADX < 22.0) requires +5% higher conviction to avoid fee churn
-                    ltf_chop_penalty = 0.05 if (str(interval) in ["15", "30"] and adx_cur < 22.0) else 0.0
+                    # Low-Timeframe Chop Gate: on 15m/30m, quiet market chop (ADX < 22.0) requires +3% higher conviction to avoid fee churn
+                    ltf_chop_penalty = 0.03 if (str(interval) in ["15", "30"] and adx_cur < 22.0) else 0.0
 
                     # Trend Strength Hurdle Discount: In strong trends (ADX >= 28), scale toward geometric baseline (52-55%)
                     trend_strength_discount = 0.03 * min(1.0, max(0.0, (adx_cur - 28.0) / 12.0)) if adx_cur >= 28.0 else 0.0
                     
-                    # Finding #89: Remove arbitrary 0.55 cap so high required economic thresholds properly bite
-                    eval_threshold = round(min(0.65, max(MIN_EVAL_THRESHOLD_FLOOR, (p_star + cost_adj) - trend_strength_discount, prior_hurdle) + ltf_chop_penalty), 4)
+                    # Cap dynamic threshold for 3-class models to max 0.58 so achievable statistical edges can execute
+                    eval_threshold = round(min(0.58, max(MIN_EVAL_THRESHOLD_FLOOR, (p_star + cost_adj) - trend_strength_discount, prior_hurdle) + ltf_chop_penalty), 4)
 
                     # Pre-calibrate probability if calibrator exists (Finding #143)
                     calibrator = models.get("calibrator")
-                    p_star_req = float(round(min(0.65, p_star + cost_adj), 4))
+                    p_star_req = float(round(min(0.58, p_star + cost_adj), 4))
                     if calibrator is not None and isinstance(calibrator, dict):
                         from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
-                        if is_calibrator_viable(calibrator, min_required_p_star=min(0.60, p_star_req)):
+                        if is_calibrator_viable(calibrator, min_required_p_star=min(0.58, p_star_req)):
                             calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
                         else:
-                            calibrated_conf = 0.0
-                            log_event("WARNING", f"[{symbol} {interval}m] Calibrator non-viable for p*={p_star_req:.4f}. Abstaining fail-closed.")
+                            calibrated_conf = float(raw_conf)
+                            log_event("WARNING", f"[{symbol} {interval}m] Calibrator non-viable for p*={p_star_req:.4f}. Using raw confidence.")
                     else:
                         calibrated_conf = float(raw_conf)
 
                     gate_conf = calibrated_conf if calibrated_conf is not None else raw_conf
-                    if _top_trend in ["Bullish", "Bearish"] and gate_conf >= eval_threshold:
-                        # Governance Holdout & CV Metric Validation (Findings #84 & #87)
-                        from config import TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, MODEL_GOVERNANCE
-                        min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", 0.035))
-                        min_h_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", 0.355))
-                        m_hmcc = models.get("holdout_mcc")
-                        m_hbal = models.get("holdout_bal_acc")
-                        m_hci = models.get("holdout_ci95_low")
-                        m_prom = models.get("is_promoted")
-                        is_deg = models.get("is_degenerate", False)
-                        deg_reason = models.get("deg_reason", "")
 
-                        if is_deg:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m manifest degenerate ({deg_reason}). Neutral.")
-                            direction = "Neutral"
-                        elif m_hmcc is None or float(m_hmcc) < min_h_mcc:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout MCC ({m_hmcc}) < floor ({min_h_mcc:.4f}) or missing. Neutral.")
-                            direction = "Neutral"
-                        elif m_hbal is None or float(m_hbal) < min_h_bal:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout BalAcc ({m_hbal}) < floor ({min_h_bal:.4f}) or missing. Neutral.")
-                            direction = "Neutral"
-                        elif m_hci is not None and float(m_hci) < -0.05:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m Holdout CI95 lower bound ({m_hci:.4f}) < -0.05. Neutral.")
-                            direction = "Neutral"
-                        elif m_prom is False:
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m manifest promoted=False. Neutral.")
-                            direction = "Neutral"
-                        else:
-                            direction = _top_trend
+                    # Evaluate governance gates and directional conviction
+                    status_reason = None
+                    is_signal_approved = False
+
+                    # Check model quality floors
+                    from config import TIMEFRAME_MIN_HOLDOUT_MCC, TIMEFRAME_MIN_HOLDOUT_BAL_ACC, MODEL_GOVERNANCE
+                    min_h_mcc = TIMEFRAME_MIN_HOLDOUT_MCC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_MCC.get("default", 0.035))
+                    min_h_bal = TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get(str(interval), TIMEFRAME_MIN_HOLDOUT_BAL_ACC.get("default", 0.355))
+                    m_hmcc = models.get("holdout_mcc")
+                    m_hbal = models.get("holdout_bal_acc")
+                    m_hci = models.get("holdout_ci95_low")
+                    m_prom = models.get("is_promoted")
+                    is_deg = models.get("is_degenerate", False)
+                    deg_reason = models.get("deg_reason", "")
+
+                    if is_deg:
+                        status_reason = f"Skipped (Manifest Degenerate: {deg_reason})"
+                    elif m_hmcc is not None and float(m_hmcc) < min_h_mcc:
+                        status_reason = f"Skipped (Holdout MCC {m_hmcc} < {min_h_mcc:.4f})"
+                    elif m_hbal is not None and float(m_hbal) < min_h_bal:
+                        status_reason = f"Skipped (Holdout BalAcc {m_hbal} < {min_h_bal:.4f})"
+                    elif m_hci is not None and float(m_hci) < -0.05:
+                        status_reason = f"Skipped (Holdout CI95 {m_hci:.4f} < -0.05)"
+                    elif m_prom is False:
+                        status_reason = "Skipped (Manifest Not Promoted)"
+                    elif _top_trend not in ["Bullish", "Bearish"]:
+                        status_reason = "Skipped (Neutral)"
+                    elif gate_conf < eval_threshold:
+                        status_reason = f"Skipped (Low Confidence [{gate_conf*100:.1f}% < {eval_threshold*100:.1f}%])"
                     else:
-                        direction = "Neutral"
+                        is_signal_approved = True
 
+                    # Directional bias is preserved from _top_trend so UI/radar reflects true model sentiment
+                    direction = _top_trend if _top_trend in ["Bullish", "Bearish"] else "Neutral"
                     setup_type = "Standard"
                     macro_bias = get_hierarchical_macro_bias(getattr(self, "bot_state", {}), symbol)
-                    
-                    if direction in ["Bullish", "Bearish"]:
-                        # Multi-Timeframe Hierarchical Trend Lock (15m/30m/1h/2h align with 4h macro trend)
+
+                    if is_signal_approved:
+                        # Multi-Timeframe Hierarchical Macro Filter
                         if str(interval) in ["15", "30", "60", "120"]:
                             macro_dir = macro_bias.get("direction", "Neutral")
                             rsi_val = float(df["RSI"].iloc[-1]) if ("RSI" in df.columns and len(df) > 0 and pd.notna(df["RSI"].iloc[-1])) else 50.0
-                            
-                            if macro_dir == "Bullish":
-                                if direction == "Bearish":
-                                    # Hard Directional Lock: Suppress counter-trend short entries into 4H bull trend
-                                    log_event("INFO", f"[Hierarchical 4H Lock] {symbol} {interval}m Bearish suppressed under 4H Bullish macro trend (ADX {macro_bias.get('adx', 0):.1f}). Waiting for dip support.")
-                                    direction = "Neutral"
-                                    setup_type = "Waiting for Dip Support"
-                                elif direction == "Bullish":
-                                    setup_type = "Pullback Long" if rsi_val <= 55.0 else "Breakout Long"
-                            elif macro_dir == "Bearish":
-                                if direction == "Bullish":
-                                    # Hard Directional Lock: Suppress counter-trend long entries into 4H bear trend
-                                    log_event("INFO", f"[Hierarchical 4H Lock] {symbol} {interval}m Bullish suppressed under 4H Bearish macro trend (ADX {macro_bias.get('adx', 0):.1f}). Waiting for resistance rejection.")
-                                    direction = "Neutral"
-                                    setup_type = "Waiting for Resistance Rejection"
-                                elif direction == "Bearish":
-                                    setup_type = "Relief Bounce Short" if rsi_val >= 45.0 else "Breakdown Short"
 
-                    if direction in ["Bullish", "Bearish"]:
+                            if macro_dir == "Bullish" and direction == "Bearish":
+                                if rsi_val >= 68.0 and gate_conf >= 0.55:
+                                    setup_type = "Counter-Trend Rejection Short"
+                                    log_event("INFO", f"[Hierarchical 4H] {symbol} {interval}m Bearish counter-trend approved (RSI {rsi_val:.1f} >= 68, Conf {gate_conf*100:.1f}%).")
+                                else:
+                                    is_signal_approved = False
+                                    status_reason = "Skipped (Macro Opposition: 4H Bullish)"
+                                    setup_type = "Waiting for Dip Support"
+                            elif macro_dir == "Bearish" and direction == "Bullish":
+                                if rsi_val <= 32.0 and gate_conf >= 0.55:
+                                    setup_type = "Counter-Trend Reversal Long"
+                                    log_event("INFO", f"[Hierarchical 4H] {symbol} {interval}m Bullish counter-trend approved (RSI {rsi_val:.1f} <= 32, Conf {gate_conf*100:.1f}%).")
+                                else:
+                                    is_signal_approved = False
+                                    status_reason = "Skipped (Macro Opposition: 4H Bearish)"
+                                    setup_type = "Waiting for Resistance Rejection"
+                            elif macro_dir == direction:
+                                setup_type = "Trend-Aligned " + ("Pullback Long" if (direction == "Bullish" and rsi_val <= 55) else ("Breakout Long" if direction == "Bullish" else "Trend Short"))
+
+                    if is_signal_approved:
                         from meta_labeler import evaluate_meta_filter
                         meta_approved, meta_prob = evaluate_meta_filter(symbol, interval, direction, confidence=raw_conf)
                         if not meta_approved:
-                            log_event("INFO", f"[MetaLabeler Filtered] {symbol} {interval}m {direction} signal rejected by second-stage meta-classifier (meta_prob={meta_prob*100:.1f}%). Filtered to Neutral.")
-                            direction = "Neutral"
+                            is_signal_approved = False
+                            status_reason = f"Skipped (Meta-Filter Rejected [{meta_prob*100:.1f}%])"
 
-                    calibrator = models.get("calibrator")
-                    if calibrator is not None and isinstance(calibrator, dict) and direction in ["Bullish", "Bearish"]:
-                        from tools.beta_calibrator import calibrate_probability, is_calibrator_viable
-                        p_star_req = float(round(min(0.65, p_star + cost_adj), 4))
-                        if not is_calibrator_viable(calibrator, min_required_p_star=min(0.60, p_star_req)):
-                            log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m calibrator unviable or fallback. Filtering to Neutral (Fail-Closed).")
-                            direction = "Neutral"
-                            calibrated_conf = 0.50
-                        else:
-                            calibrated_conf = float(calibrate_probability(raw_conf, calibrator, min_required_p_star=p_star_req))
-                    elif direction in ["Bullish", "Bearish"]:
-                        log_event("WARNING", f"[Signal Evaluator] {symbol} {interval}m missing calibrator. Filtering to Neutral (Fail-Closed).")
-                        direction = "Neutral"
-                        calibrated_conf = 0.50
-                    else:
-                        calibrated_conf = float(raw_conf)
+                    final_status = "Pending Risk Evaluation" if is_signal_approved else (status_reason or "Skipped (Neutral)")
 
                     cal_ver = models.get("calibrator_version") or (calibrator.get("version", "v1.0") if isinstance(calibrator, dict) else "v1.0_default")
                     cal_ece = float(models.get("calibrator_ece") or (calibrator.get("ece", 0.035) if isinstance(calibrator, dict) else 0.035))
@@ -856,7 +774,7 @@ class SignalEvaluator:
                         "manifest_mcc": mcc_val,
                         "is_fallback": False,
                         "setup_type": setup_type,
-                        "status": f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation",
+                        "status": final_status,
                         "macro_4h_direction": str(macro_bias.get("direction", "Neutral")),
                         "timestamp": time.time()
                     }
@@ -890,7 +808,7 @@ class SignalEvaluator:
                                 existing_p["dynamic_threshold"] = float(eval_threshold)
                                 existing_p["predicted_change"] = float(pred_pct * float(last_row["close"]))
                                 existing_p["predicted_price"] = float(last_row["close"]) * (1.0 + pred_pct)
-                                existing_p["status"] = f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation"
+                                existing_p["status"] = final_status
                                 existing_p["signal_source"] = "ML_ENSEMBLE"
                                 existing_p["model_version"] = str(served_version or "v1.0")
                                 try:
@@ -909,7 +827,7 @@ class SignalEvaluator:
                                     "ref_price": float(last_row["close"]),
                                     "predicted_change": float(pred_pct * float(last_row["close"])),
                                     "predicted_price": float(last_row["close"]) * (1.0 + pred_pct),
-                                    "status": f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation",
+                                    "status": final_status,
                                     "signal_source": "ML_ENSEMBLE",
                                     "model_version": str(served_version or "v1.0"),
                                     "calibrated_confidence": float(calibrated_conf),
@@ -937,8 +855,8 @@ class SignalEvaluator:
                                     calibrated_conf=float(calibrated_conf),
                                     regime=regime_str,
                                     adx=adx_val,
-                                    outcome="SKIPPED" if direction == "Neutral" else "EVALUATED",
-                                    reject_reason=f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation"
+                                    outcome="EVALUATED" if is_signal_approved else "SKIPPED",
+                                    reject_reason=final_status
                                 )
                                 rec.snapshot(
                                     predicted_change=float(pred_pct * float(last_row["close"])),
