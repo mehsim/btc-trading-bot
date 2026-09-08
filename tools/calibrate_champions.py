@@ -36,7 +36,14 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
     print(f"Calibrating Champion: {prefix} ({len(features)} features)")
     print(f"==================================================")
     
-    model = load_ensemble_classifier(prefix, n_features=len(features), feature_names=features)
+    try:
+        model = load_ensemble_classifier(prefix, n_features=len(features), feature_names=features)
+        if model is None:
+            print(f"[{prefix}] Model could not be loaded (denylisted or missing). Skipping.")
+            return
+    except Exception as ex_load:
+        print(f"[{prefix}] Exception loading model: {ex_load}. Skipping.")
+        return
     
     # Load dataset across symbols
     all_dfs = []
@@ -102,16 +109,20 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
     min_mass = 0.15
     
     bull_mask = (p_bull >= p_bear) & (dir_total >= min_mass) & (p_dir_bull >= min_dir)
-    # Long win: strictly hit TP barrier (target_trend == 2) (Finding #100)
     bull_target = df_eval.loc[bull_mask, "target_trend"].values
-    bull_wins = (bull_target == 2).astype(float)
-    bull_conf = p_dir_bull[bull_mask]
+    bull_conf_all = p_dir_bull[bull_mask]
+    # Conditional 2-state resolution: Long wins if hit TP (2), loses if hit SL (0); exclude neutral timeouts (1)
+    bull_resolved = (bull_target == 2) | (bull_target == 0)
+    bull_wins = (bull_target[bull_resolved] == 2).astype(float)
+    bull_conf = bull_conf_all[bull_resolved]
     
     bear_mask = (p_bear > p_bull) & (dir_total >= min_mass) & (p_dir_bear >= min_dir)
-    # Short win: strictly hit TP barrier (target_trend == 0) (Finding #100)
     bear_target = df_eval.loc[bear_mask, "target_trend"].values
-    bear_wins = (bear_target == 0).astype(float)
-    bear_conf = p_dir_bear[bear_mask]
+    bear_conf_all = p_dir_bear[bear_mask]
+    # Conditional 2-state resolution: Short wins if hit TP (0), loses if hit SL (2); exclude neutral timeouts (1)
+    bear_resolved = (bear_target == 0) | (bear_target == 2)
+    bear_wins = (bear_target[bear_resolved] == 0).astype(float)
+    bear_conf = bear_conf_all[bear_resolved]
     
     calibration_probs = np.concatenate([bull_conf, bear_conf])
     calibration_labels = np.concatenate([bull_wins, bear_wins])
@@ -187,16 +198,20 @@ def calibrate_champion_slot(regime: str, interval: str, economic_gate: float = 0
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--interval", type=str, default="all", choices=["15", "60", "240", "all"])
+    parser.add_argument("--interval", type=str, default="all", choices=["15", "30", "60", "120", "240", "all"])
     args = parser.parse_args()
     
     slots_to_calibrate = []
     if args.interval in ["15", "all"]:
         slots_to_calibrate.extend([("trending", "15", 0.52), ("ranging", "15", 0.52)])
+    if args.interval in ["30", "all"]:
+        slots_to_calibrate.extend([("trending", "30", 0.50), ("ranging", "30", 0.50)])
     if args.interval in ["60", "all"]:
         slots_to_calibrate.extend([("trending", "60", 0.40), ("ranging", "60", 0.40)])
+    if args.interval in ["120", "all"]:
+        slots_to_calibrate.extend([("trending", "120", 0.45), ("ranging", "120", 0.45)])
     if args.interval in ["240", "all"]:
-        slots_to_calibrate.extend([("trending", "240", 0.58)])
+        slots_to_calibrate.extend([("trending", "240", 0.58), ("ranging", "240", 0.50)])
         
     for reg, iv, gate in slots_to_calibrate:
         calibrate_champion_slot(reg, iv, economic_gate=gate)

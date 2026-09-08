@@ -413,7 +413,12 @@ class StatisticalValidation:
             # Pairwise absolute difference across models
             pairwise_diffs = [abs(preds[i] - preds[j]) for i in range(len(preds)) for j in range(i + 1, len(preds))]
             disagreement = float(np.mean(pairwise_diffs)) if pairwise_diffs else (0.05 if len(preds) <= 1 else weighted_std)
-            margin_unc = float(np.clip(1.0 - weighted_mean, 0.0, 1.0))
+            # Margin uncertainty normalized against ambiguity baseline (0.50 for directional / 0.333 for 3-class)
+            if weighted_mean >= 0.50:
+                norm_certainty = np.clip((weighted_mean - 0.50) / 0.50, 0.0, 1.0)
+            else:
+                norm_certainty = np.clip((weighted_mean - 0.333) / 0.667, 0.0, 1.0)
+            margin_unc = float(np.clip(1.0 - norm_certainty, 0.0, 1.0))
             u_base = 0.60 * disagreement + 0.40 * margin_unc
 
         # 2. Adaptive Penalty Scaling Multiplier (learned from Brier Score calibration)
@@ -860,12 +865,12 @@ def calculate_composite_uncertainty(
                     pass
 
         if not valid_preds:
-            p_val = float(calibrated_p) if (calibrated_p is not None and np.isfinite(calibrated_p)) else 0.5
+            p_val = float(calibrated_p) if (calibrated_p is not None and isinstance(calibrated_p, (int, float)) and np.isfinite(calibrated_p)) else 0.5
             unc = abs(p_val - 0.5) * 2.0
             return float(np.clip(unc, 0.0, 1.0))
 
         std_dev = float(np.std(valid_preds))
-        p_val = float(calibrated_p) if (calibrated_p is not None and np.isfinite(calibrated_p)) else float(np.mean(valid_preds))
+        p_val = float(calibrated_p) if (calibrated_p is not None and isinstance(calibrated_p, (int, float)) and np.isfinite(calibrated_p)) else float(np.mean(valid_preds))
         composite = (std_dev * 1.5) + (abs(p_val - 0.5) * 0.2)
         return float(np.clip(composite, 0.0, 1.0))
 

@@ -7537,7 +7537,8 @@ def main():
                             missing_candles_count=int(max_g),
                             timestamp_gap_seconds=float(excess_gap_sec),
                             stale_feed_seconds=max(0.0, float(candle_age_sec)),
-                            zero_price_detected=bool(float(latest_candle.get("close", 0.0)) <= 0.0)
+                            zero_price_detected=bool(float(latest_candle.get("close", 0.0)) <= 0.0),
+                            max_allowed_stale_seconds=max(300.0, float(max_allowed_age_sec))
                         )
                         if dq_res.get("severity") in ["CRITICAL", "HIGH"]:
                             log_event(dq_res.get("severity"), f"[{symbol} {iv}m DataQualityEngine] {dq_res.get('detail')} — Action: {dq_res.get('action')}. Abstaining.")
@@ -8461,10 +8462,11 @@ def main():
                                 print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (required threshold lowered -4.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
                             # Determine tracking status
-                            # Softened contradiction: only block if regressor predicts > 0.05% in OPPOSITE direction
+                            # Volatility-scaled contradiction: only block if regressor predicts significant opposite move (> max(0.35%, 0.25 * ATR%))
                             pred_pct = (abs(pred_change) / latest_candle["close"]) * 100
-                            strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > 0.05) or \
-                                              (ml_trend == "Bearish" and pred_change > 0 and pred_pct > 0.05)
+                            min_conflict_pct = max(0.35, float(atr_norm_val * 100.0 * 0.25)) if 'atr_norm_val' in locals() and atr_norm_val else 0.35
+                            strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > min_conflict_pct) or \
+                                              (ml_trend == "Bearish" and pred_change > 0 and pred_pct > min_conflict_pct)
                         
                             is_cooling, remaining_mins = is_symbol_interval_cooling_off(symbol, iv)
                             news_event = ""
@@ -8843,7 +8845,7 @@ def main():
 
                             if status_msg == "Pending":
                                 current_spread_bps = float(bot_state.get(f"current_spread_bps_{symbol}", bot_state.get("current_spread_bps", 3.5))) if "bot_state" in globals() and hasattr(bot_state, "get") else 3.5
-                                u_tot_live = float(bot_state.get("u_total", 0.04)) if "bot_state" in globals() and hasattr(bot_state, "get") else 0.04
+                                u_tot_live = float(bot_state.get(f"u_total_{symbol}_{iv}", bot_state.get(f"u_total_{symbol}_{tf}", bot_state.get("u_total", 0.04)))) if "bot_state" in globals() and hasattr(bot_state, "get") else 0.04
                                 rec.spread_bp = current_spread_bps
                                 
                                 # Expected R:R of the target setup relative to minimum floor across all intervals

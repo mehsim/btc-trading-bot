@@ -1663,8 +1663,10 @@ def train_models(interval=INTERVAL, pages=PAGES):
                 dir_label, dir_conf = resolve_direction(probs_val[j], interval=str(interval))
                 if dir_label in ["Bearish", "Bullish"]:
                     dir_class = 2 if dir_label == "Bullish" else 0
-                    calibration_probs.append(float(dir_conf))
-                    calibration_labels.append(1 if dir_class == y_val_t.values[j] else 0)
+                    # Conditional 2-state resolution: only calibrate on resolved trades (y in (0, 2)), excluding timeouts (y == 1)
+                    if y_val_t.values[j] in (0, 2):
+                        calibration_probs.append(float(dir_conf))
+                        calibration_labels.append(1 if dir_class == y_val_t.values[j] else 0)
             
             # Generate Meta-labels for this validation fold
             actual_val_t = y_val_t.values

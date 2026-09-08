@@ -18,19 +18,21 @@ class DataQualityEngine:
         corrupt_timestamps_count: int = 0,
         timestamp_gap_seconds: float = 0.0,
         stale_feed_seconds: float = 0.0,
-        zero_price_detected: bool = False
+        zero_price_detected: bool = False,
+        max_allowed_stale_seconds: float = 300.0
     ) -> Dict[str, Any]:
         """
         Returns: Dict with severity level, action recommendation, and detailed checks.
         """
+        effective_stale_limit = max(300.0, float(max_allowed_stale_seconds))
         if corrupt_timestamps_count > 0 or zero_price_detected:
             severity = "CRITICAL"
             action = "STOP_TRADING_IMMEDIATELY"
             detail = "Corrupt timestamps or zero prices detected in market feed."
-        elif missing_candles_count >= 5 or timestamp_gap_seconds >= 900.0 or stale_feed_seconds >= 300.0:
+        elif missing_candles_count >= 5 or timestamp_gap_seconds >= 900.0 or stale_feed_seconds >= effective_stale_limit:
             severity = "HIGH"
             action = "DISABLE_NEW_ENTRIES"
-            detail = f"Data gaps or stale market feed ({stale_feed_seconds}s stale)."
+            detail = f"Data gaps or stale market feed ({stale_feed_seconds:.1f}s stale >= {effective_stale_limit:.1f}s limit)."
         elif missing_candles_count > 0 or timestamp_gap_seconds >= 300.0:
             severity = "MEDIUM"
             action = "ALERT_AND_CAUTION"

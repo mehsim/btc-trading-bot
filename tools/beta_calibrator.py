@@ -62,10 +62,12 @@ class BetaCalibrator:
                 lr_platt.fit(log_odds, y)
                 platt_coef = float(lr_platt.coef_[0][0])
                 if platt_coef <= 0.02:
-                    # Boundary hit / degenerate flat slope -> fit failure
-                    self.a = float(platt_coef)
-                    self.b = float(platt_coef)
-                    self.c = float(lr_platt.intercept_[0])
+                    # Boundary hit / degenerate flat slope -> fit failure, clamp to positive identity/prior fallback
+                    self.a = 1.0
+                    self.b = 1.0
+                    base_wr = float(np.mean(y)) if len(y) > 0 else 0.5
+                    base_wr = float(np.clip(base_wr, 0.01, 0.99))
+                    self.c = float(np.log(base_wr / (1.0 - base_wr)))
                     self.is_fitted = False
                     self.fit_n = len(s)
                 else:
@@ -76,10 +78,12 @@ class BetaCalibrator:
                     self.fit_n = len(s)
             else:
                 if a_val <= 0.02 or b_val <= 0.02:
-                    # Boundary hit / degenerate flat slope -> fit failure
-                    self.a = float(a_val)
-                    self.b = float(b_val)
-                    self.c = c_val
+                    # Boundary hit / degenerate flat slope -> fit failure, clamp to positive identity/prior fallback
+                    self.a = 1.0
+                    self.b = 1.0
+                    base_wr = float(np.mean(y)) if len(y) > 0 else 0.5
+                    base_wr = float(np.clip(base_wr, 0.01, 0.99))
+                    self.c = float(np.log(base_wr / (1.0 - base_wr)))
                     self.is_fitted = False
                     self.fit_n = len(s)
                 else:
@@ -113,10 +117,11 @@ class BetaCalibrator:
             return False
         if self.a == 1.0 and self.b == 1.0 and abs(self.c) < 1e-6:
             return False
-        # Finding R10: Reject flat/saturated calibrators
+        # Finding R10: Reject flat/saturated or inverted/non-monotonic calibrators
         p_high = self.max_achievable_probability(0.99)
+        p_mid = float(self.predict_proba(0.50))
         p_low = float(self.predict_proba(0.01))
-        if (p_high - p_low) < 0.02:
+        if p_high <= p_mid or p_mid <= p_low or (p_high - p_low) < 0.02:
             return False
         if min_required_p_star is not None:
             if p_high < min_required_p_star:

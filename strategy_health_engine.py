@@ -251,7 +251,8 @@ class StrategyHealthEngine:
             raw_calmar_ratio = max(0.0, net_profit / max_dd) if net_profit > 0 else 0.0
             
             if trades_count < 10:
-                w_emp = trades_count / 10.0
+                # Smooth Bayesian prior decay: prevent 1-2 small scratch trades from triggering false critical halts
+                w_emp = float((trades_count / 10.0) ** 1.5)
                 w_prior = 1.0 - w_emp
                 pf = (w_emp * raw_pf) + (w_prior * prior_pf)
                 expectancy_r = (w_emp * raw_expectancy_r) + (w_prior * prior_exp)
