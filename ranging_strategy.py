@@ -37,6 +37,18 @@ def evaluate_ranging_mean_reversion(
     Evaluates candle DataFrame for high-conviction Bollinger Band mean-reversion setups.
     Returns RangingSignal dataclass instance.
     """
+    if str(interval) in ("240", "4h"):
+        return RangingSignal(
+            is_signal=False,
+            direction="Neutral",
+            confidence=0.0,
+            entry_price=0.0,
+            take_profit=0.0,
+            stop_loss=0.0,
+            expected_move=0.0,
+            reason="240m (4h) interval is decoupled from Option B bridge; executes on ML ensemble"
+        )
+
     if df is None or len(df) < 25:
         return RangingSignal(
             is_signal=False,

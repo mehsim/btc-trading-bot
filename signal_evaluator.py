@@ -349,15 +349,9 @@ class SignalEvaluator:
             macro_bias = get_hierarchical_macro_bias(getattr(self, "bot_state", {}), symbol)
 
             # Option B: Dedicated Mean-Reversion Ranging Strategy Engine
-            from ensemble import is_model_slot_denied
-            # Timeframes with approved, dedicated ranging ML models execute directly on ML;
-            # timeframes on the denylist (15, 30, 60, 120) or without models fallback to Option B bridge.
-            has_dedicated_ranging_ml = (
-                str(interval) == "240"
-                and not is_model_slot_denied(f"ranging_{interval}")
-            )
-
-            if not is_trending and not has_dedicated_ranging_ml:
+            # 240m is decoupled and executes independently on ML ensemble;
+            # timeframes on the denylist (15, 30, 60, 120) fallback to Option B bridge.
+            if not is_trending and str(interval) != "240":
                 from ranging_strategy import evaluate_ranging_mean_reversion
                 ranging_sig = evaluate_ranging_mean_reversion(df, symbol=symbol, interval=str(interval))
                 last_row = df.iloc[-1]
@@ -862,6 +856,7 @@ class SignalEvaluator:
                         "manifest_mcc": mcc_val,
                         "is_fallback": False,
                         "setup_type": setup_type,
+                        "status": f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation",
                         "macro_4h_direction": str(macro_bias.get("direction", "Neutral")),
                         "timestamp": time.time()
                     }
@@ -893,6 +888,16 @@ class SignalEvaluator:
                                 existing_p["calibrated_confidence"] = float(calibrated_conf)
                                 existing_p["raw_confidence"] = float(raw_conf)
                                 existing_p["dynamic_threshold"] = float(eval_threshold)
+                                existing_p["predicted_change"] = float(pred_pct * float(last_row["close"]))
+                                existing_p["predicted_price"] = float(last_row["close"]) * (1.0 + pred_pct)
+                                existing_p["status"] = f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation"
+                                existing_p["signal_source"] = "ML_ENSEMBLE"
+                                existing_p["model_version"] = str(model_ver)
+                                try:
+                                    from database import save_prediction as db_save_pred
+                                    db_save_pred(existing_p)
+                                except Exception as ex_save:
+                                    log_event("WARNING", f"[SignalEvaluator] Failed saving updated prediction to DB: {ex_save}")
                             else:
                                 new_pred = {
                                     "prediction_id": f"{symbol}_{interval}_{int(c_ts)}",
