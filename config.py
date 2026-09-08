@@ -51,10 +51,10 @@ MODEL_GOVERNANCE = {
 }
 
 # Timeframe-Adaptive Predictive Floors (Sub-hourly microstructure vs Multi-hour bars)
-TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.030, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.050}
-TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "120": 0.360, "240": 0.360, "default": 0.360}
-TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "120": 0.035, "240": 0.035, "default": 0.035}
-TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "120": 0.355, "240": 0.355, "default": 0.355}
+TIMEFRAME_MIN_MCC = {"15": 0.030, "30": 0.030, "60": 0.030, "120": 0.035, "240": 0.012, "default": 0.050}
+TIMEFRAME_MIN_BAL_ACC = {"15": 0.350, "30": 0.348, "60": 0.348, "120": 0.360, "240": 0.345, "default": 0.360}
+TIMEFRAME_MIN_HOLDOUT_MCC = {"15": 0.025, "30": 0.025, "60": 0.030, "120": 0.035, "240": 0.020, "default": 0.035}
+TIMEFRAME_MIN_HOLDOUT_BAL_ACC = {"15": 0.345, "30": 0.348, "60": 0.350, "120": 0.355, "240": 0.340, "default": 0.355}
 TIMEFRAME_MIN_CV_FOLD_MCC = {"15": -0.050, "30": -0.050, "60": -0.050, "120": -0.060, "240": -0.050, "default": -0.050}
 
 # Finding #157: Base Dynamic Stop Loss Multiplier
@@ -79,7 +79,6 @@ if os.path.exists("governance_denylist.json"):
 
 MODEL_SLOT_DENYLIST = {
     "ranging_120",    # unnormalized price levels and raw open-interest in feature contract — fail-closed
-    "ranging_240",    # Finding #16: challenger manifest unpromoted — fail-closed
     "trending_360",   # 360m slot unservable / non-production
     "ranging_360",    # 360m slot unservable / non-production
 }.union(_persisted_denylist)

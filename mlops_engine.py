@@ -342,7 +342,7 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         cand_range = cand.get("cv_bal_acc_range", 0.0)
 
         _interval_str = str(name).split("_")[-1] if name else "default"
-        from config import TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC
+        from config import TIMEFRAME_MIN_MCC, TIMEFRAME_MIN_BAL_ACC, TIMEFRAME_MIN_CV_FOLD_MCC
         if _interval_str in TIMEFRAME_MIN_MCC:
             min_mcc_floor = TIMEFRAME_MIN_MCC[_interval_str]
         else:
@@ -352,6 +352,8 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
             min_bal_acc_floor = TIMEFRAME_MIN_BAL_ACC[_interval_str]
         else:
             min_bal_acc_floor = gates.get("min_balanced_accuracy", MODEL_GOVERNANCE.get("min_balanced_accuracy", 0.35))
+
+        min_cv_fold_floor = TIMEFRAME_MIN_CV_FOLD_MCC.get(_interval_str, TIMEFRAME_MIN_CV_FOLD_MCC.get("default", -0.05))
 
         from config import TIMEFRAME_CONFIG
         _tf_brier = TIMEFRAME_CONFIG.get(_interval_str, {}).get("max_brier") if isinstance(TIMEFRAME_CONFIG, dict) else None
@@ -369,8 +371,8 @@ def promote_if_better(name: Any = None, challenger_version: Any = None, gates: O
         # Absolute floors — a bad or uninformative model is rejected even with no incumbent
         if cand_mcc < min_mcc_floor:
             return False, f"REJECTED: MCC {cand_mcc:.4f} below predictive floor ({min_mcc_floor})"
-        if cand_mcc_min is not None and cand_mcc_min < -0.02:
-            return False, f"REJECTED: Anti-correlated on at least one fold (min fold MCC = {cand_mcc_min:.4f} < -0.02)"
+        if cand_mcc_min is not None and cand_mcc_min < min_cv_fold_floor:
+            return False, f"REJECTED: Anti-correlated on at least one fold (min fold MCC = {cand_mcc_min:.4f} < {min_cv_fold_floor})"
         if cand_bal_acc is not None and cand_bal_acc < min_bal_acc_floor:
             return False, f"REJECTED: Balanced Accuracy {cand_bal_acc:.4f} below predictive floor ({min_bal_acc_floor})"
         if cand_ece > max_ece_ceiling:

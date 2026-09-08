@@ -89,6 +89,24 @@
       },
       "stage": "Production",
       "registered_at_utc": "2026-09-07T10:55:25.462857+00:00"
+    },
+    "ensemble_ranging_240": {
+      "run_id": "train_240m_ranging_1788866451",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3873276476753242,
+        "val_mae": 0.03599244469068384,
+        "cv_mcc": 0.0151,
+        "holdout_mcc": 0.06267169781303857,
+        "holdout_resolved_mcc": 0.05035679749072152,
+        "holdout_effective_n": 223.36,
+        "mde_80pct": 0.0867,
+        "profit_factor": 4.115333348644756,
+        "brier": 0.6661670264385054,
+        "ece": 0.0027167393176353305
+      },
+      "stage": "Production",
+      "registered_at_utc": "2026-09-08T11:20:51.914375+00:00"
     }
   },
   "Staging": {
@@ -2633,6 +2651,78 @@
       },
       "stage": "Rejected",
       "registered_at_utc": "2026-09-07T14:42:22.678801+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1788864565",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3724734355315666,
+        "val_mae": 0.036379013466510915,
+        "cv_mcc": 0.0299,
+        "holdout_mcc": 0.03694887163267031,
+        "holdout_resolved_mcc": 0.02681785539443038,
+        "holdout_effective_n": 223.36,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.66845427106773,
+        "ece": 0.017558802869734786
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-08T10:49:25.833122+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1788864937",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3873276476753242,
+        "val_mae": 0.03599049654790483,
+        "cv_mcc": 0.0151,
+        "holdout_mcc": 0.06267169781303857,
+        "holdout_resolved_mcc": 0.05035679749072152,
+        "holdout_effective_n": 223.36,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.6661670264385054,
+        "ece": 0.0027167393176353305
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-08T10:55:37.008771+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1788865668",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3873276476753242,
+        "val_mae": 0.035991359620611126,
+        "cv_mcc": 0.0151,
+        "holdout_mcc": 0.06267169781303857,
+        "holdout_resolved_mcc": 0.05035679749072152,
+        "holdout_effective_n": 223.36,
+        "mde_80pct": 0.0,
+        "profit_factor": 0.0,
+        "brier": 0.6661670264385054,
+        "ece": 0.0027167393176353305
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-08T11:07:48.874031+00:00"
+    },
+    {
+      "run_id": "train_240m_ranging_1788866098",
+      "model_name": "ensemble_ranging_240",
+      "metrics": {
+        "val_accuracy": 0.3873276476753242,
+        "val_mae": 0.03599172232224756,
+        "cv_mcc": 0.0151,
+        "holdout_mcc": 0.06267169781303857,
+        "holdout_resolved_mcc": 0.05035679749072152,
+        "holdout_effective_n": 223.36,
+        "mde_80pct": 0.0867,
+        "profit_factor": 4.115333348644756,
+        "brier": 0.6661670264385054,
+        "ece": 0.0027167393176353305
+      },
+      "stage": "Rejected",
+      "registered_at_utc": "2026-09-08T11:14:58.280715+00:00"
     }
   ]
 }

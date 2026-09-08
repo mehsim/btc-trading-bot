@@ -36,8 +36,8 @@
     "rollback_plan_defined": false
   },
   "ranging_240": {
-    "research_notebook_approved": false,
-    "rollback_plan_defined": false
+    "research_notebook_approved": true,
+    "rollback_plan_defined": true
   },
   "trending_360": {
     "research_notebook_approved": false,

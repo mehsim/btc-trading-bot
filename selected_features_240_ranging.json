@@ -1,18 +1,1 @@
-[
-  "RSI_z",
-  "close_to_VWAP",
-  "ROC_24",
-  "close_to_EMA200",
-  "roll_spread",
-  "volatility_24h",
-  "MACD_diff",
-  "ATR_norm",
-  "volatility_gk",
-  "btc_rsi",
-  "fear_greed",
-  "BB_pct",
-  "day_of_week_cos",
-  "day_of_week_sin",
-  "close_to_Kalman",
-  "ADX"
-]
+["RSI_z", "close_to_VWAP", "ROC_24", "close_to_EMA200", "roll_spread", "volatility_24h", "MACD_diff", "ATR_norm", "volatility_gk", "btc_rsi", "fear_greed", "BB_pct", "day_of_week_cos", "day_of_week_sin", "close_to_Kalman", "ADX"]
