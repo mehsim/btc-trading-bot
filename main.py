@@ -7673,7 +7673,16 @@ def main():
                             is_ranging_active = False
                             ranging_sig = None
 
-                            if is_ranging_regime:
+                            from ensemble import is_model_slot_denied
+                            # Dedicated ranging ML operates independently on ML models;
+                            # timeframes on the denylist (15, 30, 60, 120) or without active models fallback to Option B bridge.
+                            has_dedicated_ranging_ml = (
+                                str(iv) == "240"
+                                and active_model_trend is not None
+                                and not is_model_slot_denied(f"ranging_{iv}")
+                            )
+
+                            if is_ranging_regime and not has_dedicated_ranging_ml:
                                 from ranging_strategy import evaluate_ranging_mean_reversion
                                 ranging_sig = evaluate_ranging_mean_reversion(df, symbol=symbol, interval=str(iv))
                                 if ranging_sig.is_signal:
@@ -7785,7 +7794,7 @@ def main():
                                     "raw_confidence": 0.0,
                                     "calibrated_confidence": 0.0,
                                     "manifest_mcc": mcc_val if 'mcc_val' in locals() and mcc_val is not None else 0.0,
-                                    "signal_source": "MEAN_REVERSION_BB" if is_ranging_regime else "GOVERNANCE_ABSTAIN",
+                                    "signal_source": "MEAN_REVERSION_BB" if (is_ranging_regime and not has_dedicated_ranging_ml) else "GOVERNANCE_ABSTAIN",
                                     "is_fallback": False,
                                     "status": f"Abstain ({abstain_reason})"
                                 }

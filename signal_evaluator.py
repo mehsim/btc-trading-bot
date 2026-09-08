@@ -349,7 +349,15 @@ class SignalEvaluator:
             macro_bias = get_hierarchical_macro_bias(getattr(self, "bot_state", {}), symbol)
 
             # Option B: Dedicated Mean-Reversion Ranging Strategy Engine
-            if not is_trending:
+            from ensemble import is_model_slot_denied
+            # Timeframes with approved, dedicated ranging ML models execute directly on ML;
+            # timeframes on the denylist (15, 30, 60, 120) or without models fallback to Option B bridge.
+            has_dedicated_ranging_ml = (
+                str(interval) == "240"
+                and not is_model_slot_denied(f"ranging_{interval}")
+            )
+
+            if not is_trending and not has_dedicated_ranging_ml:
                 from ranging_strategy import evaluate_ranging_mean_reversion
                 ranging_sig = evaluate_ranging_mean_reversion(df, symbol=symbol, interval=str(interval))
                 last_row = df.iloc[-1]
@@ -548,9 +556,9 @@ class SignalEvaluator:
                 self.update_confluence_results(tf_key, df, symbol)
                 return
 
-            # Check governance slot denylist for trending models before model evaluation
+            # Check governance slot denylist before model evaluation
             from ensemble import is_model_slot_denied
-            _regime_key = "trending"
+            _regime_key = "trending" if is_trending else "ranging"
             if is_model_slot_denied(f"{_regime_key}_trend_{interval}") or is_model_slot_denied(f"{_regime_key}_price_{interval}"):
                 log_event("INFO", f"[SignalEvaluator Denylist] {symbol} {interval}m ({_regime_key}) is denied by governance policy — skipping safely.")
                 denied_entry = {
