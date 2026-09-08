@@ -9999,6 +9999,16 @@ def main():
                         if not getattr(rec, "reason_code", None) and status_msg not in ("Pending", "Traded", ""):
                             rec.reason_code = map_status_to_reason_code(status_msg)
                         
+                        # Harmonize bot_state latest_prediction with finalized status_msg and stance
+                        if 'bot_state' in globals() and hasattr(bot_state, "get"):
+                            for k_suffix in [str(tf), str(iv)]:
+                                for key_prefix in [f"latest_prediction_{symbol}_{k_suffix}", f"latest_prediction_{k_suffix}"]:
+                                    curr_pred = bot_state.get(key_prefix)
+                                    if isinstance(curr_pred, dict):
+                                        curr_pred["status"] = str(status_msg)
+                                        if status_msg.startswith("Skipped") or status_msg.startswith("Abstain"):
+                                            curr_pred["direction"] = "Neutral"
+                        
                         # Populate and snapshot remaining economic and sizing metrics if available
                         if 'exp_edge_bps' in locals() and exp_edge_bps is not None and rec.expected_value is None:
                             rec.expected_value = float(exp_edge_bps)

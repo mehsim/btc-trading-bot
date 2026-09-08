@@ -3084,10 +3084,18 @@
                             }
                         }
 
-                        let pred = data[`latest_prediction_${tf}`] || data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`];
+                        const mainPred = data[`latest_prediction_${tf}`];
+                        const bgPred = data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`];
+                        let pred = mainPred;
+
+                        // Select the freshest prediction between main loop and live background evaluator
+                        if (!pred || (bgPred && bgPred.timestamp && (!pred.timestamp || bgPred.timestamp >= pred.timestamp))) {
+                            pred = bgPred || pred;
+                        }
+
                         // If prediction is older than 24h, fallback to live background evaluator or clean idle state
                         if (pred && pred.timestamp && (Date.now() / 1000 - pred.timestamp > 86400)) {
-                            pred = data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`] || {
+                            pred = bgPred || {
                                 direction: "No Signal",
                                 confidence: 0.0,
                                 calibrated_confidence: 0.0,
@@ -3097,7 +3105,7 @@
                         }
                         // If market regime is Ranging and ranging models are denylisted / offline, ensure card reflects Abstain
                         if (regimeVal.includes("Ranging") && pred && pred.signal_source !== "GOVERNANCE_DENIED" && (!pred.timestamp || (Date.now() / 1000 - pred.timestamp > 3600))) {
-                            pred = data[`latest_prediction_bg_${tf}`] || data[`evaluator_prediction_${tf}`] || {
+                            pred = bgPred || {
                                 direction: "Neutral",
                                 confidence: 0.0,
                                 calibrated_confidence: 0.0,
@@ -3110,7 +3118,18 @@
                         const subtitleElem = document.getElementById(`model-details-subtitle-${tf}`);
 
                         if (pred && predElem && barElem && subtitleElem) {
-                            const dir = pred.direction || "No Signal";
+                            let dir = pred.direction || "No Signal";
+                            const statusText = (pred.status || "").trim();
+                            const confVal = (pred.calibrated_confidence !== undefined ? pred.calibrated_confidence : (pred.confidence || 0.0));
+                            const confPct = confVal * 100;
+
+                            // Normalization: If trade was skipped, abstained, or confidence is sub-threshold (<50%), display as Neutral
+                            const isSkipped = statusText.startsWith("Skipped") || statusText.startsWith("Abstain");
+                            const isSubThreshold = (dir === "Bullish" || dir === "Bearish") && (confVal < 0.50 || isSkipped);
+                            if (isSubThreshold || isSkipped) {
+                                dir = "Neutral";
+                            }
+
                             predElem.innerText = dir;
                             if (dir === "Bullish") {
                                 predElem.style.color = "var(--accent-green)";
@@ -3134,7 +3153,6 @@
                                 barElem.style.backgroundColor = "var(--text-secondary)";
                             }
 
-                            const confPct = ((pred.calibrated_confidence !== undefined ? pred.calibrated_confidence : (pred.confidence || 0.0)) * 100);
                             const changeVal = (typeof pred.predicted_change === 'number' && !isNaN(pred.predicted_change)) ? pred.predicted_change : 0.0;
                             const statusSuffix = pred.status ? ` • ${pred.status}` : '';
                             subtitleElem.innerText = `Calibrated Conf: ${confPct.toFixed(1)}% | Expected Change: ${changeVal >= 0 ? '+' : ''}${changeVal.toFixed(3)}${statusSuffix}`;

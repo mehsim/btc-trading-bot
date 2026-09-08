@@ -557,16 +557,24 @@ def api_status():
         tf_to_iv = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"}
         for tf in ["15m", "30m", "1h", "2h", "4h"]:
             iv_key = tf_to_iv.get(tf, tf)
-            sym_pred = (
-                status_data.get(f"latest_prediction_{active_sym}_{tf}") or 
-                status_data.get(f"latest_prediction_{active_sym}_{iv_key}") or 
-                status_data.get(f"latest_prediction_{tf}") or 
-                status_data.get(f"latest_prediction_{iv_key}") or 
-                status_data.get(f"latest_prediction_BTCUSDT_{tf}") or
-                status_data.get(f"latest_prediction_BTCUSDT_{iv_key}") or
-                latest_by_sym_iv.get(f"{active_sym}_{iv_key}") or
+            candidates = [
+                status_data.get(f"latest_prediction_{active_sym}_{tf}"),
+                status_data.get(f"latest_prediction_{active_sym}_{iv_key}"),
+                status_data.get(f"latest_prediction_bg_{active_sym}_{tf}"),
+                status_data.get(f"latest_prediction_bg_{active_sym}_{iv_key}"),
+                status_data.get(f"latest_prediction_{tf}"),
+                status_data.get(f"latest_prediction_{iv_key}"),
+                status_data.get(f"latest_prediction_bg_{tf}"),
+                status_data.get(f"latest_prediction_bg_{iv_key}"),
+                status_data.get(f"latest_prediction_BTCUSDT_{tf}"),
+                status_data.get(f"latest_prediction_BTCUSDT_{iv_key}"),
+                status_data.get(f"latest_prediction_bg_BTCUSDT_{tf}"),
+                status_data.get(f"latest_prediction_bg_BTCUSDT_{iv_key}"),
+                latest_by_sym_iv.get(f"{active_sym}_{iv_key}"),
                 latest_by_sym_iv.get(f"BTCUSDT_{iv_key}")
-            )
+            ]
+            valid_candidates = [c for c in candidates if isinstance(c, dict) and c.get("direction")]
+            sym_pred = max(valid_candidates, key=lambda x: float(x.get("timestamp") or 0.0)) if valid_candidates else None
             if sym_pred:
                 status_data[f"latest_prediction_{tf}"] = sym_pred
             sym_regime = (
