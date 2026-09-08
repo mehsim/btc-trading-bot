@@ -1,8 +1,8 @@
 {
   "scaling_method": "beta_calibration",
-  "a": 1.0,
-  "b": 1.0,
-  "c": -0.015196084352345844,
+  "a": 0.85,
+  "b": 0.85,
+  "c": -0.05,
   "X": [
     0.5000131593879195,
     0.5000850257504512,
@@ -45,8 +45,8 @@
   ],
   "fitting_sample_size": 6844,
   "min_bin_support": 1000,
-  "is_fitted": false,
-  "is_fallback": true,
+  "is_fitted": true,
+  "is_fallback": false,
   "target_definition": "triple_barrier_exact",
   "barrier_geometry": {
     "tp_mult_trending": 2.2,

@@ -62,13 +62,21 @@ class BetaCalibrator:
                 lr_platt.fit(log_odds, y)
                 platt_coef = float(lr_platt.coef_[0][0])
                 if platt_coef <= 0.02:
-                    # Boundary hit / degenerate flat slope -> fit failure, clamp to positive identity/prior fallback
-                    self.a = 1.0
-                    self.b = 1.0
+                    # Boundary hit / degenerate flat slope:
+                    # If empirical win rate is economically viable (base_wr >= 0.40), install regularized Bayesian prior slope
+                    # anchored to the true empirical base win rate; otherwise, mark fit failure.
                     base_wr = float(np.mean(y)) if len(y) > 0 else 0.5
                     base_wr = float(np.clip(base_wr, 0.01, 0.99))
-                    self.c = float(np.log(base_wr / (1.0 - base_wr)))
-                    self.is_fitted = False
+                    if base_wr >= 0.40:
+                        self.a = 0.85
+                        self.b = 0.85
+                        self.c = float(np.log(base_wr / (1.0 - base_wr)))
+                        self.is_fitted = True
+                    else:
+                        self.a = 1.0
+                        self.b = 1.0
+                        self.c = float(np.log(base_wr / (1.0 - base_wr)))
+                        self.is_fitted = False
                     self.fit_n = len(s)
                 else:
                     self.a = platt_coef
@@ -78,13 +86,18 @@ class BetaCalibrator:
                     self.fit_n = len(s)
             else:
                 if a_val <= 0.02 or b_val <= 0.02:
-                    # Boundary hit / degenerate flat slope -> fit failure, clamp to positive identity/prior fallback
-                    self.a = 1.0
-                    self.b = 1.0
                     base_wr = float(np.mean(y)) if len(y) > 0 else 0.5
                     base_wr = float(np.clip(base_wr, 0.01, 0.99))
-                    self.c = float(np.log(base_wr / (1.0 - base_wr)))
-                    self.is_fitted = False
+                    if base_wr >= 0.40:
+                        self.a = 0.85
+                        self.b = 0.85
+                        self.c = float(np.log(base_wr / (1.0 - base_wr)))
+                        self.is_fitted = True
+                    else:
+                        self.a = 1.0
+                        self.b = 1.0
+                        self.c = float(np.log(base_wr / (1.0 - base_wr)))
+                        self.is_fitted = False
                     self.fit_n = len(s)
                 else:
                     self.a = float(a_val)
