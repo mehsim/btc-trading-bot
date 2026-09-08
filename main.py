@@ -2044,6 +2044,7 @@ SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", "XRP
 
 # =========================
 from xgboost import XGBClassifier, XGBRegressor
+from xgboost.core import XGBoostError
 import joblib
 from ensemble import load_ensemble_classifier, load_ensemble_regressor, _slice_model_input
 
@@ -2275,7 +2276,12 @@ def load_model_weights(iv):
                 if os.path.exists(prefixes["trending_meta"]):
                     if check_startup_manifest_health(prefixes['trending_trend']):
                         meta_clf = XGBClassifier()
-                        meta_clf.load_model(prefixes["trending_meta"])
+                        try:
+                            meta_clf.load_model(prefixes["trending_meta"])
+                        except (XGBoostError, ValueError, OSError) as _ex_ub:
+                            log_event("INFO", f"Retrying {prefixes['trending_meta']} as UBJSON binary format: {_ex_ub}")
+                            with open(prefixes["trending_meta"], "rb") as _f_meta:
+                                meta_clf.load_model(bytearray(_f_meta.read()))
                         models_by_interval[iv]["trending"]["meta"] = meta_clf
                     else:
                         log_event("WARNING", f"[Model Load Warning] Skipped {prefixes['trending_meta']} due to failed manifest health check.")
@@ -2322,7 +2328,12 @@ def load_model_weights(iv):
                 if os.path.exists(prefixes["ranging_meta"]):
                     if check_startup_manifest_health(prefixes['ranging_trend']):
                         meta_clf = XGBClassifier()
-                        meta_clf.load_model(prefixes["ranging_meta"])
+                        try:
+                            meta_clf.load_model(prefixes["ranging_meta"])
+                        except (XGBoostError, ValueError, OSError) as _ex_ub:
+                            log_event("INFO", f"Retrying {prefixes['ranging_meta']} as UBJSON binary format: {_ex_ub}")
+                            with open(prefixes["ranging_meta"], "rb") as _f_meta:
+                                meta_clf.load_model(bytearray(_f_meta.read()))
                         models_by_interval[iv]["ranging"]["meta"] = meta_clf
                     else:
                         log_event("WARNING", f"[Model Load Warning] Skipped {prefixes['ranging_meta']} due to failed manifest health check.")
@@ -8694,8 +8705,19 @@ def main():
                             exp_mode = getattr(config, "EXPECTANCY_GATE_MODE", "shadow")
                             if exp_mode != "disabled":
                                 try:
-                                    recent_closed = database.get_completed_trades(limit=50, symbol=symbol)
-                                    interval_closed = [t for t in recent_closed if str(t.get("interval", "")).replace("m", "") == str(iv).replace("m", "")]
+                                    now_ts = time.time()
+                                    lookback_cutoff = now_ts - (14.0 * 86400.0)  # 14-day rolling window
+                                    recent_closed = database.get_completed_trades(limit=100, symbol=symbol)
+                                    interval_closed = []
+                                    for t in recent_closed:
+                                        if str(t.get("interval", "")).replace("m", "") != str(iv).replace("m", ""):
+                                            continue
+                                        t_exit = float(t.get("exit_time", 0.0) or 0.0)
+                                        if t_exit > 1e11:
+                                            t_exit /= 1000.0
+                                        if t_exit > 0.0 and t_exit < lookback_cutoff:
+                                            continue
+                                        interval_closed.append(t)
                                     if len(interval_closed) >= 15:
                                         wins = [float(t.get("change_pct", 0.0)) for t in interval_closed if float(t.get("pnl_usd", 0.0)) > 0]
                                         losses = [abs(float(t.get("change_pct", 0.0))) for t in interval_closed if float(t.get("pnl_usd", 0.0)) < 0]
@@ -8708,9 +8730,9 @@ def main():
                                             if not exp_pass:
                                                 if exp_mode == "active":
                                                     exp_gate_blocked = True
-                                                    exp_gate_msg = f"Negative Historical EV ({hist_ev*100:+.2f}%) over last {len(interval_closed)} trades"
+                                                    exp_gate_msg = f"Negative Historical EV ({hist_ev*100:+.2f}%) over last {len(interval_closed)} trades (14d)"
                                                 else:
-                                                    log_event("INFO", f"[{symbol} {iv}m] [Shadow Expectancy Gate] Negative Historical EV ({hist_ev*100:+.2f}%) over {len(interval_closed)} trades — would block in active mode.")
+                                                    log_event("INFO", f"[{symbol} {iv}m] [Shadow Expectancy Gate] Negative Historical EV ({hist_ev*100:+.2f}%) over {len(interval_closed)} trades (14d) — would block in active mode.")
                                                     bot_state[f"shadow_expectancy_block_{symbol}_{iv}"] = True
                                 except Exception as ex_exp:
                                     log_event("WARNING", f"Expectancy gate check error for {symbol} {iv}m: {ex_exp}")

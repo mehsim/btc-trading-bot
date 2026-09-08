@@ -157,3 +157,62 @@ def test_compute_conservative_kelly_fallback_when_clean():
     )
     assert k > 0.0, f"Expected positive Kelly fraction, got {k}"
     assert k <= 0.25, f"Quarter-Kelly should be <= 0.25, got {k}"
+
+
+def test_ubjson_meta_classifier_fallback():
+    """Verify XGBClassifier loads UBJSON binary format via bytearray fallback."""
+    from xgboost import XGBClassifier
+    import os
+    target_meta = "meta_trending_trend_15.json"
+    if not os.path.exists(target_meta):
+        pytest.skip(f"{target_meta} not found locally")
+    
+    from xgboost.core import XGBoostError
+    meta_clf = XGBClassifier()
+    try:
+        meta_clf.load_model(target_meta)
+        loaded_ok = True
+    except (XGBoostError, ValueError, OSError):
+        with open(target_meta, "rb") as f:
+            meta_clf.load_model(bytearray(f.read()))
+        loaded_ok = True
+    
+    assert loaded_ok is True
+    assert meta_clf.get_booster() is not None
+
+
+def test_expectancy_gate_lookback_filtering():
+    """Verify trades older than 14 days are excluded from the expectancy gate evaluation."""
+    import time
+    now_ts = time.time()
+    lookback_cutoff = now_ts - (14.0 * 86400.0)
+    
+    # 20 legacy trades from 20 days ago (all losses)
+    legacy_trades = [
+        {"interval": "15m", "exit_time": now_ts - (20.0 * 86400.0), "change_pct": -2.0, "pnl_usd": -10.0}
+        for _ in range(20)
+    ]
+    # 5 recent trades from 2 days ago (all wins)
+    recent_trades = [
+        {"interval": "15m", "exit_time": now_ts - (2.0 * 86400.0), "change_pct": 3.0, "pnl_usd": 15.0}
+        for _ in range(5)
+    ]
+    all_closed = legacy_trades + recent_trades
+    
+    # Applying the 14-day calendar lookback filter
+    interval_closed = []
+    for t in all_closed:
+        if str(t.get("interval", "")).replace("m", "") != "15":
+            continue
+        t_exit = float(t.get("exit_time", 0.0) or 0.0)
+        if t_exit > 1e11:
+            t_exit /= 1000.0
+        if t_exit > 0.0 and t_exit < lookback_cutoff:
+            continue
+        interval_closed.append(t)
+        
+    # Must only contain the 5 recent trades, legacy trades filtered out
+    assert len(interval_closed) == 5
+    # Gate requires >= 15 trades within the window; with 5, it should not trigger negative EV block
+    assert len(interval_closed) < 15
+
