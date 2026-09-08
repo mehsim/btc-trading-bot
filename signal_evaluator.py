@@ -892,7 +892,7 @@ class SignalEvaluator:
                                 existing_p["predicted_price"] = float(last_row["close"]) * (1.0 + pred_pct)
                                 existing_p["status"] = f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation"
                                 existing_p["signal_source"] = "ML_ENSEMBLE"
-                                existing_p["model_version"] = str(model_ver)
+                                existing_p["model_version"] = str(served_version or "v1.0")
                                 try:
                                     from database import save_prediction as db_save_pred
                                     db_save_pred(existing_p)
@@ -910,6 +910,8 @@ class SignalEvaluator:
                                     "predicted_change": float(pred_pct * float(last_row["close"])),
                                     "predicted_price": float(last_row["close"]) * (1.0 + pred_pct),
                                     "status": f"Skipped (Neutral)" if direction == "Neutral" else "Pending Risk Evaluation",
+                                    "signal_source": "ML_ENSEMBLE",
+                                    "model_version": str(served_version or "v1.0"),
                                     "calibrated_confidence": float(calibrated_conf),
                                     "raw_confidence": float(raw_conf),
                                     "dynamic_threshold": float(eval_threshold),

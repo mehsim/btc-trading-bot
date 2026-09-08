@@ -86,6 +86,39 @@ class TestRanging240mDecoupling(unittest.TestCase):
         finally:
             signal_evaluator.get_history = orig_get_history
 
+    def test_240m_ranging_updates_existing_prediction_in_history(self):
+        """Verify updating an existing prediction entry in prediction_history executes without error and updates fields."""
+        df = self._create_ranging_df(260)
+        import signal_evaluator
+        orig_get_history = signal_evaluator.get_history
+        signal_evaluator.get_history = lambda symbol, interval, limit, **kwargs: df
+
+        last_row_ts = int(df.iloc[-1]["timestamp"] * 1000)
+        # Pre-seed prediction_history with a stale bridge entry
+        stale_entry = {
+            "prediction_id": f"BTCUSDT_240_{last_row_ts}",
+            "symbol": "BTCUSDT",
+            "timestamp": 1700000000.0,
+            "candle_timestamp": last_row_ts,
+            "interval": "240",
+            "direction": "Neutral",
+            "status": "Abstain (Inside Bollinger Mid-Range)",
+            "signal_source": "MEAN_REVERSION_BB",
+            "predicted_change": 0.0,
+            "model_version": "v1.0_ranging_bb"
+        }
+        self.bot_state["prediction_history"] = [stale_entry]
+
+        try:
+            self.evaluator.evaluate_interval("BTCUSDT", "240")
+            updated = self.bot_state["prediction_history"][0]
+            # Must have updated status away from stale bridge text
+            self.assertNotEqual(updated["status"], "Abstain (Inside Bollinger Mid-Range)")
+            self.assertEqual(updated["signal_source"], "ML_ENSEMBLE")
+            self.assertIsNotNone(updated.get("model_version"))
+        finally:
+            signal_evaluator.get_history = orig_get_history
+
 
 if __name__ == "__main__":
     unittest.main()
