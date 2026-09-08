@@ -609,24 +609,50 @@ def api_status():
         # Multi-Timeframe 4H -> 1H Synergy Matrix for all supported coins
         synergy_matrix = {}
         for s in symbols:
-            p4 = (
-                status_data.get(f"latest_prediction_{s}_4h") or 
-                status_data.get(f"latest_prediction_{s}_240") or 
-                status_data.get(f"latest_prediction_bg_{s}_4h") or 
-                status_data.get(f"latest_prediction_bg_{s}_240") or 
-                status_data.get(f"evaluator_prediction_{s}_4h") or 
-                status_data.get(f"evaluator_prediction_{s}_240") or 
-                latest_by_sym_iv.get(f"{s}_240") or {}
-            )
-            p1 = (
-                status_data.get(f"latest_prediction_{s}_1h") or 
-                status_data.get(f"latest_prediction_{s}_60") or 
-                status_data.get(f"latest_prediction_bg_{s}_1h") or 
-                status_data.get(f"latest_prediction_bg_{s}_60") or 
-                status_data.get(f"evaluator_prediction_{s}_1h") or 
-                status_data.get(f"evaluator_prediction_{s}_60") or 
-                latest_by_sym_iv.get(f"{s}_60") or {}
-            )
+            candidates_4h = [
+                status_data.get(f"latest_prediction_{s}_4h"),
+                status_data.get(f"latest_prediction_{s}_240"),
+                status_data.get(f"latest_prediction_bg_{s}_4h"),
+                status_data.get(f"latest_prediction_bg_{s}_240"),
+                status_data.get(f"evaluator_prediction_{s}_4h"),
+                status_data.get(f"evaluator_prediction_{s}_240"),
+                latest_by_sym_iv.get(f"{s}_240"),
+                latest_by_sym_iv.get(f"{s}_4h")
+            ]
+            if s == "BTCUSDT":
+                candidates_4h.extend([
+                    status_data.get("latest_prediction_4h"),
+                    status_data.get("latest_prediction_240"),
+                    status_data.get("latest_prediction_bg_4h"),
+                    status_data.get("latest_prediction_bg_240"),
+                    status_data.get("evaluator_prediction_4h"),
+                    status_data.get("evaluator_prediction_240")
+                ])
+            val_4h = [c for c in candidates_4h if isinstance(c, dict) and c.get("direction")]
+            p4 = max(val_4h, key=lambda x: float(x.get("timestamp") or x.get("candle_timestamp") or 0.0)) if val_4h else {}
+
+            candidates_1h = [
+                status_data.get(f"latest_prediction_{s}_1h"),
+                status_data.get(f"latest_prediction_{s}_60"),
+                status_data.get(f"latest_prediction_bg_{s}_1h"),
+                status_data.get(f"latest_prediction_bg_{s}_60"),
+                status_data.get(f"evaluator_prediction_{s}_1h"),
+                status_data.get(f"evaluator_prediction_{s}_60"),
+                latest_by_sym_iv.get(f"{s}_60"),
+                latest_by_sym_iv.get(f"{s}_1h")
+            ]
+            if s == "BTCUSDT":
+                candidates_1h.extend([
+                    status_data.get("latest_prediction_1h"),
+                    status_data.get("latest_prediction_60"),
+                    status_data.get("latest_prediction_bg_1h"),
+                    status_data.get("latest_prediction_bg_60"),
+                    status_data.get("evaluator_prediction_1h"),
+                    status_data.get("evaluator_prediction_60")
+                ])
+            val_1h = [c for c in candidates_1h if isinstance(c, dict) and c.get("direction")]
+            p1 = max(val_1h, key=lambda x: float(x.get("timestamp") or x.get("candle_timestamp") or 0.0)) if val_1h else {}
+
             adx4 = status_data.get(f"adx_{s}_4h") if status_data.get(f"adx_{s}_4h") is not None else status_data.get(f"adx_{s}_240", 25.0)
             
             d4 = str(p4.get("direction", "Neutral")) if isinstance(p4, dict) else "Neutral"
@@ -660,22 +686,27 @@ def api_status():
             iv_key = tf_to_iv.get(tf, tf)
             coin_signals = []
             for s in symbols:
-                pred = (
-                    latest_by_sym_iv.get(f"{s}_{iv_key}") or 
-                    status_data.get(f"latest_prediction_{s}_{tf}") or 
-                    status_data.get(f"latest_prediction_{s}_{iv_key}") or
-                    status_data.get(f"latest_prediction_bg_{s}_{tf}") or 
-                    status_data.get(f"latest_prediction_bg_{s}_{iv_key}") or
-                    status_data.get(f"evaluator_prediction_{s}_{tf}") or 
-                    status_data.get(f"evaluator_prediction_{s}_{iv_key}")
-                )
-                if not pred and s == "BTCUSDT":
-                    pred = (
-                        status_data.get(f"latest_prediction_{tf}") or 
-                        status_data.get(f"latest_prediction_{iv_key}") or
-                        status_data.get(f"latest_prediction_bg_{tf}") or 
-                        status_data.get(f"latest_prediction_bg_{iv_key}")
-                    )
+                candidates = [
+                    status_data.get(f"latest_prediction_{s}_{tf}"),
+                    status_data.get(f"latest_prediction_{s}_{iv_key}"),
+                    status_data.get(f"latest_prediction_bg_{s}_{tf}"),
+                    status_data.get(f"latest_prediction_bg_{s}_{iv_key}"),
+                    status_data.get(f"evaluator_prediction_{s}_{tf}"),
+                    status_data.get(f"evaluator_prediction_{s}_{iv_key}"),
+                    latest_by_sym_iv.get(f"{s}_{iv_key}"),
+                    latest_by_sym_iv.get(f"{s}_{tf}")
+                ]
+                if s == "BTCUSDT":
+                    candidates.extend([
+                        status_data.get(f"latest_prediction_{tf}"),
+                        status_data.get(f"latest_prediction_{iv_key}"),
+                        status_data.get(f"latest_prediction_bg_{tf}"),
+                        status_data.get(f"latest_prediction_bg_{iv_key}"),
+                        status_data.get(f"evaluator_prediction_{tf}"),
+                        status_data.get(f"evaluator_prediction_{iv_key}")
+                    ])
+                valid_candidates = [c for c in candidates if isinstance(c, dict) and c.get("direction")]
+                pred = max(valid_candidates, key=lambda x: float(x.get("timestamp") or x.get("candle_timestamp") or 0.0)) if valid_candidates else None
                 
                 short_name = s.replace("USDT", "")
                 direction = "Neutral"
