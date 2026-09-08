@@ -52,7 +52,7 @@ backups/
 mlruns/
 *.bak*
 active_trades.json
-kelly_trade_history.json
+kelly_trade_history*.json
 trade_journal.csv
 governance_audit_trail.json*
 data/

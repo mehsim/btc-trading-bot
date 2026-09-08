@@ -69,7 +69,7 @@ class KellyTracker:
             wins = [r for r in returns if r > 0]
             return float(len(wins) / len(returns))
 
-    def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25, insufficient_as_none: bool = False) -> Optional[float]:
+    def compute_kelly_fraction(self, timeframe: Optional[str] = None, min_trades: int = 30, min_losses: int = 3, max_kelly_cap: float = 0.25, insufficient_as_none: bool = False, lookback_days: Optional[float] = None, ignore_untimestamped: bool = True) -> Optional[float]:
         """
         Computes dynamic Quarter-Kelly fraction per timeframe.
         H-1: Rolling window is calendar-time based (lookback_days) with a per-timeframe
@@ -93,7 +93,7 @@ class KellyTracker:
             tf_key = _normalize_tf(timeframe) if timeframe else None
             win_cfg = KELLY_WINDOW_CONFIG.get(tf_key, KELLY_WINDOW_DEFAULT) if tf_key else KELLY_WINDOW_DEFAULT
             max_trades = win_cfg["max_trades"]
-            lookback_days = win_cfg["lookback_days"]
+            eff_lookback_days = float(lookback_days) if lookback_days is not None else float(win_cfg["lookback_days"])
 
             # H-3: per-timeframe minimum; if min_trades explicitly passed, honor it
             if min_trades is not None and min_trades != 30:
@@ -104,10 +104,10 @@ class KellyTracker:
                 effective_min_trades = max(tf_min, MIN_KELLY_SAMPLE_SIZE)
 
             # H-1: filter to calendar lookback window first, then cap at max_trades
-            cutoff_dt = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=lookback_days)
+            cutoff_dt = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=eff_lookback_days)
             cutoff_iso = cutoff_dt.isoformat()
-            # Finding #35 & #28: Include records within cutoff AND untimestamped legacy records
-            windowed = [t for t in filtered if t.get("timestamp") is None or str(t.get("timestamp")) >= cutoff_iso]
+            # Finding #35 & #28: Include records within cutoff AND untimestamped legacy records (unless ignore_untimestamped=True)
+            windowed = [t for t in filtered if (t.get("timestamp") is None and not ignore_untimestamped) or (t.get("timestamp") is not None and str(t.get("timestamp")) >= cutoff_iso)]
             windowed = windowed[-max_trades:]
 
             if len(windowed) < effective_min_trades:

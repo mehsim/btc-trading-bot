@@ -169,12 +169,12 @@ def test_finding_36_break_even_scale_out_synchronization():
         "take_profit": 53000.0
     }
     
-    # Price moved up to 51100 (+1.1 entry-ATR). Scale-out target is 1.2 * 1000 = 1200 (at 51200).
-    # Break-even trigger (1.5 * 700 = 1050 without fix) would fire prematurely at 51100!
+    # Price moved up to 50600 (+0.6 entry-ATR). Scale-out target is 1.0 * 1000 = 1000 (at 51000).
+    # Break-even trigger (0.75 * 700 = 525 without fix) would fire prematurely at 50600!
     # With the fix, BE requires max(be_trigger * max_atr, scale_out_atr + buffer), so BE must NOT fire.
     exit_reason, updates, trace = engine.evaluate_exit(
         active_trade=active_trade,
-        current_price=51100.0,
+        current_price=50600.0,
         current_time=time.time(),
         current_atr=700.0,
         regime="TRENDING_MODERATE"

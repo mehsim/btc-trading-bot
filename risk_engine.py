@@ -135,7 +135,6 @@ def compute_conservative_kelly(
     Scales by model quality (MCC) via R-1 QUALITY_SIZING policy.
     """
     import numpy as np
-    from kelly_tracker import global_kelly_tracker
     from config import QUALITY_SIZING, REALIZED_RR_HAIRCUT
     haircut = haircut if haircut is not None else getattr(config, "REALIZED_RR_HAIRCUT", 0.75)
     
@@ -174,7 +173,8 @@ def compute_conservative_kelly(
             timeframe=str(interval),
             min_trades=10,
             max_kelly_cap=0.20,
-            insufficient_as_none=True
+            insufficient_as_none=True,
+            ignore_untimestamped=True
         )
         if emp_kelly is not None:
             if emp_kelly <= 0.0:

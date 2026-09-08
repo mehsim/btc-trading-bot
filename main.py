@@ -7670,7 +7670,7 @@ def main():
                                     ml_trend = ranging_sig.direction
                                     ml_confidence = float(ranging_sig.confidence)
                                     calibrated_confidence = float(ranging_sig.confidence)
-                                    pred_change = float(ranging_sig.expected_move) if ml_trend == "Bullish" else -float(ranging_sig.expected_move)
+                                    pred_change = float(ranging_sig.expected_move)
                                     predicted_price = float(latest_candle["close"]) + pred_change
                                     expected_pct_change = (abs(pred_change) / float(latest_candle["close"])) * 100
                                     signal_source_type = "MEAN_REVERSION_BB"
