@@ -851,14 +851,38 @@ class JointRiskBudgetAllocator:
         realized_wr = None
         if df_completed is not None and hasattr(df_completed, "columns") and len(df_completed) >= 10:
             if "pnl_usd" in df_completed.columns:
-                realized_wr = float((df_completed["pnl_usd"] > 0).mean())
+                pnl_num = pd.to_numeric(df_completed["pnl_usd"], errors="coerce").dropna()
+                if len(pnl_num) >= 10:
+                    realized_wr = float((pnl_num > 0).mean())
             elif "success" in df_completed.columns:
-                realized_wr = float((df_completed["success"] > 0).mean())
+                succ_col = df_completed["success"]
+                if succ_col.dtype == bool:
+                    realized_wr = float(succ_col.mean())
+                else:
+                    succ_num = pd.to_numeric(succ_col, errors="coerce")
+                    if succ_num.notna().sum() >= 10:
+                        realized_wr = float((succ_num.dropna() > 0).mean())
+                    else:
+                        succ_bool = succ_col.astype(str).str.strip().str.lower().isin(["true", "1", "win", "yes"])
+                        if len(succ_bool) >= 10:
+                            realized_wr = float(succ_bool.mean())
         if realized_wr is None and trade_history and len(trade_history) >= 10:
             # Check timeframe-specific subset if available
-            tf_th = [t for t in trade_history if str(t.get("interval", "")).replace("m", "") == str(interval).replace("m", "")] if interval else []
-            src_th = tf_th if len(tf_th) >= 10 else trade_history
-            pnl_wins = [float(t.get("pnl_usd", 0.0) or 0.0) > 0 or float(t.get("return_pct", 0.0) or 0.0) > 0 or bool(t.get("success")) for t in src_th]
+            tf_th = [t for t in trade_history if isinstance(t, dict) and str(t.get("interval", "")).replace("m", "") == str(interval).replace("m", "")] if interval else []
+            src_th = tf_th if len(tf_th) >= 10 else [t for t in trade_history if isinstance(t, dict)]
+            pnl_wins = []
+            for t in src_th:
+                try:
+                    pnl_v = float(t.get("pnl_usd", 0.0) or 0.0)
+                except (ValueError, TypeError):
+                    pnl_v = 0.0
+                try:
+                    ret_v = float(t.get("return_pct", 0.0) or 0.0)
+                except (ValueError, TypeError):
+                    ret_v = 0.0
+                succ_v = t.get("success")
+                is_win = (pnl_v > 0) or (ret_v > 0) or (succ_v is True or succ_v == 1 or str(succ_v).strip().lower() in ("true", "1", "win", "yes"))
+                pnl_wins.append(is_win)
             if len(pnl_wins) >= 10:
                 realized_wr = float(sum(pnl_wins) / len(pnl_wins))
                 

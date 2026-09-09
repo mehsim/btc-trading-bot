@@ -1004,6 +1004,17 @@ def load_history():
                     remote_balance = data.get("simulated_balance", 80.0)
                     
                     remote_trades = [t for t in remote_trades if str(t.get("interval", "60")) != "5"]
+                    for t in remote_trades:
+                        if "interval" not in t:
+                            t["interval"] = "60"
+                        for num_fld in ("pnl_usd", "change_pct", "entry_price", "exit_price", "position_size_usd", "balance", "leverage", "confidence"):
+                            if num_fld in t and t[num_fld] is not None:
+                                try:
+                                    t[num_fld] = float(t[num_fld])
+                                except (ValueError, TypeError):
+                                    pass
+                        if "success" in t and isinstance(t["success"], str):
+                            t["success"] = t["success"].strip().lower() in ("true", "1", "win", "yes")
                     remote_predictions = [p for p in remote_predictions if str(p.get("interval", "60")) != "5"]
                     
                     if len(remote_trades) > 0 or len(remote_predictions) > 0:
@@ -1038,6 +1049,14 @@ def load_history():
                 for t in bot_state["trade_history"]:
                     if "interval" not in t:
                         t["interval"] = "60"
+                    for num_fld in ("pnl_usd", "change_pct", "entry_price", "exit_price", "position_size_usd", "balance", "leverage", "confidence"):
+                        if num_fld in t and t[num_fld] is not None:
+                            try:
+                                t[num_fld] = float(t[num_fld])
+                            except (ValueError, TypeError):
+                                pass
+                    if "success" in t and isinstance(t["success"], str):
+                        t["success"] = t["success"].strip().lower() in ("true", "1", "win", "yes")
                 bot_state["prediction_history"] = [
                     p for p in data.get("prediction_history", [])
                     if str(p.get("interval", "60")) != "5" and p.get("status") != "Abstain" and p.get("calibrated_confidence") is not None and str(p.get("direction")) != "None"
@@ -9057,7 +9076,15 @@ def main():
                                         mhi_val = float(bot_state.get(f"mhi_{iv}", bot_state.get("mhi_score", 70.0)))
                                         rec.mhi_score = float(mhi_val)
                                         th_recs = bot_state.get("trade_history", [])
-                                        df_th = pd.DataFrame(th_recs) if th_recs else df_completed
+                                        if th_recs:
+                                            df_th = pd.DataFrame(th_recs)
+                                            for c in ("pnl_usd", "change_pct", "entry_price", "exit_price", "position_size_usd", "balance", "leverage", "confidence"):
+                                                if c in df_th.columns:
+                                                    df_th[c] = pd.to_numeric(df_th[c], errors="coerce")
+                                            if "success" in df_th.columns and df_th["success"].dtype == object:
+                                                df_th["success"] = df_th["success"].apply(lambda x: True if (x is True or x == 1 or str(x).strip().lower() in ("true", "1", "win", "yes")) else False)
+                                        else:
+                                            df_th = df_completed
                                         budget_res = risk_engine.joint_risk_budget_allocator.allocate_risk_budget(
                                             symbol=symbol,
                                             entry_price=entry_price,
