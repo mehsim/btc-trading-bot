@@ -1209,12 +1209,19 @@ def calculate_adaptive_structural_stop(
     else:
         noise_floor_pct = 0.002 if cfg_sl_mult is not None else 0.005
     min_noise_dist = max(effective_mult * atr_val, entry_price * noise_floor_pct)
+    # Cap maximum structural stop distance for intraday timeframes (15m, 30m, 60m) to avoid bloated risk
+    max_sl_mult = 1.75 if (interval is not None and str(iv_clean) in ["15", "30", "60"]) else 2.50
+    max_sl_pct_cap = 0.025 if (interval is not None and str(iv_clean) in ["15", "30", "60"]) else 0.050
+    max_sl_dist = min(max_sl_mult * atr_val, entry_price * max_sl_pct_cap)
+
     if is_long:
         structural_sl = swing_price - (0.25 * atr_val) if recency_passed else (entry_price - (effective_mult + 0.25) * atr_val)
-        final_sl = min(entry_price - min_noise_dist, structural_sl)
+        raw_final_sl = min(entry_price - min_noise_dist, structural_sl)
+        final_sl = max(entry_price - max_sl_dist, raw_final_sl)
     else:
         structural_sl = swing_price + (0.25 * atr_val) if recency_passed else (entry_price + (effective_mult + 0.25) * atr_val)
-        final_sl = max(entry_price + min_noise_dist, structural_sl)
+        raw_final_sl = max(entry_price + min_noise_dist, structural_sl)
+        final_sl = min(entry_price + max_sl_dist, raw_final_sl)
     # Compute liquidity sweep and volume confirmation
     has_sweep = False
     if len(df_recent) >= 3:
@@ -1351,6 +1358,9 @@ def resolve_trade_geometry(
 
     # R:R Preservation (Finding #91, Finding #12): preserve target R:R and recompute exact adjusted multipliers from final distances
     tp_dist = max(base_tp_dist, sl_dist * target_rr)
+    if iv_str in ["15", "30", "60"]:
+        max_intraday_tp = min(2.50 * atr_dollars, entry_price * 0.040)
+        tp_dist = min(tp_dist, max(sl_dist * 1.0, max_intraday_tp))
     take_profit_price = (entry_price + tp_dist) if is_long else (entry_price - tp_dist)
     sl_multiplier_adjusted = sl_dist / max(1e-6, atr_dollars)
     tp_multiplier_adjusted = tp_dist / max(1e-6, atr_dollars)

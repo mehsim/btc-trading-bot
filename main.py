@@ -185,6 +185,7 @@ def map_status_to_reason_code(msg: str) -> Optional[str]:
     if "ATR SPIKE" in m: return ReasonCode.ATR_SPIKE
     if "NEWS BLOCK" in m: return ReasonCode.NEWS_BLOCK
     if "CONTRADICTION" in m: return ReasonCode.CONTRADICTION
+    if "EXHAUSTION" in m: return ReasonCode.MOMENTUM_EXHAUSTION
     if "NEUTRAL" in m: return ReasonCode.NEUTRAL
     if "CLUSTER LIMIT" in m: return ReasonCode.CLUSTER_LIMIT
     if "ALREADY ACTIVE" in m: return ReasonCode.ALREADY_ACTIVE
@@ -8481,9 +8482,13 @@ def main():
                                 print(f"[{symbol} {iv}m Candlestick Overlay] Pattern Alignment Boost (required threshold lowered -4.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
 
                             # Determine tracking status
-                            # Volatility-scaled contradiction: only block if regressor predicts significant opposite move (> max(0.35%, 0.25 * ATR%))
+                            # Strict Regressor Directional Consensus Gate:
+                            # A trade must never enter if the regressor predicts a clear opposite-direction move.
                             pred_pct = (abs(pred_change) / latest_candle["close"]) * 100
-                            min_conflict_pct = max(0.35, float(atr_norm_val * 100.0 * 0.25)) if 'atr_norm_val' in locals() and atr_norm_val else 0.35
+                            if str(iv) in ["15", "30", "60"]:
+                                min_conflict_pct = 0.10
+                            else:
+                                min_conflict_pct = max(0.20, float(atr_norm_val * 100.0 * 0.15)) if 'atr_norm_val' in locals() and atr_norm_val else 0.20
                             strong_conflict = (ml_trend == "Bullish" and pred_change < 0 and pred_pct > min_conflict_pct) or \
                                               (ml_trend == "Bearish" and pred_change > 0 and pred_pct > min_conflict_pct)
                         
@@ -8649,9 +8654,23 @@ def main():
 
                                     if htf_trend in ["Bullish", "Bearish"] and ml_trend in ["Bullish", "Bearish"]:
                                         if ml_trend == htf_trend:
-                                            dynamic_conf_threshold -= 0.08
-                                            adjustments_applied.append(("macro_alignment", -0.08))
-                                            print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
+                                            # Asset-Specific Decoupling Guard:
+                                            # Altcoins must not receive macro alignment discount if decoupling from local trend
+                                            is_decoupled = False
+                                            if symbol != "BTCUSDT" and str(iv) in ["15", "30", "60"]:
+                                                cur_c = float(latest_candle.get("close", 0.0))
+                                                c_sma50 = float(latest_candle.get("SMA_50", 0.0)) if pd.notna(latest_candle.get("SMA_50")) else 0.0
+                                                if ml_trend == "Bullish" and c_sma50 > 0 and cur_c < c_sma50:
+                                                    is_decoupled = True
+                                                elif ml_trend == "Bearish" and c_sma50 > 0 and cur_c > c_sma50:
+                                                    is_decoupled = True
+
+                                            if is_decoupled:
+                                                log_event("INFO", f"[{symbol} {iv}m Macro Decoupling Guard] Opposes local SMA50 ({cur_c:.4f} vs {c_sma50:.4f}) despite macro {htf_trend}. Alignment discount withheld.")
+                                            else:
+                                                dynamic_conf_threshold -= 0.08
+                                                adjustments_applied.append(("macro_alignment", -0.08))
+                                                print(f"[{symbol} {iv}m Macro Alignment Boost] Aligned with {macro_tf} ({htf_trend}, Source: {htf_meta['trend_source']}, Consensus: {consensus}). Threshold lowered (-8.0% to {dynamic_conf_threshold:.2f}) | Pure Calibrated Conf: {calibrated_confidence*100:.2f}%")
                                         else:
                                             dynamic_conf_threshold += 0.06
                                             rsi_now = float(latest_candle.get("RSI", 50.0)) if pd.notna(latest_candle.get("RSI")) else 50.0
